@@ -532,7 +532,7 @@ const IMTemplateEditor: React.FC = () => {
     setIsTranslating(true);
     try {
       const targetLangLabel = ALL_LANGUAGES.find(l => l.code === activeLang)?.label || activeLang;
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       // Added comment above fix: Using gemini-3-flash-preview for translations
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',

@@ -60,7 +60,7 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
     setLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const context = buildContext();
       
       const systemInstruction = `You are an expert Project Management assistant for a product launch platform called OriginFlow. 
