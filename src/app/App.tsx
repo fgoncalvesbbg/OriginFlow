@@ -1,41 +1,41 @@
 
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
-import AdminRoute from './components/AdminRoute';
-import { checkComplianceDeadlines } from './services/apiService';
+import { AuthProvider } from '../context/AuthContext';
+import ProtectedRoute from '../components/ProtectedRoute';
+import AdminRoute from '../components/AdminRoute';
+import { checkComplianceDeadlines } from '../services/apiService';
 
 // Pages
-import Login from './pages/Login';
-import PMDashboard from './pages/PMDashboard';
-import TimelineDashboard from './pages/TimelineDashboard';
-import ProjectDetail from './pages/ProjectDetail';
-import CreateProject from './pages/CreateProject';
-import SupplierPortal from './pages/SupplierPortal';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminTestEmail from './pages/AdminTestEmail';
-import SupplierDashboard from './pages/SupplierDashboard';
-import SuppliersList from './pages/SuppliersList';
+import Login from '../pages/Login';
+import PMDashboard from '../pages/PMDashboard';
+import TimelineDashboard from '../pages/TimelineDashboard';
+import ProjectDetail from '../pages/ProjectDetail';
+import CreateProject from '../pages/CreateProject';
+import SupplierPortal from '../pages/SupplierPortal';
+import AdminDashboard from '../pages/AdminDashboard';
+import AdminTestEmail from '../pages/AdminTestEmail';
+import SupplierDashboard from '../pages/SupplierDashboard';
+import SuppliersList from '../pages/SuppliersList';
 
 // Compliance Pages
-import ComplianceDashboard from './pages/compliance/ComplianceDashboard';
-import CreateComplianceRequest from './pages/compliance/CreateComplianceRequest';
-import ComplianceRequestDetail from './pages/compliance/ComplianceRequestDetail';
-import SupplierCompliancePortal from './pages/compliance/SupplierCompliancePortal';
-import ComplianceLibrary from './pages/compliance/ComplianceLibrary';
+import ComplianceDashboard from '../pages/compliance/ComplianceDashboard';
+import CreateComplianceRequest from '../pages/compliance/CreateComplianceRequest';
+import ComplianceRequestDetail from '../pages/compliance/ComplianceRequestDetail';
+import SupplierCompliancePortal from '../pages/compliance/SupplierCompliancePortal';
+import ComplianceLibrary from '../pages/compliance/ComplianceLibrary';
 
 // IM Pages
-import IMDashboard from './pages/im/IMDashboard';
-import IMTemplateEditor from './pages/im/IMTemplateEditor';
-import IMPreview from './pages/im/IMPreview';
-import ProjectIMGenerator from './pages/im/ProjectIMGenerator';
+import IMDashboard from '../pages/im/IMDashboard';
+import IMTemplateEditor from '../pages/im/IMTemplateEditor';
+import IMPreview from '../pages/im/IMPreview';
+import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
 // Sourcing Pages
-import SourcingDashboard from './pages/sourcing/SourcingDashboard';
-import CreateRFQ from './pages/sourcing/CreateRFQ';
-import RFQDetail from './pages/sourcing/RFQDetail';
-import SupplierRFQPortal from './pages/sourcing/SupplierRFQPortal';
+import SourcingDashboard from '../pages/sourcing/SourcingDashboard';
+import CreateRFQ from '../pages/sourcing/CreateRFQ';
+import RFQDetail from '../pages/sourcing/RFQDetail';
+import SupplierRFQPortal from '../pages/sourcing/SupplierRFQPortal';
 
 const App: React.FC = () => {
   // Trigger background checks for deadlines on app mount
