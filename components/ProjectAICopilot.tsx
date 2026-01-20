@@ -71,8 +71,9 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
       CONTEXT:
       ${context}`;
 
+      // Complex Reasoning Task: Use gemini-3-pro-preview
       const chat = ai.chats.create({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3-pro-preview',
         config: { systemInstruction },
         history: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
       });
@@ -83,7 +84,7 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
       setMessages(prev => [...prev, { role: 'model', text: responseText }]);
     } catch (error: any) {
       console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: "I'm sorry, I encountered an error connecting to the AI service." }]);
+      setMessages(prev => [...prev, { role: 'model', text: "I'm sorry, I encountered an error connecting to the AI service. Please check your API key configuration." }]);
     } finally {
       setLoading(false);
     }
@@ -96,7 +97,6 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
     }
   };
 
-  // Simple Markdown-like parser for bold text
   const renderText = (text: string) => {
     const parts = text.split(/(\*\*.*?\*\*)/g);
     return parts.map((part, i) => {
@@ -121,14 +121,13 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
 
   return (
     <div className={`fixed bottom-6 right-6 w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-40 flex flex-col transition-all duration-300 ${isMinimized ? 'h-16' : 'h-[600px]'}`}>
-      {/* Header */}
       <div 
         className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 rounded-t-2xl flex justify-between items-center cursor-pointer"
         onClick={() => setIsMinimized(!isMinimized)}
       >
         <div className="flex items-center gap-2 text-white">
           <Bot size={20} />
-          <h3 className="font-bold text-sm">OriginFlow AI</h3>
+          <h3 className="font-bold text-sm">OriginFlow AI Pro</h3>
         </div>
         <div className="flex items-center gap-2 text-white/80">
           <button onClick={(e) => { e.stopPropagation(); setIsMinimized(!isMinimized); }} className="hover:text-white">
@@ -142,7 +141,6 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
 
       {!isMinimized && (
         <>
-          {/* Chat Area */}
           <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-4" ref={scrollRef}>
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
@@ -164,13 +162,12 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
                     <Sparkles size={14} />
                  </div>
                  <div className="bg-white border border-slate-200 p-3 rounded-lg rounded-tl-none shadow-sm flex items-center gap-2 text-slate-500 text-sm">
-                    <Loader2 size={14} className="animate-spin" /> Thinking...
+                    <Loader2 size={14} className="animate-spin" /> Analyzing context...
                  </div>
               </div>
             )}
           </div>
 
-          {/* Input Area */}
           <div className="p-4 bg-white border-t border-slate-100 rounded-b-2xl">
             <div className="relative">
               <textarea
@@ -185,7 +182,7 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
               <button 
                 onClick={handleSend}
                 disabled={!input.trim() || loading}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
                 <Send size={14} />
               </button>
@@ -197,7 +194,7 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
                <button onClick={() => setInput("Draft an email to supplier about missing documents")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors border border-slate-200">
                   Draft Follow-up
                </button>
-               <button onClick={() => setInput("Identify potential risks based on delays")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors border border-slate-200">
+               <button onClick={() => setInput("Identify potential risks based on deadlines")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors border border-slate-200">
                   Identify Risks
                </button>
             </div>

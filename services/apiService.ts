@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { supabase as authenticatedClient } from './supabaseClient';
+import { supabase as authenticatedClient, isLive } from './supabaseClient';
 import { 
   Project, Supplier, User, ComplianceRequest, ComplianceRequestStatus, 
   CategoryL3, ProductFeature, ComplianceRequirement, ProjectStep, ProjectDocument, 
@@ -11,11 +11,11 @@ import {
   SupplierProposal, ProductionUpdate, DeadlineItem
 } from '../types';
 
-// --- CONFIG ---
-// Values are now pulled from the central supabaseClient which uses process.env
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+// Use placeholders if not live to prevent constructor errors
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'placeholder';
 
+// The portal client is used for non-authenticated public routes
 const portalClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: false,
@@ -46,6 +46,9 @@ export const generateUUID = () => {
 };
 
 export const handleError = (error: any, context: string) => {
+  if (!isLive) {
+      throw new Error(`Connection error: Supabase is not configured. Please check your environment variables in Netlify.`);
+  }
   console.error(`Error in ${context}:`, error);
   let msg = 'Unknown error';
   
@@ -219,6 +222,7 @@ export const triggerEmailNotification = async (payload: {
 // --- Projects ---
 
 export const getProjects = async (): Promise<Project[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('projects').select('*');
     if (error) {
         console.error("getProjects failed", error);
@@ -228,7 +232,7 @@ export const getProjects = async (): Promise<Project[]> => {
 };
 
 export const getProjectById = async (id: string): Promise<Project | undefined> => {
-    if (!id) return undefined;
+    if (!id || !isLive) return undefined;
     const { data, error } = await supabase.from('projects').select('*').eq('id', id).single();
     if (error || !data) return undefined;
     return mapProject(data);
@@ -302,6 +306,7 @@ export const deleteProject = async (id: string): Promise<void> => {
 };
 
 export const getProjectSteps = async (projectId: string): Promise<ProjectStep[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('project_steps').select('*').eq('project_id', projectId).order('step_number');
     if (error) return [];
     return (data || []).map(mapProjectStep);
@@ -312,12 +317,14 @@ export const updateStepStatus = async (stepId: string, status: StepStatus): Prom
 };
 
 export const getProjectDocs = async (projectId: string): Promise<ProjectDocument[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('project_documents').select('*').eq('project_id', projectId);
     if (error) return [];
     return (data || []).map(mapProjectDocument);
 };
 
 export const getProjectByToken = async (token: string): Promise<Project | undefined> => {
+    if (!isLive) return undefined;
     const { data: rpcData, error: rpcError } = await portalClient.rpc('get_project_by_token_secure', { p_token: token });
     
     if (!rpcError && rpcData && rpcData.length > 0) {
@@ -327,12 +334,14 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
 };
 
 export const getProjectsBySupplierId = async (supplierId: string): Promise<Project[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map(mapProject);
 };
 
 export const getProjectsBySupplierToken = async (token: string): Promise<Project[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token });
     if (error) return [];
     return (data || []).map(mapProject);
@@ -345,6 +354,7 @@ export const saveProjectMilestones = async (projectId: string, milestones: Proje
 // --- Manufacturing / Production Updates ---
 
 export const getProductionUpdates = async (projectId: string): Promise<ProductionUpdate[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('production_updates')
         .select('*')
         .eq('project_id', projectId)
@@ -354,6 +364,7 @@ export const getProductionUpdates = async (projectId: string): Promise<Productio
 };
 
 export const getAllProductionUpdates = async (): Promise<ProductionUpdate[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('production_updates')
         .select('*')
         .order('created_at', { ascending: true });
@@ -395,6 +406,7 @@ export const saveProductionUpdate = async (update: Partial<ProductionUpdate>): P
 // --- Suppliers ---
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('suppliers').select('*');
     if (error) {
         console.error("getSuppliers failed", error);
@@ -404,6 +416,7 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
 };
 
 export const getSupplierById = async (id: string): Promise<Supplier | undefined> => {
+    if (!id || !isLive) return undefined;
     const { data, error } = await supabase.from('suppliers').select('*').eq('id', id).single();
     if (error || !data) return undefined;
     return mapSupplier(data);
@@ -434,6 +447,7 @@ export const ensureSupplierToken = async (supplierId: string): Promise<string> =
 };
 
 export const getSupplierByToken = async (token: string): Promise<Supplier | undefined> => {
+    if (!isLive) return undefined;
     const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle();
     if (error) return undefined;
     return data ? mapSupplier(data) : undefined;
@@ -442,12 +456,14 @@ export const getSupplierByToken = async (token: string): Promise<Supplier | unde
 // --- Users & Auth ---
 
 export const getProfiles = async (): Promise<User[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('profiles').select('*');
     if (error) return [];
     return (data || []).map(mapProfile);
 };
 
 export const getUserProfile = async (userId: string): Promise<User | null> => {
+    if (!isLive) return null;
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
     
     if (!data) {
@@ -469,6 +485,7 @@ export const getUserProfile = async (userId: string): Promise<User | null> => {
 };
 
 export const getSessionUser = async (): Promise<User | null> => {
+    if (!isLive) return null;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
     return getUserProfile(session.user.id);
@@ -594,6 +611,7 @@ export const deleteDocumentVersion = async (versionId: string): Promise<void> =>
 };
 
 export const getDocumentComments = async (docId: string): Promise<DocumentComment[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('document_comments').select('*').eq('document_id', docId).order('created_at');
     if (error) return [];
     return (data || []).map((c: any) => ({
@@ -626,6 +644,7 @@ export const addDocumentComment = async (docId: string, content: string, authorN
 };
 
 export const getMissingDocumentsForSupplier = async (supplierId: string): Promise<(ProjectDocument & { projectName: string, projectIdCode: string })[]> => {
+    if (!isLive) return [];
     const projects = await getProjectsBySupplierId(supplierId);
     const activeProjects = projects.filter(p => p.status !== ProjectOverallStatus.ARCHIVED && p.status !== ProjectOverallStatus.CANCELLED && p.status !== ProjectOverallStatus.COMPLETED);
     
@@ -662,6 +681,8 @@ export const getMissingDocumentsForSupplier = async (supplierId: string): Promis
 // --- Stats & Notifications ---
 
 export const getDashboardStats = async (): Promise<DashboardStats & { newProposals: number }> => {
+    if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 } as any;
+    
     const today = new Date();
     const nextPeriod = new Date();
     nextPeriod.setDate(today.getDate() + 14);
@@ -728,6 +749,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
 };
 
 export const getSupplierNotifications = async (supplierId: string): Promise<Notification[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map((n: any) => ({
@@ -741,6 +763,7 @@ export const getSupplierNotifications = async (supplierId: string): Promise<Noti
 };
 
 export const getNotifications = async (): Promise<Notification[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false });
     if (error) return [];
     return (data || []).map((n: any) => ({
@@ -760,12 +783,14 @@ export const markNotificationRead = async (id: string): Promise<void> => {
 // --- Compliance ---
 
 export const getComplianceRequests = async (): Promise<ComplianceRequest[]> => {
+  if (!isLive) return [];
   const { data, error } = await supabase.from('compliance_requests').select('*').order('created_at', { ascending: false });
   if (error) return [];
   return (data || []).map(mapComplianceRequest);
 };
 
 export const getComplianceRequestById = async (id: string): Promise<ComplianceRequest | undefined> => {
+  if (!id || !isLive) return undefined;
   const { data, error } = await supabase.from('compliance_requests').select('*').eq('id', id).single();
   if (error) return undefined;
   return mapComplianceRequest(data);
@@ -796,6 +821,7 @@ export const createComplianceRequest = async (
 };
 
 export const getComplianceRequestByToken = async (token: string): Promise<ComplianceRequest | undefined> => {
+    if (!isLive) return undefined;
     const { data, error } = await portalClient.from('compliance_requests').select('*').eq('token', token).maybeSingle();
     if (error) return undefined;
     if (!data) return undefined;
@@ -803,6 +829,7 @@ export const getComplianceRequestByToken = async (token: string): Promise<Compli
 };
 
 export const verifySupplierAccess = async (token: string, accessCode: string): Promise<ComplianceRequest> => {
+    if (!isLive) throw new Error("Connection error: Supabase is not configured.");
     const { data, error } = await portalClient.rpc('get_compliance_request_secure', { 
         p_token: token, 
         p_code: accessCode 
@@ -848,6 +875,7 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
 };
 
 export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map(mapComplianceRequest);
@@ -857,6 +885,7 @@ export const checkComplianceDeadlines = async (): Promise<void> => {
 };
 
 export const getCategories = async (): Promise<CategoryL3[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('categories_l3').select('*');
     if (error) return [];
     return (data || []).map((c: any) => ({
@@ -891,6 +920,7 @@ export const deleteCategory = async (id: string): Promise<void> => {
 };
 
 export const getProductFeatures = async (): Promise<ProductFeature[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('product_features').select('*');
     if (error) return [];
     return (data || []).map((f: any) => ({
@@ -919,6 +949,7 @@ export const deleteProductFeature = async (id: string): Promise<void> => {
 };
 
 export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('category_attributes').select('*');
     if (error) return [];
     return (data || []).map((a: any) => ({
@@ -945,6 +976,7 @@ export const deleteCategoryAttribute = async (id: string): Promise<void> => {
 };
 
 export const getComplianceRequirements = async (): Promise<ComplianceRequirement[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('compliance_requirements').select('*');
     if (error) return [];
     return (data || []).map((r: any) => ({
@@ -996,6 +1028,7 @@ export const addStandardRequirements = async (categoryId: string): Promise<void>
 // --- IM Templates ---
 
 export const getIMTemplates = async (): Promise<IMTemplate[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('im_templates').select('*');
     if (error) return [];
     return (data || []).map((t: any) => ({
@@ -1012,6 +1045,7 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
 };
 
 export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefined> => {
+    if (!id || !isLive) return undefined;
     const { data, error } = await portalClient.from('im_templates').select('*').eq('id', id).single();
     if (error) return undefined;
     return {
@@ -1028,6 +1062,7 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
 };
 
 export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMTemplate | undefined> => {
+    if (!categoryId || !isLive) return undefined;
     const { data, error } = await supabase.from('im_templates').select('*').eq('category_id', categoryId).single();
     if (error) return undefined;
     return {
@@ -1082,6 +1117,7 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
 };
 
 export const getIMSections = async (templateId: string): Promise<IMSection[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('im_sections').select('*').eq('template_id', templateId);
     if (error) return [];
     return (data || []).map((s: any) => ({
@@ -1129,6 +1165,7 @@ export const deleteIMSection = async (id: string): Promise<void> => {
 };
 
 export const getProjectIM = async (projectId: string): Promise<ProjectIM | null> => {
+    if (!isLive) return null;
     const { data, error } = await supabase.from('project_ims').select('*').eq('project_id', projectId).maybeSingle();
     if (error) return null;
     if (!data) return null;
@@ -1182,12 +1219,14 @@ export const deleteProjectIM = async (projectId: string): Promise<void> => {
 // --- SOURCING / RFQ ---
 
 export const getRFQs = async (): Promise<RFQ[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('rfqs').select('*, category_l3:categories_l3(name)').order('created_at', { ascending: false });
     if (error) return [];
     return (data || []).map(mapRFQ);
 };
 
 export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('rfq_entries')
         .select('*, rfqs!inner(*)')
         .eq('supplier_id', supplierId)
@@ -1217,6 +1256,7 @@ export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]
 };
 
 export const getRFQById = async (id: string): Promise<RFQ | undefined> => {
+    if (!id || !isLive) return undefined;
     const { data, error } = await supabase.from('rfqs').select('*, category_l3:categories_l3(name)').eq('id', id).single();
     if (error) return undefined;
     
@@ -1296,6 +1336,7 @@ export const deleteRFQ = async (id: string): Promise<void> => {
 };
 
 export const getRFQEntryByToken = async (token: string): Promise<{ rfq: RFQ, entry: RFQEntry } | undefined> => {
+    if (!isLive) return undefined;
     const { data: entryData, error } = await portalClient.from('rfq_entries').select('*').eq('token', token).maybeSingle();
     if (error || !entryData) {
         console.error("getRFQEntryByToken: Entry not found or error", error);
@@ -1361,6 +1402,7 @@ export const awardRFQ = async (rfqId: string, entryId: string): Promise<void> =>
 // --- SUPPLIER PROPOSALS ---
 
 export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => {
+    if (!isLive) return [];
     const { data, error } = await supabase.from('supplier_proposals').select('*, supplier:suppliers(name)').order('created_at', { ascending: false });
     if (error) handleError(error, 'getAllSupplierProposals');
     return (data || []).map((p: any) => ({
@@ -1376,6 +1418,7 @@ export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => 
 };
 
 export const getSupplierProposals = async (supplierId: string): Promise<SupplierProposal[]> => {
+    if (!isLive) return [];
     const { data, error } = await portalClient.from('supplier_proposals').select('*').eq('supplier_id', supplierId).order('created_at', { ascending: false });
     if (error) return [];
     return (data || []).map((p: any) => ({

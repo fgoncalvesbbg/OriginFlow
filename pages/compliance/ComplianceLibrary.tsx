@@ -7,10 +7,10 @@ import {
   COMPLIANCE_SECTIONS
 } from '../../services/apiService';
 import { CategoryL3, ProductFeature, ComplianceRequirement } from '../../types';
-import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck } from 'lucide-react';
+// Added comment above fix: Adding missing X icon to lucide-react imports
+import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Helper for generating valid UUIDs
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -54,25 +54,20 @@ const ComplianceLibrary: React.FC = () => {
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Requirements View State
   const [selectedCategoryForReqs, setSelectedCategoryForReqs] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(COMPLIANCE_SECTIONS));
   
-  // Simple Edit State
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // AI Modal State
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiProductDesc, setAiProductDesc] = useState('');
   const [isAiGenerating, setIsAiGenerating] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Partial<ComplianceRequirement>[]>([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
 
-  // New Section State for Manual Entry
   const [newSectionName, setNewSectionName] = useState('');
 
-  // Modal State for Confirmations/Alerts
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
     title: string;
@@ -222,8 +217,6 @@ const ComplianceLibrary: React.FC = () => {
       setExpandedSections(next);
   };
 
-  // --- AI Generation Handlers ---
-
   const handleAiGenerate = async () => {
     if (!aiProductDesc.trim()) return;
     setIsAiGenerating(true);
@@ -233,11 +226,13 @@ const ComplianceLibrary: React.FC = () => {
       const categoryName = categories.find(c => c.id === selectedCategoryForReqs)?.name || 'Unknown Category';
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
+      // Upgrade to gemini-3-pro-preview for complex regulatory reasoning
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3-pro-preview',
         contents: `Generate 5 key regulatory compliance requirements for a product in the category "${categoryName}". 
         The product is described as: "${aiProductDesc}".
-        Return a JSON array where each object has: title (string), description (string), section (string - e.g. "Safety", "Chemical"), isMandatory (boolean), referenceCode (string).`,
+        Consider safety standards (like IEC/EN), chemical restrictions (RoHS/REACH), and packaging rules.
+        Return a JSON array where each object has: title (string), description (string), section (string - e.g. "General", "Safety", "Chemical", "Mechanical"), isMandatory (boolean), referenceCode (string).`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -442,7 +437,6 @@ const ComplianceLibrary: React.FC = () => {
                                         </div>
                                         <p className="text-slate-600 text-xs leading-relaxed mb-3">{r.description}</p>
                                         
-                                        {/* Standardized Rules View */}
                                         <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-wrap gap-x-6 gap-y-2 items-center">
                                             <div className="flex items-center gap-1.5 min-w-[120px]">
                                                 <Clock size={12} className="text-slate-400" />
@@ -527,6 +521,89 @@ const ComplianceLibrary: React.FC = () => {
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6 min-h-[400px]">
         {loading ? <div>Loading...</div> : renderRequirementsView()}
       </div>
+
+      {/* AI Suggestion Modal */}
+      {isAiModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-purple-600 px-6 py-4 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Sparkles size={20} />
+                <h3 className="font-bold text-lg">AI Requirement Suggestion</h3>
+              </div>
+              {/* Added comment above fix: Fixing missing icon X import */}
+              <button onClick={() => setIsAiModalOpen(false)}><X size={20} /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1">
+              <p className="text-sm text-slate-600 mb-4">Describe the product in the <strong>{categories.find(c => c.id === selectedCategoryForReqs)?.name}</strong> category to get tailored compliance suggestions.</p>
+              
+              <div className="flex gap-2 mb-6">
+                <textarea 
+                  className="flex-1 border rounded-lg p-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                  rows={3}
+                  placeholder="e.g. A battery-powered wireless kitchen scale with tempered glass top and Bluetooth connectivity."
+                  value={aiProductDesc}
+                  onChange={(e) => setAiProductDesc(e.target.value)}
+                />
+                <button 
+                  onClick={handleAiGenerate}
+                  disabled={isAiGenerating || !aiProductDesc.trim()}
+                  className="bg-purple-600 text-white px-6 rounded-lg font-bold hover:bg-purple-700 disabled:opacity-50 flex flex-col items-center justify-center gap-1"
+                >
+                  {isAiGenerating ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
+                  <span className="text-[10px] uppercase">Analyze</span>
+                </button>
+              </div>
+
+              {aiSuggestions.length > 0 && (
+                <div className="space-y-3 animate-in slide-in-from-bottom-2">
+                  <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wide">Suggested Requirements</h4>
+                  {aiSuggestions.map((suggestion, idx) => {
+                    const isSelected = selectedSuggestions.has(idx);
+                    return (
+                      <div 
+                        key={idx} 
+                        onClick={() => {
+                          const next = new Set(selectedSuggestions);
+                          if (next.has(idx)) next.delete(idx); else next.add(idx);
+                          setSelectedSuggestions(next);
+                        }}
+                        className={`p-4 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-purple-50 border-purple-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+                      >
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h5 className="font-bold text-slate-900 text-sm">{suggestion.title}</h5>
+                              {suggestion.referenceCode && <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">{suggestion.referenceCode}</span>}
+                            </div>
+                            <p className="text-xs text-slate-600">{suggestion.description}</p>
+                            <div className="mt-2 text-[10px] font-bold text-purple-600 uppercase">{suggestion.section || 'General'}</div>
+                          </div>
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300'}`}>
+                            {isSelected && <CheckCircle size={14} />}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
+               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-slate-600">Cancel</button>
+               <button 
+                 onClick={handleSaveAiSuggestions}
+                 disabled={selectedSuggestions.size === 0}
+                 className="bg-purple-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-purple-700 disabled:opacity-50"
+               >
+                 Add {selectedSuggestions.size} Selected
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -616,7 +693,6 @@ const ComplianceLibrary: React.FC = () => {
                 />
               </div>
 
-              {/* Submission Rules Form Section */}
               <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg shadow-sm space-y-4">
                   <h4 className="font-bold text-sm text-slate-800 border-b pb-2 border-slate-200">Submission Rules</h4>
                   
