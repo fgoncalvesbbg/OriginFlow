@@ -492,6 +492,7 @@ export const getSessionUser = async (): Promise<User | null> => {
 };
 
 export const login = async (email: string, pass: string): Promise<User> => {
+    if (!isLive) handleError(null, 'login');
     const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) handleError(error, 'login');
     if (data.user) {
@@ -503,6 +504,7 @@ export const login = async (email: string, pass: string): Promise<User> => {
 };
 
 export const signUp = async (email: string, pass: string, name: string): Promise<void> => {
+    if (!isLive) handleError(null, 'signUp');
     const { data, error } = await supabase.auth.signUp({ 
         email, 
         password: pass,
