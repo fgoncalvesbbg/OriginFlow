@@ -2,7 +2,7 @@
   "name": "launchflow-plm",
   "version": "1.0.0",
   "description": "LaunchFlow PLM Application",
-  "main": "index.tsx",
+  "main": "src/app/main.tsx",
   "scripts": {
     "start": "vite",
     "build": "vite build",
