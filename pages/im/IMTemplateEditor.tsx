@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getProductFeatures } from '../../services/apiService';
 import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CloudCheck, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
 
@@ -590,7 +590,7 @@ const IMTemplateEditor: React.FC = () => {
                  <div className="flex items-center gap-4 text-xs text-slate-500 mt-1">
                     {template.updatedAt && <span className="flex items-center gap-1"><Clock size={12} /> Saved: {new Date(template.updatedAt).toLocaleDateString()}</span>}
                     {template.lastUpdatedBy && <span className="flex items-center gap-1"><User size={12} /> By: {template.lastUpdatedBy}</span>}
-                    {lastSaved && <span className="text-green-600 flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded-full font-medium"><CloudCheck size={10} /> Saved</span>}
+                    {lastSaved && <span className="text-green-600 flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded-full font-medium"><CheckCircle size={10} /> Saved</span>}
                  </div>
                </div>
             </div>
