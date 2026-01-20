@@ -1,0 +1,27 @@
+
+-- Fix for 'project_id_code' column missing error
+-- This script ensures the column exists with the correct name expected by the API.
+
+DO $$
+BEGIN
+    -- Case 1: Check if 'project_id' exists (standard naming convention) and rename it
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'project_id') THEN
+        ALTER TABLE public.projects RENAME COLUMN project_id TO project_id_code;
+        
+    -- Case 2: Check if 'projectId' exists (camelCase from older definitions) and rename it
+    ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'projectId') THEN
+        ALTER TABLE public.projects RENAME COLUMN "projectId" TO project_id_code;
+        
+    -- Case 3: If neither exists and 'project_id_code' is missing, create it
+    ELSIF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'project_id_code') THEN
+        ALTER TABLE public.projects ADD COLUMN project_id_code text;
+    END IF;
+END $$;
+
+-- Populate any NULL values with a generated ID to satisfy NOT NULL constraints if we apply them later
+UPDATE public.projects 
+SET project_id_code = 'PRJ-' || substring(id::text from 1 for 8) 
+WHERE project_id_code IS NULL OR project_id_code = '';
+
+-- Force Supabase PostgREST Schema Cache Reload
+NOTIFY pgrst, 'reload schema';

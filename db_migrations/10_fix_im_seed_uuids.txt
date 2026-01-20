@@ -1,0 +1,40 @@
+-- 1. Fix Permissions (Ensure you can see the data)
+ALTER TABLE public.im_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.im_sections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.categories_l3 ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Enable all for im templates" ON public.im_templates;
+CREATE POLICY "Enable all for im templates" ON public.im_templates FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for im sections" ON public.im_sections;
+CREATE POLICY "Enable all for im sections" ON public.im_sections FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for categories" ON public.categories_l3;
+CREATE POLICY "Enable all for categories" ON public.categories_l3 FOR ALL USING (auth.role() = 'authenticated');
+
+-- 2. Seed Data with VALID UUIDs
+-- We use fixed UUIDs so we don't create duplicates if you run this multiple times.
+
+-- Categories (Using valid UUIDs now)
+INSERT INTO public.categories_l3 (id, name, active, is_finalized)
+VALUES 
+  ('98a6b766-b6d4-4393-8897-38654a973775', 'Company Standards', true, true),
+  ('4c55320a-7f7d-447f-932b-76267963d021', 'Small Kitchen Appliances', true, false),
+  ('8290933e-5726-4333-9e07-39c729225f48', 'Toys (Battery Operated)', true, false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Templates
+INSERT INTO public.im_templates (id, category_id, name, languages, updated_at)
+VALUES 
+  ('3f333df6-90a4-4fda-8dd3-9485d27cee36', '98a6b766-b6d4-4393-8897-38654a973775', 'Main Company Template', '{en,de,fr,es,it}', NOW()),
+  ('728ed52f-8839-4902-929d-477640099762', '4c55320a-7f7d-447f-932b-76267963d021', 'Kitchen Appliance Template', '{en,de}', NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Sections (Sample content for Company Standard)
+INSERT INTO public.im_sections (id, template_id, title, "order", is_placeholder, content)
+VALUES
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '3f333df6-90a4-4fda-8dd3-9485d27cee36', 'Introduction', 1, false, '{"en": "<p>Thank you for purchasing this product. Please read this manual carefully before use.</p>"}'),
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12', '3f333df6-90a4-4fda-8dd3-9485d27cee36', 'Safety Instructions', 2, false, '{"en": "<p><strong>WARNING:</strong> Risk of electric shock. Do not open the device.</p>"}'),
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13', '3f333df6-90a4-4fda-8dd3-9485d27cee36', 'Warranty', 3, false, '{"en": "<p>This product comes with a 2-year limited warranty.</p>"}'),
+  ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14', '3f333df6-90a4-4fda-8dd3-9485d27cee36', 'Disposal', 4, false, '{"en": "<p>Dispose of packaging in an environmentally friendly manner.</p>"}')
+ON CONFLICT (id) DO NOTHING;

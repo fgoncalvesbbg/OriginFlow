@@ -1,0 +1,82 @@
+
+-- 1. REVOKE UNSAFE PUBLIC ACCESS
+-- Remove the policies that allowed public users to SELECT or UPDATE directly
+DROP POLICY IF EXISTS "Allow public access to compliance requests via token" ON public.compliance_requests;
+DROP POLICY IF EXISTS "Allow public access to projects via token" ON public.projects;
+DROP POLICY IF EXISTS "Allow public update to compliance requests via token" ON public.compliance_requests;
+
+-- Ensure RLS is definitely on
+ALTER TABLE public.compliance_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+
+-- 2. CREATE SECURE READ FUNCTION (Acts as Login)
+-- This function only returns data if BOTH token and access_code match.
+CREATE OR REPLACE FUNCTION public.get_compliance_request_secure(p_token text, p_code text)
+RETURNS SETOF public.compliance_requests
+LANGUAGE sql
+SECURITY DEFINER -- Runs with admin privileges to bypass RLS for the specific row match
+SET search_path = public
+AS $$
+  SELECT * 
+  FROM public.compliance_requests 
+  WHERE token = p_token 
+  AND access_code = p_code;
+$$;
+
+-- Grant access to this function
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure TO public;
+
+
+-- 3. CREATE SECURE SUBMIT FUNCTION
+-- Allows updating the request only if credentials are provided again
+CREATE OR REPLACE FUNCTION public.submit_compliance_response_secure(
+  p_token text, 
+  p_code text, 
+  p_responses jsonb, 
+  p_status text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_req_id uuid;
+BEGIN
+  -- Check credentials and get ID
+  SELECT id INTO v_req_id
+  FROM public.compliance_requests
+  WHERE token = p_token AND access_code = p_code;
+
+  IF v_req_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid credentials';
+  END IF;
+
+  -- Perform Update
+  UPDATE public.compliance_requests
+  SET 
+    responses = p_responses,
+    status = p_status,
+    submitted_at = NOW(),
+    completed_at = CASE WHEN p_status = 'approved' THEN NOW() ELSE NULL END
+  WHERE id = v_req_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.submit_compliance_response_secure TO public;
+
+
+-- 4. SECURE PROJECT PORTAL ACCESS (Optional but recommended)
+-- Requires exact token match, prevents listing all projects
+CREATE OR REPLACE FUNCTION public.get_project_by_token_secure(p_token text)
+RETURNS SETOF public.projects
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT * 
+  FROM public.projects 
+  WHERE supplier_link_token = p_token;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_project_by_token_secure TO public;

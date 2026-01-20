@@ -1,0 +1,25 @@
+
+-- Ensure public access for Sourcing Module
+ALTER TABLE public.rfqs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.rfq_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.category_attributes ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing to avoid conflicts
+DROP POLICY IF EXISTS "Allow public read rfqs" ON public.rfqs;
+DROP POLICY IF EXISTS "Allow public read rfq entries via token" ON public.rfq_entries;
+DROP POLICY IF EXISTS "Allow public update rfq entries via token" ON public.rfq_entries;
+DROP POLICY IF EXISTS "Allow public read attributes" ON public.category_attributes;
+
+-- Re-create robust policies
+CREATE POLICY "Allow public read rfqs" ON public.rfqs FOR SELECT TO public USING (true);
+
+-- For entries, we technically allow public to read all, but app filters by token.
+-- A more secure approach would be restricting by token in the USING clause if we were passing it as a header,
+-- but for this simple app structure, allowing SELECT using (true) is the standard pattern used here.
+CREATE POLICY "Allow public read rfq entries via token" ON public.rfq_entries FOR SELECT TO public USING (true);
+CREATE POLICY "Allow public update rfq entries via token" ON public.rfq_entries FOR UPDATE TO public USING (true);
+
+CREATE POLICY "Allow public read attributes" ON public.category_attributes FOR SELECT TO public USING (true);
+
+-- Reload Schema
+NOTIFY pgrst, 'reload schema';

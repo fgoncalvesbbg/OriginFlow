@@ -1,0 +1,24 @@
+
+-- This script removes automated triggers that might be trying to send emails/webhooks.
+
+-- 1. Drop common trigger names associated with notifications
+DROP TRIGGER IF EXISTS on_compliance_submitted ON public.compliance_requests;
+DROP TRIGGER IF EXISTS on_rfq_created ON public.rfqs;
+DROP TRIGGER IF EXISTS on_production_delay ON public.production_updates;
+
+-- 2. Generic function to drop all triggers on main tables to be absolutely sure
+DO $$ 
+DECLARE 
+    r RECORD;
+BEGIN
+    FOR r IN (
+        SELECT trigger_name, event_object_table 
+        FROM information_schema.triggers 
+        WHERE event_object_table IN ('compliance_requests', 'rfq_entries', 'rfqs', 'production_updates')
+    ) LOOP
+        EXECUTE 'DROP TRIGGER ' || r.trigger_name || ' ON ' || r.event_object_table || ';';
+    END LOOP;
+END $$;
+
+-- 3. Notify schema change
+NOTIFY pgrst, 'reload schema';

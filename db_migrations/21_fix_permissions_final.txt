@@ -1,0 +1,44 @@
+
+-- 1. FIX ROW LEVEL SECURITY POLICIES
+-- This ensures logged-in users (authenticated) can read/write all main tables.
+
+-- Profiles
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for users" ON public.profiles;
+CREATE POLICY "Enable all for users" ON public.profiles FOR ALL USING (auth.role() = 'authenticated');
+
+-- Projects
+ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for projects" ON public.projects;
+CREATE POLICY "Enable all for projects" ON public.projects FOR ALL USING (auth.role() = 'authenticated');
+
+-- Suppliers
+ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for suppliers" ON public.suppliers;
+CREATE POLICY "Enable all for suppliers" ON public.suppliers FOR ALL USING (auth.role() = 'authenticated');
+
+-- Documents
+ALTER TABLE public.project_documents ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for docs" ON public.project_documents;
+CREATE POLICY "Enable all for docs" ON public.project_documents FOR ALL USING (auth.role() = 'authenticated');
+
+-- Compliance
+ALTER TABLE public.compliance_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for requests" ON public.compliance_requests;
+CREATE POLICY "Enable all for requests" ON public.compliance_requests FOR ALL USING (auth.role() = 'authenticated');
+
+-- IM Templates
+ALTER TABLE public.im_templates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for im templates" ON public.im_templates;
+CREATE POLICY "Enable all for im templates" ON public.im_templates FOR ALL USING (auth.role() = 'authenticated');
+
+ALTER TABLE public.im_sections ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all for im sections" ON public.im_sections;
+CREATE POLICY "Enable all for im sections" ON public.im_sections FOR ALL USING (auth.role() = 'authenticated');
+
+-- 2. FORCE ADMIN ROLE
+-- Updates all existing users to ADMIN so you can access the Admin Module.
+UPDATE public.profiles SET role = 'ADMIN';
+
+-- 3. REFRESH SCHEMA CACHE
+NOTIFY pgrst, 'reload schema';

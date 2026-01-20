@@ -1,0 +1,32 @@
+
+-- New Table for Unsolicited Proposals
+CREATE TABLE IF NOT EXISTS public.supplier_proposals (
+    id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+    supplier_id uuid REFERENCES public.suppliers(id),
+    title text NOT NULL,
+    description text,
+    file_url text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text DEFAULT 'new' -- new, reviewed, accepted, rejected
+);
+
+-- RLS
+ALTER TABLE public.supplier_proposals ENABLE ROW LEVEL SECURITY;
+
+-- PMs can read all
+DROP POLICY IF EXISTS "Enable read all proposals for authenticated" ON public.supplier_proposals;
+CREATE POLICY "Enable read all proposals for authenticated" ON public.supplier_proposals FOR SELECT TO authenticated USING (true);
+
+-- PMs can update status
+DROP POLICY IF EXISTS "Enable update proposals for authenticated" ON public.supplier_proposals;
+CREATE POLICY "Enable update proposals for authenticated" ON public.supplier_proposals FOR UPDATE TO authenticated USING (true);
+
+-- Public (Suppliers) can insert and see their own (simplified for demo, UI handles token check)
+DROP POLICY IF EXISTS "Allow public insert proposals" ON public.supplier_proposals;
+CREATE POLICY "Allow public insert proposals" ON public.supplier_proposals FOR INSERT TO public WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public select own proposals" ON public.supplier_proposals;
+CREATE POLICY "Allow public select own proposals" ON public.supplier_proposals FOR SELECT TO public USING (true);
+
+-- Force schema reload
+NOTIFY pgrst, 'reload schema';

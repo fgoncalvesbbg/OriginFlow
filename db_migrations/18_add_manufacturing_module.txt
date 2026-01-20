@@ -1,0 +1,32 @@
+
+-- Create Production Updates table to track ETD changes
+CREATE TABLE IF NOT EXISTS public.production_updates (
+    id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+    project_id uuid REFERENCES public.projects(id) ON DELETE CASCADE,
+    previous_etd timestamp with time zone,
+    new_etd timestamp with time zone NOT NULL,
+    is_on_time boolean DEFAULT true,
+    delay_reason text,
+    notes text,
+    updated_by text, -- User name or 'Supplier'
+    is_supplier_update boolean DEFAULT false,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE public.production_updates ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+-- Authenticated users (PMs) can do everything
+DROP POLICY IF EXISTS "Enable all for production_updates" ON public.production_updates;
+CREATE POLICY "Enable all for production_updates" ON public.production_updates FOR ALL TO authenticated USING (true);
+
+-- Public (Suppliers) can insert updates via token (secured by project token logic in API)
+DROP POLICY IF EXISTS "Allow public insert production_updates" ON public.production_updates;
+CREATE POLICY "Allow public insert production_updates" ON public.production_updates FOR INSERT TO public WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public select production_updates" ON public.production_updates;
+CREATE POLICY "Allow public select production_updates" ON public.production_updates FOR SELECT TO public USING (true);
+
+-- Force schema reload
+NOTIFY pgrst, 'reload schema';

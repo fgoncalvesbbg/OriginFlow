@@ -1,0 +1,195 @@
+
+
+import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import Layout from '../../components/Layout';
+import { getCategories, getIMTemplates, createIMTemplate, createCategory, updateIMTemplate } from '../../services/apiService';
+import { CategoryL3, IMTemplate } from '../../types';
+import { BookOpen, Plus, Edit, FileText, ArrowRight, ShieldCheck, CheckCircle2, Lock, Unlock } from 'lucide-react';
+
+const IMDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const [categories, setCategories] = useState<CategoryL3[]>([]);
+  const [templates, setTemplates] = useState<IMTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creatingId, setCreatingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    const [cats, temps] = await Promise.all([getCategories(), getIMTemplates()]);
+    setCategories(cats);
+    setTemplates(temps);
+    setLoading(false);
+  };
+
+  const handleCreate = async (cat: CategoryL3) => {
+    setCreatingId(cat.id);
+    try {
+      await createIMTemplate(cat.id, `${cat.name} Manual Template`);
+      navigate(`/im/template/${cat.id}`);
+    } catch (e: any) {
+      console.error(e);
+      alert(`Failed to create template: ${e instanceof Error ? e.message : JSON.stringify(e)}`);
+      setCreatingId(null);
+    }
+  };
+
+  const handleToggleFinalized = async (template: IMTemplate) => {
+    setTogglingId(template.id);
+    const newStatus = !template.isFinalized;
+    try {
+      await updateIMTemplate(template.id, { 
+        isFinalized: newStatus,
+        finalizedAt: newStatus ? new Date().toISOString() : undefined
+      });
+      await loadData();
+    } catch (e) {
+      alert("Failed to update template status.");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleInitializeMaster = async () => {
+      setCreatingId('master');
+      try {
+         let cat = companyCat;
+         if (!cat) {
+            cat = await createCategory('Company Standards');
+         }
+         await createIMTemplate(cat.id, 'Main Company Template');
+         navigate(`/im/template/${cat.id}`);
+      } catch(e: any) {
+         console.error(e);
+         alert(`Failed to initialize master template: ${e instanceof Error ? e.message : JSON.stringify(e)}`);
+         setCreatingId(null);
+      }
+  };
+
+  if (loading) return <Layout><div>Loading...</div></Layout>;
+
+  const companyCat = categories.find(c => c.name === 'Company Standards');
+  const companyTemplate = companyCat ? templates.find(t => t.categoryId === companyCat.id) : null;
+  const otherCategories = categories.filter(c => c.name !== 'Company Standards');
+
+  return (
+    <Layout>
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+           <BookOpen className="text-blue-600" /> Instruction Manuals
+        </h2>
+        <p className="text-slate-500 mt-1">Manage IM content templates for product categories.</p>
+      </div>
+
+      {/* Main Company Template Section */}
+      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-8 text-white mb-10 shadow-lg flex flex-col md:flex-row justify-between items-center gap-6">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+               <ShieldCheck className="text-blue-400" size={28} />
+               <h3 className="text-2xl font-bold">Company Master Template</h3>
+            </div>
+            <p className="text-slate-300 max-w-xl">
+               Define the standard layout, branding, cover page styles, and legal disclaimers applied to all new instruction manuals.
+            </p>
+          </div>
+          <div>
+             {companyTemplate && companyCat ? (
+               <Link 
+                 to={`/im/template/${companyCat.id}`} 
+                 className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-500 shadow-md transition-all"
+               >
+                 <Edit size={18} /> Edit Main Template
+               </Link>
+             ) : (
+               <button 
+                 onClick={handleInitializeMaster}
+                 disabled={creatingId === 'master'}
+                 className="flex items-center gap-2 bg-white text-slate-900 px-6 py-3 rounded-lg font-bold hover:bg-slate-100 shadow-md transition-all disabled:opacity-70"
+               >
+                 {creatingId === 'master' ? 'Initializing...' : <><Plus size={18} /> Initialize Master Template</>}
+               </button>
+             )}
+          </div>
+      </div>
+
+      <h3 className="text-lg font-bold text-slate-800 mb-4">Category Templates</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+         {otherCategories.map(cat => {
+           const template = templates.find(t => t.categoryId === cat.id);
+           
+           return (
+             <div key={cat.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all group relative">
+                {template?.isFinalized && (
+                  <div className="absolute top-4 right-4 bg-green-100 text-green-700 px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-sm animate-in fade-in">
+                    <CheckCircle2 size={12} /> FINALIZED
+                  </div>
+                )}
+                <div>
+                   <h3 className="text-lg font-bold text-slate-800 mb-2">{cat.name}</h3>
+                   <div className="text-xs text-slate-500 mb-4">
+                      {template ? (
+                        <div className="flex flex-col gap-1">
+                          <span className={`flex items-center gap-1 ${template.isFinalized ? 'text-green-600' : 'text-blue-600'}`}>
+                            <FileText size={12} /> {template.isFinalized ? 'Template Finalized' : 'Template Active'}
+                          </span>
+                          {template.finalizedAt && <span className="text-[10px] text-slate-400">Finalized: {new Date(template.finalizedAt).toLocaleDateString()}</span>}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">No template defined</span>
+                      )}
+                   </div>
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
+                   {template ? (
+                     <>
+                        <Link 
+                          to={`/im/template/${cat.id}`}
+                          className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                        >
+                          Edit Template <ArrowRight size={14} />
+                        </Link>
+                        
+                        <button 
+                          onClick={() => handleToggleFinalized(template)}
+                          disabled={togglingId === template.id}
+                          className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded transition-colors ${
+                            template.isFinalized 
+                              ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' 
+                              : 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
+                          }`}
+                        >
+                          {togglingId === template.id ? 'Updating...' : (
+                            template.isFinalized ? <><Unlock size={12}/> Reopen</> : <><Lock size={12}/> Mark Final</>
+                          )}
+                        </button>
+                     </>
+                   ) : (
+                     <button 
+                       onClick={() => handleCreate(cat)}
+                       disabled={creatingId === cat.id}
+                       className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-blue-600 disabled:opacity-50"
+                     >
+                       {creatingId === cat.id ? 'Creating...' : <><Plus size={16} /> Create Template</>}
+                     </button>
+                   )}
+                </div>
+             </div>
+           );
+         })}
+         
+         {otherCategories.length === 0 && (
+            <div className="col-span-3 text-center py-12 text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
+               No product categories defined. Go to Admin Console to add categories.
+            </div>
+         )}
+      </div>
+    </Layout>
+  );
+};
+
+export default IMDashboard;

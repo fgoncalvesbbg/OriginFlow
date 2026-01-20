@@ -1,0 +1,68 @@
+
+-- 1. DROP OLD VERSIONS
+DROP FUNCTION IF EXISTS public.get_compliance_request_secure(text, text);
+
+-- 2. RECREATE WITH EXPLICIT COLUMN DEFINITIONS
+-- This prevents "AbortError" or cache mismatches when columns are added/removed from the table.
+CREATE OR REPLACE FUNCTION public.get_compliance_request_secure(p_token text, p_code text)
+RETURNS TABLE (
+    id uuid,
+    request_id text,
+    project_id uuid,
+    project_name text,
+    supplier_id uuid,
+    category_id text,
+    features jsonb,
+    status text,
+    responses jsonb,
+    token text,
+    access_code text,
+    deadline timestamptz,
+    submitted_at timestamptz,
+    completed_at timestamptz,
+    updated_by text,
+    change_log jsonb,
+    respondent_name text,
+    respondent_position text,
+    created_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER -- Essential: Runs as owner to see the row even if RLS is strict
+SET search_path = public
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        r.id, 
+        r.request_id, 
+        r.project_id, 
+        r.project_name, 
+        r.supplier_id, 
+        r.category_id, 
+        r.features, 
+        r.status, 
+        r.responses, 
+        r.token, 
+        r.access_code, 
+        r.deadline, 
+        r.submitted_at, 
+        r.completed_at, 
+        r.updated_by, 
+        r.change_log, 
+        r.respondent_name, 
+        r.respondent_position, 
+        r.created_at
+    FROM public.compliance_requests r
+    WHERE r.token = p_token 
+    AND r.access_code = p_code;
+END;
+$$;
+
+-- 3. GRANT PERMISSIONS
+-- Ensure the 'anon' (public) user can actually run this function
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure TO anon;
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure TO service_role;
+
+-- 4. RELOAD SCHEMA CACHE
+NOTIFY pgrst, 'reload schema';

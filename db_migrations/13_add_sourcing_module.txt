@@ -1,0 +1,42 @@
+
+-- RFQ TABLES
+
+create table if not exists public.rfqs (
+  id uuid default uuid_generate_v4() primary key,
+  rfq_id text not null, -- visible ID like RFQ-2025-001
+  title text not null,
+  description text,
+  created_by uuid references auth.users(id),
+  created_at timestamp with time zone default now() not null,
+  status text default 'open' -- open, closed, awarded
+);
+
+create table if not exists public.rfq_entries (
+  id uuid default uuid_generate_v4() primary key,
+  rfq_id uuid references public.rfqs(id) on delete cascade,
+  supplier_id uuid references public.suppliers(id),
+  token text, -- unique access token for supplier
+  status text default 'pending', -- pending, submitted, awarded, rejected
+  unit_price numeric,
+  moq integer,
+  lead_time_weeks integer,
+  tooling_cost numeric,
+  currency text default 'USD',
+  supplier_notes text,
+  submitted_at timestamp with time zone,
+  created_at timestamp with time zone default now() not null
+);
+
+-- RLS Policies
+
+ALTER TABLE public.rfqs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.rfq_entries ENABLE ROW LEVEL SECURITY;
+
+-- Authenticated users (PMs/Admins) have full access
+CREATE POLICY "Enable all for rfqs" ON public.rfqs FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for rfq_entries" ON public.rfq_entries FOR ALL USING (auth.role() = 'authenticated');
+
+-- Public access via Token
+CREATE POLICY "Allow public read rfq entries via token" ON public.rfq_entries FOR SELECT TO public USING (true);
+CREATE POLICY "Allow public update rfq entries via token" ON public.rfq_entries FOR UPDATE TO public USING (true);
+CREATE POLICY "Allow public read rfqs" ON public.rfqs FOR SELECT TO public USING (true); -- Needed to show RFQ details on public portal

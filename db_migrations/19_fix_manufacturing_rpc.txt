@@ -1,0 +1,66 @@
+
+-- Secure function to submit production updates and sync project ETD
+-- This allows Suppliers (public users) to update the project ETD safely via the portal
+CREATE OR REPLACE FUNCTION public.submit_production_update(
+    p_project_id uuid,
+    p_previous_etd timestamptz,
+    p_new_etd timestamptz,
+    p_is_on_time boolean,
+    p_delay_reason text,
+    p_notes text,
+    p_updated_by text,
+    p_is_supplier boolean
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER -- Critical: Runs as admin to bypass Project RLS restrictions for the update
+SET search_path = public
+AS $$
+DECLARE
+    v_record jsonb;
+    v_current_milestones jsonb;
+BEGIN
+    -- 1. Insert Update Record
+    INSERT INTO public.production_updates (
+        project_id, previous_etd, new_etd, is_on_time, delay_reason, notes, updated_by, is_supplier_update
+    ) VALUES (
+        p_project_id, p_previous_etd, p_new_etd, p_is_on_time, p_delay_reason, p_notes, p_updated_by, p_is_supplier
+    ) RETURNING to_jsonb(production_updates.*) INTO v_record;
+
+    -- 2. Update Project Milestone ETD
+    -- We only update the project if it exists.
+    -- Fetch current milestones
+    SELECT milestones INTO v_current_milestones FROM public.projects WHERE id = p_project_id;
+    
+    IF FOUND THEN
+        -- Update the 'etd' key in the jsonb object
+        UPDATE public.projects 
+        SET milestones = jsonb_set(
+            COALESCE(v_current_milestones, '{}'::jsonb), 
+            '{etd}', 
+            to_jsonb(p_new_etd)
+        )
+        WHERE id = p_project_id;
+    END IF;
+
+    RETURN v_record;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.submit_production_update TO public;
+
+-- Secure function to get projects for a supplier by their PORTAL TOKEN
+-- This guarantees the dashboard loads even if public table access is restricted
+CREATE OR REPLACE FUNCTION public.get_projects_by_supplier_token(p_token text)
+RETURNS SETOF public.projects
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT p.*
+  FROM public.projects p
+  JOIN public.suppliers s ON p.supplier_id = s.id
+  WHERE s.portal_token = p_token;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_projects_by_supplier_token TO public;

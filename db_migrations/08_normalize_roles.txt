@@ -1,0 +1,11 @@
+-- 1. Normalize existing roles to uppercase (Standardize)
+UPDATE public.profiles SET role = 'ADMIN' WHERE role ILIKE 'admin';
+UPDATE public.profiles SET role = 'PM' WHERE role ILIKE 'pm' OR role ILIKE 'project manager';
+UPDATE public.profiles SET role = 'SUPPLIER' WHERE role ILIKE 'supplier';
+
+-- 2. Set the default for new users to 'PM'
+ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'PM';
+
+-- 3. Ensure your specific user is an Admin (Optional safety net)
+-- You can run this line manually with your email if needed:
+-- UPDATE public.profiles SET role = 'ADMIN' WHERE email = 'your_email@example.com';

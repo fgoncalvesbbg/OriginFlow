@@ -1,0 +1,52 @@
+
+-- Add columns for respondent details
+ALTER TABLE public.compliance_requests
+ADD COLUMN IF NOT EXISTS respondent_name text,
+ADD COLUMN IF NOT EXISTS respondent_position text;
+
+-- Drop the OLD function signature explicitly to avoid "function name is not unique" errors
+DROP FUNCTION IF EXISTS public.submit_compliance_response_secure(text, text, jsonb, text);
+
+-- Create the NEW function with updated signature (includes respondent details)
+CREATE OR REPLACE FUNCTION public.submit_compliance_response_secure(
+  p_token text, 
+  p_code text, 
+  p_responses jsonb, 
+  p_status text,
+  p_respondent_name text DEFAULT NULL,
+  p_respondent_position text DEFAULT NULL
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_req_id uuid;
+BEGIN
+  -- Check credentials and get ID
+  SELECT id INTO v_req_id
+  FROM public.compliance_requests
+  WHERE token = p_token AND access_code = p_code;
+
+  IF v_req_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid credentials';
+  END IF;
+
+  -- Perform Update
+  UPDATE public.compliance_requests
+  SET 
+    responses = p_responses,
+    status = p_status,
+    submitted_at = NOW(),
+    completed_at = CASE WHEN p_status = 'approved' THEN NOW() ELSE NULL END,
+    respondent_name = p_respondent_name,
+    respondent_position = p_respondent_position
+  WHERE id = v_req_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.submit_compliance_response_secure TO public;
+
+-- Force schema reload
+NOTIFY pgrst, 'reload schema';

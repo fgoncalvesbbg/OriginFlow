@@ -1,0 +1,71 @@
+-- 1. RESTORE AUTHENTICATED ACCESS (Fixes "All disappeared" for Project Manager)
+-- This section ensures that if you are logged in (Authenticated), you have full access to everything.
+
+DROP POLICY IF EXISTS "Enable all for users" ON public.profiles;
+CREATE POLICY "Enable all for users" ON public.profiles FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for projects" ON public.projects;
+CREATE POLICY "Enable all for projects" ON public.projects FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for suppliers" ON public.suppliers;
+CREATE POLICY "Enable all for suppliers" ON public.suppliers FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for steps" ON public.project_steps;
+CREATE POLICY "Enable all for steps" ON public.project_steps FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for docs" ON public.project_documents;
+CREATE POLICY "Enable all for docs" ON public.project_documents FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for versions" ON public.document_versions;
+CREATE POLICY "Enable all for versions" ON public.document_versions FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for comments" ON public.document_comments;
+CREATE POLICY "Enable all for comments" ON public.document_comments FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for categories" ON public.categories_l3;
+CREATE POLICY "Enable all for categories" ON public.categories_l3 FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for features" ON public.product_features;
+CREATE POLICY "Enable all for features" ON public.product_features FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for requirements" ON public.compliance_requirements;
+CREATE POLICY "Enable all for requirements" ON public.compliance_requirements FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for requests" ON public.compliance_requests;
+CREATE POLICY "Enable all for requests" ON public.compliance_requests FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for im templates" ON public.im_templates;
+CREATE POLICY "Enable all for im templates" ON public.im_templates FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for im sections" ON public.im_sections;
+CREATE POLICY "Enable all for im sections" ON public.im_sections FOR ALL USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Enable all for project ims" ON public.project_ims;
+CREATE POLICY "Enable all for project ims" ON public.project_ims FOR ALL USING (auth.role() = 'authenticated');
+
+-- 2. PUBLIC READ ACCESS FOR MASTER DATA (Fixes Supplier Portal "Empty Link" / "Loading Error")
+-- Suppliers need to read the form definitions (Categories, Features, Requirements) without logging in.
+
+DROP POLICY IF EXISTS "Allow public read access to categories" ON public.categories_l3;
+CREATE POLICY "Allow public read access to categories" ON public.categories_l3 FOR SELECT TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow public read access to features" ON public.product_features;
+CREATE POLICY "Allow public read access to features" ON public.product_features FOR SELECT TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow public read access to requirements" ON public.compliance_requirements;
+CREATE POLICY "Allow public read access to requirements" ON public.compliance_requirements FOR SELECT TO public USING (true);
+
+-- 3. PUBLIC ACCESS FOR TRANSACTIONAL DATA (Secured by Token & Access Code in App)
+-- Allows the app to fetch the specific project/request using the token in the URL.
+
+-- Projects (Required for Supplier Portal)
+DROP POLICY IF EXISTS "Allow public access to projects via token" ON public.projects;
+CREATE POLICY "Allow public access to projects via token" ON public.projects FOR SELECT TO public USING (true);
+
+-- Compliance Requests (Required for TCF Portal)
+DROP POLICY IF EXISTS "Allow public access to compliance requests via token" ON public.compliance_requests;
+CREATE POLICY "Allow public access to compliance requests via token" ON public.compliance_requests FOR ALL TO public USING (true);
+
+-- Project Documents (Required for File Uploads)
+DROP POLICY IF EXISTS "Allow public access to docs via token" ON public.project_documents;
+CREATE POLICY "Allow public access to docs via token" ON public.project_documents FOR ALL TO public USING (true);

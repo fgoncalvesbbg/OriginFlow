@@ -1,0 +1,7 @@
+-- Add columns to im_templates table to track finalization status
+ALTER TABLE public.im_templates
+ADD COLUMN IF NOT EXISTS is_finalized boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS finalized_at timestamp with time zone;
+
+-- Force schema reload
+NOTIFY pgrst, 'reload schema';

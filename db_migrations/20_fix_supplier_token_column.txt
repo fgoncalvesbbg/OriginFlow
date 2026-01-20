@@ -1,0 +1,72 @@
+
+-- 1. Rename 'token' to 'portal_token' in suppliers table if needed
+-- This aligns the DB schema with the application code (portalToken)
+DO $$
+BEGIN
+  IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='suppliers' AND column_name='token') 
+     AND NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='suppliers' AND column_name='portal_token') THEN
+      ALTER TABLE public.suppliers RENAME COLUMN token TO portal_token;
+  
+  ELSIF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='suppliers' AND column_name='portal_token') THEN
+      ALTER TABLE public.suppliers ADD COLUMN portal_token text;
+  END IF;
+END $$;
+
+-- 2. Recreate the secure function for Supplier Dashboard
+CREATE OR REPLACE FUNCTION public.get_projects_by_supplier_token(p_token text)
+RETURNS SETOF public.projects
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT p.*
+  FROM public.projects p
+  JOIN public.suppliers s ON p.supplier_id = s.id
+  WHERE s.portal_token = p_token;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_projects_by_supplier_token TO public;
+
+-- 3. Ensure the manufacturing update function also exists (in case previous run failed completely)
+CREATE OR REPLACE FUNCTION public.submit_production_update(
+    p_project_id uuid,
+    p_previous_etd timestamptz,
+    p_new_etd timestamptz,
+    p_is_on_time boolean,
+    p_delay_reason text,
+    p_notes text,
+    p_updated_by text,
+    p_is_supplier boolean
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_record jsonb;
+    v_current_milestones jsonb;
+BEGIN
+    INSERT INTO public.production_updates (
+        project_id, previous_etd, new_etd, is_on_time, delay_reason, notes, updated_by, is_supplier_update
+    ) VALUES (
+        p_project_id, p_previous_etd, p_new_etd, p_is_on_time, p_delay_reason, p_notes, p_updated_by, p_is_supplier
+    ) RETURNING to_jsonb(production_updates.*) INTO v_record;
+
+    SELECT milestones INTO v_current_milestones FROM public.projects WHERE id = p_project_id;
+    
+    IF FOUND THEN
+        UPDATE public.projects 
+        SET milestones = jsonb_set(
+            COALESCE(v_current_milestones, '{}'::jsonb), 
+            '{etd}', 
+            to_jsonb(p_new_etd)
+        )
+        WHERE id = p_project_id;
+    END IF;
+
+    RETURN v_record;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.submit_production_update TO public;

@@ -1,0 +1,10 @@
+
+-- Add new configuration fields to compliance_requirements table
+
+ALTER TABLE public.compliance_requirements
+ADD COLUMN IF NOT EXISTS timing_type text DEFAULT 'ETD', -- 'ETD' or 'POST_ETD'
+ADD COLUMN IF NOT EXISTS timing_weeks integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS self_declaration_accepted boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS test_report_origin text DEFAULT 'third_party_mandatory'; -- 'supplier_inhouse' or 'third_party_mandatory'
+
+-- Ensure public read access policies still cover these new columns (implicitly covered by 'select using (true)')

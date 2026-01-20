@@ -1,0 +1,28 @@
+
+-- 1. DROP PREVIOUS VERSIONS
+DROP FUNCTION IF EXISTS public.get_compliance_request_secure(text, text);
+
+-- 2. RECREATE USING SETOF
+-- Using SETOF public.compliance_requests is the most stable approach 
+-- as it automatically handles column changes in the table.
+CREATE OR REPLACE FUNCTION public.get_compliance_request_secure(p_token text, p_code text)
+RETURNS SETOF public.compliance_requests
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT *
+  FROM public.compliance_requests
+  WHERE token = p_token 
+  AND access_code = p_code;
+$$;
+
+-- 3. ENSURE PERMISSIONS ARE CLEAR
+-- Explicitly grant access to all roles for this specific utility function
+REVOKE ALL ON FUNCTION public.get_compliance_request_secure(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure(text, text) TO anon;
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_compliance_request_secure(text, text) TO service_role;
+
+-- 4. REFRESH SCHEMA CACHE
+NOTIFY pgrst, 'reload schema';

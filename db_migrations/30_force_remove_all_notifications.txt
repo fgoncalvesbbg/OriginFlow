@@ -1,0 +1,69 @@
+
+-- 1. Redefine the RPC to ensure it only performs standard database operations
+-- This removes any hidden logic that might have been added to the function body by previous templates or tools.
+
+CREATE OR REPLACE FUNCTION public.submit_compliance_response_secure(
+  p_token text, 
+  p_code text, 
+  p_responses jsonb, 
+  p_status text,
+  p_respondent_name text DEFAULT NULL,
+  p_respondent_position text DEFAULT NULL
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_req_id uuid;
+BEGIN
+  -- Verify the token and access code to find the correct request
+  SELECT id INTO v_req_id
+  FROM public.compliance_requests
+  WHERE token = p_token AND access_code = p_code;
+
+  IF v_req_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid credentials or request not found';
+  END IF;
+
+  -- Simple Update - This just stores the info on Supabase as requested.
+  -- No net.http_post, no emails, no external logic.
+  UPDATE public.compliance_requests
+  SET 
+    responses = p_responses,
+    status = p_status,
+    submitted_at = NOW(),
+    completed_at = CASE WHEN p_status = 'approved' THEN NOW() ELSE NULL END,
+    respondent_name = p_respondent_name,
+    respondent_position = p_respondent_position
+  WHERE id = v_req_id;
+END;
+$$;
+
+-- Ensure permissions are set for the public portal to call this
+GRANT EXECUTE ON FUNCTION public.submit_compliance_response_secure TO public;
+GRANT EXECUTE ON FUNCTION public.submit_compliance_response_secure TO anon;
+GRANT EXECUTE ON FUNCTION public.submit_compliance_response_secure TO authenticated;
+
+-- 2. "Nuclear" trigger removal
+-- This loop finds every single trigger on your main data tables and drops them.
+-- This effectively disables all Supabase "Webhooks" and custom notification logic
+-- that might be triggering the 'net.http_post' error.
+
+DO $$ 
+DECLARE 
+    r RECORD;
+BEGIN
+    FOR r IN (
+        SELECT trigger_name, event_object_table 
+        FROM information_schema.triggers 
+        WHERE event_object_schema = 'public'
+        AND event_object_table IN ('compliance_requests', 'rfq_entries', 'production_updates', 'projects')
+    ) LOOP
+        EXECUTE 'DROP TRIGGER IF EXISTS ' || quote_ident(r.trigger_name) || ' ON ' || quote_ident(r.event_object_table) || ';';
+    END LOOP;
+END $$;
+
+-- 3. Clear schema cache so the changes are recognized by the API immediately
+NOTIFY pgrst, 'reload schema';

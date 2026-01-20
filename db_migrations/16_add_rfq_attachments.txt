@@ -1,0 +1,12 @@
+
+-- Add columns to rfqs table
+ALTER TABLE public.rfqs 
+ADD COLUMN IF NOT EXISTS thumbnail_url text,
+ADD COLUMN IF NOT EXISTS attachments jsonb DEFAULT '[]'::jsonb;
+
+-- Add column to rfq_entries table
+ALTER TABLE public.rfq_entries 
+ADD COLUMN IF NOT EXISTS quote_file_url text;
+
+-- Force schema reload
+NOTIFY pgrst, 'reload schema';
