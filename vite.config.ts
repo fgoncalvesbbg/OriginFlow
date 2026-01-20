@@ -10,6 +10,11 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [react()],
+    resolve: {
+      alias: {
+        jspdf: 'jspdf/dist/jspdf.es.min.js'
+      }
+    },
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
       'process.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL),
