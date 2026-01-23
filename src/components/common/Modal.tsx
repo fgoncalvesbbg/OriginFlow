@@ -44,18 +44,18 @@ const ModalComponent: React.FC<ModalComponentProps> = ({ modal, onClose }) => {
 
   const getIcon = () => {
     if (modal.options.isDangerous) {
-      return <AlertTriangle className="w-6 h-6 text-red-600" />;
+      return <AlertTriangle className="w-6 h-6 text-rose-600" />;
     }
     if (modal.type === 'alert') {
-      return <Info className="w-6 h-6 text-blue-600" />;
+      return <Info className="w-6 h-6 text-indigo-600" />;
     }
-    return <CheckCircle className="w-6 h-6 text-green-600" />;
+    return <CheckCircle className="w-6 h-6 text-emerald-600" />;
   };
 
   const getIconBg = () => {
-    if (modal.options.isDangerous) return 'bg-red-100';
-    if (modal.type === 'alert') return 'bg-blue-100';
-    return 'bg-green-100';
+    if (modal.options.isDangerous) return 'bg-rose-100';
+    if (modal.type === 'alert') return 'bg-indigo-100';
+    return 'bg-emerald-100';
   };
 
   const title = modal.options.title || (modal.type === 'alert' ? 'Alert' : 'Confirm');
@@ -72,14 +72,14 @@ const ModalComponent: React.FC<ModalComponentProps> = ({ modal, onClose }) => {
 
       {/* Modal */}
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4 animate-fadeIn">
-        <div className="bg-white rounded-lg shadow-xl max-w-sm w-full overflow-hidden">
+        <div className="bg-white rounded-xl shadow-lg max-w-sm w-full overflow-hidden border border-gray-200">
           {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between p-6 border-b border-gray-100">
             <div className="flex items-center gap-3">
-              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getIconBg()}`}>
+              <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${getIconBg()}`}>
                 {getIcon()}
               </div>
-              <h2 className="text-lg font-bold text-gray-900">{title}</h2>
+              <h2 className="text-lg font-bold text-primary">{title}</h2>
             </div>
             <button
               onClick={() => onClose(modal.id)}
@@ -102,23 +102,23 @@ const ModalComponent: React.FC<ModalComponentProps> = ({ modal, onClose }) => {
           </div>
 
           {/* Footer */}
-          <div className="bg-gray-50 px-6 py-4 flex gap-3 justify-end border-t border-gray-200">
+          <div className="bg-light px-6 py-4 flex gap-3 justify-end border-t border-gray-100">
             {modal.type === 'confirm' || modal.type === 'custom' ? (
               <>
                 <button
                   onClick={handleCancel}
                   disabled={isLoading}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
                 >
                   {cancelText}
                 </button>
                 <button
                   onClick={handleConfirm}
                   disabled={isLoading}
-                  className={`px-4 py-2 text-white rounded-lg font-medium transition-colors disabled:opacity-50 ${
+                  className={`px-4 py-2 text-white rounded-xl font-medium transition-colors disabled:opacity-50 ${
                     modal.options.isDangerous
-                      ? 'bg-red-600 hover:bg-red-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
+                      ? 'bg-rose-600 hover:bg-rose-700'
+                      : 'bg-indigo-600 hover:bg-indigo-700'
                   }`}
                 >
                   {isLoading ? 'Loading...' : okText}
@@ -128,7 +128,7 @@ const ModalComponent: React.FC<ModalComponentProps> = ({ modal, onClose }) => {
               <button
                 onClick={handleConfirm}
                 disabled={isLoading}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
               >
                 {isLoading ? 'Loading...' : okText}
               </button>

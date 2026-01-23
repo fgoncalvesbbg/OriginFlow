@@ -12,7 +12,7 @@ const ProtectedRoute: React.FC<Props> = ({ children }) => {
   const location = useLocation();
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading session...</div>;
+    return <div className="min-h-screen flex items-center justify-center bg-light text-gray-400">Loading session...</div>;
   }
 
   if (!isAuthenticated) {

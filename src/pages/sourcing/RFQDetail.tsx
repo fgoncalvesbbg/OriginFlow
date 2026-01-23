@@ -16,12 +16,12 @@ const ConfirmationModal: React.FC<{
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-sm text-slate-600 mb-6">{message}</p>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-6">{message}</p>
         <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete RFQ</button>
+          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete RFQ</button>
         </div>
       </div>
     </div>
@@ -112,22 +112,22 @@ const RFQDetail: React.FC = () => {
 
       <div className="flex justify-between items-start mb-6">
          <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/sourcing')} className="text-slate-400 hover:text-slate-600"><ArrowLeft size={20} /></button>
+            <button onClick={() => navigate('/sourcing')} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
             <div>
                 <div className="flex items-center gap-3 mb-1">
-                    <h2 className="text-2xl font-bold text-slate-900">{rfq.title}</h2>
-                    <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${rfq.status === RFQStatus.OPEN ? 'bg-blue-100 text-blue-700' : rfq.status === RFQStatus.AWARDED ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
+                    <h1 className="text-3xl font-bold text-primary">{rfq.title}</h2>
+                    <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${rfq.status === RFQStatus.OPEN ? 'bg-indigo-100 text-indigo-700' : rfq.status === RFQStatus.AWARDED ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
                         {rfq.status}
                     </span>
                 </div>
-                <div className="text-sm text-slate-500 font-mono">{rfq.rfqId} {rfq.categoryName && `• ${rfq.categoryName}`}</div>
+                <div className="text-sm text-muted font-mono">{rfq.rfqId} {rfq.categoryName && `• ${rfq.categoryName}`}</div>
             </div>
          </div>
          <div className="flex gap-2">
             {canDelete && (
                 <button 
                     onClick={() => setIsDeleteModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 bg-white rounded-lg text-sm font-medium hover:bg-red-50 transition-colors shadow-sm"
+                    className="flex items-center gap-2 px-4 py-2 border border-rose-200 text-rose-600 bg-white rounded-xl text-sm font-medium hover:bg-rose-50 transition-colors shadow"
                 >
                     <Trash2 size={16} /> Delete RFQ
                 </button>
@@ -139,26 +139,26 @@ const RFQDetail: React.FC = () => {
           {/* Specs Panel */}
           <div className="lg:col-span-1 space-y-6">
               {rfq.thumbnailUrl && (
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-center">
+                  <div className="bg-white p-4 rounded-xl border border-gray-200 shadow flex justify-center">
                       <img src={rfq.thumbnailUrl} alt="Product Reference" className="max-h-64 max-w-full object-contain rounded" />
                   </div>
               )}
 
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="font-bold text-slate-800 mb-4 text-sm uppercase tracking-wide">Description</h3>
-                  <div className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap bg-slate-50 p-4 rounded border border-slate-100 max-h-60 overflow-y-auto">
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+                  <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wide">Description</h3>
+                  <div className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap bg-light p-4 rounded border border-gray-100 max-h-60 overflow-y-auto">
                       {rfq.description}
                   </div>
               </div>
 
               {rfq.attachments && rfq.attachments.length > 0 && (
-                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                      <h3 className="font-bold text-slate-800 mb-4 text-sm uppercase tracking-wide flex items-center gap-2">
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+                      <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wide flex items-center gap-2">
                           <Paperclip size={16}/> Attachments
                       </h3>
                       <div className="space-y-2">
                           {rfq.attachments.map((file, idx) => (
-                              <a key={idx} href={file.url} download={file.name} className="flex items-center gap-2 text-sm text-blue-600 hover:underline bg-blue-50 p-2 rounded border border-blue-100">
+                              <a key={idx} href={file.url} download={file.name} className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-2 rounded border border-indigo-100">
                                   <FileText size={14}/> {file.name}
                               </a>
                           ))}
@@ -167,17 +167,17 @@ const RFQDetail: React.FC = () => {
               )}
 
               {rfq.attributes && rfq.attributes.length > 0 && (
-                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                      <h3 className="font-bold text-slate-800 mb-4 text-sm uppercase tracking-wide flex items-center gap-2">
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+                      <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wide flex items-center gap-2">
                           <List size={16}/> Technical Specs
                       </h3>
                       <div className="space-y-3">
                           {rfq.attributes.map((attr, idx) => (
                               <div key={idx} className="flex justify-between text-sm border-b border-slate-50 pb-2 last:border-0">
-                                  <span className="text-slate-500">{attr.name}</span>
-                                  <span className="font-medium text-slate-800">
+                                  <span className="text-muted">{attr.name}</span>
+                                  <span className="font-medium text-gray-800">
                                       {attr.value}
-                                      {attr.type === 'range' && <span className="text-xs text-slate-400 ml-1">(Range)</span>}
+                                      {attr.type === 'range' && <span className="text-xs text-gray-400 ml-1">(Range)</span>}
                                   </span>
                               </div>
                           ))}
@@ -187,13 +187,13 @@ const RFQDetail: React.FC = () => {
           </div>
 
           {/* Comparison Table */}
-          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 font-bold text-slate-700">
+          <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow overflow-hidden h-fit">
+              <div className="px-6 py-4 bg-light border-b border-gray-200 font-bold text-gray-700">
                   Quote Comparison
               </div>
               <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                      <thead className="bg-white text-slate-500 border-b border-slate-100">
+                      <thead className="bg-white text-muted border-b border-gray-100">
                           <tr>
                               <th className="px-4 py-3">Supplier</th>
                               <th className="px-4 py-3">Status</th>
@@ -211,26 +211,26 @@ const RFQDetail: React.FC = () => {
                               const isWinner = entry.status === RFQEntryStatus.AWARDED;
 
                               return (
-                                  <tr key={entry.id} className={`group ${isWinner ? 'bg-green-50/50' : 'hover:bg-slate-50'}`}>
-                                      <td className="px-4 py-3 font-medium text-slate-900">
+                                  <tr key={entry.id} className={`group ${isWinner ? 'bg-emerald-50/50' : 'hover:bg-light'}`}>
+                                      <td className="px-4 py-3 font-medium text-primary">
                                           {entry.supplierName}
-                                          {isWinner && <span className="ml-2 text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">WINNER</span>}
+                                          {isWinner && <span className="ml-2 text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">WINNER</span>}
                                       </td>
                                       <td className="px-4 py-3">
                                           {entry.status === RFQEntryStatus.PENDING ? (
                                               <div className="flex items-center gap-2">
-                                                  <span className="text-slate-400 italic">Pending</span>
-                                                  <button onClick={() => handleCopyLink(entry)} className="text-blue-600 hover:bg-blue-50 p-1 rounded" title="Copy Link">
+                                                  <span className="text-gray-400 italic">Pending</span>
+                                                  <button onClick={() => handleCopyLink(entry)} className="text-indigo-600 hover:bg-indigo-50 p-1 rounded" title="Copy Link">
                                                       {copiedEntryId === entry.id ? <CheckCircle size={14} /> : <LinkIcon size={14} />}
                                                   </button>
                                               </div>
                                           ) : (
-                                              <span className="text-slate-700 font-medium capitalize">{entry.status}</span>
+                                              <span className="text-gray-700 font-medium capitalize">{entry.status}</span>
                                           )}
                                       </td>
                                       <td className="px-4 py-3 text-right">
                                           {entry.unitPrice ? (
-                                              <div className={isBestPrice ? 'text-green-600 font-bold' : ''}>
+                                              <div className={isBestPrice ? 'text-emerald-600 font-bold' : ''}>
                                                   {entry.currency} {entry.unitPrice}
                                               </div>
                                           ) : '-'}
@@ -238,14 +238,14 @@ const RFQDetail: React.FC = () => {
                                       <td className="px-4 py-3 text-right">{entry.moq || '-'}</td>
                                       <td className="px-4 py-3 text-right">
                                           {entry.leadTimeWeeks ? (
-                                              <div className={isBestTime ? 'text-green-600 font-bold' : ''}>
+                                              <div className={isBestTime ? 'text-emerald-600 font-bold' : ''}>
                                                   {entry.leadTimeWeeks} wks
                                               </div>
                                           ) : '-'}
                                       </td>
                                       <td className="px-4 py-3 text-right">
                                           {entry.quoteFileUrl ? (
-                                              <a href={entry.quoteFileUrl} download={`Quote_${entry.supplierName}`} className="text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                                              <a href={entry.quoteFileUrl} download={`Quote_${entry.supplierName}`} className="text-indigo-600 hover:text-blue-800 inline-flex items-center gap-1">
                                                   <Download size={14} />
                                               </a>
                                           ) : '-'}
@@ -255,7 +255,7 @@ const RFQDetail: React.FC = () => {
                                               <button 
                                                 onClick={() => handleAward(entry)}
                                                 disabled={awarding}
-                                                className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 shadow-sm flex items-center gap-1 ml-auto"
+                                                className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 shadow flex items-center gap-1 ml-auto"
                                               >
                                                   <Award size={12} /> Award
                                               </button>

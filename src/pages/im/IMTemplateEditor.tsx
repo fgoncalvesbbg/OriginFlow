@@ -34,12 +34,12 @@ const ConfirmationModal: React.FC<{
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-sm text-slate-600 mb-6">{message}</p>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-6">{message}</p>
         <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
+          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
         </div>
       </div>
     </div>
@@ -160,7 +160,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   }, [onChange]);
 
   return (
-    <div className={`flex flex-col h-full border rounded-lg transition-colors overflow-hidden ${isFocused ? 'border-blue-400 ring-1 ring-blue-100' : 'border-slate-300'}`}>
+    <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
       <style>{`
         .im-editor-content ul { list-style-type: disc !important; padding-left: 1.5em !important; margin-bottom: 1em !important; }
         .im-editor-content ol { list-style-type: decimal !important; padding-left: 1.5em !important; margin-bottom: 1em !important; }
@@ -192,23 +192,23 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         .im-table th { background-color: #f1f5f9; font-weight: bold; text-align: left; }
       `}</style>
 
-      <div className="flex-none flex items-center gap-1 p-2 bg-slate-50 border-b border-slate-200 select-none z-10 flex-wrap">
-        <button onMouseDown={(e) => { e.preventDefault(); exec('bold'); }} className="p-1.5 hover:bg-slate-200 rounded text-slate-600" title="Bold"><Bold size={16} /></button>
-        <button onMouseDown={(e) => { e.preventDefault(); exec('italic'); }} className="p-1.5 hover:bg-slate-200 rounded text-slate-600" title="Italic"><Italic size={16} /></button>
-        <button onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} className="p-1.5 hover:bg-slate-200 rounded text-slate-600" title="Underline"><Underline size={16} /></button>
-        <div className="w-px h-4 bg-slate-300 mx-1"></div>
-        <button onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }} className="p-1.5 hover:bg-slate-200 rounded text-slate-600" title="Bullet List"><List size={16} /></button>
+      <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
+        <button onMouseDown={(e) => { e.preventDefault(); exec('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold"><Bold size={16} /></button>
+        <button onMouseDown={(e) => { e.preventDefault(); exec('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic"><Italic size={16} /></button>
+        <button onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline"><Underline size={16} /></button>
+        <div className="w-px h-4 bg-gray-300 mx-1"></div>
+        <button onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bullet List"><List size={16} /></button>
         {!minimal && (
           <>
-            <div className="w-px h-4 bg-slate-300 mx-1"></div>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('warning'); }} className="p-1.5 hover:bg-orange-100 hover:text-orange-600 rounded text-slate-600" title="Warning Block"><AlertTriangle size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('caution'); }} className="p-1.5 hover:bg-yellow-100 hover:text-yellow-600 rounded text-slate-600" title="Caution Block"><AlertOctagon size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('electric'); }} className="p-1.5 hover:bg-red-100 hover:text-red-600 rounded text-slate-600" title="Electric Hazard"><Zap size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('info'); }} className="p-1.5 hover:bg-blue-100 hover:text-blue-600 rounded text-slate-600" title="Info Block"><Info size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('table'); }} className="p-1.5 hover:bg-slate-200 rounded text-slate-600" title="Insert Table"><TableIcon size={16} /></button>
-            <div className="w-px h-4 bg-slate-300 mx-1"></div>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('text'); }} className="flex items-center gap-1 px-2 py-1 bg-yellow-50 text-yellow-700 hover:bg-yellow-100 rounded text-xs font-medium border border-yellow-200" title="Insert User Input Field"><Type size={14} /> Text</button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('image'); }} className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded text-xs font-medium border border-blue-200" title="Insert Image Upload Field"><ImageIcon size={14} /> Img</button>
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('warning'); }} className="p-1.5 hover:bg-orange-100 hover:text-amber-600 rounded text-gray-600" title="Warning Block"><AlertTriangle size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('caution'); }} className="p-1.5 hover:bg-amber-100 hover:text-amber-600 rounded text-gray-600" title="Caution Block"><AlertOctagon size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('electric'); }} className="p-1.5 hover:bg-rose-100 hover:text-rose-600 rounded text-gray-600" title="Electric Hazard"><Zap size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('info'); }} className="p-1.5 hover:bg-indigo-100 hover:text-indigo-600 rounded text-gray-600" title="Info Block"><Info size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('table'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Insert Table"><TableIcon size={16} /></button>
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('text'); }} className="flex items-center gap-1 px-2 py-1 bg-amber-50 text-yellow-700 hover:bg-amber-100 rounded text-xs font-medium border border-amber-200" title="Insert User Input Field"><Type size={14} /> Text</button>
+            <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('image'); }} className="flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-xs font-medium border border-indigo-200" title="Insert Image Upload Field"><ImageIcon size={14} /> Img</button>
             <button onMouseDown={(e) => { e.preventDefault(); onInsertCondition?.(); }} className="flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-xs font-medium border border-purple-200" title="Insert Optional/Conditional Text"><GitBranch size={14} /> Cond</button>
           </>
         )}
@@ -216,7 +216,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       
       <div className="flex-1 relative bg-white cursor-text" onClick={() => { contentRef.current?.focus(); }}>
         {!initialContent && !isFocused && placeholder && (
-           <div className="absolute top-4 left-4 text-slate-400 pointer-events-none select-none z-10">{placeholder}</div>
+           <div className="absolute top-4 left-4 text-gray-400 pointer-events-none select-none z-10">{placeholder}</div>
         )}
         <div className="absolute inset-0 overflow-y-auto">
           <div 
@@ -322,7 +322,7 @@ const IMTemplateEditor: React.FC = () => {
     const label = placeholderConfig.label.trim() || (placeholderConfig.type === 'text' ? 'Text' : 'Image');
     const id = Math.random().toString(36).substr(2, 9);
     const type = placeholderConfig.type;
-    const colorClass = type === 'text' ? 'bg-yellow-100 border-yellow-300 text-yellow-800' : 'bg-blue-100 border-blue-300 text-blue-800';
+    const colorClass = type === 'text' ? 'bg-amber-100 border-yellow-300 text-amber-800' : 'bg-indigo-100 border-indigo-300 text-blue-800';
     const labelAttr = encodeURIComponent(label);
     const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}" data-label="${labelAttr}">[${label}]</span>&nbsp;`;
     insertHtmlToCurrentEditor(html);
@@ -380,7 +380,7 @@ const IMTemplateEditor: React.FC = () => {
           if (feat) { label = "Auto-Spec"; featureName = feat.name; }
       }
       const safeText = encodeURIComponent(condText);
-      const html = `&nbsp;<span class="im-condition bg-purple-50 border-purple-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${condFeatureId}" data-content="${safeText}" data-feature-name="${featureName}" title="Condition: ${featureName || 'Manual'}"><span class="font-bold text-xs uppercase mr-1">[${label}]</span> ${condText.substring(0, 20)}${condText.length > 20 ? '...' : ''}</span>&nbsp;`;
+      const html = `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${condFeatureId}" data-content="${safeText}" data-feature-name="${featureName}" title="Condition: ${featureName || 'Manual'}"><span class="font-bold text-xs uppercase mr-1">[${label}]</span> ${condText.substring(0, 20)}${condText.length > 20 ? '...' : ''}</span>&nbsp;`;
       insertHtmlToCurrentEditor(html);
       setIsConditionModalOpen(false);
   };
@@ -553,17 +553,17 @@ const IMTemplateEditor: React.FC = () => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
      return (
        <div key={s.id} className="flex flex-col">
-           <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-blue-50 text-blue-700 font-medium border border-blue-200' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
-              <span className="text-slate-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
+           <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
+              <span className="text-gray-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
               <span className="truncate flex-1">{s.title}</span>
               <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1">
-                  {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-slate-400 hover:text-blue-600 p-1 hover:bg-blue-100 rounded"><Plus size={12} /></button>}
+                  {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
                   <div className="flex flex-col">
-                     <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-slate-400 hover:text-blue-600 p-1 hover:bg-blue-100 rounded"><ChevronUp size={12} /></button>
-                     <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-slate-400 hover:text-blue-600 p-1 hover:bg-blue-100 rounded"><ChevronDown size={12} /></button>
+                     <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronUp size={12} /></button>
+                     <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronDown size={12} /></button>
                   </div>
               </div>
-              {s.isPlaceholder && <LayoutTemplate size={12} className="text-slate-400 shrink-0" />}
+              {s.isPlaceholder && <LayoutTemplate size={12} className="text-gray-400 shrink-0" />}
            </div>
            {children.map((child, idx) => renderSidebarItem(child, `${indexPrefix}${idx + 1}.`, level + 1))}
        </div>
@@ -584,36 +584,36 @@ const IMTemplateEditor: React.FC = () => {
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-               <button onClick={() => navigate('/im')} className="text-slate-400 hover:text-slate-600"><ArrowLeft size={20}/></button>
+               <button onClick={() => navigate('/im')} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20}/></button>
                <div>
-                 <h2 className="text-xl font-bold text-slate-900">{category?.name} Manual</h2>
-                 <div className="flex items-center gap-4 text-xs text-slate-500 mt-1">
+                 <h2 className="text-xl font-bold text-primary">{category?.name} Manual</h2>
+                 <div className="flex items-center gap-4 text-xs text-muted mt-1">
                     {template.updatedAt && <span className="flex items-center gap-1"><Clock size={12} /> Saved: {new Date(template.updatedAt).toLocaleDateString()}</span>}
                     {template.lastUpdatedBy && <span className="flex items-center gap-1"><User size={12} /> By: {template.lastUpdatedBy}</span>}
-                    {lastSaved && <span className="text-green-600 flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded-full font-medium"><CheckCircle size={10} /> Saved</span>}
+                    {lastSaved && <span className="text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full font-medium"><CheckCircle size={10} /> Saved</span>}
                  </div>
                </div>
             </div>
 
             <div className="flex gap-3 items-center">
-               <button onClick={() => setIsSettingsModalOpen(true)} className="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 shadow-sm"><Settings size={16} /> Settings</button>
-               <button onClick={handleSaveSection} disabled={saving} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-70 shadow-sm ml-2"><Save size={16} /> {saving ? 'Saving...' : 'Save'}</button>
+               <button onClick={() => setIsSettingsModalOpen(true)} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Settings size={16} /> Settings</button>
+               <button onClick={handleSaveSection} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : 'Save'}</button>
             </div>
           </div>
 
           <div className="flex flex-1 gap-6 overflow-hidden">
              {/* Sidebar */}
-             <div className="w-64 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col overflow-hidden">
-                <div className="flex border-b border-slate-200">
-                   <button onClick={() => setActiveSidebarTab('structure')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'structure' ? 'bg-slate-50 text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:bg-slate-50'}`}><Layers size={14} /> Structure</button>
-                   <button onClick={() => setActiveSidebarTab('assets')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'assets' ? 'bg-slate-50 text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:bg-slate-50'}`}><Grid size={14} /> Assets</button>
+             <div className="w-64 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+                <div className="flex border-b border-gray-200">
+                   <button onClick={() => setActiveSidebarTab('structure')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'structure' ? 'bg-light text-indigo-600 border-b-2 border-indigo-600' : 'text-muted hover:bg-light'}`}><Layers size={14} /> Structure</button>
+                   <button onClick={() => setActiveSidebarTab('assets')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'assets' ? 'bg-light text-indigo-600 border-b-2 border-indigo-600' : 'text-muted hover:bg-light'}`}><Grid size={14} /> Assets</button>
                 </div>
 
                 {activeSidebarTab === 'structure' && (
                    <>
-                     <div className="p-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500 uppercase">Section Tree</span>
-                        <button onClick={handleAddSection} className={`text-blue-600 hover:bg-blue-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>
+                     <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
+                        <span className="text-xs font-bold text-muted uppercase">Section Tree</span>
+                        <button onClick={handleAddSection} className={`text-indigo-600 hover:bg-indigo-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>
                      </div>
                      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
                         {rootSections.map((s, idx) => renderSidebarItem(s, `${idx + 1}.`, 0))}
@@ -623,47 +623,47 @@ const IMTemplateEditor: React.FC = () => {
 
                 {activeSidebarTab === 'assets' && (
                    <div className="flex-col flex h-full">
-                      <div className="p-3 border-b border-slate-100 bg-slate-50">
-                         <label className="w-full flex items-center justify-center gap-2 bg-white border border-slate-300 border-dashed rounded-lg p-3 cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-colors">
-                            <Upload size={16} className="text-slate-400" />
-                            <span className="text-xs font-medium text-slate-600">Upload Image</span>
+                      <div className="p-3 border-b border-gray-100 bg-light">
+                         <label className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 border-dashed rounded-xl p-3 cursor-pointer hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
+                            <Upload size={16} className="text-gray-400" />
+                            <span className="text-xs font-medium text-gray-600">Upload Image</span>
                             <input type="file" className="hidden" accept="image/*" onChange={handleUploadAsset} />
                          </label>
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2">
                          {assets.map((src, i) => (
-                            <div key={i} className="group relative aspect-square rounded-lg border border-slate-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400" onClick={() => handleInsertAsset(src)}>
+                            <div key={i} className="group relative aspect-square rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-400" onClick={() => handleInsertAsset(src)}>
                                <img src={src} alt={`Asset ${i}`} className="w-full h-full object-cover" />
                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Plus size={20} className="text-white" /></div>
                             </div>
                          ))}
-                         {assets.length === 0 && <div className="col-span-2 text-center py-8 text-slate-400 text-xs">No assets uploaded yet.</div>}
+                         {assets.length === 0 && <div className="col-span-2 text-center py-8 text-gray-400 text-xs">No assets uploaded yet.</div>}
                       </div>
                    </div>
                 )}
              </div>
 
              {/* Editor Area */}
-             <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col overflow-hidden">
+             <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
                 {currentSection ? (
                    <>
-                     <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-start">
+                     <div className="p-4 border-b border-gray-100 bg-light/50 flex justify-between items-start">
                         <div className="flex-1 max-w-md">
-                           <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-2">{currentSection.parentId ? 'Sub-Chapter' : 'Section'}</div>
-                           <input className="w-full font-bold text-lg bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none text-slate-900" value={currentSection.title} onChange={(e) => updateCurrentSection({ title: e.target.value })} />
+                           <div className="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">{currentSection.parentId ? 'Sub-Chapter' : 'Section'}</div>
+                           <input className="w-full font-bold text-lg bg-transparent border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none text-primary" value={currentSection.title} onChange={(e) => updateCurrentSection({ title: e.target.value })} />
                         </div>
                         <div className="flex items-center gap-4">
-                           <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-600 select-none">
-                              <input type="checkbox" checked={currentSection.isPlaceholder} onChange={(e) => updateCurrentSection({ isPlaceholder: e.target.checked })} className="rounded text-blue-600 focus:ring-blue-500" /> Placeholder?
+                           <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600 select-none">
+                              <input type="checkbox" checked={currentSection.isPlaceholder} onChange={(e) => updateCurrentSection({ isPlaceholder: e.target.checked })} className="rounded text-indigo-600 focus:ring-indigo-500" /> Placeholder?
                            </label>
-                           <button onClick={() => handleDeleteSection(currentSection.id)} className="text-slate-400 hover:text-red-600 p-2"><Trash2 size={16} /></button>
+                           <button onClick={() => handleDeleteSection(currentSection.id)} className="text-gray-400 hover:text-rose-600 p-2"><Trash2 size={16} /></button>
                         </div>
                      </div>
 
-                     <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pr-2">
+                     <div className="flex items-center justify-between border-b border-gray-200 bg-light pr-2">
                         <div className="flex overflow-x-auto">
                            {availableLangsForTabs.map(lang => (
-                           <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>{lang.label}</button>
+                           <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-muted hover:text-gray-700'}`}>{lang.label}</button>
                            ))}
                         </div>
                         {activeLang !== 'en' && !currentSection.isPlaceholder && (
@@ -689,7 +689,7 @@ const IMTemplateEditor: React.FC = () => {
                      </div>
                    </>
                 ) : (
-                   <div className="flex-1 flex items-center justify-center text-slate-400">Select a section to edit</div>
+                   <div className="flex-1 flex items-center justify-center text-gray-400">Select a section to edit</div>
                 )}
              </div>
           </div>
@@ -704,11 +704,11 @@ const IMTemplateEditor: React.FC = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Primary Color</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
                             <input type="color" className="w-full h-10 rounded cursor-pointer" value={metaSettings.primaryColor} onChange={(e) => setMetaSettings({...metaSettings, primaryColor: e.target.value})} />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Page Size</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Page Size</label>
                             <select className="w-full border rounded p-2 text-sm" value={metaSettings.pageSize} onChange={(e) => setMetaSettings({...metaSettings, pageSize: e.target.value as any})}>
                                 <option value="a4">A4</option>
                                 <option value="letter">US Letter</option>
@@ -717,12 +717,12 @@ const IMTemplateEditor: React.FC = () => {
                         </div>
                     </div>
                     <div className="mb-4">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Footer Text (Global)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Footer Text (Global)</label>
                         <input className="w-full border rounded p-2 text-sm" value={metaSettings.footerText || ''} onChange={(e) => setMetaSettings({...metaSettings, footerText: e.target.value})} placeholder="e.g. Copyright 2025 Company Name" />
                     </div>
                     <div className="flex justify-end gap-2 mt-6">
-                        <button onClick={() => setIsSettingsModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded">Cancel</button>
-                        <button onClick={handleSaveMetadata} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Save Settings</button>
+                        <button onClick={() => setIsSettingsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
+                        <button onClick={handleSaveMetadata} className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Save Settings</button>
                     </div>
                 </div>
               </div>
@@ -732,22 +732,22 @@ const IMTemplateEditor: React.FC = () => {
                   <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
                       <h3 className="font-bold text-lg mb-4">Add Condition</h3>
                       <div className="mb-4">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Condition Trigger</label>
-                        <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" value={condFeatureId} onChange={(e) => setCondFeatureId(e.target.value)}>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Condition Trigger</label>
+                        <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={condFeatureId} onChange={(e) => setCondFeatureId(e.target.value)}>
                             <option value="manual">Manual Selection (Optional Block)</option>
                             <optgroup label="Auto-include based on Feature">
                                 {categoryFeatures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                             </optgroup>
                         </select>
-                        <p className="text-xs text-slate-500 mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : "Text is automatically included if the project has this feature active."}</p>
+                        <p className="text-xs text-muted mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : "Text is automatically included if the project has this feature active."}</p>
                       </div>
                       <div className="mb-4">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Content to Show</label>
-                        <textarea className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-500" rows={3} value={condText} onChange={(e) => setCondText(e.target.value)} placeholder="Text to show if condition matches..." />
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Content to Show</label>
+                        <textarea className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-indigo-500" rows={3} value={condText} onChange={(e) => setCondText(e.target.value)} placeholder="Text to show if condition matches..." />
                       </div>
                       <div className="flex justify-end gap-3">
-                        <button onClick={() => setIsConditionModalOpen(false)} className="text-slate-600">Cancel</button>
-                        <button onClick={handleInsertCondition} className="bg-blue-600 text-white px-4 py-2 rounded">Insert</button>
+                        <button onClick={() => setIsConditionModalOpen(false)} className="text-gray-600">Cancel</button>
+                        <button onClick={handleInsertCondition} className="bg-indigo-600 text-white px-4 py-2 rounded">Insert</button>
                       </div>
                   </div>
               </div>
@@ -757,13 +757,13 @@ const IMTemplateEditor: React.FC = () => {
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 animate-in fade-in zoom-in duration-200">
                     <h3 className="font-bold text-lg mb-4">Add {placeholderConfig.type === 'text' ? 'Text' : 'Image'} Placeholder</h3>
                     <div className="mb-4">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Description / Label</label>
-                        <input className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-500" placeholder={placeholderConfig.type === 'text' ? "e.g. Product Name" : "e.g. Front View"} value={placeholderConfig.label} onChange={(e) => setPlaceholderConfig({...placeholderConfig, label: e.target.value})} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleConfirmPlaceholder()} />
-                        <p className="text-xs text-slate-500 mt-1">This label will be shown to the user when they fill out the manual.</p>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Description / Label</label>
+                        <input className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-indigo-500" placeholder={placeholderConfig.type === 'text' ? "e.g. Product Name" : "e.g. Front View"} value={placeholderConfig.label} onChange={(e) => setPlaceholderConfig({...placeholderConfig, label: e.target.value})} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleConfirmPlaceholder()} />
+                        <p className="text-xs text-muted mt-1">This label will be shown to the user when they fill out the manual.</p>
                     </div>
                     <div className="flex justify-end gap-3">
-                        <button onClick={() => setIsPlaceholderModalOpen(false)} className="text-slate-600 hover:bg-slate-100 px-4 py-2 rounded">Cancel</button>
-                        <button onClick={handleConfirmPlaceholder} className="bg-blue-600 text-white px-4 py-2 rounded">Insert</button>
+                        <button onClick={() => setIsPlaceholderModalOpen(false)} className="text-gray-600 hover:bg-gray-100 px-4 py-2 rounded">Cancel</button>
+                        <button onClick={handleConfirmPlaceholder} className="bg-indigo-600 text-white px-4 py-2 rounded">Insert</button>
                     </div>
                 </div>
             </div>

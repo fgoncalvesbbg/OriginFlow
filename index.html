@@ -5,15 +5,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OriginFlow PLM</title>
+    <!-- Modern Font Import -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          },
           extend: {
             colors: {
-              primary: '#0f172a', // Slate 900
-              secondary: '#334155', // Slate 700
-              accent: '#3b82f6', // Blue 500
+              primary: '#1a1f35', // Deep charcoal
+              secondary: '#6b7280', // Refined gray
+              accent: '#4f46e5', // Elegant indigo
+              muted: '#9ca3af', // Soft gray
+              light: '#f9fafb', // Almost white
             }
           }
         }
@@ -37,7 +46,7 @@
 }
 </script>
 </head>
-  <body class="bg-slate-50 text-slate-900 antialiased">
+  <body class="bg-light text-primary antialiased">
     <div id="root"></div>
     <!-- Load the main React entry point -->
     <script type="module" src="./src/app/main.tsx"></script>

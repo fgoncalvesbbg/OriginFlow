@@ -111,7 +111,7 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all z-40 flex items-center gap-2 group"
+        className="fixed bottom-6 right-6 bg-gradient-to-r from-indigo-600 to-indigo-600 text-white p-4 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all z-40 flex items-center gap-2 group"
       >
         <Sparkles size={24} className="group-hover:animate-pulse" />
         <span className="font-bold pr-1">AI Copilot</span>
@@ -120,9 +120,9 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
   }
 
   return (
-    <div className={`fixed bottom-6 right-6 w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-40 flex flex-col transition-all duration-300 ${isMinimized ? 'h-16' : 'h-[600px]'}`}>
+    <div className={`fixed bottom-6 right-6 w-96 bg-white rounded-2xl shadow-2xl border border-gray-200 z-40 flex flex-col transition-all duration-300 ${isMinimized ? 'h-16' : 'h-[600px]'}`}>
       <div 
-        className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 rounded-t-2xl flex justify-between items-center cursor-pointer"
+        className="bg-gradient-to-r from-indigo-600 to-indigo-600 p-4 rounded-t-2xl flex justify-between items-center cursor-pointer"
         onClick={() => setIsMinimized(!isMinimized)}
       >
         <div className="flex items-center gap-2 text-white">
@@ -141,16 +141,16 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
 
       {!isMinimized && (
         <>
-          <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-4" ref={scrollRef}>
+          <div className="flex-1 overflow-y-auto p-4 bg-light space-y-4" ref={scrollRef}>
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-slate-200 text-slate-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-200 text-gray-600' : 'bg-indigo-100 text-indigo-600'}`}>
                   {msg.role === 'user' ? <User size={14} /> : <Sparkles size={14} />}
                 </div>
-                <div className={`p-3 rounded-lg text-sm max-w-[80%] whitespace-pre-wrap ${
+                <div className={`p-3 rounded-xl text-sm max-w-[80%] whitespace-pre-wrap ${
                   msg.role === 'user' 
-                    ? 'bg-blue-600 text-white rounded-tr-none' 
-                    : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none shadow-sm'
+                    ? 'bg-indigo-600 text-white rounded-tr-none' 
+                    : 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow'
                 }`}>
                   {renderText(msg.text)}
                 </div>
@@ -161,40 +161,40 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
                     <Sparkles size={14} />
                  </div>
-                 <div className="bg-white border border-slate-200 p-3 rounded-lg rounded-tl-none shadow-sm flex items-center gap-2 text-slate-500 text-sm">
+                 <div className="bg-white border border-gray-200 p-3 rounded-xl rounded-tl-none shadow flex items-center gap-2 text-muted text-sm">
                     <Loader2 size={14} className="animate-spin" /> Analyzing context...
                  </div>
               </div>
             )}
           </div>
 
-          <div className="p-4 bg-white border-t border-slate-100 rounded-b-2xl">
+          <div className="p-4 bg-white border-t border-gray-100 rounded-b-2xl">
             <div className="relative">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask about status, draft emails..."
-                className="w-full pr-10 pl-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm resize-none"
+                className="w-full pr-10 pl-4 py-3 bg-light border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm resize-none"
                 rows={1}
                 style={{ minHeight: '44px', maxHeight: '120px' }}
               />
               <button 
                 onClick={handleSend}
                 disabled={!input.trim() || loading}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
               >
                 <Send size={14} />
               </button>
             </div>
             <div className="mt-2 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-               <button onClick={() => setInput("Summarize current project status")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors border border-slate-200">
+               <button onClick={() => setInput("Summarize current project status")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-md transition-colors border border-gray-200">
                   Summarize Status
                </button>
-               <button onClick={() => setInput("Draft an email to supplier about missing documents")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors border border-slate-200">
+               <button onClick={() => setInput("Draft an email to supplier about missing documents")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-md transition-colors border border-gray-200">
                   Draft Follow-up
                </button>
-               <button onClick={() => setInput("Identify potential risks based on deadlines")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition-colors border border-slate-200">
+               <button onClick={() => setInput("Identify potential risks based on deadlines")} className="text-[10px] whitespace-nowrap px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-md transition-colors border border-gray-200">
                   Identify Risks
                </button>
             </div>

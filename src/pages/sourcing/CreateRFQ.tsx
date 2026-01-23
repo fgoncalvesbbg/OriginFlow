@@ -159,31 +159,31 @@ const CreateRFQ: React.FC = () => {
   return (
     <Layout>
       <div className="max-w-4xl mx-auto">
-        <button onClick={() => navigate('/sourcing')} className="flex items-center text-slate-500 hover:text-slate-800 mb-6 text-sm">
+        <button onClick={() => navigate('/sourcing')} className="flex items-center text-muted hover:text-gray-800 mb-6 text-sm">
           <ArrowLeft size={16} className="mr-1" /> Back to Sourcing
         </button>
 
-        <h2 className="text-2xl font-bold text-slate-900 mb-6">Create New RFQ</h2>
+        <h1 className="text-3xl font-bold text-primary mb-6">Create New RFQ</h2>
         
-        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 space-y-8">
+        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow border border-gray-200 space-y-8">
             
             {/* Basic Info */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">RFQ Title</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RFQ Title</label>
                     <input 
                         required 
-                        className="w-full border border-slate-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-indigo-500 outline-none"
                         placeholder="e.g. Wireless Earbuds Gen 2 Sourcing"
                         value={title}
                         onChange={e => setTitle(e.target.value)}
                     />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">RFQ ID</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RFQ ID</label>
                     <input 
                         required 
-                        className="w-full border border-slate-300 rounded p-2 bg-slate-50 font-mono text-sm"
+                        className="w-full border border-gray-300 rounded p-2 bg-light font-mono text-sm"
                         value={rfqId}
                         onChange={e => setRfqId(e.target.value)}
                     />
@@ -193,37 +193,37 @@ const CreateRFQ: React.FC = () => {
             {/* Product Image & Attachments */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Reference Image (Thumbnail)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Reference Image (Thumbnail)</label>
                     <div className="flex items-start gap-4">
-                        <div className="w-32 h-32 bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center overflow-hidden relative">
+                        <div className="w-32 h-32 bg-light border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center overflow-hidden relative">
                             {thumbnailUrl ? (
                                 <img src={thumbnailUrl} alt="Thumbnail" className="w-full h-full object-cover" />
                             ) : (
-                                <ImageIcon className="text-slate-300" size={32} />
+                                <ImageIcon className="text-gray-300" size={32} />
                             )}
                             <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleThumbnailUpload} />
                         </div>
-                        <div className="flex-1 text-xs text-slate-500">
+                        <div className="flex-1 text-xs text-muted">
                             <p>Upload a reference image for the product.</p>
                             <p className="mt-1">Format: JPG, PNG.</p>
-                            {thumbnailUrl && <button type="button" onClick={() => setThumbnailUrl('')} className="text-red-600 mt-2 hover:underline">Remove</button>}
+                            {thumbnailUrl && <button type="button" onClick={() => setThumbnailUrl('')} className="text-rose-600 mt-2 hover:underline">Remove</button>}
                         </div>
                     </div>
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Attachments (Specs, Drawings)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Attachments (Specs, Drawings)</label>
                     <div className="space-y-2">
                         {attachments.map((file, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded border border-slate-200 text-sm">
+                            <div key={idx} className="flex items-center justify-between bg-light p-2 rounded border border-gray-200 text-sm">
                                 <span className="flex items-center gap-2 truncate max-w-[200px]">
-                                    <FileText size={14} className="text-slate-400" /> {file.name}
+                                    <FileText size={14} className="text-gray-400" /> {file.name}
                                 </span>
-                                <button type="button" onClick={() => removeAttachment(idx)} className="text-slate-400 hover:text-red-600"><X size={14}/></button>
+                                <button type="button" onClick={() => removeAttachment(idx)} className="text-gray-400 hover:text-rose-600"><X size={14}/></button>
                             </div>
                         ))}
                         
-                        <label className="flex items-center justify-center gap-2 w-full p-2 border border-dashed border-blue-300 bg-blue-50 text-blue-600 rounded cursor-pointer hover:bg-blue-100 transition-colors text-sm font-medium">
+                        <label className="flex items-center justify-center gap-2 w-full p-2 border border-dashed border-indigo-300 bg-indigo-50 text-indigo-600 rounded cursor-pointer hover:bg-indigo-100 transition-colors text-sm font-medium">
                             <Upload size={14} /> Add Attachment
                             <input type="file" className="hidden" onChange={handleAttachmentUpload} />
                         </label>
@@ -232,13 +232,13 @@ const CreateRFQ: React.FC = () => {
             </div>
 
             {/* Category & Attributes */}
-            <div className="bg-slate-50 p-6 rounded-lg border border-slate-200">
+            <div className="bg-light p-6 rounded-xl border border-gray-200">
                 <div className="mb-6">
-                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                         <Layers size={16} /> Product Category
                     </label>
                     <select 
-                        className="w-full border border-slate-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                        className="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                         value={selectedCategory}
                         onChange={(e) => handleCategoryChange(e.target.value)}
                     >
@@ -247,28 +247,28 @@ const CreateRFQ: React.FC = () => {
                             <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                     </select>
-                    <p className="text-xs text-slate-500 mt-1">Selecting a category loads specific technical attributes.</p>
+                    <p className="text-xs text-muted mt-1">Selecting a category loads specific technical attributes.</p>
                 </div>
 
                 {selectedCategory && currentCatAttributes.length > 0 && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
                         {currentCatAttributes.map(attr => (
-                            <div key={attr.id} className="bg-white p-4 rounded border border-slate-200 shadow-sm">
+                            <div key={attr.id} className="bg-white p-4 rounded border border-gray-200 shadow">
                                 <div className="flex justify-between items-center mb-2">
-                                    <label className="text-sm font-bold text-slate-800">{attr.name}</label>
+                                    <label className="text-sm font-bold text-gray-800">{attr.name}</label>
                                     {attr.dataType === 'number' && (
-                                        <div className="flex bg-slate-100 rounded p-0.5 text-[10px] font-bold">
+                                        <div className="flex bg-gray-100 rounded p-0.5 text-[10px] font-bold">
                                             <button 
                                                 type="button"
                                                 onClick={() => handleAttributeTypeChange(attr.id, 'fixed')}
-                                                className={`px-2 py-0.5 rounded transition-colors ${attributeTypes[attr.id] === 'fixed' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                                className={`px-2 py-0.5 rounded transition-colors ${attributeTypes[attr.id] === 'fixed' ? 'bg-white shadow text-indigo-600' : 'text-muted'}`}
                                             >
                                                 Fixed
                                             </button>
                                             <button 
                                                 type="button"
                                                 onClick={() => handleAttributeTypeChange(attr.id, 'range')}
-                                                className={`px-2 py-0.5 rounded transition-colors ${attributeTypes[attr.id] === 'range' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                                className={`px-2 py-0.5 rounded transition-colors ${attributeTypes[attr.id] === 'range' ? 'bg-white shadow text-indigo-600' : 'text-muted'}`}
                                             >
                                                 Range
                                             </button>
@@ -279,7 +279,7 @@ const CreateRFQ: React.FC = () => {
                                 {attributeTypes[attr.id] === 'range' ? (
                                     <input 
                                         type="text"
-                                        className="w-full border border-slate-300 rounded p-2 text-sm focus:border-blue-500 outline-none"
+                                        className="w-full border border-gray-300 rounded p-2 text-sm focus:border-indigo-500 outline-none"
                                         placeholder="e.g. 100-200"
                                         value={attributeValues[attr.id] || ''}
                                         onChange={e => setAttributeValues({...attributeValues, [attr.id]: e.target.value})}
@@ -287,7 +287,7 @@ const CreateRFQ: React.FC = () => {
                                 ) : (
                                     <input 
                                         type={attr.dataType === 'number' ? 'number' : 'text'}
-                                        className="w-full border border-slate-300 rounded p-2 text-sm focus:border-blue-500 outline-none"
+                                        className="w-full border border-gray-300 rounded p-2 text-sm focus:border-indigo-500 outline-none"
                                         placeholder={attr.dataType === 'number' ? 'e.g. 100' : 'Specification...'}
                                         value={attributeValues[attr.id] || ''}
                                         onChange={e => setAttributeValues({...attributeValues, [attr.id]: e.target.value})}
@@ -299,7 +299,7 @@ const CreateRFQ: React.FC = () => {
                 )}
                 
                 {selectedCategory && currentCatAttributes.length === 0 && (
-                    <div className="text-center py-4 text-slate-400 italic text-sm">
+                    <div className="text-center py-4 text-gray-400 italic text-sm">
                         No specific attributes defined for this category yet.
                     </div>
                 )}
@@ -307,10 +307,10 @@ const CreateRFQ: React.FC = () => {
 
             {/* Description */}
             <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Additional Specifications / Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Specifications / Description</label>
                 <textarea 
                     required
-                    className="w-full border border-slate-300 rounded p-3 h-32 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                    className="w-full border border-gray-300 rounded p-3 h-32 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
                     placeholder="Describe other requirements, materials, standards, etc..."
                     value={description}
                     onChange={e => setDescription(e.target.value)}
@@ -318,8 +318,8 @@ const CreateRFQ: React.FC = () => {
             </div>
 
             {/* Suppliers */}
-            <div className="border-t border-slate-100 pt-6">
-                <label className="block text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+            <div className="border-t border-gray-100 pt-6">
+                <label className="block text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
                     <Users size={16} /> Select Suppliers to Invite
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-60 overflow-y-auto pr-2">
@@ -327,14 +327,14 @@ const CreateRFQ: React.FC = () => {
                         <div 
                             key={s.id} 
                             onClick={() => toggleSupplier(s.id)}
-                            className={`p-3 border rounded-lg cursor-pointer transition-colors flex items-center gap-3 ${selectedSupplierIds.has(s.id) ? 'bg-blue-50 border-blue-200' : 'hover:bg-slate-50 border-slate-200'}`}
+                            className={`p-3 border rounded-xl cursor-pointer transition-colors flex items-center gap-3 ${selectedSupplierIds.has(s.id) ? 'bg-indigo-50 border-indigo-200' : 'hover:bg-light border-gray-200'}`}
                         >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selectedSupplierIds.has(s.id) ? 'bg-blue-600 border-blue-600' : 'border-slate-300 bg-white'}`}>
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selectedSupplierIds.has(s.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
                                 {selectedSupplierIds.has(s.id) && <div className="w-2 h-2 bg-white rounded-full" />}
                             </div>
                             <div>
-                                <div className="text-sm font-medium text-slate-800">{s.name}</div>
-                                <div className="text-xs text-slate-500">{s.code}</div>
+                                <div className="text-sm font-medium text-gray-800">{s.name}</div>
+                                <div className="text-xs text-muted">{s.code}</div>
                             </div>
                         </div>
                     ))}
@@ -342,8 +342,8 @@ const CreateRFQ: React.FC = () => {
             </div>
 
             <div className="flex justify-end pt-4 gap-3">
-                <button type="button" onClick={() => navigate('/sourcing')} className="px-6 py-2 text-slate-600 hover:bg-slate-50 rounded">Cancel</button>
-                <button type="submit" disabled={submitting} className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                <button type="button" onClick={() => navigate('/sourcing')} className="px-6 py-2 text-gray-600 hover:bg-light rounded">Cancel</button>
+                <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
                     {submitting && <Loader2 size={16} className="animate-spin" />}
                     {submitting ? 'Creating...' : 'Create & Send Invites'}
                 </button>

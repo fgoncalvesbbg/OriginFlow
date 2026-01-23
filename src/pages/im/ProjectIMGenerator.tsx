@@ -23,12 +23,12 @@ const ConfirmationModal: React.FC<{
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-sm text-slate-600 mb-6">{message}</p>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-6">{message}</p>
         <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
+          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
         </div>
       </div>
     </div>
@@ -588,7 +588,7 @@ const ProjectIMGenerator: React.FC = () => {
           if (!id || !type) return;
 
           const val = formData[id];
-          const wrapperClass = "im-interactive-placeholder cursor-pointer rounded transition-all inline-block align-middle hover:ring-2 hover:ring-offset-1 hover:ring-blue-400";
+          const wrapperClass = "im-interactive-placeholder cursor-pointer rounded transition-all inline-block align-middle hover:ring-2 hover:ring-offset-1 hover:ring-indigo-400";
 
           const wrapper = document.createElement(type === 'image' && val ? 'div' : 'span');
           wrapper.className = wrapperClass;
@@ -609,12 +609,12 @@ const ProjectIMGenerator: React.FC = () => {
                       if (text.startsWith('[') && text.endsWith(']')) label = text.substring(1, text.length-1);
                  }
 
-                 wrapper.className += " bg-blue-50 text-blue-600 px-3 py-2 text-xs font-bold border border-dashed border-blue-300 hover:bg-blue-100";
+                 wrapper.className += " bg-indigo-50 text-indigo-600 px-3 py-2 text-xs font-bold border border-dashed border-indigo-300 hover:bg-indigo-100";
                  wrapper.innerHTML = `<span style="display:flex;align-items:center;gap:4px">🖼️ ${label}</span>`;
              }
           } else {
              if (val) {
-                 wrapper.className += " border-b-2 border-blue-100 hover:border-blue-400 px-1 hover:bg-blue-50";
+                 wrapper.className += " border-b-2 border-indigo-100 hover:border-indigo-400 px-1 hover:bg-indigo-50";
                  wrapper.textContent = val;
              } else {
                  let label = 'Text';
@@ -625,7 +625,7 @@ const ProjectIMGenerator: React.FC = () => {
                       if (text.startsWith('[') && text.endsWith(']')) label = text.substring(1, text.length-1);
                  }
 
-                 wrapper.className += " bg-yellow-50 text-yellow-700 px-2 py-0.5 text-xs font-bold border border-dashed border-yellow-300 hover:bg-yellow-100 mx-1";
+                 wrapper.className += " bg-amber-50 text-yellow-700 px-2 py-0.5 text-xs font-bold border border-dashed border-yellow-300 hover:bg-amber-100 mx-1";
                  wrapper.textContent = `[ ${label} ]`;
              }
           }
@@ -707,10 +707,10 @@ const ProjectIMGenerator: React.FC = () => {
       return (
           <Layout>
               <div className="max-w-2xl mx-auto mt-10">
-                  <h2 className="text-2xl font-bold text-slate-900 mb-6">Generate Instruction Manual</h2>
-                  <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-                      <label className="block font-medium text-slate-700 mb-2">Select a Template</label>
-                      <select className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" onChange={handleTemplateSelect} defaultValue="">
+                  <h1 className="text-3xl font-bold text-primary mb-6">Generate Instruction Manual</h2>
+                  <div className="bg-white p-8 rounded-xl border border-gray-200 shadow">
+                      <label className="block font-medium text-gray-700 mb-2">Select a Template</label>
+                      <select className="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" onChange={handleTemplateSelect} defaultValue="">
                           <option value="" disabled>-- Choose a Template --</option>
                           {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
@@ -812,46 +812,46 @@ const ProjectIMGenerator: React.FC = () => {
        <div className="h-[calc(100vh-100px)] flex flex-col">
            <div className="flex justify-between items-center mb-4">
                <div className="flex items-center gap-3">
-                   <button onClick={() => navigate(`/project/${projectId}`)} className="text-slate-400 hover:text-slate-600"><ArrowLeft size={20} /></button>
+                   <button onClick={() => navigate(`/project/${projectId}`)} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
                    <div>
-                       <h2 className="text-xl font-bold text-slate-900">{template?.name}</h2>
-                       <div className="flex items-center gap-2 text-xs text-slate-500">
+                       <h2 className="text-xl font-bold text-primary">{template?.name}</h2>
+                       <div className="flex items-center gap-2 text-xs text-muted">
                           <span>For: {project?.name}</span>
-                          {instance?.status === 'generated' && <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold">GENERATED</span>}
+                          {instance?.status === 'generated' && <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">GENERATED</span>}
                        </div>
                    </div>
                </div>
                <div className="flex gap-3 items-center">
                    <button 
                         onClick={handleDeleteDraft} 
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-xl text-sm font-medium hover:bg-rose-50 transition-colors"
                         disabled={loading || saving}
                    >
                        {instance ? <Trash2 size={16} /> : <RotateCcw size={16} />}
                        {instance ? 'Delete Draft' : 'Reset'}
                    </button>
 
-                   <button onClick={handleSaveDraft} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"><Save size={16} /> Save Draft</button>
+                   <button onClick={handleSaveDraft} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light"><Save size={16} /> Save Draft</button>
                    
                    {/* Export Menu */}
                    <div className="relative" ref={exportMenuRef}>
                        <button 
                           onClick={() => setShowExportMenu(!showExportMenu)}
-                          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
+                          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light"
                        >
                           <Download size={16} /> Export Data <ChevronDown size={14} />
                        </button>
                        {showExportMenu && (
-                           <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-slate-200 z-50 py-1">
+                           <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
                                <button 
                                   onClick={() => handleExport('json')}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2"
                                >
                                   <FileJson size={16} /> Export as JSON
                                </button>
                                <button 
                                   onClick={() => handleExport('xml')}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2"
                                >
                                   <Code size={16} /> XML (InDesign)
                                </button>
@@ -859,7 +859,7 @@ const ProjectIMGenerator: React.FC = () => {
                        )}
                    </div>
 
-                   <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-70">
+                   <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70">
                       {generating ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
                       {generating ? 'Generating...' : `Generate PDF (${activeLang.toUpperCase()})`}
                    </button>
@@ -868,26 +868,26 @@ const ProjectIMGenerator: React.FC = () => {
 
            <div className="flex flex-1 gap-6 overflow-hidden">
                {/* LEFT: INPUTS */}
-               <div className="w-1/3 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col overflow-hidden">
-                   <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+               <div className="w-1/3 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+                   <div className="p-4 bg-light border-b border-gray-200 font-bold text-gray-700 flex items-center justify-between">
                        <div className="flex items-center gap-2"><Settings size={16} /> Configuration</div>
-                       <span className="text-xs font-normal text-slate-500 bg-slate-200 px-2 py-0.5 rounded">Language: {activeLang.toUpperCase()}</span>
+                       <span className="text-xs font-normal text-muted bg-gray-200 px-2 py-0.5 rounded">Language: {activeLang.toUpperCase()}</span>
                    </div>
                    <div className="flex-1 overflow-y-auto p-6 space-y-8">
                        
                        {/* COVER PAGE CONFIG */}
-                       <div className="border-b border-slate-100 pb-6">
-                            <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm">
-                                <span className="bg-slate-800 text-white px-1.5 py-0.5 rounded">Cover</span> Cover Page & Branding
+                       <div className="border-b border-gray-100 pb-6">
+                            <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-sm">
+                                <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded">Cover</span> Cover Page & Branding
                             </h4>
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Manual Title</label>
-                                    <input className="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={displayTitle} onChange={(e) => handleInputChange('__cover_title', e.target.value)} placeholder={project?.name} />
+                                    <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1">Manual Title</label>
+                                    <input className="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={displayTitle} onChange={(e) => handleInputChange('__cover_title', e.target.value)} placeholder={project?.name} />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Subtitle</label>
-                                    <input className="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={displaySubtitle} onChange={(e) => handleInputChange('__cover_subtitle', e.target.value)} />
+                                    <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1">Subtitle</label>
+                                    <input className="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={displaySubtitle} onChange={(e) => handleInputChange('__cover_subtitle', e.target.value)} />
                                 </div>
                             </div>
                        </div>
@@ -901,12 +901,12 @@ const ProjectIMGenerator: React.FC = () => {
                            if (items.length === 0 && !section.isPlaceholder) return null;
                            
                            return (
-                               <div key={section.id} className="border-b border-slate-100 pb-6 last:border-0">
-                                   <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm">
-                                       <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-500">Sec {section.order}</span> {section.title}
+                               <div key={section.id} className="border-b border-gray-100 pb-6 last:border-0">
+                                   <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-sm">
+                                       <span className="bg-gray-100 px-1.5 py-0.5 rounded text-muted">Sec {section.order}</span> {section.title}
                                    </h4>
-                                   {section.isPlaceholder && <div className="mb-4 bg-blue-50 p-3 rounded border border-blue-100 text-xs text-blue-800"><AlertCircle size={14} className="inline mr-1"/> Placeholder Section</div>}
-                                   {!contentHtml && !section.isPlaceholder && <div className="text-xs text-slate-400 italic mb-2">No content defined for {activeLang.toUpperCase()}.</div>}
+                                   {section.isPlaceholder && <div className="mb-4 bg-indigo-50 p-3 rounded border border-indigo-100 text-xs text-blue-800"><AlertCircle size={14} className="inline mr-1"/> Placeholder Section</div>}
+                                   {!contentHtml && !section.isPlaceholder && <div className="text-xs text-gray-400 italic mb-2">No content defined for {activeLang.toUpperCase()}.</div>}
 
                                    <div className="space-y-5">
                                        {items.map((item, idx) => {
@@ -915,31 +915,31 @@ const ProjectIMGenerator: React.FC = () => {
                                            return (
                                                <div key={`${item.id}-${idx}`} className="group">
                                                    {item.kind === 'condition' ? (
-                                                       <div onClick={() => handleConditionToggle(item.id)} className={`p-3 rounded border cursor-pointer transition-all ${conditions[item.id] ? 'bg-purple-50 border-purple-200 shadow-sm' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                                                       <div onClick={() => handleConditionToggle(item.id)} className={`p-3 rounded border cursor-pointer transition-all ${conditions[item.id] ? 'bg-purple-50 border-purple-200 shadow' : 'bg-white border-gray-200 hover:bg-light'}`}>
                                                           <div className="flex items-start gap-3">
-                                                              <div className="mt-0.5 text-purple-600">
-                                                                  {conditions[item.id] ? <CheckSquare size={18} /> : <Square size={18} className="text-slate-400" />}
+                                                              <div className="mt-0.5 text-indigo-600">
+                                                                  {conditions[item.id] ? <CheckSquare size={18} /> : <Square size={18} className="text-gray-400" />}
                                                               </div>
                                                               <div>
-                                                                  <div className="text-xs font-bold uppercase text-slate-500 mb-1 flex items-center gap-1 select-none"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Feature Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}</div>
-                                                                  <p className={`text-sm text-slate-700 select-none ${!conditions[item.id] && 'opacity-50 line-through'}`}>"{item.label}"</p>
+                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Feature Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}</div>
+                                                                  <p className={`text-sm text-gray-700 select-none ${!conditions[item.id] && 'opacity-50 line-through'}`}>"{item.label}"</p>
                                                               </div>
                                                           </div>
                                                        </div>
                                                    ) : (
                                                        <div>
                                                            <div className="flex justify-between items-center mb-1.5">
-                                                               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">{item.label}</label>
-                                                               {isFilled ? <span className="text-[10px] font-bold text-green-600 flex items-center gap-1 bg-green-50 px-1.5 py-0.5 rounded"><CheckCircle size={10}/> Filled</span> : <span className="text-[10px] font-bold text-orange-500 flex items-center gap-1 bg-orange-50 px-1.5 py-0.5 rounded"><AlertCircle size={10}/> Required</span>}
+                                                               <label className="block text-xs font-bold text-muted uppercase tracking-wide">{item.label}</label>
+                                                               {isFilled ? <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded"><CheckCircle size={10}/> Filled</span> : <span className="text-[10px] font-bold text-orange-500 flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded"><AlertCircle size={10}/> Required</span>}
                                                            </div>
                                                            {item.type === 'text' ? (
-                                                               <textarea className={`w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none ${isFilled ? 'border-slate-300 bg-slate-50' : 'border-orange-200 bg-white'}`} rows={2} placeholder="Content..." value={formData[item.id] || ''} onChange={(e) => handleInputChange(item.id, e.target.value)} />
+                                                               <textarea className={`w-full border rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none ${isFilled ? 'border-gray-300 bg-light' : 'border-amber-200 bg-white'}`} rows={2} placeholder="Content..." value={formData[item.id] || ''} onChange={(e) => handleInputChange(item.id, e.target.value)} />
                                                            ) : (
                                                                <div className="space-y-2">
-                                                                   <label className={`block w-full border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors ${isFilled ? 'border-slate-200 hover:bg-slate-50' : 'border-orange-200 bg-orange-50/30 hover:bg-orange-50'}`}>
+                                                                   <label className={`block w-full border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors ${isFilled ? 'border-gray-200 hover:bg-light' : 'border-amber-200 bg-amber-50/30 hover:bg-amber-50'}`}>
                                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(item.id, e.target.files[0])} />
-                                                                       <ImageIcon className={`mx-auto mb-1 ${isFilled ? 'text-slate-400' : 'text-orange-400'}`} size={20} />
-                                                                       <span className={`text-xs ${isFilled ? 'text-slate-500' : 'text-orange-600 font-medium'}`}>{isFilled ? 'Replace Image' : 'Click to Upload Image'}</span>
+                                                                       <ImageIcon className={`mx-auto mb-1 ${isFilled ? 'text-gray-400' : 'text-orange-400'}`} size={20} />
+                                                                       <span className={`text-xs ${isFilled ? 'text-muted' : 'text-amber-600 font-medium'}`}>{isFilled ? 'Replace Image' : 'Click to Upload Image'}</span>
                                                                    </label>
                                                                </div>
                                                            )}
@@ -956,34 +956,34 @@ const ProjectIMGenerator: React.FC = () => {
                </div>
 
                {/* RIGHT: PREVIEW */}
-               <div className="flex-1 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col overflow-hidden">
-                   <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-slate-700 flex justify-between items-center">
+               <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+                   <div className="p-4 bg-light border-b border-gray-200 font-bold text-gray-700 flex justify-between items-center">
                        <span>Live Preview</span>
                        <div className="flex items-center gap-3">
                            {/* Status Badge */}
-                           <div className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 font-medium transition-colors ${completion.status === 'ready' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>
+                           <div className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 font-medium transition-colors ${completion.status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-orange-700 border-amber-200'}`}>
                                {completion.status === 'ready' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
                                {completion.label}
                            </div>
 
                            {/* Language Selector */}
-                           <div className="flex items-center gap-1 bg-white border border-slate-300 rounded px-2 py-1 text-xs shadow-sm">
-                               <Globe size={12} className="text-slate-400"/>
+                           <div className="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs shadow">
+                               <Globe size={12} className="text-gray-400"/>
                                <select 
                                   value={activeLang} 
                                   onChange={(e) => setActiveLang(e.target.value)}
-                                  className="bg-transparent outline-none text-slate-700 font-bold cursor-pointer appearance-none pr-4 relative z-10"
+                                  className="bg-transparent outline-none text-gray-700 font-bold cursor-pointer appearance-none pr-4 relative z-10"
                                >
                                   {(template?.languages || ['en']).map(code => (
                                      <option key={code} value={code}>{code.toUpperCase()}</option>
                                   ))}
                                </select>
-                               <ChevronDown size={10} className="text-slate-400 -ml-3 z-0 pointer-events-none" />
+                               <ChevronDown size={10} className="text-gray-400 -ml-3 z-0 pointer-events-none" />
                            </div>
-                           <span className="text-xs text-slate-500 border-l pl-2 border-slate-300 flex items-center gap-1"><Printer size={12}/> A4</span>
+                           <span className="text-xs text-muted border-l pl-2 border-gray-300 flex items-center gap-1"><Printer size={12}/> A4</span>
                        </div>
                    </div>
-                   <div className="flex-1 overflow-y-auto bg-slate-100 p-8 flex justify-center" onClick={handlePreviewClick}>
+                   <div className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center" onClick={handlePreviewClick}>
                        <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top">
                           {/* COVER PAGE */}
                           <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page">
@@ -991,21 +991,21 @@ const ProjectIMGenerator: React.FC = () => {
                              <div className="flex-1 p-[20mm] flex flex-col justify-between">
                                 <div>
                                    {displayLogo && <img src={displayLogo} alt="Logo" className="h-12 object-contain mb-10" />}
-                                   <h1 className="text-4xl font-bold text-slate-900 mb-4">{displayTitle}</h1>
-                                   <p className="text-xl text-slate-500 uppercase tracking-widest font-light">{displaySubtitle}</p>
+                                   <h1 className="text-4xl font-bold text-primary mb-4">{displayTitle}</h1>
+                                   <p className="text-xl text-muted uppercase tracking-widest font-light">{displaySubtitle}</p>
                                 </div>
                                 <div className="border-t-4 pt-6" style={{ borderColor: primaryColor }}>
-                                   <p className="text-sm font-bold text-slate-900 uppercase mb-1">{template?.metadata?.companyName || 'Company Name'}</p>
-                                   <p className="text-xs text-slate-500">Original Instructions</p>
+                                   <p className="text-sm font-bold text-primary uppercase mb-1">{template?.metadata?.companyName || 'Company Name'}</p>
+                                   <p className="text-xs text-muted">Original Instructions</p>
                                 </div>
                              </div>
                           </div>
                           {/* CONTENT */}
                           <div className="p-[20mm] pb-[30mm] min-h-[297mm] bg-white relative">
-                              <div className="space-y-6 text-slate-800 text-sm leading-relaxed">
+                              <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
                                   {orderedSections.map(section => (
                                       <div key={section.id} className="mb-8">
-                                          <h3 className="text-lg font-bold text-slate-900 mb-3 border-b pb-2" style={{ borderColor: primaryColor }}>{section.title}</h3>
+                                          <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: primaryColor }}>{section.title}</h3>
                                           <div className="im-preview-content" dangerouslySetInnerHTML={{ __html: processContent(section.content[activeLang] || '') }} />
                                       </div>
                                   ))}
@@ -1013,7 +1013,7 @@ const ProjectIMGenerator: React.FC = () => {
                               
                               {/* FOOTER */}
                               {displayFooter && (
-                                  <div className="absolute bottom-0 left-0 right-0 p-8 border-t border-slate-100 text-center text-xs text-slate-400">
+                                  <div className="absolute bottom-0 left-0 right-0 p-8 border-t border-gray-100 text-center text-xs text-gray-400">
                                       {displayFooter}
                                   </div>
                               )}
@@ -1021,10 +1021,10 @@ const ProjectIMGenerator: React.FC = () => {
 
                           {/* BACK PAGE */}
                           {template?.metadata?.backPageContent && (
-                              <div className="min-h-[297mm] bg-slate-50 p-[20mm] flex flex-col justify-end mt-4 break-before-page">
+                              <div className="min-h-[297mm] bg-light p-[20mm] flex flex-col justify-end mt-4 break-before-page">
                                   <div className="border-t pt-8" style={{ borderColor: primaryColor }}>
                                       <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
-                                      <div className="mt-10 text-xs text-slate-400 text-center">
+                                      <div className="mt-10 text-xs text-gray-400 text-center">
                                           &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.
                                       </div>
                                   </div>
@@ -1041,18 +1041,18 @@ const ProjectIMGenerator: React.FC = () => {
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="font-bold text-lg">Edit Text</h3>
-                            <button onClick={() => setTextEditId(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+                            <button onClick={() => setTextEditId(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <textarea 
-                            className="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                            className="w-full border p-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" 
                             rows={4} 
                             value={tempTextValue} 
                             onChange={(e) => setTempTextValue(e.target.value)} 
                             autoFocus
                         />
                         <div className="flex justify-end gap-3 mt-4">
-                            <button onClick={() => setTextEditId(null)} className="text-slate-600 hover:bg-slate-50 px-4 py-2 rounded">Cancel</button>
-                            <button onClick={handleSaveTextModal} className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">Save Update</button>
+                            <button onClick={() => setTextEditId(null)} className="text-gray-600 hover:bg-light px-4 py-2 rounded">Cancel</button>
+                            <button onClick={handleSaveTextModal} className="bg-indigo-600 text-white px-4 py-2 rounded font-medium hover:bg-indigo-700">Save Update</button>
                         </div>
                     </div>
                 </div>

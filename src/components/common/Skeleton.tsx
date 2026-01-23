@@ -77,7 +77,7 @@ interface CardSkeletonProps {
 
 export const CardSkeleton: React.FC<CardSkeletonProps> = ({ lines = 3 }) => {
   return (
-    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+    <div className="bg-white rounded-xl p-4 shadow border border-gray-200">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
         <AvatarSkeleton size={40} />
@@ -145,7 +145,7 @@ export const ImageSkeleton: React.FC<ImageSkeletonProps> = ({
 }) => {
   return (
     <div
-      className="animate-pulse bg-gray-200 rounded-lg"
+      className="animate-pulse bg-gray-200 rounded-xl"
       style={{
         width,
         height,

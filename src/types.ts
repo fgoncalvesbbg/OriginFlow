@@ -19,6 +19,7 @@ export interface Supplier {
   code: string;
   email: string;
   portalToken?: string;
+  accessCode?: string;
 }
 
 export enum ProjectOverallStatus {

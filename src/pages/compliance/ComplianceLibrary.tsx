@@ -32,14 +32,14 @@ const ConfirmationModal: React.FC<{
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-sm text-slate-600 mb-6">{message}</p>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-6">{message}</p>
         <div className="flex justify-end gap-3">
           {!isAlert && (
-            <button onClick={onCancel} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">Cancel</button>
+            <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
           )}
-          <button onClick={onConfirm} className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded text-sm font-medium">
+          <button onClick={onConfirm} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm font-medium">
             {isAlert ? 'OK' : 'Confirm'}
           </button>
         </div>
@@ -301,7 +301,7 @@ const ComplianceLibrary: React.FC = () => {
     if (!selectedCategoryForReqs) {
       return (
         <div>
-            <h3 className="text-lg font-bold text-slate-800 mb-4">Select a Category to Manage Requirements</h3>
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Select a Category to Manage Requirements</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {categories.map(cat => {
                 const count = requirements.filter(r => r.categoryId === cat.id).length;
@@ -309,23 +309,23 @@ const ComplianceLibrary: React.FC = () => {
                 <div 
                     key={cat.id} 
                     onClick={() => setSelectedCategoryForReqs(cat.id)}
-                    className={`p-6 rounded-xl border shadow-sm cursor-pointer hover:shadow-md transition-all group relative overflow-hidden ${cat.isFinalized ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200 hover:border-blue-400'}`}
+                    className={`p-6 rounded-xl border shadow cursor-pointer hover:shadow-md transition-all group relative overflow-hidden ${cat.isFinalized ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200 hover:border-indigo-400'}`}
                 >
                     {cat.isFinalized && (
-                    <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">
                         FINALIZED
                     </div>
                     )}
-                    <h3 className="font-bold text-lg text-slate-900 group-hover:text-blue-600 transition-colors">{cat.name}</h3>
-                    <p className="text-slate-500 text-sm mt-2">{count} Requirement{count !== 1 ? 's' : ''}</p>
-                    <div className="mt-4 text-xs font-medium text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                    <h3 className="font-bold text-lg text-primary group-hover:text-indigo-600 transition-colors">{cat.name}</h3>
+                    <p className="text-muted text-sm mt-2">{count} Requirement{count !== 1 ? 's' : ''}</p>
+                    <div className="mt-4 text-xs font-medium text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                     Manage Requirements <ArrowLeft className="rotate-180" size={12} />
                     </div>
                 </div>
                 );
             })}
             {categories.length === 0 && !loading && (
-                <div className="col-span-3 text-center py-12 bg-slate-50 rounded-lg border border-dashed">
+                <div className="col-span-3 text-center py-12 bg-light rounded-xl border border-dashed">
                     No categories found.
                 </div>
             )}
@@ -357,40 +357,40 @@ const ComplianceLibrary: React.FC = () => {
       <div>
         <button 
           onClick={() => setSelectedCategoryForReqs(null)} 
-          className="mb-6 text-sm text-slate-500 hover:text-slate-800 flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-slate-100 w-fit"
+          className="mb-6 text-sm text-muted hover:text-gray-800 flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-gray-100 w-fit"
         >
           <ArrowLeft size={16} /> Back to Categories
         </button>
 
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <div>
-            <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+            <h3 className="text-2xl font-bold text-primary flex items-center gap-3">
               {category?.name}
               {category?.isFinalized && (
                 <span title="Finalized Category">
-                  <CheckCircle className="text-blue-600" size={20} />
+                  <CheckCircle className="text-indigo-600" size={20} />
                 </span>
               )}
             </h3>
-            <p className="text-slate-500 text-sm">Managing requirements for this category.</p>
+            <p className="text-muted text-sm">Managing requirements for this category.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button 
               onClick={handlePreloadDefaults}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-md hover:bg-slate-50 text-sm font-medium shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-light text-sm font-medium shadow"
               title="Add standard template requirements"
             >
               <RefreshCw size={16} /> Preload Standard
             </button>
             <button 
               onClick={() => setIsAiModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium shadow"
             >
               <Sparkles size={16} /> AI Suggest
             </button>
             <button 
               onClick={() => openAddModal()} 
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow"
             >
               <Plus size={16} /> Add Requirement
             </button>
@@ -399,27 +399,27 @@ const ComplianceLibrary: React.FC = () => {
 
         <div className="space-y-6">
           {sortedSections.length === 0 ? (
-            <div className="text-center py-12 bg-slate-50 rounded-lg border border-dashed border-slate-200">
-              <p className="text-slate-500">No requirements found for this category yet.</p>
+            <div className="text-center py-12 bg-light rounded-xl border border-dashed border-gray-200">
+              <p className="text-muted">No requirements found for this category yet.</p>
             </div>
           ) : (
             sortedSections.map((section) => {
                 const isExpanded = expandedSections.has(section);
                 const items = groupedReqs[section];
                 return (
-                    <div key={section} className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                    <div key={section} className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow">
                         <div 
-                            className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex justify-between items-center cursor-pointer hover:bg-slate-100 transition-colors"
+                            className="bg-light px-5 py-3 border-b border-gray-200 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors"
                             onClick={() => toggleSection(section)}
                         >
                             <div className="flex items-center gap-2">
-                                {isExpanded ? <FolderOpen size={18} className="text-blue-500" /> : <Folder size={18} className="text-slate-400" />}
-                                <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wide">{section}</h4>
-                                <span className="text-xs text-slate-400 ml-1">({items.length})</span>
+                                {isExpanded ? <FolderOpen size={18} className="text-indigo-500" /> : <Folder size={18} className="text-gray-400" />}
+                                <h4 className="font-bold text-gray-700 text-sm uppercase tracking-wide">{section}</h4>
+                                <span className="text-xs text-gray-400 ml-1">({items.length})</span>
                             </div>
                             <button 
                                 onClick={(e) => { e.stopPropagation(); openAddModal(section); }}
-                                className="text-xs flex items-center gap-1 bg-white border border-slate-300 px-2 py-1 rounded text-blue-600 hover:text-blue-800 hover:bg-blue-50 font-medium"
+                                className="text-xs flex items-center gap-1 bg-white border border-gray-300 px-2 py-1 rounded text-indigo-600 hover:text-blue-800 hover:bg-indigo-50 font-medium"
                             >
                                 <Plus size={14} /> Add to Section
                             </button>
@@ -428,35 +428,35 @@ const ComplianceLibrary: React.FC = () => {
                         {isExpanded && (
                             <div className="divide-y divide-slate-100">
                                 {items.map(r => (
-                                <div key={r.id} className="bg-white p-5 hover:bg-slate-50 transition-colors group">
+                                <div key={r.id} className="bg-white p-5 hover:bg-light transition-colors group">
                                     <div className="flex justify-between items-start gap-4">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-1">
-                                        <h4 className="font-bold text-slate-900 text-sm">{r.title}</h4>
-                                        {r.isMandatory && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">Mandatory</span>}
+                                        <h4 className="font-bold text-primary text-sm">{r.title}</h4>
+                                        {r.isMandatory && <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">Mandatory</span>}
                                         </div>
-                                        <p className="text-slate-600 text-xs leading-relaxed mb-3">{r.description}</p>
+                                        <p className="text-gray-600 text-xs leading-relaxed mb-3">{r.description}</p>
                                         
-                                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-wrap gap-x-6 gap-y-2 items-center">
+                                        <div className="bg-light p-2.5 rounded-xl border border-gray-100 flex flex-wrap gap-x-6 gap-y-2 items-center">
                                             <div className="flex items-center gap-1.5 min-w-[120px]">
-                                                <Clock size={12} className="text-slate-400" />
+                                                <Clock size={12} className="text-gray-400" />
                                                 <div className="flex flex-col">
-                                                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Timing</span>
-                                                    <span className="text-[10px] font-bold text-slate-700">{r.timingType === 'POST_ETD' ? `ETD + ${r.timingWeeks}w` : 'At ETD'}</span>
+                                                    <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Timing</span>
+                                                    <span className="text-[10px] font-bold text-gray-700">{r.timingType === 'POST_ETD' ? `ETD + ${r.timingWeeks}w` : 'At ETD'}</span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1.5 min-w-[140px]">
-                                                <Building size={12} className="text-slate-400" />
+                                                <Building size={12} className="text-gray-400" />
                                                 <div className="flex flex-col">
-                                                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Origin</span>
-                                                    <span className="text-[10px] font-bold text-slate-700">{r.testReportOrigin === 'supplier_inhouse' ? 'In-House Accepted' : '3rd Party Lab Only'}</span>
+                                                    <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Origin</span>
+                                                    <span className="text-[10px] font-bold text-gray-700">{r.testReportOrigin === 'supplier_inhouse' ? 'In-House Accepted' : '3rd Party Lab Only'}</span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1.5 min-w-[140px]">
-                                                <FileCheck size={12} className="text-slate-400" />
+                                                <FileCheck size={12} className="text-gray-400" />
                                                 <div className="flex flex-col">
-                                                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Declaration</span>
-                                                    <span className="text-[10px] font-bold text-slate-700">{r.selfDeclarationAccepted ? 'Accepted' : 'Report Mandatory'}</span>
+                                                    <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Declaration</span>
+                                                    <span className="text-[10px] font-bold text-gray-700">{r.selfDeclarationAccepted ? 'Accepted' : 'Report Mandatory'}</span>
                                                 </div>
                                             </div>
                                             
@@ -477,13 +477,13 @@ const ComplianceLibrary: React.FC = () => {
                                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button 
                                         onClick={() => handleEditRequirement(r)}
-                                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+                                        className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
                                         >
                                         <Edit2 size={14} />
                                         </button>
                                         <button 
                                         onClick={() => handleDeleteRequirement(r.id)}
-                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors"
                                         >
                                         <Trash2 size={14} />
                                         </button>
@@ -514,11 +514,11 @@ const ComplianceLibrary: React.FC = () => {
       />
 
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-900">Compliance Library</h2>
-        <p className="text-slate-500">Manage regulatory requirements for your product categories.</p>
+        <h1 className="text-3xl font-bold text-primary">Compliance Library</h2>
+        <p className="text-muted">Manage regulatory requirements for your product categories.</p>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6 min-h-[400px]">
+      <div className="bg-white rounded-xl shadow border border-gray-200 p-6 min-h-[400px]">
         {loading ? <div>Loading...</div> : renderRequirementsView()}
       </div>
 
@@ -526,7 +526,7 @@ const ComplianceLibrary: React.FC = () => {
       {isAiModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-purple-600 px-6 py-4 text-white flex justify-between items-center">
+            <div className="bg-indigo-600 px-6 py-4 text-white flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <Sparkles size={20} />
                 <h3 className="font-bold text-lg">AI Requirement Suggestion</h3>
@@ -536,11 +536,11 @@ const ComplianceLibrary: React.FC = () => {
             </div>
             
             <div className="p-6 overflow-y-auto flex-1">
-              <p className="text-sm text-slate-600 mb-4">Describe the product in the <strong>{categories.find(c => c.id === selectedCategoryForReqs)?.name}</strong> category to get tailored compliance suggestions.</p>
+              <p className="text-sm text-gray-600 mb-4">Describe the product in the <strong>{categories.find(c => c.id === selectedCategoryForReqs)?.name}</strong> category to get tailored compliance suggestions.</p>
               
               <div className="flex gap-2 mb-6">
                 <textarea 
-                  className="flex-1 border rounded-lg p-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                  className="flex-1 border rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
                   rows={3}
                   placeholder="e.g. A battery-powered wireless kitchen scale with tempered glass top and Bluetooth connectivity."
                   value={aiProductDesc}
@@ -549,7 +549,7 @@ const ComplianceLibrary: React.FC = () => {
                 <button 
                   onClick={handleAiGenerate}
                   disabled={isAiGenerating || !aiProductDesc.trim()}
-                  className="bg-purple-600 text-white px-6 rounded-lg font-bold hover:bg-purple-700 disabled:opacity-50 flex flex-col items-center justify-center gap-1"
+                  className="bg-indigo-600 text-white px-6 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50 flex flex-col items-center justify-center gap-1"
                 >
                   {isAiGenerating ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
                   <span className="text-[10px] uppercase">Analyze</span>
@@ -558,7 +558,7 @@ const ComplianceLibrary: React.FC = () => {
 
               {aiSuggestions.length > 0 && (
                 <div className="space-y-3 animate-in slide-in-from-bottom-2">
-                  <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wide">Suggested Requirements</h4>
+                  <h4 className="font-bold text-gray-700 text-sm uppercase tracking-wide">Suggested Requirements</h4>
                   {aiSuggestions.map((suggestion, idx) => {
                     const isSelected = selectedSuggestions.has(idx);
                     return (
@@ -569,18 +569,18 @@ const ComplianceLibrary: React.FC = () => {
                           if (next.has(idx)) next.delete(idx); else next.add(idx);
                           setSelectedSuggestions(next);
                         }}
-                        className={`p-4 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-purple-50 border-purple-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+                        className={`p-4 rounded-xl border cursor-pointer transition-all ${isSelected ? 'bg-purple-50 border-indigo-300' : 'bg-white border-gray-200 hover:bg-light'}`}
                       >
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                              <h5 className="font-bold text-slate-900 text-sm">{suggestion.title}</h5>
-                              {suggestion.referenceCode && <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">{suggestion.referenceCode}</span>}
+                              <h5 className="font-bold text-primary text-sm">{suggestion.title}</h5>
+                              {suggestion.referenceCode && <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">{suggestion.referenceCode}</span>}
                             </div>
-                            <p className="text-xs text-slate-600">{suggestion.description}</p>
-                            <div className="mt-2 text-[10px] font-bold text-purple-600 uppercase">{suggestion.section || 'General'}</div>
+                            <p className="text-xs text-gray-600">{suggestion.description}</p>
+                            <div className="mt-2 text-[10px] font-bold text-indigo-600 uppercase">{suggestion.section || 'General'}</div>
                           </div>
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300'}`}>
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300'}`}>
                             {isSelected && <CheckCircle size={14} />}
                           </div>
                         </div>
@@ -591,12 +591,12 @@ const ComplianceLibrary: React.FC = () => {
               )}
             </div>
 
-            <div className="p-4 bg-slate-50 border-t flex justify-end gap-3">
-               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-slate-600">Cancel</button>
+            <div className="p-4 bg-light border-t flex justify-end gap-3">
+               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-gray-600">Cancel</button>
                <button 
                  onClick={handleSaveAiSuggestions}
                  disabled={selectedSuggestions.size === 0}
-                 className="bg-purple-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-purple-700 disabled:opacity-50"
+                 className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50"
                >
                  Add {selectedSuggestions.size} Selected
                </button>
@@ -608,11 +608,11 @@ const ComplianceLibrary: React.FC = () => {
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center flex-shrink-0">
-               <h3 className="font-bold text-lg text-slate-800 capitalize">
+            <div className="bg-light px-6 py-4 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
+               <h3 className="font-bold text-lg text-gray-800 capitalize">
                  {editingItem.id ? 'Edit' : 'Add'} Requirement
                </h3>
-               <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded font-medium">
+               <span className="text-xs bg-indigo-100 text-blue-800 px-2 py-1 rounded font-medium">
                    {categories.find(c => c.id === (editingItem.categoryId || selectedCategoryForReqs))?.name || 'No Category'}
                </span>
             </div>
@@ -620,10 +620,10 @@ const ComplianceLibrary: React.FC = () => {
             <div className="overflow-y-auto p-6 flex-1">
             <form id="reqForm" onSubmit={handleSaveRequirement} className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Section Group</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Section Group</label>
                 <div className="flex gap-2">
                     <select 
-                        className="flex-1 border border-slate-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="flex-1 border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         value={editingItem.section || ''}
                         onChange={e => {
                             setEditingItem({...editingItem, section: e.target.value});
@@ -638,7 +638,7 @@ const ComplianceLibrary: React.FC = () => {
                     <input 
                         type="text" 
                         placeholder="Or Type New Section Name"
-                        className="flex-1 border border-slate-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="flex-1 border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         value={newSectionName}
                         onChange={e => {
                             setNewSectionName(e.target.value);
@@ -649,11 +649,11 @@ const ComplianceLibrary: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Requirement Title</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Requirement Title</label>
                 <input 
                   placeholder="e.g. Power Cord Safety" 
                   required 
-                  className="w-full border border-slate-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
                   value={editingItem.title} 
                   onChange={e => setEditingItem({...editingItem, title: e.target.value})} 
                 />
@@ -661,10 +661,10 @@ const ComplianceLibrary: React.FC = () => {
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Reference Code (Optional)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Reference Code (Optional)</label>
                     <input 
                         placeholder="e.g. EN-60335-1" 
-                        className="w-full border border-slate-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                        className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
                         value={editingItem.referenceCode || ''} 
                         onChange={e => setEditingItem({...editingItem, referenceCode: e.target.value})} 
                     />
@@ -673,32 +673,32 @@ const ComplianceLibrary: React.FC = () => {
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input 
                         type="checkbox" 
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
                         checked={editingItem.isMandatory}
                         onChange={e => setEditingItem({...editingItem, isMandatory: e.target.checked})}
                     />
-                    <span className="text-sm font-medium text-slate-700">Mandatory Requirement</span>
+                    <span className="text-sm font-medium text-gray-700">Mandatory Requirement</span>
                     </label>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Long Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Long Description</label>
                 <textarea 
                   placeholder="Full details of the requirement..." 
                   rows={3}
-                  className="w-full border border-slate-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
                   value={editingItem.description} 
                   onChange={e => setEditingItem({...editingItem, description: e.target.value})} 
                 />
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg shadow-sm space-y-4">
-                  <h4 className="font-bold text-sm text-slate-800 border-b pb-2 border-slate-200">Submission Rules</h4>
+              <div className="bg-light border border-gray-200 p-4 rounded-xl shadow space-y-4">
+                  <h4 className="font-bold text-sm text-gray-800 border-b pb-2 border-gray-200">Submission Rules</h4>
                   
                   <div className="grid grid-cols-2 gap-4">
                       <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Timing</label>
+                          <label className="block text-[10px] font-bold text-muted uppercase mb-1">Timing</label>
                           <select 
                              className="w-full border rounded text-sm p-2 bg-white"
                              value={editingItem.timingType}
@@ -709,7 +709,7 @@ const ComplianceLibrary: React.FC = () => {
                           </select>
                           {editingItem.timingType === 'POST_ETD' && (
                               <div className="mt-2 flex items-center gap-2">
-                                  <span className="text-xs text-slate-600">Due</span>
+                                  <span className="text-xs text-gray-600">Due</span>
                                   <input 
                                     type="number" 
                                     min="1"
@@ -717,13 +717,13 @@ const ComplianceLibrary: React.FC = () => {
                                     value={editingItem.timingWeeks || ''}
                                     onChange={(e) => setEditingItem({...editingItem, timingWeeks: parseInt(e.target.value) || 0})}
                                   />
-                                  <span className="text-xs text-slate-600">weeks after ETD</span>
+                                  <span className="text-xs text-gray-600">weeks after ETD</span>
                               </div>
                           )}
                       </div>
 
                       <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Report Origin</label>
+                          <label className="block text-[10px] font-bold text-muted uppercase mb-1">Report Origin</label>
                           <select 
                              className="w-full border rounded text-sm p-2 bg-white"
                              value={editingItem.testReportOrigin}
@@ -739,17 +739,17 @@ const ComplianceLibrary: React.FC = () => {
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input 
                             type="checkbox" 
-                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
                             checked={editingItem.selfDeclarationAccepted}
                             onChange={e => setEditingItem({...editingItem, selfDeclarationAccepted: e.target.checked})}
                         />
-                        <span className="text-sm font-medium text-slate-700">Supplier Self-Declaration Accepted</span>
+                        <span className="text-sm font-medium text-gray-700">Supplier Self-Declaration Accepted</span>
                       </label>
                   </div>
               </div>
 
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                <label className="block text-sm font-bold text-slate-700 mb-2">Applicable Features (Conditions)</label>
+              <div className="bg-light p-4 rounded-xl border border-gray-200">
+                <label className="block text-sm font-bold text-gray-700 mb-2">Applicable Features (Conditions)</label>
                 <div className="flex flex-wrap gap-2">
                   {features.filter(f => f.categoryId === (editingItem.categoryId || selectedCategoryForReqs)).map(feat => {
                     const isSelected = editingItem.conditionFeatureIds?.includes(feat.id);
@@ -760,8 +760,8 @@ const ComplianceLibrary: React.FC = () => {
                         onClick={() => toggleFeatureCondition(feat.id)}
                         className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                           isSelected 
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                            : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow' 
+                            : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'
                         }`}
                       >
                         {feat.name} {isSelected && '✓'}
@@ -773,18 +773,18 @@ const ComplianceLibrary: React.FC = () => {
             </form>
             </div>
               
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 bg-white p-4 rounded-b-xl flex-shrink-0">
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 bg-white p-4 rounded-b-xl flex-shrink-0">
                 <button 
                   type="button" 
                   onClick={() => setIsModalOpen(false)} 
-                  className="px-5 py-2 text-slate-600 hover:bg-slate-100 rounded-md text-sm font-medium"
+                  className="px-5 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit" 
                   form="reqForm"
-                  className="px-5 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-md text-sm font-medium shadow-sm"
+                  className="px-5 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-sm font-medium shadow"
                 >
                   Save Requirement
                 </button>

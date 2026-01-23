@@ -111,11 +111,11 @@ const TimelineDashboard: React.FC = () => {
         // 2 Weeks: 10-17 days
         
         if (days >= 38 && days <= 45) {
-            list.push({ project: p, type: '6-Week Production Check', days, date: etd, color: 'bg-blue-100 text-blue-800 border-blue-200' });
+            list.push({ project: p, type: '6-Week Production Check', days, date: etd, color: 'bg-indigo-100 text-blue-800 border-indigo-200' });
         } else if (days >= 24 && days <= 31) {
-            list.push({ project: p, type: '4-Week QA Booking', days, date: etd, color: 'bg-orange-100 text-orange-800 border-orange-200' });
+            list.push({ project: p, type: '4-Week QA Booking', days, date: etd, color: 'bg-orange-100 text-orange-800 border-amber-200' });
         } else if (days >= 10 && days <= 17) {
-            list.push({ project: p, type: '2-Week Logistics Confirm', days, date: etd, color: 'bg-red-100 text-red-800 border-red-200' });
+            list.push({ project: p, type: '2-Week Logistics Confirm', days, date: etd, color: 'bg-rose-100 text-rose-800 border-rose-200' });
         }
       }
     });
@@ -137,7 +137,7 @@ const TimelineDashboard: React.FC = () => {
               months.push(
                   <div 
                     key={curr.toISOString()} 
-                    className="absolute border-l border-slate-200 h-full flex items-end pb-2 pl-2 text-xs font-bold text-slate-400 uppercase tracking-wider"
+                    className="absolute border-l border-gray-200 h-full flex items-end pb-2 pl-2 text-xs font-bold text-gray-400 uppercase tracking-wider"
                     style={{ left: `${left}%`, width: `${width}%` }}
                   >
                       {curr.toLocaleDateString('en-US', { month: 'short' })}
@@ -167,29 +167,29 @@ const TimelineDashboard: React.FC = () => {
     <Layout>
       <div className="flex justify-between items-end mb-6">
         <div>
-            <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                <CalendarClock className="text-blue-600" /> Project Timeline
+            <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
+                <CalendarClock className="text-indigo-600" /> Project Timeline
             </h2>
-            <p className="text-slate-500 mt-1">Gantt view of production milestones and delivery schedules.</p>
+            <p className="text-muted mt-1">Gantt view of production milestones and delivery schedules.</p>
         </div>
         <div className="flex gap-2 text-xs">
-            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> Timeline</div>
-            <div className="flex items-center gap-1"><div className="w-3 h-3 rotate-45 bg-green-500"></div> PO</div>
-            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-orange-500"></div> Production</div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 bg-indigo-500 rounded-sm"></div> Timeline</div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rotate-45 bg-emerald-500"></div> PO</div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-amber-500"></div> Production</div>
             <div className="flex items-center gap-1"><Truck size={12} className="text-indigo-600"/> ETD</div>
-            <div className="flex items-center gap-1"><Flag size={12} className="text-red-600"/> ETA</div>
+            <div className="flex items-center gap-1"><Flag size={12} className="text-rose-600"/> ETA</div>
         </div>
       </div>
 
       {/* Alerts Section */}
       {alerts.length > 0 && (
           <div className="mb-8 animate-in fade-in slide-in-from-top-4">
-              <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
                   <AlertCircle size={16} className="text-orange-500" /> Upcoming Checkpoints
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {alerts.map((alert, idx) => (
-                      <div key={idx} className={`p-4 rounded-lg border shadow-sm flex flex-col justify-between ${alert.color}`}>
+                      <div key={idx} className={`p-4 rounded-xl border shadow flex flex-col justify-between ${alert.color}`}>
                           <div>
                               <div className="flex justify-between items-start mb-2">
                                   <span className="text-[10px] font-bold uppercase tracking-wider opacity-80 border border-current px-1.5 py-0.5 rounded">{alert.type}</span>
@@ -211,12 +211,12 @@ const TimelineDashboard: React.FC = () => {
       )}
 
       {loading ? (
-          <div className="p-12 text-center text-slate-400">Loading timeline...</div>
+          <div className="p-12 text-center text-gray-400">Loading timeline...</div>
       ) : (
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col h-[600px]">
+          <div className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden flex flex-col h-[600px]">
               {/* Header Row */}
-              <div className="flex border-b border-slate-200 bg-slate-50 min-h-[50px]">
-                  <div className="w-64 p-4 font-bold text-slate-700 shrink-0 border-r border-slate-200 z-20 bg-slate-50">Project</div>
+              <div className="flex border-b border-gray-200 bg-light min-h-[50px]">
+                  <div className="w-64 p-4 font-bold text-gray-700 shrink-0 border-r border-gray-200 z-20 bg-light">Project</div>
                   <div className="flex-1 relative overflow-hidden">
                       {renderTimeAxis()}
                   </div>
@@ -255,17 +255,17 @@ const TimelineDashboard: React.FC = () => {
                       const isDelayed = originalEtdPos !== -1 && etdPos > originalEtdPos;
 
                       return (
-                          <div key={project.id} className="flex border-b border-slate-100 hover:bg-slate-50 transition-colors group h-16">
+                          <div key={project.id} className="flex border-b border-gray-100 hover:bg-light transition-colors group h-16">
                               {/* Left Column */}
-                              <div className="w-64 p-3 border-r border-slate-200 shrink-0 bg-white z-10 relative">
-                                  <Link to={`/project/${project.id}`} className="font-bold text-sm text-slate-800 hover:text-blue-600 block truncate mb-0.5">
+                              <div className="w-64 p-3 border-r border-gray-200 shrink-0 bg-white z-10 relative">
+                                  <Link to={`/project/${project.id}`} className="font-bold text-sm text-gray-800 hover:text-indigo-600 block truncate mb-0.5">
                                       {project.name}
                                   </Link>
-                                  <div className="text-xs text-slate-500 truncate">{getSupplierName(project.supplierId)}</div>
+                                  <div className="text-xs text-muted truncate">{getSupplierName(project.supplierId)}</div>
                                   
                                   {/* Document Readiness Mini-Bar */}
-                                  <div className="mt-2 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden flex" title="Document Readiness">
-                                      <div className="h-full bg-green-500" style={{ width: `${(project.currentStep / 3) * 100}%` }}></div>
+                                  <div className="mt-2 h-1.5 w-full bg-gray-100 rounded-full overflow-hidden flex" title="Document Readiness">
+                                      <div className="h-full bg-emerald-500" style={{ width: `${(project.currentStep / 3) * 100}%` }}></div>
                                   </div>
                               </div>
 
@@ -279,10 +279,10 @@ const TimelineDashboard: React.FC = () => {
                                   {/* Main Duration Bar */}
                                   {startPos >= 0 && (
                                       <div 
-                                        className="absolute h-2 top-7 rounded-full bg-blue-100"
+                                        className="absolute h-2 top-7 rounded-full bg-indigo-100"
                                         style={{ left: `${startPos}%`, width: `${width}%` }}
                                       >
-                                          <div className="h-full bg-blue-500 opacity-20 w-full rounded-full"></div>
+                                          <div className="h-full bg-indigo-500 opacity-20 w-full rounded-full"></div>
                                       </div>
                                   )}
 
@@ -292,7 +292,7 @@ const TimelineDashboard: React.FC = () => {
                                         className="absolute top-5 -ml-2 opacity-40 grayscale flex flex-col items-center group/marker z-0"
                                         style={{ left: `${originalEtdPos}%` }}
                                       >
-                                          <Truck size={16} className="text-slate-400" />
+                                          <Truck size={16} className="text-gray-400" />
                                           <div className="hidden group-hover/marker:block absolute bottom-full mb-1 bg-black text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50">
                                               Original ETD: {new Date(originalEtd!).toLocaleDateString()}
                                           </div>
@@ -305,7 +305,7 @@ const TimelineDashboard: React.FC = () => {
                                         className="absolute top-6 -ml-1.5 flex flex-col items-center group/marker cursor-pointer z-10"
                                         style={{ left: `${poPos}%` }}
                                       >
-                                          <div className="w-3 h-3 bg-green-500 rotate-45 shadow-sm border border-white"></div>
+                                          <div className="w-3 h-3 bg-emerald-500 rotate-45 shadow border border-white"></div>
                                           <div className="hidden group-hover/marker:block absolute bottom-full mb-1 bg-black text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50">
                                               PO: {new Date(m.poPlacement!).toLocaleDateString()}
                                           </div>
@@ -318,7 +318,7 @@ const TimelineDashboard: React.FC = () => {
                                         className="absolute top-6 -ml-1.5 flex flex-col items-center group/marker cursor-pointer z-10"
                                         style={{ left: `${mpPos}%` }}
                                       >
-                                          <div className="w-3 h-3 bg-orange-500 rounded-full shadow-sm border border-white"></div>
+                                          <div className="w-3 h-3 bg-amber-500 rounded-full shadow border border-white"></div>
                                           <div className="hidden group-hover/marker:block absolute bottom-full mb-1 bg-black text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50">
                                               MP Start: {new Date(m.massProduction!).toLocaleDateString()}
                                           </div>
@@ -331,7 +331,7 @@ const TimelineDashboard: React.FC = () => {
                                         className="absolute top-5 -ml-2 flex flex-col items-center group/marker cursor-pointer z-20"
                                         style={{ left: `${etdPos}%` }}
                                       >
-                                          <Truck size={16} className={`text-indigo-600 drop-shadow-sm ${isDelayed ? 'text-red-600' : ''}`} />
+                                          <Truck size={16} className={`text-indigo-600 drop-shadow ${isDelayed ? 'text-rose-600' : ''}`} />
                                           <div className="hidden group-hover/marker:block absolute bottom-full mb-1 bg-black text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50">
                                               ETD: {new Date(m.etd!).toLocaleDateString()} {isDelayed && '(Delayed)'}
                                           </div>
@@ -344,7 +344,7 @@ const TimelineDashboard: React.FC = () => {
                                         className="absolute top-5 -ml-2 flex flex-col items-center group/marker cursor-pointer z-10"
                                         style={{ left: `${etaPos}%` }}
                                       >
-                                          <Flag size={16} className="text-red-600 drop-shadow-sm" />
+                                          <Flag size={16} className="text-rose-600 drop-shadow" />
                                           <div className="hidden group-hover/marker:block absolute bottom-full mb-1 bg-black text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50">
                                               ETA: {new Date(m.eta!).toLocaleDateString()}
                                           </div>

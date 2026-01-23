@@ -27,12 +27,12 @@ const ConfirmationModal: React.FC<{
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-sm text-slate-600 mb-6">{message}</p>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-6">{message}</p>
         <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
+          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
         </div>
       </div>
     </div>
@@ -386,14 +386,14 @@ LaunchFlow PLM Platform`;
 
       <div className="flex flex-col md:flex-row justify-between items-start mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">{req.projectName}</h1>
-          <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-4 items-center">
-            <span className="font-mono bg-slate-100 px-2 py-0.5 rounded">{req.requestId}</span>
+          <h1 className="text-2xl font-bold text-primary">{req.projectName}</h1>
+          <div className="text-sm text-muted mt-1 flex flex-wrap gap-4 items-center">
+            <span className="font-mono bg-gray-100 px-2 py-0.5 rounded">{req.requestId}</span>
             <span>Category: <strong>{category?.name}</strong></span>
             <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
-                req.status === 'approved' ? 'bg-green-100 text-green-800' :
-                req.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                'bg-blue-100 text-blue-800'
+                req.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
+                req.status === 'rejected' ? 'bg-rose-100 text-rose-800' :
+                'bg-indigo-100 text-blue-800'
             }`}>
                 {req.status.replace('_', ' ')}
             </span>
@@ -401,19 +401,19 @@ LaunchFlow PLM Platform`;
         </div>
         
         <div className="flex flex-wrap gap-2 items-center">
-          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 rounded-md flex items-center gap-2 text-sm mr-2">
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded-md flex items-center gap-2 text-sm mr-2">
              <Lock size={14} /> 
              <span className="font-bold">Access Code:</span> 
              <span className="font-mono font-bold tracking-widest">{showAccessCode ? req.accessCode || '----' : '••••••'}</span>
-             <button onClick={() => setShowAccessCode(!showAccessCode)} className="ml-1 text-yellow-600">
+             <button onClick={() => setShowAccessCode(!showAccessCode)} className="ml-1 text-amber-600">
                 {showAccessCode ? <EyeOff size={14} /> : <Eye size={14} />}
              </button>
           </div>
 
           <button 
             onClick={handleSendEmail}
-            className={`flex items-center gap-2 px-4 py-2 rounded shadow-sm text-sm font-medium transition-all ${
-              emailSent ? 'bg-green-600 text-white' : 'bg-white border border-blue-200 text-blue-600 hover:bg-blue-50'
+            className={`flex items-center gap-2 px-4 py-2 rounded shadow text-sm font-medium transition-all ${
+              emailSent ? 'bg-emerald-600 text-white' : 'bg-white border border-indigo-200 text-indigo-600 hover:bg-indigo-50'
             }`}
           >
             {emailSent ? <Check size={14} /> : <Mail size={14} />}
@@ -423,17 +423,17 @@ LaunchFlow PLM Platform`;
           <button 
             onClick={handleExportPDF}
             disabled={exporting}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded shadow-sm text-sm hover:bg-slate-50 text-slate-700 disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded shadow text-sm hover:bg-light text-gray-700 disabled:opacity-50"
           >
             {exporting ? 'Generating...' : <><FileDown size={14} /> Export PDF</>}
           </button>
 
-          <button onClick={handleCopyLink} className="flex items-center gap-2 px-4 py-2 bg-white border rounded shadow-sm text-sm hover:bg-slate-50">
+          <button onClick={handleCopyLink} className="flex items-center gap-2 px-4 py-2 bg-white border rounded shadow text-sm hover:bg-light">
             {copied ? 'Copied!' : <><Copy size={14} /> Copy Portal Link</>}
           </button>
           
           {user?.role === UserRole.ADMIN && (
-             <button onClick={() => setIsDeleteModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-red-200 text-red-600 rounded shadow-sm text-sm hover:bg-red-50">
+             <button onClick={() => setIsDeleteModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded shadow text-sm hover:bg-rose-50">
                <Trash2 size={14} /> Delete
              </button>
           )}
@@ -442,11 +442,11 @@ LaunchFlow PLM Platform`;
 
       <div className="space-y-6 mb-8">
          {sortedSections.map(section => (
-            <div key={section} className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
-                <div className="bg-slate-100 px-6 py-3 border-b border-slate-200">
+            <div key={section} className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
+                <div className="bg-gray-100 px-6 py-3 border-b border-gray-200">
                     <div className="flex items-center gap-2">
-                       <Folder size={16} className="text-slate-400"/>
-                       <span className="font-semibold text-slate-700 uppercase tracking-wide text-sm">{section}</span>
+                       <Folder size={16} className="text-gray-400"/>
+                       <span className="font-semibold text-gray-700 uppercase tracking-wide text-sm">{section}</span>
                     </div>
                 </div>
                 <div className="divide-y divide-slate-100">
@@ -455,33 +455,33 @@ LaunchFlow PLM Platform`;
                         const isRejected = currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY;
 
                         return (
-                        <div key={r.id} className={`p-6 transition-colors ${isRejected ? 'bg-red-50/30' : 'hover:bg-slate-50'}`}>
+                        <div key={r.id} className={`p-6 transition-colors ${isRejected ? 'bg-rose-50/30' : 'hover:bg-light'}`}>
                             <div className="flex flex-col md:flex-row gap-6">
                             <div className="flex-1">
-                                <h4 className="font-bold text-slate-900">{r.title}</h4>
-                                <p className="text-sm text-slate-600 mb-4">{r.description}</p>
+                                <h4 className="font-bold text-primary">{r.title}</h4>
+                                <p className="text-sm text-gray-600 mb-4">{r.description}</p>
                                 
                                 {/* Standardized Rules Bar for PM Review */}
-                                <div className="bg-slate-50/80 p-2.5 rounded-lg border border-slate-200 flex flex-wrap gap-x-6 gap-y-2 items-center">
+                                <div className="bg-light/80 p-2.5 rounded-xl border border-gray-200 flex flex-wrap gap-x-6 gap-y-2 items-center">
                                     <div className="flex items-center gap-1.5 min-w-[120px]">
-                                        <Clock size={12} className="text-slate-400" />
+                                        <Clock size={12} className="text-gray-400" />
                                         <div className="flex flex-col">
-                                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Timing</span>
-                                            <span className="text-[10px] font-bold text-slate-700">{r.timingType === 'POST_ETD' ? `ETD + ${r.timingWeeks}w` : 'At ETD'}</span>
+                                            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Timing</span>
+                                            <span className="text-[10px] font-bold text-gray-700">{r.timingType === 'POST_ETD' ? `ETD + ${r.timingWeeks}w` : 'At ETD'}</span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5 min-w-[140px]">
-                                        <Building size={12} className="text-slate-400" />
+                                        <Building size={12} className="text-gray-400" />
                                         <div className="flex flex-col">
-                                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Origin</span>
-                                            <span className="text-[10px] font-bold text-slate-700">{r.testReportOrigin === 'supplier_inhouse' ? 'In-House OK' : '3rd Party Lab Only'}</span>
+                                            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Origin</span>
+                                            <span className="text-[10px] font-bold text-gray-700">{r.testReportOrigin === 'supplier_inhouse' ? 'In-House OK' : '3rd Party Lab Only'}</span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5 min-w-[140px]">
-                                        <FileCheck size={12} className="text-slate-400" />
+                                        <FileCheck size={12} className="text-gray-400" />
                                         <div className="flex flex-col">
-                                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter leading-none">Declaration</span>
-                                            <span className="text-[10px] font-bold text-slate-700">{r.selfDeclarationAccepted ? 'Accepted' : 'Report Mandatory'}</span>
+                                            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Declaration</span>
+                                            <span className="text-[10px] font-bold text-gray-700">{r.selfDeclarationAccepted ? 'Accepted' : 'Report Mandatory'}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -489,20 +489,20 @@ LaunchFlow PLM Platform`;
                             
                             <div className="w-full md:w-96 shrink-0">
                                 <div className="flex items-center gap-4 mb-3">
-                                    <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${currentAnswer === ComplianceResponseStatus.COMPLY ? 'bg-green-50 border-green-200 text-green-700' : 'border-slate-200'}`}>
+                                    <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${currentAnswer === ComplianceResponseStatus.COMPLY ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-gray-200'}`}>
                                         <input 
                                             type="radio" 
-                                            className="text-green-600"
+                                            className="text-emerald-600"
                                             checked={currentAnswer === ComplianceResponseStatus.COMPLY}
                                             onChange={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
                                         />
                                         <span className="text-sm font-medium">Accept</span>
                                     </label>
 
-                                    <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-red-50 border-red-200 text-red-700' : 'border-slate-200'}`}>
+                                    <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-rose-50 border-rose-200 text-rose-700' : 'border-gray-200'}`}>
                                         <input 
                                             type="radio" 
-                                            className="text-red-600"
+                                            className="text-rose-600"
                                             checked={currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY}
                                             onChange={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
                                         />
@@ -526,9 +526,9 @@ LaunchFlow PLM Platform`;
          ))}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-lg flex justify-end gap-3 z-30 md:pl-64">
-         <button onClick={() => navigate('/compliance')} className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded font-medium">Cancel</button>
-         <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded font-bold shadow-sm disabled:opacity-50 flex items-center gap-2">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg flex justify-end gap-3 z-30 md:pl-64">
+         <button onClick={() => navigate('/compliance')} className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded font-medium">Cancel</button>
+         <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded font-bold shadow disabled:opacity-50 flex items-center gap-2">
             <Save size={18} /> {saving ? 'Saving...' : 'Save & Update Status'}
          </button>
       </div>

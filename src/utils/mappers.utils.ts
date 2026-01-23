@@ -88,7 +88,8 @@ export const mapSupplier = (s: any): Supplier => {
     name: s.name,
     code: s.code,
     email: s.email,
-    portalToken: s.portal_token || s.token
+    portalToken: s.portal_token || s.token,
+    accessCode: s.access_code
   };
 };
 

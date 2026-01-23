@@ -5,6 +5,7 @@ create extension if not exists "uuid-ossp";
 
 -- --- MIGRATION: Run this if tables already exist ---
 ALTER TABLE public.compliance_requirements ADD COLUMN IF NOT EXISTS section text;
+ALTER TABLE public.suppliers ADD COLUMN IF NOT EXISTS access_code text;
 -- --------------------------------------------------
 
 -- 1. PROFILES (Users)
@@ -22,7 +23,8 @@ create table if not exists public.suppliers (
   name text not null,
   code text,
   email text,
-  token text, 
+  token text,
+  access_code text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 

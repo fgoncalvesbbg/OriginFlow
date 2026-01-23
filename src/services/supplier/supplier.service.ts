@@ -65,12 +65,70 @@ export const updateSupplier = async (id: string, updates: Partial<Supplier>): Pr
 };
 
 /**
+ * Generate a 6-digit numeric access code
+ */
+const generateAccessCode = (): string => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+/**
  * Ensure supplier has a portal token (create if doesn't exist)
  */
 export const ensureSupplierToken = async (supplierId: string): Promise<string> => {
+    if (!supplierId) throw new Error("Supplier ID is required");
+
     const sup = await getSupplierById(supplierId);
-    if (sup?.portalToken) return sup.portalToken;
+    if (!sup) throw new Error("Supplier not found");
+    if (sup.portalToken) return sup.portalToken;
+
     const token = generateUUID();
-    await supabase.from('suppliers').update({ portal_token: token }).eq('id', supplierId);
+    const { error } = await supabase.from('suppliers').update({ portal_token: token }).eq('id', supplierId);
+
+    if (error) {
+        handleError(error, 'ensureSupplierToken');
+        throw new Error(`Failed to generate access token: ${error.message}`);
+    }
+
     return token;
+};
+
+/**
+ * Ensure supplier has an access code (create if doesn't exist)
+ */
+export const ensureSupplierAccessCode = async (supplierId: string): Promise<string> => {
+    if (!supplierId) throw new Error("Supplier ID is required");
+
+    const sup = await getSupplierById(supplierId);
+    if (!sup) throw new Error("Supplier not found");
+    if (sup.accessCode) return sup.accessCode;
+
+    const accessCode = generateAccessCode();
+    const { error } = await supabase.from('suppliers').update({ access_code: accessCode }).eq('id', supplierId);
+
+    if (error) {
+        handleError(error, 'ensureSupplierAccessCode');
+        throw new Error(`Failed to generate access code: ${error.message}`);
+    }
+
+    return accessCode;
+};
+
+/**
+ * Regenerate supplier access code (for resending via email)
+ */
+export const regenerateSupplierAccessCode = async (supplierId: string): Promise<string> => {
+    if (!supplierId) throw new Error("Supplier ID is required");
+
+    const sup = await getSupplierById(supplierId);
+    if (!sup) throw new Error("Supplier not found");
+
+    const accessCode = generateAccessCode();
+    const { error } = await supabase.from('suppliers').update({ access_code: accessCode }).eq('id', supplierId);
+
+    if (error) {
+        handleError(error, 'regenerateSupplierAccessCode');
+        throw new Error(`Failed to regenerate access code: ${error.message}`);
+    }
+
+    return accessCode;
 };

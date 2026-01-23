@@ -45,37 +45,37 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-light flex flex-col items-center justify-center p-4">
       <div className="mb-8 text-center">
-        <div className="flex items-center justify-center gap-2 text-3xl font-bold text-slate-900 mb-2">
-          <Box className="text-blue-600" size={32} />
+        <div className="flex items-center justify-center gap-2 text-3xl font-bold text-primary mb-2">
+          <Box className="text-indigo-600" size={32} />
           OriginFlow
         </div>
-        <p className="text-slate-500">Product Lifecycle Management</p>
+        <p className="text-muted">Product Lifecycle Management</p>
       </div>
 
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-xl border border-slate-100 p-8 animate-in fade-in zoom-in duration-300">
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-xl border border-gray-100 p-8 animate-in fade-in zoom-in duration-300">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h2 className="text-xl font-bold text-slate-800">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-            <p className="text-sm text-slate-400">{mode === 'login' ? 'Sign in to your dashboard.' : 'Start managing your products.'}</p>
+            <h2 className="text-xl font-bold text-gray-800">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+            <p className="text-sm text-gray-400">{mode === 'login' ? 'Sign in to your dashboard.' : 'Start managing your products.'}</p>
           </div>
           <button 
             onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setSuccessMsg(''); }}
-            className="text-xs font-bold text-blue-600 hover:underline uppercase tracking-wide"
+            className="text-xs font-bold text-indigo-600 hover:underline uppercase tracking-wide"
           >
             {mode === 'login' ? 'Sign Up' : 'Log In'}
           </button>
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">
+          <div className="mb-6 p-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">
             {error}
           </div>
         )}
 
         {successMsg && (
-          <div className="mb-6 p-3 bg-green-50 border border-green-100 rounded-lg text-sm text-green-600">
+          <div className="mb-6 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
             {successMsg}
           </div>
         )}
@@ -83,13 +83,13 @@ const Login: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-5">
           {mode === 'signup' && (
              <div>
-               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">Full Name</label>
+               <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Full Name</label>
                <div className="relative">
-                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                  <input 
                    type="text" 
                    required
-                   className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                   className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
                    placeholder="John Doe"
                    value={name}
                    onChange={(e) => setName(e.target.value)}
@@ -99,13 +99,13 @@ const Login: React.FC = () => {
           )}
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">Email Address</label>
+            <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Email Address</label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input 
                 type="email" 
                 required
-                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
                 placeholder="name@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -114,13 +114,13 @@ const Login: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">Password</label>
+            <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Password</label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input 
                 type="password" 
                 required
-                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -132,7 +132,7 @@ const Login: React.FC = () => {
             <button 
               type="submit" 
               disabled={submitting}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-200 active:scale-95 disabled:opacity-70"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 active:scale-95 disabled:opacity-70"
             >
               {submitting ? 'Processing...' : (mode === 'login' ? 'Sign In' : 'Create Account')} 
               {!submitting && <ArrowRight size={18} />}

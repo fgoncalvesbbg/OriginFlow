@@ -64,60 +64,60 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   const isActive = (path: string) => {
-    return location.pathname === path ? "bg-slate-800 text-white shadow-md" : "text-slate-400 hover:bg-slate-800 hover:text-white";
+    return location.pathname === path ? "bg-indigo-600 text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white";
   };
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen bg-light">
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-white hidden md:flex flex-col fixed h-full z-30 shadow-xl">
-        <div className="p-6 border-b border-slate-800">
+      <aside className="w-64 bg-primary text-white hidden md:flex flex-col fixed h-full z-30 shadow-lg">
+        <div className="p-6 border-b border-gray-700">
           <h1 className="text-xl font-bold flex items-center gap-2 tracking-tight">
-            <Box className="w-6 h-6 text-blue-500" />
+            <Box className="w-6 h-6 text-indigo-400" />
             OriginFlow
           </h1>
-          <p className="text-xs text-slate-500 mt-1 pl-8">Beta v1.3</p>
+          <p className="text-xs text-gray-500 mt-1 pl-8">Beta v1.3</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 mt-4">
-          <Link to="/" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${isActive('/')}`}>
+          <Link to="/" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/')}`}>
             <LayoutDashboard size={18} />
             Dashboard
           </Link>
           
-          <Link to="/timeline" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${isActive('/timeline')}`}>
+          <Link to="/timeline" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/timeline')}`}>
             <CalendarClock size={18} />
             Timeline
           </Link>
 
-          <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Modules</div>
+          <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Modules</div>
           
-          <Link to="/sourcing" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${location.pathname.startsWith('/sourcing') ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800"}`}>
+          <Link to="/sourcing" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${location.pathname.startsWith('/sourcing') ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
             <ShoppingBag size={18} />
             Sourcing & RFQ
           </Link>
 
-          <Link to="/suppliers" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${isActive('/suppliers')}`}>
+          <Link to="/suppliers" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/suppliers')}`}>
             <Truck size={18} />
             Suppliers
           </Link>
 
-          <Link to="/compliance" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${location.pathname.startsWith('/compliance') ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800"}`}>
+          <Link to="/compliance" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${location.pathname.startsWith('/compliance') ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
             <ShieldCheck size={18} />
             Compliance
           </Link>
 
-          <Link to="/im" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${location.pathname.startsWith('/im') ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800"}`}>
+          <Link to="/im" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${location.pathname.startsWith('/im') ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
             <BookOpen size={18} />
             Instruction Manuals
           </Link>
 
           {user?.role === UserRole.ADMIN && (
             <>
-              <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Admin</div>
-              <Link to="/admin" className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${isActive('/admin')}`}>
+              <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Admin</div>
+              <Link to="/admin" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/admin')}`}>
                 <Lock size={18} />
                 Admin Panel
               </Link>
@@ -125,17 +125,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           )}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
-          <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg mb-4">
-             <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white">
+        <div className="p-4 border-t border-gray-700">
+          <div className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl mb-4">
+             <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold text-white">
                 {user?.name?.charAt(0) || 'U'}
              </div>
              <div className="overflow-hidden">
                 <div className="text-xs font-bold truncate">{user?.name}</div>
-                <div className="text-[10px] text-slate-400">{user?.role}</div>
+                <div className="text-[10px] text-gray-400">{user?.role}</div>
              </div>
           </div>
-          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-2 w-full text-left text-xs font-medium text-slate-400 hover:text-red-400 transition-colors">
+          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-2 w-full text-left text-xs font-medium text-gray-400 hover:text-red-400 transition-colors">
             <LogOut size={16} />
             Sign Out
           </button>
@@ -144,78 +144,78 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Main Content */}
       <main className="flex-1 md:ml-64 min-h-screen flex flex-col">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-20">
+        <div className="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center sticky top-0 z-20 shadow">
           <div className="flex-1">
              <Breadcrumbs />
           </div>
-          
+
           {/* Notification Center */}
           <div className="relative flex items-center gap-4" ref={notifRef}>
             {overdueCount > 0 && (
-              <Link to="/timeline" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 rounded-full text-xs font-bold hover:bg-red-100 transition-colors border border-red-200">
+              <Link to="/timeline" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-100 transition-colors border border-rose-200">
                 <AlertCircle size={14} />
                 {overdueCount} Overdue
               </Link>
             )}
 
-            <button 
+            <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`relative p-2 rounded-full transition-colors focus:outline-none ${unreadCount > 0 || overdueCount > 0 ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}
+              className={`relative p-2 rounded-full transition-colors focus:outline-none ${unreadCount > 0 || overdueCount > 0 ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'text-gray-500 hover:bg-gray-100'}`}
             >
               <Bell size={20} className={overdueCount > 0 ? 'animate-pulse' : ''} />
               {(unreadCount > 0 || overdueCount > 0) && (
-                <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow-sm">
+                <span className="absolute top-0 right-0 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow">
                   {unreadCount + overdueCount}
                 </span>
               )}
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 mt-2 top-full w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 z-50">
-                <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-slate-700">Notifications & Alerts</h3>
-                  <span className="text-xs text-slate-400">{unreadCount + overdueCount} total</span>
+              <div className="absolute right-0 mt-2 top-full w-80 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden animate-scaleIn z-50">
+                <div className="px-4 py-3 border-b border-gray-100 bg-light flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-primary">Notifications & Alerts</h3>
+                  <span className="text-xs text-muted">{unreadCount + overdueCount} total</span>
                 </div>
                 <div className="max-h-[400px] overflow-y-auto">
                   {overdueCount > 0 && (
-                    <div className="p-4 bg-red-50 border-b border-red-100">
+                    <div className="p-4 bg-rose-50 border-b border-rose-100">
                        <div className="flex items-start gap-2">
-                          <AlertCircle size={16} className="text-red-600 mt-0.5" />
+                          <AlertCircle size={16} className="text-rose-600 mt-0.5" />
                           <div>
-                            <p className="text-xs font-bold text-red-800">Critical Deadlines Missed</p>
-                            <p className="text-[10px] text-red-600 mt-0.5">You have {overdueCount} items past their due date.</p>
-                            <Link to="/" onClick={() => setShowNotifications(false)} className="text-[10px] font-bold text-red-700 underline mt-1 inline-block">Review Now</Link>
+                            <p className="text-xs font-bold text-rose-800">Critical Deadlines Missed</p>
+                            <p className="text-[10px] text-rose-600 mt-0.5">You have {overdueCount} items past their due date.</p>
+                            <Link to="/" onClick={() => setShowNotifications(false)} className="text-[10px] font-bold text-rose-700 underline mt-1 inline-block">Review Now</Link>
                           </div>
                        </div>
                     </div>
                   )}
 
                   {notifications.length === 0 && overdueCount === 0 ? (
-                    <div className="p-12 text-center text-slate-400 text-xs italic">No notifications</div>
+                    <div className="p-12 text-center text-muted text-xs italic">No notifications</div>
                   ) : (
                     notifications.map(notif => (
-                      <div 
-                        key={notif.id} 
-                        className={`p-4 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors ${notif.isRead ? 'opacity-60' : 'bg-blue-50/30'}`}
+                      <div
+                        key={notif.id}
+                        className={`p-4 border-b border-gray-50 last:border-0 hover:bg-light transition-colors ${notif.isRead ? 'opacity-60' : 'bg-indigo-50/30'}`}
                       >
                         <div className="flex justify-between items-start gap-2">
-                          <p className="text-xs text-slate-800 leading-snug">{notif.message}</p>
+                          <p className="text-xs text-primary leading-snug">{notif.message}</p>
                           {!notif.isRead && (
-                            <button 
-                              onClick={() => handleMarkRead(notif.id)} 
-                              className="text-blue-600 hover:text-blue-800" 
+                            <button
+                              onClick={() => handleMarkRead(notif.id)}
+                              className="text-indigo-600 hover:text-indigo-800"
                             >
-                              <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                              <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>
                             </button>
                           )}
                         </div>
                         <div className="flex justify-between items-center mt-2">
-                          <span className="text-[10px] text-slate-400">{new Date(notif.createdAt).toLocaleDateString()}</span>
+                          <span className="text-[10px] text-muted">{new Date(notif.createdAt).toLocaleDateString()}</span>
                           {notif.link && (
-                            <Link 
-                              to={notif.link} 
+                            <Link
+                              to={notif.link}
                               onClick={() => { handleMarkRead(notif.id); setShowNotifications(false); }}
-                              className="text-[10px] font-bold text-blue-600 hover:underline"
+                              className="text-[10px] font-bold text-indigo-600 hover:underline"
                             >
                               View Details
                             </Link>

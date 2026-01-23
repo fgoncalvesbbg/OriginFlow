@@ -130,7 +130,7 @@ const CreateComplianceRequest: React.FC = () => {
 
   if (loading) return (
       <Layout>
-          <div className="flex flex-col items-center justify-center h-64 text-slate-500">
+          <div className="flex flex-col items-center justify-center h-64 text-muted">
               <Loader2 className="animate-spin mb-2" size={32} />
               <p>Loading projects & templates...</p>
           </div>
@@ -142,7 +142,7 @@ const CreateComplianceRequest: React.FC = () => {
           <div className="flex flex-col items-center justify-center h-64 text-red-500">
               <AlertCircle className="mb-2" size={32} />
               <p>{error}</p>
-              <button onClick={() => window.location.reload()} className="mt-4 text-blue-600 underline">Retry</button>
+              <button onClick={() => window.location.reload()} className="mt-4 text-indigo-600 underline">Retry</button>
           </div>
       </Layout>
   );
@@ -150,15 +150,15 @@ const CreateComplianceRequest: React.FC = () => {
   return (
     <Layout>
       <div className="max-w-3xl mx-auto">
-        <button onClick={() => navigate(-1)} className="flex items-center text-slate-500 hover:text-slate-800 mb-6 text-sm">
+        <button onClick={() => navigate(-1)} className="flex items-center text-muted hover:text-gray-800 mb-6 text-sm">
           <ArrowLeft size={16} className="mr-1" /> Back
         </button>
 
-        <h2 className="text-2xl font-bold text-slate-900 mb-6">Create Compliance Request</h2>
+        <h1 className="text-3xl font-bold text-primary mb-6">Create Compliance Request</h2>
         
-        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 space-y-6">
+        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow border border-gray-200 space-y-6">
           
-          <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg flex gap-3 items-start text-sm text-blue-800 mb-6">
+          <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex gap-3 items-start text-sm text-blue-800 mb-6">
              <Lock size={18} className="shrink-0 mt-0.5" />
              <div>
                <span className="font-bold">Security Note:</span> A random 6-digit Access Code will be generated automatically. You must share this code with the supplier along with the link.
@@ -167,39 +167,39 @@ const CreateComplianceRequest: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
              <div className="col-span-2">
-               <label className="block text-sm font-medium text-slate-700 mb-1">Link to Existing Project (Optional)</label>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Link to Existing Project (Optional)</label>
                <select 
-                className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none"
                 onChange={(e) => handleProjectSelect(e.target.value)}
                 value={selectedProjectId}
                >
                  <option value="">-- No Project (Standalone Request) --</option>
                  {projects.map(p => <option key={p.id} value={p.id}>{p.name} ({p.projectId})</option>)}
                </select>
-               {projects.length === 0 && <p className="text-xs text-slate-400 mt-1">No active projects found.</p>}
+               {projects.length === 0 && <p className="text-xs text-gray-400 mt-1">No active projects found.</p>}
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">TCF Request ID</label>
-               <input required type="text" className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none" value={requestId} onChange={e => setRequestId(e.target.value)} />
+               <label className="block text-sm font-medium text-gray-700 mb-1">TCF Request ID</label>
+               <input required type="text" className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={requestId} onChange={e => setRequestId(e.target.value)} />
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">Project Name</label>
-               <input required type="text" className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. New Product Launch" />
+               <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
+               <input required type="text" className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. New Product Launch" />
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">Supplier</label>
-               <select required className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none" value={supplierId} onChange={e => setSupplierId(e.target.value)}>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+               <select required className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={supplierId} onChange={e => setSupplierId(e.target.value)}>
                  <option value="">Select Supplier</option>
                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                </select>
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">Product Category (TCF Template)</label>
-               <select required className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none" value={categoryId} onChange={e => handleCategoryChange(e.target.value)}>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Product Category (TCF Template)</label>
+               <select required className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={categoryId} onChange={e => handleCategoryChange(e.target.value)}>
                  <option value="">Select Category</option>
                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                </select>
@@ -207,10 +207,10 @@ const CreateComplianceRequest: React.FC = () => {
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-slate-700 mb-1">Submission Deadline</label>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Submission Deadline</label>
                <input 
                  type="date" 
-                 className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none" 
+                 className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" 
                  value={deadline} 
                  onChange={e => setDeadline(e.target.value)} 
                />
@@ -218,34 +218,34 @@ const CreateComplianceRequest: React.FC = () => {
           </div>
 
           {categoryId && (
-            <div className="border-t border-slate-100 pt-4 animate-in fade-in">
-              <h3 className="font-semibold text-slate-800 mb-3">Product Features</h3>
-              <p className="text-xs text-slate-500 mb-3">Select features to automatically filter relevant compliance requirements.</p>
+            <div className="border-t border-gray-100 pt-4 animate-in fade-in">
+              <h3 className="font-semibold text-gray-800 mb-3">Product Features</h3>
+              <p className="text-xs text-muted mb-3">Select features to automatically filter relevant compliance requirements.</p>
               {availableFeatures.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {availableFeatures.map(feat => (
-                      <label key={feat.id} className="flex items-center p-3 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors select-none group">
+                      <label key={feat.id} className="flex items-center p-3 border border-gray-200 rounded-xl hover:bg-light cursor-pointer transition-colors select-none group">
                         <div className="relative flex items-center">
                            <input 
                               type="checkbox" 
-                              className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                              className="h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
                               checked={featureValues[feat.id] || false}
                               onChange={e => setFeatureValues({...featureValues, [feat.id]: e.target.checked})}
                            />
                         </div>
-                        <span className="ml-3 text-sm text-slate-700 group-hover:text-blue-700 font-medium">{feat.name}</span>
+                        <span className="ml-3 text-sm text-gray-700 group-hover:text-indigo-700 font-medium">{feat.name}</span>
                       </label>
                     ))}
                   </div>
               ) : (
-                  <div className="text-sm text-slate-400 italic border border-dashed border-slate-200 p-4 rounded text-center">No configurable features available for this category.</div>
+                  <div className="text-sm text-gray-400 italic border border-dashed border-gray-200 p-4 rounded text-center">No configurable features available for this category.</div>
               )}
             </div>
           )}
 
           <div className="flex justify-end pt-4">
-            <button type="button" onClick={() => navigate(-1)} className="px-6 py-2 text-slate-600 hover:bg-slate-50 mr-3 rounded">Cancel</button>
-            <button type="submit" disabled={submitting} className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+            <button type="button" onClick={() => navigate(-1)} className="px-6 py-2 text-gray-600 hover:bg-light mr-3 rounded">Cancel</button>
+            <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
               {submitting && <Loader2 size={16} className="animate-spin" />}
               {submitting ? 'Creating...' : 'Create & Generate Code'}
             </button>

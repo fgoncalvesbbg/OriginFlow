@@ -28,29 +28,29 @@ const ToastComponent: React.FC<ToastComponentProps> = ({ toast, onClose }) => {
   if (!isVisible) return null;
 
   const bgColor = {
-    success: 'bg-green-50 border-green-200',
-    error: 'bg-red-50 border-red-200',
-    info: 'bg-blue-50 border-blue-200',
-    warning: 'bg-yellow-50 border-yellow-200'
+    success: 'bg-emerald-50 border-emerald-200',
+    error: 'bg-rose-50 border-rose-200',
+    info: 'bg-indigo-50 border-indigo-200',
+    warning: 'bg-amber-50 border-amber-200'
   }[toast.type];
 
   const textColor = {
-    success: 'text-green-800',
-    error: 'text-red-800',
-    info: 'text-blue-800',
-    warning: 'text-yellow-800'
+    success: 'text-emerald-800',
+    error: 'text-rose-800',
+    info: 'text-indigo-800',
+    warning: 'text-amber-800'
   }[toast.type];
 
   const icon = {
-    success: <CheckCircle className="w-5 h-5 text-green-600" />,
-    error: <AlertCircle className="w-5 h-5 text-red-600" />,
-    info: <Info className="w-5 h-5 text-blue-600" />,
-    warning: <AlertTriangle className="w-5 h-5 text-yellow-600" />
+    success: <CheckCircle className="w-5 h-5 text-emerald-600" />,
+    error: <AlertCircle className="w-5 h-5 text-rose-600" />,
+    info: <Info className="w-5 h-5 text-indigo-600" />,
+    warning: <AlertTriangle className="w-5 h-5 text-amber-600" />
   }[toast.type];
 
   return (
     <div
-      className={`${bgColor} border rounded-lg p-4 flex items-start gap-3 animate-slideIn shadow-lg`}
+      className={`${bgColor} border rounded-xl p-4 flex items-start gap-3 animate-slideUp shadow-lg`}
       role="alert"
     >
       <div className="flex-shrink-0 mt-0.5">
