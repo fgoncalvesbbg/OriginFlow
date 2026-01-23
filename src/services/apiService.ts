@@ -13,11 +13,9 @@ import {
 
 // Use environment-provided Supabase credentials (Netlify/Vite)
 const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL ||
-  import.meta.env.SUPABASE_URL;
+  import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  import.meta.env.SUPABASE_ANON_KEY;
+  import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // The portal client is used for non-authenticated public routes
 const portalClient = createClient(SUPABASE_URL ?? '', SUPABASE_ANON_KEY ?? '', {
@@ -52,7 +50,7 @@ export const generateUUID = () => {
 
 export const handleError = (error: any, context: string) => {
   if (!isLive) {
-      throw new Error(`Connection error: Supabase is not configured. Please check your environment variables in Netlify.`);
+      throw new Error(`Connection error: Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables in Netlify.`);
   }
   console.error(`Error in ${context}:`, error);
   let msg = 'Unknown error';

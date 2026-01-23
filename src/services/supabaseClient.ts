@@ -9,7 +9,7 @@ export const isLive = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 if (!isLive) {
     console.warn(
-        "Supabase credentials missing. Check your environment variables (VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY or SUPABASE_URL/SUPABASE_ANON_KEY)."
+        "Supabase credentials missing. Check your environment variables (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY)."
     );
 }
 
