@@ -241,7 +241,7 @@ const SupplierCompliancePortal: React.FC = () => {
         {submitted && (
             <div className="mb-8 bg-emerald-50 border border-emerald-200 rounded-xl p-10 text-center animate-in fade-in slide-in-from-top-4">
                 <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-100 rounded-full text-emerald-600 mb-4"><CheckCircle size={32} /></div>
-                <h1 className="text-3xl font-bold text-green-900 mb-2">Form Successfully Submitted</h2>
+                <h1 className="text-3xl font-bold text-emerald-900 mb-2">Form Successfully Submitted</h1>
                 <p className="text-emerald-800 max-w-md mx-auto">Your technical compliance response has been recorded. Our team will review the declaration.</p>
             </div>
         )}
@@ -306,8 +306,8 @@ const SupplierCompliancePortal: React.FC = () => {
 
                                             <div className="w-full md:w-72 shrink-0 space-y-3 pt-2">
                                                 <div className="flex gap-2">
-                                                    <button onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})} className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${answer === ComplianceResponseStatus.COMPLY ? 'bg-emerald-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-300 hover:border-green-400'}`}>Confirm</button>
-                                                    <button onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})} className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${answer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-rose-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:border-green-400'}`}>Cannot Confirm</button>
+                                                    <button onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})} className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${answer === ComplianceResponseStatus.COMPLY ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-300 hover:border-emerald-400'}`}>Confirm</button>
+                                                    <button onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})} className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${answer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-gray-600 border-gray-300 hover:border-rose-400'}`}>Cannot Confirm</button>
                                                 </div>
                                                 <textarea className="w-full text-xs border border-gray-200 rounded p-2 focus:ring-1 focus:ring-indigo-500 outline-none" placeholder="Notes (Optional)..." rows={2} value={comments[r.id] || ''} onChange={(e) => setComments({...comments, [r.id]: e.target.value})} />
                                             </div>

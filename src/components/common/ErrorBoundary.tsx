@@ -46,14 +46,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <div className="flex items-center justify-center w-12 h-12 mx-auto bg-rose-100 rounded-full mb-4">
               <AlertTriangle className="w-6 h-6 text-rose-600" />
             </div>
-            <h1 className="text-2xl font-bold text-center text-red-900 mb-2">
+            <h1 className="text-2xl font-bold text-center text-rose-900 mb-2">
               Oops! Something went wrong
             </h1>
             <p className="text-rose-700 text-center mb-4">
               We encountered an unexpected error. Please try again.
             </p>
             <details className="bg-rose-50 border border-rose-200 rounded p-3 mb-4 text-sm">
-              <summary className="font-semibold text-red-900 cursor-pointer">
+              <summary className="font-semibold text-rose-900 cursor-pointer">
                 Error details
               </summary>
               <pre className="mt-2 text-rose-700 overflow-auto max-h-40 text-xs">

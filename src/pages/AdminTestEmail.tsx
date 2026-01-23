@@ -63,7 +63,7 @@ const AdminTestEmail: React.FC = () => {
 
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-1">
-             <h1 className="text-3xl font-bold text-primary">Email Notification Test</h2>
+             <h1 className="text-3xl font-bold text-primary">Email Notification Test</h1>
              <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                 <Zap size={10} /> RESEND API
              </span>
@@ -89,7 +89,7 @@ const AdminTestEmail: React.FC = () => {
                 </div>
             </div>
             <div className="p-6">
-                <p className="text-sm font-medium mb-4 text-red-900 flex items-center gap-2">
+                <p className="text-sm font-medium mb-4 text-rose-900 flex items-center gap-2">
                     <AlertTriangle size={16} /> 
                     Configuration Error Detected
                 </p>

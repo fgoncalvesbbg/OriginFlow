@@ -155,10 +155,10 @@ const TimelineDashboard: React.FC = () => {
       if (pos < 0 || pos > 100) return null;
       return (
           <div 
-            className="absolute top-0 bottom-0 border-l-2 border-red-400 border-dashed z-10 pointer-events-none"
+            className="absolute top-0 bottom-0 border-l-2 border-rose-400 border-dashed z-10 pointer-events-none"
             style={{ left: `${pos}%` }}
           >
-              <div className="bg-red-400 text-white text-[10px] px-1 rounded absolute -top-2 -left-4">Today</div>
+              <div className="bg-rose-400 text-white text-[10px] px-1 rounded absolute -top-2 -left-4">Today</div>
           </div>
       );
   };

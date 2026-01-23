@@ -233,7 +233,7 @@ const SupplierDashboard: React.FC = () => {
               <div className="flex items-center justify-center w-12 h-12 rounded-full bg-white/20 mx-auto mb-4">
                 <Key className="text-white" size={24} />
               </div>
-              <h1 className="text-3xl font-bold text-white text-center">Portal Access Required</h2>
+              <h1 className="text-3xl font-bold text-white text-center">Portal Access Required</h1>
               <p className="text-indigo-100 text-center text-sm mt-2">Enter your 6-digit access code to proceed</p>
             </div>
             <form onSubmit={handleVerifyAccessCode} className="p-8 space-y-4">
@@ -438,7 +438,7 @@ const SupplierDashboard: React.FC = () => {
             <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
                 {missingDocs.length === 0 ? (
                     <div className="p-8 text-center text-muted flex flex-col items-center">
-                        <CheckCircle size={32} className="text-green-500 mb-2" />
+                        <CheckCircle size={32} className="text-emerald-500 mb-2" />
                         <p>All caught up! No pending document requests.</p>
                     </div>
                 ) : (

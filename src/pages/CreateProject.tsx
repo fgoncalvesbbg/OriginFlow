@@ -61,7 +61,7 @@ const CreateProject: React.FC = () => {
         </button>
         
         <div className="bg-white rounded-xl shadow border border-gray-200 p-8">
-          <h1 className="text-3xl font-bold text-primary mb-6">Create New Project</h2>
+          <h1 className="text-3xl font-bold text-primary mb-6">Create New Project</h1>
           
           {error && (
             <div className="mb-6 bg-rose-50 border-l-4 border-red-500 p-4 rounded flex items-start gap-3">

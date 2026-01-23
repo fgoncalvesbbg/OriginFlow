@@ -170,7 +170,7 @@ const SupplierPortal: React.FC = () => {
                              )}
                           </div>
                           <div className="flex items-center gap-2 mb-1">
-                             <h3 className={`font-semibold text-lg ${isApproved ? 'text-green-900' : 'text-primary'}`}>{doc.title}</h3>
+                             <h3 className={`font-semibold text-lg ${isApproved ? 'text-emerald-900' : 'text-primary'}`}>{doc.title}</h3>
                              {isApproved && <Lock size={14} className="text-emerald-600" />}
                              {isAdHoc && <span className="text-[10px] bg-gray-100 text-muted px-1.5 py-0.5 rounded border">Extra File</span>}
                           </div>
@@ -197,7 +197,7 @@ const SupplierPortal: React.FC = () => {
                                 </div>
                               ) : doc.fileUrl && !isRejected ? (
                                 <div className="text-center">
-                                   <CheckCircle className="mx-auto text-green-500 mb-2" size={32} />
+                                   <CheckCircle className="mx-auto text-emerald-500 mb-2" size={32} />
                                    <p className="text-sm font-medium text-primary">File Uploaded</p>
                                    <p className="text-xs text-muted mt-1 mb-3">
                                      Uploaded on {new Date(doc.uploadedAt!).toLocaleDateString()}
