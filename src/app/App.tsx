@@ -2,9 +2,14 @@
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
+import { ToastProvider, ToastContext } from '../context/ToastContext';
+import { ModalProvider, ModalContext } from '../context/ModalContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminRoute from '../components/AdminRoute';
-import { checkComplianceDeadlines } from '../services/apiService';
+import { ToastContainer } from '../components/common/Toast';
+import { ModalContainer } from '../components/common/Modal';
+import { ErrorBoundary } from '../components/common/ErrorBoundary';
+import { checkComplianceDeadlines } from '../services';
 
 // Pages
 import Login from '../pages/Login';
@@ -37,14 +42,17 @@ import CreateRFQ from '../pages/sourcing/CreateRFQ';
 import RFQDetail from '../pages/sourcing/RFQDetail';
 import SupplierRFQPortal from '../pages/sourcing/SupplierRFQPortal';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   // Trigger background checks for deadlines on app mount
   useEffect(() => {
     checkComplianceDeadlines();
   }, []);
 
+  const toastContext = React.useContext(ToastContext);
+  const modalContext = React.useContext(ModalContext);
+
   return (
-    <AuthProvider>
+    <>
       <Router>
         <Routes>
           {/* Public Routes */}
@@ -164,7 +172,23 @@ const App: React.FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
-    </AuthProvider>
+      {toastContext && <ToastContainer toasts={toastContext.toasts} onClose={toastContext.removeToast} />}
+      {modalContext && <ModalContainer modals={modalContext.modals} onClose={modalContext.close} />}
+    </>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ErrorBoundary>
+      <AuthProvider>
+        <ToastProvider>
+          <ModalProvider>
+            <AppContent />
+          </ModalProvider>
+        </ToastProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 };
 
