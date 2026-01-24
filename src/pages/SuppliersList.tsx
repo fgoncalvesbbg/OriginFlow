@@ -21,6 +21,9 @@ const SuppliersList: React.FC = () => {
   const [generatingCodeFor, setGeneratingCodeFor] = useState<string | null>(null);
   const [copiedCodeFor, setCopiedCodeFor] = useState<string | null>(null);
 
+  // Confirmation state for regeneration
+  const [regenerateConfirm, setRegenerateConfirm] = useState<string | null>(null);
+
   useEffect(() => {
     const load = async () => {
       const [sData, pData] = await Promise.all([getSuppliers(), getProjects()]);
@@ -101,13 +104,14 @@ const SuppliersList: React.FC = () => {
     }
   };
 
-  const handleRegenerateAccessCode = async (supplierId: string) => {
+  const confirmRegenerateAccessCode = async (supplierId: string) => {
     setGeneratingCodeFor(supplierId);
     try {
       const code = await regenerateSupplierAccessCode(supplierId);
       setSuppliers(prev => prev.map(s => s.id === supplierId ? { ...s, accessCode: code } : s));
-      success('New access code generated successfully');
+      success('New access code generated successfully. Make sure to share it with the supplier.');
       setCopiedCodeFor(null);
+      setRegenerateConfirm(null);
     } catch (e: any) {
       console.error("Access code regeneration failed:", e);
       error('Failed to regenerate access code. Please try again.');
@@ -215,9 +219,10 @@ const SuppliersList: React.FC = () => {
                              </button>
                            </div>
                            <button
-                             onClick={() => handleRegenerateAccessCode(supplier.id)}
+                             onClick={() => setRegenerateConfirm(supplier.id)}
                              disabled={generatingCodeFor === supplier.id}
-                             className="w-full text-xs font-medium text-indigo-700 py-1 px-2 bg-white rounded hover:bg-indigo-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                             className="w-full text-xs font-medium text-amber-700 py-1 px-2 bg-white border border-amber-200 rounded hover:bg-amber-50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                             title="Requires confirmation"
                            >
                              <RotateCcw size={12} />
                              {generatingCodeFor === supplier.id ? 'Generating...' : 'Regenerate'}
@@ -305,6 +310,58 @@ const SuppliersList: React.FC = () => {
                   </form>
               </div>
           </div>
+      )}
+
+      {/* Regenerate Confirmation Modal */}
+      {regenerateConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-amber-50 px-6 py-4 border-b border-amber-200 flex justify-between items-start">
+              <div>
+                <h3 className="font-bold text-lg text-amber-900">Regenerate Access Code?</h3>
+                <p className="text-sm text-amber-700 mt-1">
+                  {suppliers.find(s => s.id === regenerateConfirm)?.name}
+                </p>
+              </div>
+              <button
+                onClick={() => setRegenerateConfirm(null)}
+                className="text-amber-400 hover:text-amber-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-gray-700">
+                The supplier's current access code will be invalidated. Make sure to share the new code with them immediately.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setRegenerateConfirm(null)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => confirmRegenerateAccessCode(regenerateConfirm)}
+                  disabled={generatingCodeFor === regenerateConfirm}
+                  className="px-4 py-2 bg-amber-600 text-white hover:bg-amber-700 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {generatingCodeFor === regenerateConfirm ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw size={16} />
+                      Regenerate Code
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </Layout>

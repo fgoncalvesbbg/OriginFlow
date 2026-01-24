@@ -4,7 +4,8 @@ import { useParams, Link } from 'react-router-dom';
 import {
     getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
     getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
-    getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate
+    getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate,
+    logAccessCodeAttempt, getClientIP
 } from '../services/apiService';
 import { ensureSupplierAccessCode } from '../services/supplier/supplier.service';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionUpdate, ProductionDelayReason } from '../types';
@@ -39,10 +40,24 @@ const SupplierDashboard: React.FC = () => {
   const [proposalFile, setProposalFile] = useState<string | null>(null);
   const [uploadingProposal, setUploadingProposal] = useState(false);
 
+  // Get client IP on component mount
+  useEffect(() => {
+    const fetchIP = async () => {
+      const ip = await getClientIP();
+      setClientIP(ip);
+    };
+    fetchIP();
+  }, []);
+
   // Access Code Verification
   const [isAccessVerified, setIsAccessVerified] = useState(false);
   const [enteredAccessCode, setEnteredAccessCode] = useState('');
   const [accessCodeError, setAccessCodeError] = useState('');
+
+  // Session Management (60 min timeout)
+  const SESSION_TIMEOUT = 60 * 60 * 1000; // 60 minutes in milliseconds
+  const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
+  const [clientIP, setClientIP] = useState<string>('unknown');
 
   useEffect(() => {
     if (!token) {
@@ -113,6 +128,30 @@ const SupplierDashboard: React.FC = () => {
       controller.abort();
     };
   }, [token]);
+
+  // Session timeout - log out after 60 minutes of access
+  useEffect(() => {
+    if (!isAccessVerified || !supplier) return;
+
+    // Set session start time
+    if (!sessionStartTime) {
+      setSessionStartTime(Date.now());
+      return;
+    }
+
+    // Check if session has expired
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - sessionStartTime;
+      if (elapsed > SESSION_TIMEOUT) {
+        setIsAccessVerified(false);
+        setEnteredAccessCode('');
+        setError('Your session has expired. Please enter your access code again.');
+        clearInterval(timer);
+      }
+    }, 60000); // Check every minute
+
+    return () => clearInterval(timer);
+  }, [isAccessVerified, supplier, sessionStartTime]);
 
   // Load supplier data after access code verification
   useEffect(() => {
@@ -192,7 +231,7 @@ const SupplierDashboard: React.FC = () => {
     };
   }, [token, supplier, isAccessVerified]);
 
-  const handleVerifyAccessCode = (e: React.FormEvent) => {
+  const handleVerifyAccessCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setAccessCodeError('');
 
@@ -206,13 +245,21 @@ const SupplierDashboard: React.FC = () => {
       return;
     }
 
-    if (enteredAccessCode !== supplier.accessCode) {
-      setAccessCodeError('Incorrect access code. Please try again.');
+    const isCorrect = enteredAccessCode === supplier.accessCode;
+
+    // Log the attempt
+    await logAccessCodeAttempt(supplier.id, enteredAccessCode, clientIP, isCorrect);
+
+    if (!isCorrect) {
+      setAccessCodeError(
+        'Incorrect access code. If you don\'t have your code, please reach out to your Project Manager for assistance.'
+      );
       setEnteredAccessCode('');
       return;
     }
 
     setAccessCodeError('');
+    setSessionStartTime(Date.now()); // Reset session timer
     setIsAccessVerified(true);
   };
 

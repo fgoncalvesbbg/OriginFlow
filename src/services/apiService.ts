@@ -1526,3 +1526,44 @@ export const createSupplierProposal = async (supplierId: string, title: string, 
     });
     if (error) handleError(error, 'createSupplierProposal');
 };
+
+// --- ACCESS CODE LOGGING ---
+
+/**
+ * Get client IP address
+ */
+export const getClientIP = async (): Promise<string> => {
+    try {
+        const response = await fetch('https://api.ipify.org?format=json', { mode: 'cors' });
+        const data = await response.json();
+        return data.ip || 'unknown';
+    } catch (e) {
+        console.error('Failed to get client IP:', e);
+        return 'unknown';
+    }
+};
+
+/**
+ * Log access code usage attempt
+ */
+export const logAccessCodeAttempt = async (
+    supplierId: string,
+    accessCode: string,
+    ipAddress: string,
+    success: boolean
+): Promise<void> => {
+    try {
+        const { error } = await portalClient.from('supplier_access_logs').insert({
+            supplier_id: supplierId,
+            access_code: accessCode,
+            ip_address: ipAddress,
+            success,
+            created_at: new Date().toISOString()
+        });
+        if (error) {
+            console.error('Failed to log access code attempt:', error);
+        }
+    } catch (e) {
+        console.error('Error logging access code attempt:', e);
+    }
+};
