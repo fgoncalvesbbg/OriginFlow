@@ -471,14 +471,28 @@ export const ensureSupplierAccessCode = async (supplierId: string): Promise<stri
     if (sup.accessCode) return sup.accessCode;
 
     const accessCode = generateAccessCode();
-    const { error } = await supabase.from('suppliers').update({ access_code: accessCode }).eq('id', supplierId);
-
-    if (error) {
-        handleError(error, 'ensureSupplierAccessCode');
-        throw new Error(`Failed to generate access code: ${error.message}`);
+    if (!accessCode) {
+        throw new Error("Failed to generate access code");
     }
 
-    return accessCode;
+    const { data, error } = await supabase
+        .from('suppliers')
+        .update({ access_code: accessCode })
+        .eq('id', supplierId)
+        .select('access_code')
+        .single();
+
+    if (error) {
+        console.error('Error updating access code:', error);
+        handleError(error, 'ensureSupplierAccessCode');
+        throw new Error(`Failed to save access code: ${error.message}`);
+    }
+
+    if (!data?.access_code) {
+        throw new Error("Access code was not saved properly. Please try again.");
+    }
+
+    return data.access_code;
 };
 
 export const regenerateSupplierAccessCode = async (supplierId: string): Promise<string> => {
@@ -488,14 +502,28 @@ export const regenerateSupplierAccessCode = async (supplierId: string): Promise<
     if (!sup) throw new Error("Supplier not found");
 
     const accessCode = generateAccessCode();
-    const { error } = await supabase.from('suppliers').update({ access_code: accessCode }).eq('id', supplierId);
+    if (!accessCode) {
+        throw new Error("Failed to generate new access code");
+    }
+
+    const { data, error } = await supabase
+        .from('suppliers')
+        .update({ access_code: accessCode })
+        .eq('id', supplierId)
+        .select('access_code')
+        .single();
 
     if (error) {
+        console.error('Error regenerating access code:', error);
         handleError(error, 'regenerateSupplierAccessCode');
         throw new Error(`Failed to regenerate access code: ${error.message}`);
     }
 
-    return accessCode;
+    if (!data?.access_code) {
+        throw new Error("New access code was not saved properly. Please try again.");
+    }
+
+    return data.access_code;
 };
 
 export const getSupplierByToken = async (token: string): Promise<Supplier | undefined> => {
