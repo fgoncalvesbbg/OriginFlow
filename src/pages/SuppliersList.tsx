@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { getSuppliers, getProjects, ensureSupplierToken, ensureSupplierAccessCode, regenerateSupplierAccessCode, updateSupplier } from '../services/apiService';
+import { getSuppliers, getProjects, regenerateSupplierAccessCode, updateSupplier } from '../services/apiService';
 import { Supplier, Project } from '../types';
-import { Truck, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, Key, RotateCcw, Send } from 'lucide-react';
+import { Truck, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, RotateCcw } from 'lucide-react';
 import { useToast } from '../hooks/useToast';
 
 const SuppliersList: React.FC = () => {
@@ -27,22 +27,7 @@ const SuppliersList: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       const [sData, pData] = await Promise.all([getSuppliers(), getProjects()]);
-
-      // Ensure all suppliers have access codes
-      const suppliersWithCodes = await Promise.all(
-        sData.map(async (supplier) => {
-          if (supplier.accessCode) return supplier;
-          try {
-            const code = await ensureSupplierAccessCode(supplier.id);
-            return { ...supplier, accessCode: code };
-          } catch (e) {
-            console.error(`Failed to generate code for supplier ${supplier.id}:`, e);
-            return supplier;
-          }
-        })
-      );
-
-      setSuppliers(suppliersWithCodes);
+      setSuppliers(sData);
       setProjects(pData);
       setLoading(false);
     };
@@ -53,17 +38,13 @@ const SuppliersList: React.FC = () => {
     return projects.filter(p => p.supplierId === supplierId && p.status !== 'archived' && p.status !== 'cancelled').length;
   };
 
-  const handleOpenPortal = async (supplier: Supplier) => {
-    try {
-        const token = await ensureSupplierToken(supplier.id);
-        setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, portalToken: token } : s));
-        const url = `${window.location.origin}/#/supplier-dashboard/${token}`;
-        window.open(url, '_blank');
-    } catch (e: any) {
-        console.error("Failed to access supplier portal", e);
-        const msg = e.message || (typeof e === 'object' ? JSON.stringify(e) : String(e));
-        alert(`Failed to generate access token: ${msg}`);
+  const handleOpenPortal = (supplier: Supplier) => {
+    if (!supplier.portalToken) {
+      error('Portal token not configured. Please refresh the page and try again.');
+      return;
     }
+    const url = `${window.location.origin}/#/supplier-dashboard/${supplier.portalToken}`;
+    window.open(url, '_blank');
   };
 
   const handleEdit = (supplier: Supplier) => {
@@ -84,24 +65,6 @@ const SuppliersList: React.FC = () => {
       } finally {
           setSaving(false);
       }
-  };
-
-  const ensureAccessCode = async (supplierId: string): Promise<string | null> => {
-    const supplier = suppliers.find(s => s.id === supplierId);
-    if (supplier?.accessCode) return supplier.accessCode;
-
-    setGeneratingCodeFor(supplierId);
-    try {
-      const code = await ensureSupplierAccessCode(supplierId);
-      setSuppliers(prev => prev.map(s => s.id === supplierId ? { ...s, accessCode: code } : s));
-      return code;
-    } catch (e: any) {
-      console.error("Access code generation failed:", e);
-      error('Failed to generate access code. Please try again.');
-      return null;
-    } finally {
-      setGeneratingCodeFor(null);
-    }
   };
 
   const confirmRegenerateAccessCode = async (supplierId: string) => {
@@ -289,23 +252,7 @@ OriginFlow Team`;
                            </button>
                          </>
                        ) : (
-                         <button
-                           onClick={() => ensureAccessCode(supplier.id)}
-                           disabled={generatingCodeFor === supplier.id}
-                           className="w-full bg-white text-indigo-600 font-medium py-1.5 rounded hover:bg-indigo-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                         >
-                           {generatingCodeFor === supplier.id ? (
-                             <>
-                               <Loader2 size={14} className="animate-spin" />
-                               Generating...
-                             </>
-                           ) : (
-                             <>
-                               <Key size={14} />
-                               Generate Code
-                             </>
-                           )}
-                         </button>
+                         <p className="text-xs text-gray-500 text-center py-2">Access code is being generated...</p>
                        )}
                      </div>
                   </div>

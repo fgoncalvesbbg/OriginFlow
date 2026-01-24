@@ -1,33 +1,14 @@
 
-import { createClient } from '@supabase/supabase-js';
-import { supabase as authenticatedClient, isLive } from './supabaseClient';
-import { 
-  Project, Supplier, User, ComplianceRequest, ComplianceRequestStatus, 
-  CategoryL3, ProductFeature, ComplianceRequirement, ProjectStep, ProjectDocument, 
+import { supabase, portalClient, isLive } from './core/supabase.client';
+import {
+  Project, Supplier, User, ComplianceRequest, ComplianceRequestStatus,
+  CategoryL3, ProductFeature, ComplianceRequirement, ProjectStep, ProjectDocument,
   DashboardStats, DocStatus, StepStatus, ResponsibleParty, UserRole, ProjectOverallStatus,
   ComplianceResponseItem, ChangeLogEntry, Notification, IMTemplate, IMSection, ProjectIM,
   DocumentComment, ProjectMilestones, IMTemplateMetadata,
   RFQ, RFQEntry, RFQStatus, RFQEntryStatus, CategoryAttribute, RFQAttributeValue, RFQAttachment,
   SupplierProposal, ProductionUpdate, DeadlineItem
 } from '../types';
-
-// Use environment-provided Supabase credentials (Netlify/Vite)
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-// The portal client is used for non-authenticated public routes
-const portalClient = createClient(SUPABASE_URL ?? '', SUPABASE_ANON_KEY ?? '', {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-    storageKey: 'sb-portal-auth-token'
-  }
-});
-
-const supabase = authenticatedClient;
 
 export const COMPLIANCE_SECTIONS = [
     'General Requirements',
@@ -336,14 +317,14 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
     return undefined;
 };
 
-export const getProjectsBySupplierId = async (supplierId: string, signal?: AbortSignal): Promise<Project[]> => {
+export const getProjectsBySupplierId = async (supplierId: string): Promise<Project[]> => {
     if (!isLive) return [];
     const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map(mapProject);
 };
 
-export const getProjectsBySupplierToken = async (token: string, signal?: AbortSignal): Promise<Project[]> => {
+export const getProjectsBySupplierToken = async (token: string): Promise<Project[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token });
     if (error) return [];
@@ -356,7 +337,7 @@ export const saveProjectMilestones = async (projectId: string, milestones: Proje
 
 // --- Manufacturing / Production Updates ---
 
-export const getProductionUpdates = async (projectId: string, signal?: AbortSignal): Promise<ProductionUpdate[]> => {
+export const getProductionUpdates = async (projectId: string): Promise<ProductionUpdate[]> => {
     if (!isLive) return [];
     const { data, error } = await supabase.from('production_updates')
         .select('*')
@@ -725,9 +706,9 @@ export const addDocumentComment = async (docId: string, content: string, authorN
     };
 };
 
-export const getMissingDocumentsForSupplier = async (supplierId: string, signal?: AbortSignal): Promise<(ProjectDocument & { projectName: string, projectIdCode: string })[]> => {
+export const getMissingDocumentsForSupplier = async (supplierId: string): Promise<(ProjectDocument & { projectName: string, projectIdCode: string })[]> => {
     if (!isLive) return [];
-    const projects = await getProjectsBySupplierId(supplierId, signal);
+    const projects = await getProjectsBySupplierId(supplierId);
     const activeProjects = projects.filter(p => p.status !== ProjectOverallStatus.ARCHIVED && p.status !== ProjectOverallStatus.CANCELLED && p.status !== ProjectOverallStatus.COMPLETED);
 
     if (activeProjects.length === 0) return [];
@@ -830,7 +811,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
     } as any;
 };
 
-export const getSupplierNotifications = async (supplierId: string, signal?: AbortSignal): Promise<Notification[]> => {
+export const getSupplierNotifications = async (supplierId: string): Promise<Notification[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId);
     if (error) return [];
@@ -956,7 +937,7 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
     await supabase.from('compliance_requests').delete().eq('id', id);
 };
 
-export const getComplianceRequestsBySupplierId = async (supplierId: string, signal?: AbortSignal): Promise<ComplianceRequest[]> => {
+export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId);
     if (error) return [];
@@ -1307,7 +1288,7 @@ export const getRFQs = async (): Promise<RFQ[]> => {
     return (data || []).map(mapRFQ);
 };
 
-export const getRFQsForSupplier = async (supplierId: string, signal?: AbortSignal): Promise<RFQEntry[]> => {
+export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.from('rfq_entries')
         .select('*, rfqs!inner(*)')

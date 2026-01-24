@@ -1,15 +1,15 @@
 
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
-    getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
-    getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
-    getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate,
-    logAccessCodeAttempt, getClientIP
+  getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
+  getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
+  getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate,
+  logAccessCodeAttempt
 } from '../services/apiService';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { Box, ShieldCheck, ExternalLink, Calendar, LayoutDashboard, Clock, Bell, X, AlertCircle, FileText, ShoppingBag, Upload, CheckCircle, Factory, Key } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -28,16 +28,10 @@ const SupplierDashboard: React.FC = () => {
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [updatingProject, setUpdatingProject] = useState<Project | null>(null);
   const [updateForm, setUpdateForm] = useState({
-      newDate: '',
-      delayReason: '' as ProductionDelayReason | '',
-      notes: ''
+    newDate: '',
+    delayReason: '' as ProductionDelayReason | '',
+    notes: ''
   });
-
-  // Proposal Upload State
-  const [proposalTitle, setProposalTitle] = useState('');
-  const [proposalDesc, setProposalDesc] = useState('');
-  const [proposalFile, setProposalFile] = useState<string | null>(null);
-  const [uploadingProposal, setUploadingProposal] = useState(false);
 
   // Access Code Verification
   const [isAccessVerified, setIsAccessVerified] = useState(false);
@@ -47,9 +41,8 @@ const SupplierDashboard: React.FC = () => {
   // Session Management (60 min timeout)
   const SESSION_TIMEOUT = 60 * 60 * 1000;
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
-  const [clientIP, setClientIP] = useState<string>('unknown');
 
-  // Load supplier data and check access code on mount
+  // Load supplier data on mount
   useEffect(() => {
     if (!token) {
       setError('Invalid portal link.');
@@ -57,18 +50,14 @@ const SupplierDashboard: React.FC = () => {
       return;
     }
 
-    let isMounted = true;
+    let mounted = true;
 
-    const loadSupplier = async () => {
+    const loadPortal = async () => {
       try {
-        // Fetch client IP
-        const ip = await getClientIP();
-        if (isMounted) setClientIP(ip);
-
         // Fetch supplier by token
         const sup = await getSupplierByToken(token);
 
-        if (!isMounted) return;
+        if (!mounted) return;
 
         if (!sup) {
           setError('Supplier not found. Please check your link.');
@@ -76,34 +65,50 @@ const SupplierDashboard: React.FC = () => {
           return;
         }
 
-        // Supplier found - set it
+        if (!sup.accessCode) {
+          setError('Portal setup incomplete. Please contact your Project Manager.');
+          setLoading(false);
+          return;
+        }
+
         setSupplier(sup);
         setLoading(false);
-
-        // If supplier has no access code, show error
-        if (!sup.accessCode) {
-          setError('This portal has not been activated yet. Please contact your Project Manager.');
-        }
       } catch (err: any) {
-        if (!isMounted) return;
+        if (!mounted) return;
         console.error('Portal load error:', err);
         setError('Failed to load portal. Please refresh the page.');
         setLoading(false);
       }
     };
 
-    loadSupplier();
+    loadPortal();
 
     return () => {
-      isMounted = false;
+      mounted = false;
     };
   }, [token]);
 
-  // Load dashboard data after access code verification
+  // Session timeout
+  useEffect(() => {
+    if (!sessionStartTime) return;
+
+    const intervalId = setInterval(() => {
+      const elapsed = Date.now() - sessionStartTime;
+      if (elapsed > SESSION_TIMEOUT) {
+        setIsAccessVerified(false);
+        setEnteredAccessCode('');
+        setError('Your session has expired. Please enter your access code again.');
+      }
+    }, 60000);
+
+    return () => clearInterval(intervalId);
+  }, [sessionStartTime]);
+
+  // Load dashboard data after access verification
   useEffect(() => {
     if (!isAccessVerified || !supplier?.id) return;
 
-    let isMounted = true;
+    let mounted = true;
 
     const loadDashboardData = async () => {
       try {
@@ -115,7 +120,7 @@ const SupplierDashboard: React.FC = () => {
           getRFQsForSupplier(supplier.id)
         ]);
 
-        if (!isMounted) return;
+        if (!mounted) return;
 
         setProjects(pList);
         setComplianceReqs(cList);
@@ -144,11 +149,11 @@ const SupplierDashboard: React.FC = () => {
           }
         }
 
-        if (isMounted) {
+        if (mounted) {
           setProjectsNeedingUpdate(needsUpdate);
         }
       } catch (err: any) {
-        if (!isMounted) return;
+        if (!mounted) return;
         console.error('Dashboard data load error:', err);
         // Non-critical error - don't block the UI
       }
@@ -157,25 +162,9 @@ const SupplierDashboard: React.FC = () => {
     loadDashboardData();
 
     return () => {
-      isMounted = false;
+      mounted = false;
     };
-  }, [token, supplier, isAccessVerified]);
-
-  // Session timeout
-  useEffect(() => {
-    if (!sessionStartTime) return;
-
-    const intervalId = setInterval(() => {
-      const elapsed = Date.now() - sessionStartTime;
-      if (elapsed > SESSION_TIMEOUT) {
-        setIsAccessVerified(false);
-        setEnteredAccessCode('');
-        setError('Your session has expired. Please enter your access code again.');
-      }
-    }, 60000);
-
-    return () => clearInterval(intervalId);
-  }, [sessionStartTime]);
+  }, [isAccessVerified, supplier?.id, token]);
 
   const handleVerifyAccessCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,7 +183,7 @@ const SupplierDashboard: React.FC = () => {
     const isCorrect = enteredAccessCode === supplier.accessCode;
 
     // Log the attempt
-    await logAccessCodeAttempt(supplier.id, enteredAccessCode, clientIP, isCorrect);
+    await logAccessCodeAttempt(supplier.id, enteredAccessCode, 'unknown', isCorrect);
 
     if (!isCorrect) {
       setAccessCodeError(
@@ -215,71 +204,43 @@ const SupplierDashboard: React.FC = () => {
   };
 
   const handleConfirmEtd = async (project: Project, currentEtd: string) => {
-      try {
-          await saveProductionUpdate({
-              projectId: project.id,
-              previousEtd: currentEtd,
-              newEtd: currentEtd,
-              isOnTime: true,
-              isSupplierUpdate: true,
-              updatedBy: 'Supplier',
-              notes: 'Confirmed via Supplier Portal'
-          });
-          setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== project.id));
-          alert("ETD Confirmed!");
-      } catch (e) {
-          alert("Error confirming ETD.");
-      }
+    try {
+      await saveProductionUpdate({
+        projectId: project.id,
+        previousEtd: currentEtd,
+        newEtd: currentEtd,
+        isOnTime: true,
+        isSupplierUpdate: true,
+        updatedBy: 'Supplier',
+        notes: 'Confirmed via Supplier Portal'
+      });
+      setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== project.id));
+      alert("ETD Confirmed!");
+    } catch (e) {
+      alert("Error confirming ETD.");
+    }
   };
 
   const handleReportDelay = async () => {
-      if (!updatingProject) return;
-      try {
-          await saveProductionUpdate({
-              projectId: updatingProject.id,
-              previousEtd: updatingProject.milestones?.etd,
-              newEtd: updateForm.newDate,
-              isOnTime: false,
-              delayReason: updateForm.delayReason as ProductionDelayReason,
-              notes: updateForm.notes,
-              isSupplierUpdate: true,
-              updatedBy: 'Supplier'
-          });
-          setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== updatingProject.id));
-          setIsUpdateModalOpen(false);
-          setUpdatingProject(null);
-          alert("Delay reported successfully.");
-      } catch (e) {
-          alert("Error reporting delay.");
-      }
-  };
-
-  const handleProposalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          const file = e.target.files[0];
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              setProposalFile(reader.result as string);
-          };
-          reader.readAsDataURL(file);
-      }
-  };
-
-  const handleSubmitProposal = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!supplier || !proposalFile) return;
-      setUploadingProposal(true);
-      try {
-          await createSupplierProposal(supplier.id, proposalTitle, proposalDesc, proposalFile);
-          alert("Proposal uploaded successfully!");
-          setProposalTitle('');
-          setProposalDesc('');
-          setProposalFile(null);
-      } catch (e) {
-          alert("Failed to upload proposal.");
-      } finally {
-          setUploadingProposal(false);
-      }
+    if (!updatingProject) return;
+    try {
+      await saveProductionUpdate({
+        projectId: updatingProject.id,
+        previousEtd: updatingProject.milestones?.etd,
+        newEtd: updateForm.newDate,
+        isOnTime: false,
+        delayReason: updateForm.delayReason as ProductionDelayReason,
+        notes: updateForm.notes,
+        isSupplierUpdate: true,
+        updatedBy: 'Supplier'
+      });
+      setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== updatingProject.id));
+      setIsUpdateModalOpen(false);
+      setUpdatingProject(null);
+      alert("Delay reported successfully.");
+    } catch (e) {
+      alert("Error reporting delay.");
+    }
   };
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
