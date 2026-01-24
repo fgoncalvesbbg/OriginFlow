@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getRFQs, getAllSupplierProposals, deleteRFQ } from '../../services/apiService';
 import { RFQ, RFQStatus, SupplierProposal, UserRole } from '../../types';
-import { ShoppingBag, Plus, Search, ChevronRight, Clock, FileText, Paperclip, Download, Trash2, MoreHorizontal } from 'lucide-react';
+import { ShoppingBag, Plus, Search, ChevronRight, Clock, FileText, Paperclip, Download, Trash2, MoreHorizontal, Image as ImageIcon, Eye, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
+import ConvertProposalModal from '../../components/sourcing/ConvertProposalModal';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -30,15 +32,21 @@ const ConfirmationModal: React.FC<{
 
 const SourcingDashboard: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<'rfq' | 'proposals'>('rfq');
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [proposals, setProposals] = useState<SupplierProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Deletion State
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [rfqToDelete, setRfqToDelete] = useState<RFQ | null>(null);
+
+  // Conversion State
+  const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
+  const [selectedProposal, setSelectedProposal] = useState<SupplierProposal | null>(null);
 
   useEffect(() => {
     loadData();
@@ -210,39 +218,119 @@ const SourcingDashboard: React.FC = () => {
 
       {/* Proposals List */}
       {activeTab === 'proposals' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-4">
               {loading ? (
-                  <div className="col-span-3 text-center py-12 text-gray-400">Loading Proposals...</div>
+                  <div className="text-center py-12 text-gray-400">Loading Proposals...</div>
               ) : filteredProposals.length === 0 ? (
-                  <div className="col-span-3 text-center py-12 text-gray-400 bg-light rounded-xl border border-dashed">No unsolicited proposals received yet.</div>
+                  <div className="text-center py-12 text-gray-400 bg-light rounded-xl border border-dashed">No unsolicited proposals received yet.</div>
               ) : (
-                  filteredProposals.map(prop => (
-                      <div key={prop.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow flex flex-col">
+                  <div className="space-y-4">
+                    {filteredProposals.map(prop => (
+                        <div key={prop.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+                          {/* Header */}
                           <div className="flex justify-between items-start mb-4">
-                              <div>
-                                  <h3 className="font-bold text-gray-800">{prop.title}</h3>
-                                  <p className="text-xs text-muted mt-1">From: {prop.supplierName || 'Unknown Supplier'}</p>
+                              <div className="flex-1">
+                                  <h3 className="font-bold text-lg text-gray-800">{prop.title}</h3>
+                                  <p className="text-sm text-muted mt-1">From: <span className="font-medium">{prop.supplierName || 'Unknown Supplier'}</span></p>
                               </div>
-                              <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-medium uppercase">{prop.status}</span>
+                              <span className={`text-[10px] px-3 py-1.5 rounded font-medium uppercase whitespace-nowrap ml-4 ${
+                                prop.status === 'new' ? 'bg-blue-100 text-blue-700' :
+                                prop.status === 'reviewed' ? 'bg-yellow-100 text-yellow-700' :
+                                prop.status === 'accepted' ? 'bg-green-100 text-green-700' :
+                                prop.status === 'converted_to_rfq' ? 'bg-indigo-100 text-indigo-700' :
+                                'bg-red-100 text-red-700'
+                              }`}>
+                                {prop.status === 'converted_to_rfq' ? 'Converted to RFQ' : prop.status}
+                              </span>
                           </div>
-                          <p className="text-sm text-gray-600 mb-6 line-clamp-3 flex-1">{prop.description}</p>
-                          <div className="flex justify-between items-center mt-auto pt-4 border-t border-gray-100">
-                              <span className="text-xs text-gray-400">{new Date(prop.createdAt).toLocaleDateString()}</span>
-                              {prop.fileUrl && (
-                                  <a 
-                                    href={prop.fileUrl} 
-                                    download={prop.title}
-                                    className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-blue-800 hover:bg-indigo-50 px-3 py-1.5 rounded transition-colors"
-                                  >
-                                      <Download size={14} /> Download
-                                  </a>
+
+                          {/* Description */}
+                          <p className="text-sm text-gray-600 mb-4">{prop.description}</p>
+
+                          {/* Thumbnail & Attachments */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
+                            {prop.thumbnailUrl && (
+                              <div className="flex items-center justify-center">
+                                <img
+                                  src={prop.thumbnailUrl}
+                                  alt="Product thumbnail"
+                                  className="max-h-32 object-contain rounded"
+                                />
+                              </div>
+                            )}
+
+                            {prop.attributes && prop.attributes.length > 0 && (
+                              <div className="md:col-span-2">
+                                <p className="text-xs font-medium text-gray-700 mb-2">Technical Specifications:</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {prop.attributes.slice(0, 4).map((attr, idx) => (
+                                    <div key={idx} className="text-xs">
+                                      <span className="font-medium text-gray-700">{attr.name}:</span>
+                                      <span className="text-gray-600 ml-1">{attr.value}</span>
+                                    </div>
+                                  ))}
+                                  {prop.attributes.length > 4 && (
+                                    <div className="text-xs text-gray-500">+{prop.attributes.length - 4} more</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {prop.attachments && prop.attachments.length > 0 && (
+                              <div className="md:col-span-3">
+                                <p className="text-xs font-medium text-gray-700 mb-2">Attachments:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {prop.attachments.map((att, idx) => (
+                                    <a
+                                      key={idx}
+                                      href={att.url}
+                                      download={att.name}
+                                      className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-gray-300 rounded text-xs text-gray-700 hover:bg-gray-100 transition"
+                                    >
+                                      <Download size={12} /> {att.name}
+                                    </a>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Footer with Actions */}
+                          <div className="flex justify-between items-center pt-4 border-t border-gray-100">
+                              <span className="text-xs text-gray-400">Submitted: {new Date(prop.createdAt).toLocaleDateString()}</span>
+                              {prop.status !== 'converted_to_rfq' && prop.status !== 'rejected' && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedProposal(prop);
+                                    setIsConvertModalOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
+                                >
+                                  <ArrowRight size={14} /> Convert to RFQ
+                                </button>
                               )}
                           </div>
                       </div>
-                  ))
+                    ))}
+                  </div>
               )}
           </div>
       )}
+
+      {/* Convert Proposal Modal */}
+      <ConvertProposalModal
+        isOpen={isConvertModalOpen}
+        onClose={() => {
+          setIsConvertModalOpen(false);
+          setSelectedProposal(null);
+        }}
+        proposal={selectedProposal}
+        onSuccess={(rfqId) => {
+          // Reload data and navigate to new RFQ
+          loadData();
+          navigate(`/sourcing/${rfqId}`);
+        }}
+      />
     </Layout>
   );
 };

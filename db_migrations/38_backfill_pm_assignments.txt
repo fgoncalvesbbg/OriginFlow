@@ -1,0 +1,98 @@
+-- Migration 38: Backfill PM assignments for legacy data
+-- This migration:
+-- 1. Sets created_by for all existing projects (uses current pm_id as a reasonable assumption)
+-- 2. Auto-assigns suppliers to PMs based on project relationships
+-- 3. Makes created_by NOT NULL for new projects
+
+-- =====================================================
+-- BACKFILL CREATED_BY FOR EXISTING PROJECTS
+-- =====================================================
+
+-- Set created_by to the current assigned PM for all projects that don't have a creator
+UPDATE public.projects
+SET created_by = pm_id
+WHERE created_by IS NULL AND pm_id IS NOT NULL;
+
+-- For projects with no PM assigned, we can't auto-assign, so they'll remain with NULL created_by
+-- (These projects are likely inactive or in an intermediate state)
+
+-- =====================================================
+-- AUTO-ASSIGN SUPPLIERS TO PMs BASED ON PROJECT RELATIONSHIPS
+-- =====================================================
+
+-- Insert supplier-PM assignments based on which suppliers are used in projects
+-- This finds the relationship between suppliers and PMs via projects
+INSERT INTO public.supplier_pm_assignments (supplier_id, pm_id, assigned_by)
+SELECT DISTINCT
+  p.supplier_id,
+  p.pm_id,
+  NULL::uuid  -- No admin assigned this (system auto-assignment)
+FROM public.projects p
+WHERE p.supplier_id IS NOT NULL
+  AND p.pm_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.supplier_pm_assignments spa
+    WHERE spa.supplier_id = p.supplier_id
+    AND spa.pm_id = p.pm_id
+  )
+ON CONFLICT (supplier_id, pm_id) DO NOTHING;
+
+-- =====================================================
+-- LOG MIGRATION RESULTS
+-- =====================================================
+
+DO $$
+DECLARE
+  projects_with_created_by int;
+  suppliers_with_pm int;
+  suppliers_missing_pm int;
+BEGIN
+  -- Count projects that now have created_by set
+  SELECT COUNT(*) INTO projects_with_created_by
+  FROM public.projects
+  WHERE created_by IS NOT NULL;
+
+  -- Count distinct supplier-PM assignments
+  SELECT COUNT(*) INTO suppliers_with_pm
+  FROM public.supplier_pm_assignments;
+
+  -- Count suppliers with no PM assignments
+  SELECT COUNT(DISTINCT id) INTO suppliers_missing_pm
+  FROM public.suppliers s
+  WHERE NOT EXISTS (
+    SELECT 1 FROM public.supplier_pm_assignments spa
+    WHERE spa.supplier_id = s.id
+  );
+
+  RAISE NOTICE 'Backfill complete:';
+  RAISE NOTICE '  - % projects now have created_by set', projects_with_created_by;
+  RAISE NOTICE '  - % supplier-PM assignments created', suppliers_with_pm;
+  RAISE NOTICE '  - % suppliers have no PM assigned', suppliers_missing_pm;
+END $$;
+
+-- =====================================================
+-- ADD NOT NULL CONSTRAINT FOR NEW PROJECTS
+-- =====================================================
+
+-- First verify we have no issues with existing data
+-- This would fail if there are projects with both NULL created_by AND NULL pm_id
+-- If it fails, those projects need to be handled manually
+
+ALTER TABLE public.projects
+ALTER COLUMN created_by SET NOT NULL;
+
+-- =====================================================
+-- ADD CONSTRAINTS TO ENSURE DATA INTEGRITY
+-- =====================================================
+
+-- Note: Role validation is enforced via RLS policies and application logic
+-- PostgreSQL CHECK constraints do not support subqueries, so we rely on:
+-- 1. RLS policies that enforce role-based access
+-- 2. Application-level validation when assigning PMs
+-- 3. Foreign key constraints to profiles table (data referential integrity)
+
+-- =====================================================
+-- FORCE SCHEMA RELOAD
+-- =====================================================
+
+NOTIFY pgrst, 'reload schema';

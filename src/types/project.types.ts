@@ -23,6 +23,7 @@ export interface Project {
   name: string;
   supplierId: string;
   pmId: string;
+  createdBy?: string;
   currentStep: number;
   status: ProjectOverallStatus;
   milestones?: ProjectMilestones;

@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { 
-  getProfiles, updateUserRole, 
+import {
+  getProfiles, updateUserRole,
   getSuppliers, createSupplier, ensureSupplierToken, updateSupplier,
   getCategories, getProductFeatures, saveCategory, saveProductFeature,
   deleteCategory, deleteProductFeature,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
-  generateUUID
+  generateUUID,
+  assignSupplierToPMs, getSupplierPMs,
+  reassignProjectPM, getProjects
 } from '../services/apiService';
 import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Circle, Layers, Tag, Trash2, SlidersHorizontal, X, Save, Loader2 } from 'lucide-react';
@@ -36,7 +38,7 @@ const ConfirmationModal: React.FC<{
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects'>('users');
   
   // Core Data
   const [users, setUsers] = useState<User[]>([]);
@@ -50,6 +52,13 @@ const AdminDashboard: React.FC = () => {
   const [newSupCode, setNewSupCode] = useState('');
   const [newSupEmail, setNewSupEmail] = useState('');
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedSupplierForPMAssignment, setSelectedSupplierForPMAssignment] = useState<string | null>(null);
+  const [selectedPMsForSupplier, setSelectedPMsForSupplier] = useState<string[]>([]);
+  const [pmAssignmentModalOpen, setPMAssignmentModalOpen] = useState(false);
+  const [projectReassignmentModalOpen, setProjectReassignmentModalOpen] = useState(false);
+  const [selectedProjectForReassignment, setSelectedProjectForReassignment] = useState<any>(null);
+  const [newPMIdForProject, setNewPMIdForProject] = useState<string>('');
 
   // Category/Feature/Attribute Editing State
   const [selectedCategoryDetail, setSelectedCategoryDetail] = useState<string | null>(null);
@@ -76,18 +85,20 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const [u, s, c, f, a] = await Promise.all([
-      getProfiles(), 
+    const [u, s, c, f, a, p] = await Promise.all([
+      getProfiles(),
       getSuppliers(),
       getCategories(),
       getProductFeatures(),
-      getCategoryAttributes()
+      getCategoryAttributes(),
+      getProjects()
     ]);
     setUsers(u);
     setSuppliers(s);
     setCategories(c);
     setFeatures(f);
     setAttributes(a);
+    setProjects(p);
   };
 
   // --- USER ACTIONS ---
@@ -125,6 +136,47 @@ const AdminDashboard: React.FC = () => {
          const msg = e.message || (typeof e === 'object' ? JSON.stringify(e) : String(e));
          alert(`Error generating token: ${msg}`);
     }
+  };
+
+  // --- PM ASSIGNMENT ACTIONS ---
+  const openPMAssignmentModal = async (supplierId: string) => {
+    setSelectedSupplierForPMAssignment(supplierId);
+    const pms = await getSupplierPMs(supplierId);
+    setSelectedPMsForSupplier(pms.map(p => p.id));
+    setPMAssignmentModalOpen(true);
+  };
+
+  const handleSavePMAssignment = async () => {
+    if (!selectedSupplierForPMAssignment) return;
+    try {
+      await assignSupplierToPMs(selectedSupplierForPMAssignment, selectedPMsForSupplier);
+      setPMAssignmentModalOpen(false);
+      setSelectedSupplierForPMAssignment(null);
+      setSelectedPMsForSupplier([]);
+      loadData();
+      alert('PM assignments updated successfully');
+    } catch (e: any) {
+      alert(`Error saving PM assignments: ${e.message}`);
+    }
+  };
+
+  const handleReassignProject = async (projectId: string, newPmId: string) => {
+    try {
+      await reassignProjectPM(projectId, newPmId);
+      loadData();
+      setProjectReassignmentModalOpen(false);
+      setSelectedProjectForReassignment(null);
+      setNewPMIdForProject('');
+      alert('Project reassigned successfully');
+    } catch (e: any) {
+      alert(`Error reassigning project: ${e.message}`);
+    }
+  };
+
+  const openProjectReassignmentModal = (project: any) => {
+    setSelectedProjectForReassignment(project);
+    setNewPMIdForProject(project.pmId);
+    setProjectReassignmentModalOpen(true);
   };
 
   // --- CATEGORY & FEATURE ACTIONS ---
@@ -438,6 +490,9 @@ const AdminDashboard: React.FC = () => {
         <button onClick={() => { setActiveTab('categories'); setSelectedCategoryDetail(null); }} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'categories' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Layers size={18} /> Product Categories
         </button>
+        <button onClick={() => setActiveTab('projects')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'projects' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <ShoppingBag size={18} /> Projects
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow border border-gray-200 min-h-[400px]">
@@ -505,13 +560,21 @@ const AdminDashboard: React.FC = () => {
                      >
                        <Edit2 size={16} />
                      </button>
-                     <button 
+                     <button
                        onClick={() => handleCopyPortalLink(sup)}
                        className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors"
                        title="Copy Supplier Portal Link"
                      >
                        {copiedTokenId === sup.id ? <CheckCircle size={14} className="text-emerald-600" /> : <LinkIcon size={14} />}
                        {copiedTokenId === sup.id ? 'Link Copied' : 'Portal Link'}
+                     </button>
+                     <button
+                       onClick={() => openPMAssignmentModal(sup.id)}
+                       className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors"
+                       title="Manage PM Assignments"
+                     >
+                       <SlidersHorizontal size={14} />
+                       Assign PMs
                      </button>
                   </div>
                 </div>
@@ -525,6 +588,53 @@ const AdminDashboard: React.FC = () => {
             <div className="p-6">
                 {renderCategoriesTab()}
             </div>
+        )}
+
+        {/* PROJECTS TAB */}
+        {activeTab === 'projects' && (
+          <div>
+            <div className="px-6 py-4 bg-light border-b border-gray-200">
+              <h3 className="font-bold text-gray-800">Project PM Management</h3>
+            </div>
+            <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+              {projects.length === 0 ? (
+                <div className="p-6 text-center text-gray-500 text-sm">
+                  No projects found
+                </div>
+              ) : (
+                projects.map(proj => (
+                  <div key={proj.id} className="p-4 hover:bg-light px-6 flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="font-medium text-primary">{proj.name}</div>
+                      <div className="text-xs text-muted mt-1">
+                        Project ID: {proj.projectId} • Supplier: {suppliers.find(s => s.id === proj.supplierId)?.name || 'Unknown'}
+                      </div>
+                      <div className="text-xs text-muted mt-1">
+                        Current PM: <span className="font-medium text-gray-700">
+                          {users.find(u => u.id === proj.pmId)?.name || 'Unassigned'}
+                        </span>
+                        {proj.createdBy && (
+                          <>
+                            {' '} • Created by: <span className="font-medium text-gray-700">
+                              {users.find(u => u.id === proj.createdBy)?.name || 'Unknown'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => openProjectReassignmentModal(proj)}
+                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors ml-4 whitespace-nowrap"
+                      title="Reassign PM"
+                    >
+                      <SlidersHorizontal size={14} />
+                      Change PM
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         )}
       </div>
 
@@ -618,6 +728,153 @@ const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PM Assignment Modal */}
+      {pmAssignmentModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg text-gray-800">Assign Product Managers</h3>
+              <button onClick={() => setPMAssignmentModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Select which Product Managers can manage this supplier:
+              </p>
+
+              <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md p-3 space-y-2">
+                {users.filter(u => u.role === UserRole.PM).map(pm => (
+                  <div key={pm.id} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id={`pm-${pm.id}`}
+                      checked={selectedPMsForSupplier.includes(pm.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedPMsForSupplier([...selectedPMsForSupplier, pm.id]);
+                        } else {
+                          setSelectedPMsForSupplier(selectedPMsForSupplier.filter(id => id !== pm.id));
+                        }
+                      }}
+                      className="w-4 h-4 text-indigo-600 rounded"
+                    />
+                    <label htmlFor={`pm-${pm.id}`} className="text-sm text-gray-700 cursor-pointer flex-1">
+                      {pm.name} ({pm.email})
+                    </label>
+                  </div>
+                ))}
+              </div>
+
+              {selectedPMsForSupplier.length > 0 && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded p-3">
+                  <p className="text-xs font-medium text-indigo-900 mb-2">Selected PMs:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {users
+                      .filter(u => selectedPMsForSupplier.includes(u.id))
+                      .map(pm => (
+                        <span key={pm.id} className="bg-indigo-200 text-indigo-900 text-xs px-2 py-1 rounded-full">
+                          {pm.name}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  onClick={() => setPMAssignmentModalOpen(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSavePMAssignment}
+                  className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-sm font-medium"
+                >
+                  Save Assignments
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Project PM Reassignment Modal */}
+      {projectReassignmentModalOpen && selectedProjectForReassignment && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg text-gray-800">Reassign Project Manager</h3>
+              <button onClick={() => setProjectReassignmentModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-indigo-50 border border-indigo-200 rounded p-3">
+                <p className="text-sm font-medium text-indigo-900">
+                  {selectedProjectForReassignment.name}
+                </p>
+                <p className="text-xs text-indigo-700 mt-1">
+                  Project ID: {selectedProjectForReassignment.projectId}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select New Product Manager
+                </label>
+                <select
+                  value={newPMIdForProject}
+                  onChange={(e) => setNewPMIdForProject(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">-- Choose a PM --</option>
+                  {users
+                    .filter(u => u.role === UserRole.PM)
+                    .map(pm => (
+                      <option key={pm.id} value={pm.id}>
+                        {pm.name} ({pm.email})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {newPMIdForProject && newPMIdForProject !== selectedProjectForReassignment.pmId && (
+                <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                  <p className="text-xs text-amber-900">
+                    Current PM: <span className="font-medium">{users.find(u => u.id === selectedProjectForReassignment.pmId)?.name || 'Unassigned'}</span>
+                  </p>
+                  <p className="text-xs text-amber-900 mt-1">
+                    New PM: <span className="font-medium">{users.find(u => u.id === newPMIdForProject)?.name}</span>
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  onClick={() => setProjectReassignmentModalOpen(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (newPMIdForProject && selectedProjectForReassignment) {
+                      handleReassignProject(selectedProjectForReassignment.id, newPMIdForProject);
+                    } else {
+                      alert('Please select a Product Manager');
+                    }
+                  }}
+                  disabled={!newPMIdForProject}
+                  className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Reassign PM
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

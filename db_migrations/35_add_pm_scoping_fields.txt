@@ -1,0 +1,31 @@
+-- Migration 35: Add PM scoping fields and many-to-many PM-Supplier relationships
+-- Adds created_by to projects for audit trail and creates junction table for supplier PM assignments
+
+-- 1. Add created_by column to projects table (tracks who originally created the project)
+ALTER TABLE public.projects
+ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES public.profiles(id);
+
+-- 2. Create junction table for many-to-many PM-Supplier relationships
+CREATE TABLE IF NOT EXISTS public.supplier_pm_assignments (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  supplier_id uuid NOT NULL REFERENCES public.suppliers(id) ON DELETE CASCADE,
+  pm_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  assigned_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
+  assigned_by uuid REFERENCES public.profiles(id),
+  UNIQUE(supplier_id, pm_id)
+);
+
+-- 3. Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_projects_pm_id ON public.projects(pm_id);
+CREATE INDEX IF NOT EXISTS idx_projects_created_by ON public.projects(created_by);
+CREATE INDEX IF NOT EXISTS idx_supplier_pm_assignments_supplier ON public.supplier_pm_assignments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_pm_assignments_pm ON public.supplier_pm_assignments(pm_id);
+
+-- 4. Add comments for documentation
+COMMENT ON COLUMN public.projects.created_by IS 'User who originally created this project (audit trail only, not for visibility)';
+COMMENT ON TABLE public.supplier_pm_assignments IS 'Junction table for many-to-many PM-Supplier relationships. Allows multiple PMs to manage the same supplier.';
+COMMENT ON COLUMN public.supplier_pm_assignments.assigned_at IS 'When the PM was assigned to this supplier';
+COMMENT ON COLUMN public.supplier_pm_assignments.assigned_by IS 'Admin who made the PM assignment';
+
+-- 5. Force schema reload to reflect new tables and columns
+NOTIFY pgrst, 'reload schema';

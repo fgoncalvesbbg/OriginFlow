@@ -1,0 +1,15 @@
+-- Enhancement: Add RFQ-like structure to supplier_proposals table
+-- This allows suppliers to submit structured proposals with categories, attributes, thumbnails, and attachments
+-- PMs can then review and convert these to official RFQs
+
+ALTER TABLE public.supplier_proposals
+ADD COLUMN IF NOT EXISTS category_id uuid REFERENCES public.categories_l3(id),
+ADD COLUMN IF NOT EXISTS attributes jsonb DEFAULT '[]'::jsonb,
+ADD COLUMN IF NOT EXISTS thumbnail_url text,
+ADD COLUMN IF NOT EXISTS attachments jsonb DEFAULT '[]'::jsonb;
+
+-- Update comment on table to reflect new capability
+COMMENT ON TABLE public.supplier_proposals IS 'Unsolicited supplier proposals that can be enhanced with categories, attributes, and files - convertible to RFQs by PM';
+
+-- Force schema reload
+NOTIFY pgrst, 'reload schema';

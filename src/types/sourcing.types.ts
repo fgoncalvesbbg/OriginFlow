@@ -69,7 +69,11 @@ export interface SupplierProposal {
   supplierName?: string;
   title: string;
   description: string;
-  fileUrl: string;
-  status: string;
+  fileUrl?: string; // Legacy field, kept for backward compatibility
+  categoryId?: string;
+  attributes: RFQAttributeValue[];
+  thumbnailUrl?: string;
+  attachments: RFQAttachment[];
+  status: string; // 'new', 'reviewed', 'accepted', 'rejected', 'converted_to_rfq'
   createdAt: string;
 }

@@ -78,10 +78,11 @@ const mapProject = (p: any): Project => {
   if (!p || typeof p !== 'object') throw new Error("Project data is missing or invalid");
   return {
     id: p.id,
-    projectId: p.project_id_code || p.projectId, 
+    projectId: p.project_id_code || p.projectId,
     name: p.name,
     supplierId: p.supplier_id,
     pmId: p.pm_id,
+    createdBy: p.created_by,
     currentStep: p.current_step,
     status: p.status,
     milestones: p.milestones,
@@ -128,6 +129,9 @@ const mapSupplier = (s: any): Supplier => {
     name: s.name,
     code: s.code,
     email: s.email,
+    pmId: s.pm_id,
+    assignedPMIds: Array.isArray(s.assigned_pm_ids) ? s.assigned_pm_ids : [],
+    assignedPMNames: Array.isArray(s.assigned_pm_names) ? s.assigned_pm_names : [],
     portalToken: s.portal_token || s.token,
     accessCode: s.access_code
   };
@@ -224,14 +228,17 @@ export const getProjectById = async (id: string): Promise<Project | undefined> =
 };
 
 export const createProject = async (name: string, supplierId: string, projectId: string, pmId: string): Promise<Project> => {
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { data, error } = await supabase.from('projects').insert({
-        name, 
-        supplier_id: supplierId, 
-        project_id_code: projectId, 
-        pm_id: pmId, 
-        status: ProjectOverallStatus.IN_PROGRESS, 
-        current_step: 1, 
-        created_at: new Date().toISOString(), 
+        name,
+        supplier_id: supplierId,
+        project_id_code: projectId,
+        pm_id: pmId,
+        created_by: user?.id,
+        status: ProjectOverallStatus.IN_PROGRESS,
+        current_step: 1,
+        created_at: new Date().toISOString(),
         supplier_link_token: generateUUID()
     }).select().single();
     
@@ -513,6 +520,89 @@ export const getSupplierByToken = async (token: string): Promise<Supplier | unde
     const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle();
     if (error) return undefined;
     return data ? mapSupplier(data) : undefined;
+};
+
+// --- PM Assignment Functions ---
+
+export const assignSupplierToPMs = async (supplierId: string, pmIds: string[]): Promise<void> => {
+    if (!supplierId || !pmIds.length) return;
+
+    const { data: { user } } = await supabase.auth.getUser();
+
+    // Delete existing assignments for this supplier
+    await supabase.from('supplier_pm_assignments').delete().eq('supplier_id', supplierId);
+
+    // Insert new assignments
+    const assignments = pmIds.map(pmId => ({
+        supplier_id: supplierId,
+        pm_id: pmId,
+        assigned_by: user?.id
+    }));
+
+    const { error } = await supabase.from('supplier_pm_assignments').insert(assignments);
+    if (error) handleError(error, 'assignSupplierToPMs');
+};
+
+export const addSupplierPMAssignment = async (supplierId: string, pmId: string): Promise<void> => {
+    if (!supplierId || !pmId) return;
+
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const { error } = await supabase.from('supplier_pm_assignments').insert({
+        supplier_id: supplierId,
+        pm_id: pmId,
+        assigned_by: user?.id
+    });
+
+    if (error && !error.message.includes('duplicate key')) {
+        handleError(error, 'addSupplierPMAssignment');
+    }
+};
+
+export const removeSupplierPMAssignment = async (supplierId: string, pmId: string): Promise<void> => {
+    if (!supplierId || !pmId) return;
+
+    const { error } = await supabase
+        .from('supplier_pm_assignments')
+        .delete()
+        .eq('supplier_id', supplierId)
+        .eq('pm_id', pmId);
+
+    if (error) handleError(error, 'removeSupplierPMAssignment');
+};
+
+export const getSupplierPMs = async (supplierId: string): Promise<User[]> => {
+    if (!supplierId || !isLive) return [];
+
+    const { data, error } = await supabase
+        .from('supplier_pm_assignments')
+        .select('pm_id')
+        .eq('supplier_id', supplierId);
+
+    if (error) return [];
+
+    const pmIds = (data || []).map(d => d.pm_id);
+    if (!pmIds.length) return [];
+
+    const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', pmIds);
+
+    if (profileError) return [];
+    return (profiles || []).map(mapProfile);
+};
+
+export const reassignProjectPM = async (projectId: string, newPmId: string): Promise<Project> => {
+    const { data, error } = await supabase
+        .from('projects')
+        .update({ pm_id: newPmId })
+        .eq('id', projectId)
+        .select()
+        .single();
+
+    if (error) handleError(error, 'reassignProjectPM');
+    return mapProject(data);
 };
 
 // --- Users & Auth ---
@@ -1479,6 +1569,10 @@ export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => 
         title: p.title,
         description: p.description,
         fileUrl: p.file_url,
+        categoryId: p.category_id,
+        attributes: p.attributes || [],
+        thumbnailUrl: p.thumbnail_url,
+        attachments: p.attachments || [],
         status: p.status,
         createdAt: p.created_at
     }));
@@ -1495,6 +1589,10 @@ export const getSupplierProposals = async (supplierId: string): Promise<Supplier
         title: p.title,
         description: p.description,
         fileUrl: p.file_url,
+        categoryId: p.category_id,
+        attributes: p.attributes || [],
+        thumbnailUrl: p.thumbnail_url,
+        attachments: p.attachments || [],
         status: p.status,
         createdAt: p.created_at
     }));
@@ -1510,6 +1608,139 @@ export const createSupplierProposal = async (supplierId: string, title: string, 
         created_at: new Date().toISOString()
     });
     if (error) handleError(error, 'createSupplierProposal');
+};
+
+/**
+ * Create an enhanced supplier proposal with full RFQ structure
+ */
+export const createEnhancedSupplierProposal = async (
+    supplierId: string,
+    title: string,
+    description: string,
+    categoryId?: string,
+    attributes?: any[],
+    thumbnailUrl?: string,
+    attachments?: any[]
+): Promise<void> => {
+    const { error } = await portalClient.from('supplier_proposals').insert({
+        supplier_id: supplierId,
+        title,
+        description,
+        category_id: categoryId || null,
+        attributes: attributes || [],
+        thumbnail_url: thumbnailUrl || null,
+        attachments: attachments || [],
+        status: 'new',
+        created_at: new Date().toISOString()
+    });
+    if (error) handleError(error, 'createEnhancedSupplierProposal');
+};
+
+/**
+ * Helper function to generate RFQ ID
+ */
+const generateRFQId = (): string => {
+    const year = new Date().getFullYear();
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    return `RFQ-${year}-${random}`;
+};
+
+/**
+ * Helper function to generate UUID
+ */
+const generateUUID = (): string => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+};
+
+/**
+ * Convert a supplier proposal to an RFQ (PM action)
+ */
+export const convertProposalToRFQ = async (
+    proposalId: string,
+    createdBy: string,
+    supplierIds: string[]
+): Promise<any> => {
+    // 1. Fetch the proposal
+    const { data: proposalData, error: fetchError } = await supabase
+        .from('supplier_proposals')
+        .select('*')
+        .eq('id', proposalId)
+        .single();
+
+    if (fetchError || !proposalData) {
+        handleError(fetchError, 'convertProposalToRFQ - fetch');
+        throw new Error('Proposal not found');
+    }
+
+    // 2. Create RFQ from proposal data
+    const rfqId = generateRFQId();
+    const { data: rfqData, error: rfqError } = await supabase
+        .from('rfqs')
+        .insert({
+            title: proposalData.title,
+            rfq_id: rfqId,
+            description: proposalData.description,
+            created_by: createdBy,
+            category_id: proposalData.category_id,
+            attributes: proposalData.attributes || [],
+            thumbnail_url: proposalData.thumbnail_url,
+            attachments: proposalData.attachments || [],
+            status: 'open',
+            created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+    if (rfqError) {
+        handleError(rfqError, 'convertProposalToRFQ - create RFQ');
+        throw new Error('Failed to create RFQ');
+    }
+
+    // 3. Create RFQ entries for selected suppliers
+    if (supplierIds && supplierIds.length > 0) {
+        const entriesPayload = supplierIds.map(sid => ({
+            rfq_id: rfqData.id,
+            supplier_id: sid,
+            token: generateUUID(),
+            status: 'pending',
+            created_at: new Date().toISOString()
+        }));
+
+        const { error: entriesError } = await supabase.from('rfq_entries').insert(entriesPayload);
+        if (entriesError) {
+            handleError(entriesError, 'convertProposalToRFQ - create entries');
+            throw new Error('Failed to create RFQ entries');
+        }
+    }
+
+    // 4. Update proposal status
+    const { error: updateError } = await supabase
+        .from('supplier_proposals')
+        .update({ status: 'converted_to_rfq' })
+        .eq('id', proposalId);
+
+    if (updateError) {
+        handleError(updateError, 'convertProposalToRFQ - update status');
+        throw new Error('Failed to update proposal status');
+    }
+
+    return {
+        id: rfqData.id,
+        rfqId: rfqData.rfq_id,
+        title: rfqData.title,
+        description: rfqData.description,
+        attributes: rfqData.attributes || [],
+        thumbnailUrl: rfqData.thumbnail_url,
+        attachments: rfqData.attachments || [],
+        createdBy: rfqData.created_by,
+        createdAt: rfqData.created_at,
+        status: rfqData.status,
+        categoryId: rfqData.category_id
+    };
 };
 
 // --- ACCESS CODE LOGGING ---

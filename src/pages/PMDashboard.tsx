@@ -50,11 +50,9 @@ const PMDashboard: React.FC = () => {
 
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           p.projectId.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    if (!matchesSearch) return false;
 
-    if (user?.role === UserRole.ADMIN) return true;
-    return p.pmId === user?.id;
+    return matchesSearch;
+    // RLS policies on the database handle PM access control server-side
   });
 
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';

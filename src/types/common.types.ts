@@ -21,6 +21,9 @@ export interface Supplier {
   name: string;
   code: string;
   email: string;
+  pmId?: string;
+  assignedPMIds?: string[];
+  assignedPMNames?: string[];
   portalToken?: string;
   accessCode?: string;
 }

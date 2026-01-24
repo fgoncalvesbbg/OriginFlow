@@ -126,5 +126,7 @@ export {
   submitRFQEntry,
   getAllSupplierProposals,
   getSupplierProposals,
-  createSupplierProposal
+  createSupplierProposal,
+  createEnhancedSupplierProposal,
+  convertProposalToRFQ
 } from './sourcing';

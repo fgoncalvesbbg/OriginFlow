@@ -5,11 +5,12 @@ import {
   getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
-  logAccessCodeAttempt, submitRFQEntry
+  logAccessCodeAttempt, submitRFQEntry, getSupplierProposals
 } from '../services/apiService';
-import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason } from '../types';
+import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload } from 'lucide-react';
+import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload, Plus, Download } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -19,9 +20,11 @@ const SupplierDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [missingDocs, setMissingDocs] = useState<(ProjectDocument & { projectName: string, projectIdCode: string })[]>([]);
   const [openRfqs, setOpenRfqs] = useState<RFQEntry[]>([]);
+  const [proposals, setProposals] = useState<SupplierProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   const [submittingQuote, setSubmittingQuote] = useState(false);
   const [selectedRfqForQuote, setSelectedRfqForQuote] = useState<RFQEntry | null>(null);
@@ -124,12 +127,13 @@ const SupplierDashboard: React.FC = () => {
 
     const loadDashboardData = async () => {
       try {
-        const [pList, cList, nList, mDocs, rfqList] = await Promise.all([
+        const [pList, cList, nList, mDocs, rfqList, propList] = await Promise.all([
           getProjectsBySupplierToken(token!),
           getComplianceRequestsBySupplierId(supplier.id),
           getSupplierNotifications(supplier.id),
           getMissingDocumentsForSupplier(supplier.id),
-          getRFQsForSupplier(supplier.id)
+          getRFQsForSupplier(supplier.id),
+          getSupplierProposals(supplier.id)
         ]);
 
         if (!mounted) return;
@@ -139,6 +143,7 @@ const SupplierDashboard: React.FC = () => {
         setNotifications(nList);
         setMissingDocs(mDocs);
         setOpenRfqs(rfqList);
+        setProposals(propList);
 
         // Calculate Manufacturing Checks
         const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
@@ -623,6 +628,61 @@ const SupplierDashboard: React.FC = () => {
           )}
         </div>
 
+        {/* My Proposals */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <FileText size={20} className="text-primary" />
+              My Proposals ({proposals.length})
+            </h2>
+            <button
+              onClick={() => setIsProposalModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
+            >
+              <Plus size={16} /> Submit New Proposal
+            </button>
+          </div>
+          {proposals.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-muted">
+              <p>You haven't submitted any proposals yet. Share your new products with us!</p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {proposals.map(prop => (
+                <div key={prop.id} className="bg-white rounded-lg shadow p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1">
+                      <h3 className="font-bold">{prop.title}</h3>
+                      <p className="text-sm text-muted mt-1">{prop.description}</p>
+                      {prop.categoryId && (
+                        <p className="text-xs text-gray-500 mt-2">Category: Electronics</p>
+                      )}
+                    </div>
+                    <span className={`ml-4 px-3 py-1 text-xs rounded font-medium whitespace-nowrap ${
+                      prop.status === 'new' ? 'bg-blue-100 text-blue-800' :
+                      prop.status === 'reviewed' ? 'bg-yellow-100 text-yellow-800' :
+                      prop.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                      prop.status === 'converted_to_rfq' ? 'bg-indigo-100 text-indigo-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {prop.status === 'converted_to_rfq' ? 'Converted to RFQ' : prop.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>Submitted: {new Date(prop.createdAt).toLocaleDateString()}</span>
+                    {prop.attachments && prop.attachments.length > 0 && (
+                      <>
+                        <span>•</span>
+                        <span>{prop.attachments.length} file(s)</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Update Modal */}
@@ -834,6 +894,19 @@ const SupplierDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Submit Proposal Modal */}
+      <SubmitProposalModal
+        isOpen={isProposalModalOpen}
+        onClose={() => setIsProposalModalOpen(false)}
+        supplierId={supplier?.id || ''}
+        onSuccess={() => {
+          // Reload proposals after successful submission
+          if (supplier?.id) {
+            getSupplierProposals(supplier.id).then(setProposals);
+          }
+        }}
+      />
     </div>
   );
 };
