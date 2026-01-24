@@ -1,11 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { 
-    getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId, 
-    getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier, 
-    getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate 
+import {
+    getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
+    getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
+    getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate
 } from '../services/apiService';
+import { ensureSupplierAccessCode } from '../services/supplier/supplier.service';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionUpdate, ProductionDelayReason } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { Box, ShieldCheck, ExternalLink, Calendar, LayoutDashboard, Clock, Bell, X, AlertCircle, FileText, ShoppingBag, Upload, CheckCircle, Factory, Key } from 'lucide-react';
@@ -58,11 +59,18 @@ const SupplierDashboard: React.FC = () => {
           return;
         }
 
-        // Check if access code exists and is required
-        if (!sup.accessCode) {
-          setError('Access code not configured. Please contact support.');
-          setLoading(false);
-          return;
+        // Auto-generate access code if it doesn't exist
+        let accessCode = sup.accessCode;
+        if (!accessCode) {
+          try {
+            accessCode = await ensureSupplierAccessCode(sup.id);
+            sup.accessCode = accessCode;
+          } catch (err) {
+            console.error('Failed to generate access code:', err);
+            setError('Unable to configure access. Please contact support.');
+            setLoading(false);
+            return;
+          }
         }
 
         // Don't load full data yet - wait for access code verification
