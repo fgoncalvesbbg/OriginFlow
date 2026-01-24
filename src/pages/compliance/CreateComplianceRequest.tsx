@@ -154,7 +154,7 @@ const CreateComplianceRequest: React.FC = () => {
           <ArrowLeft size={16} className="mr-1" /> Back
         </button>
 
-        <h1 className="text-3xl font-bold text-primary mb-6">Create Compliance Request</h2>
+        <h1 className="text-3xl font-bold text-primary mb-6">Create Compliance Request</h1>
         
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow border border-gray-200 space-y-6">
           

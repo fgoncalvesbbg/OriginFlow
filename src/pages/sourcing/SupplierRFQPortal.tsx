@@ -99,7 +99,7 @@ const SupplierRFQPortal: React.FC = () => {
           <div className="min-h-screen bg-light flex items-center justify-center p-4">
               <div className="bg-white p-8 rounded-xl shadow max-w-md w-full text-center">
                   <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
-                  <h1 className="text-3xl font-bold text-primary mb-2">Quote Submitted</h2>
+                  <h1 className="text-3xl font-bold text-primary mb-2">Quote Submitted</h1>
                   <p className="text-gray-600 mb-6">Thank you for your submission to <strong>{rfq.title}</strong>.</p>
                   <div className="bg-light p-4 rounded text-sm text-muted">
                       We will notify you if your quote is selected.
@@ -128,7 +128,7 @@ const SupplierRFQPortal: React.FC = () => {
                         </div>
                     )}
 
-                    <h1 className="text-3xl font-bold text-primary mb-4">{rfq.title}</h2>
+                    <h1 className="text-3xl font-bold text-primary mb-4">{rfq.title}</h1>
                     <div className="bg-light p-4 rounded border border-gray-100 text-sm text-gray-600 whitespace-pre-wrap leading-relaxed mb-4">
                         {rfq.description}
                     </div>

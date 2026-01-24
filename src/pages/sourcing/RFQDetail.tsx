@@ -115,7 +115,7 @@ const RFQDetail: React.FC = () => {
             <button onClick={() => navigate('/sourcing')} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
             <div>
                 <div className="flex items-center gap-3 mb-1">
-                    <h1 className="text-3xl font-bold text-primary">{rfq.title}</h2>
+                    <h1 className="text-3xl font-bold text-primary">{rfq.title}</h1>
                     <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${rfq.status === RFQStatus.OPEN ? 'bg-indigo-100 text-indigo-700' : rfq.status === RFQStatus.AWARDED ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
                         {rfq.status}
                     </span>

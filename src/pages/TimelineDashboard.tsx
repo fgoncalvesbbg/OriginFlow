@@ -169,7 +169,7 @@ const TimelineDashboard: React.FC = () => {
         <div>
             <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
                 <CalendarClock className="text-indigo-600" /> Project Timeline
-            </h2>
+            </h1>
             <p className="text-muted mt-1">Gantt view of production milestones and delivery schedules.</p>
         </div>
         <div className="flex gap-2 text-xs">

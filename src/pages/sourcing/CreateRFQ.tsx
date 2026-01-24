@@ -163,7 +163,7 @@ const CreateRFQ: React.FC = () => {
           <ArrowLeft size={16} className="mr-1" /> Back to Sourcing
         </button>
 
-        <h1 className="text-3xl font-bold text-primary mb-6">Create New RFQ</h2>
+        <h1 className="text-3xl font-bold text-primary mb-6">Create New RFQ</h1>
         
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow border border-gray-200 space-y-8">
             

@@ -514,7 +514,7 @@ const ComplianceLibrary: React.FC = () => {
       />
 
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-primary">Compliance Library</h2>
+        <h1 className="text-3xl font-bold text-primary">Compliance Library</h1>
         <p className="text-muted">Manage regulatory requirements for your product categories.</p>
       </div>
 

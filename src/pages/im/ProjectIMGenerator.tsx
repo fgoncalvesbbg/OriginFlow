@@ -707,7 +707,7 @@ const ProjectIMGenerator: React.FC = () => {
       return (
           <Layout>
               <div className="max-w-2xl mx-auto mt-10">
-                  <h1 className="text-3xl font-bold text-primary mb-6">Generate Instruction Manual</h2>
+                  <h1 className="text-3xl font-bold text-primary mb-6">Generate Instruction Manual</h1>
                   <div className="bg-white p-8 rounded-xl border border-gray-200 shadow">
                       <label className="block font-medium text-gray-700 mb-2">Select a Template</label>
                       <select className="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" onChange={handleTemplateSelect} defaultValue="">
