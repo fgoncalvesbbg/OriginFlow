@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { getSuppliers, getProjects, ensureSupplierToken, ensureSupplierAccessCode, regenerateSupplierAccessCode, updateSupplier } from '../services/apiService';
 import { Supplier, Project } from '../types';
-import { Truck, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, Key, RotateCcw } from 'lucide-react';
+import { Truck, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, Key, RotateCcw, Send } from 'lucide-react';
 import { useToast } from '../hooks/useToast';
 
 const SuppliersList: React.FC = () => {
@@ -127,6 +127,48 @@ const SuppliersList: React.FC = () => {
     setTimeout(() => setCopiedCodeFor(null), 2000);
   };
 
+  const handleCopyPortalLink = (supplier: Supplier) => {
+    if (!supplier.portalToken) {
+      error('Portal token not available');
+      return;
+    }
+    const link = `${window.location.origin}/#/supplier-dashboard/${supplier.portalToken}`;
+    navigator.clipboard.writeText(link);
+    success('Portal link copied to clipboard');
+  };
+
+  const handleEmailSupplier = async (supplier: Supplier) => {
+    if (!supplier.email) {
+      error('Supplier email not available');
+      return;
+    }
+
+    if (!supplier.portalToken) {
+      error('Portal token not available');
+      return;
+    }
+
+    const portalLink = `${window.location.origin}/#/supplier-dashboard/${supplier.portalToken}`;
+    const subject = 'Your OriginFlow Supplier Portal Access';
+    const emailBody = `Hello ${supplier.name},
+
+You now have access to the OriginFlow Supplier Portal. Use the information below to log in:
+
+Portal Link:
+${portalLink}
+
+Access Code:
+${supplier.accessCode}
+
+Please keep your access code safe and don't share it with others. If you have any questions, please reach out to your Project Manager.
+
+Best regards,
+OriginFlow Team`;
+
+    const mailtoLink = `mailto:${supplier.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+    window.location.href = mailtoLink;
+  };
+
   const filteredSuppliers = suppliers.filter(s =>
     s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -202,10 +244,10 @@ const SuppliersList: React.FC = () => {
                      </button>
 
                      {/* Access Code Section */}
-                     <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200">
-                       <p className="text-xs font-semibold text-indigo-700 uppercase mb-2">Portal Access Code</p>
+                     <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200 space-y-2">
+                       <p className="text-xs font-semibold text-indigo-700 uppercase">Portal Access Code</p>
                        {supplier.accessCode ? (
-                         <div className="space-y-2">
+                         <>
                            <div className="flex items-center gap-2">
                              <div className="flex-1 font-mono font-bold text-lg text-indigo-600 tracking-widest">
                                {supplier.accessCode}
@@ -218,6 +260,24 @@ const SuppliersList: React.FC = () => {
                                <Copy size={14} className={copiedCodeFor === supplier.id ? "text-green-600" : "text-indigo-600"} />
                              </button>
                            </div>
+                           <div className="grid grid-cols-2 gap-2">
+                             <button
+                               onClick={() => handleCopyPortalLink(supplier)}
+                               className="text-xs font-medium text-blue-700 py-1 px-2 bg-white border border-blue-200 rounded hover:bg-blue-50 transition-colors flex items-center justify-center gap-1"
+                               title="Copy portal link"
+                             >
+                               <Copy size={12} />
+                               Copy Link
+                             </button>
+                             <button
+                               onClick={() => handleEmailSupplier(supplier)}
+                               className="text-xs font-medium text-green-700 py-1 px-2 bg-white border border-green-200 rounded hover:bg-green-50 transition-colors flex items-center justify-center gap-1"
+                               title="Email supplier"
+                             >
+                               <Mail size={12} />
+                               Email
+                             </button>
+                           </div>
                            <button
                              onClick={() => setRegenerateConfirm(supplier.id)}
                              disabled={generatingCodeFor === supplier.id}
@@ -227,7 +287,7 @@ const SuppliersList: React.FC = () => {
                              <RotateCcw size={12} />
                              {generatingCodeFor === supplier.id ? 'Generating...' : 'Regenerate'}
                            </button>
-                         </div>
+                         </>
                        ) : (
                          <button
                            onClick={() => ensureAccessCode(supplier.id)}
@@ -248,10 +308,6 @@ const SuppliersList: React.FC = () => {
                          </button>
                        )}
                      </div>
-
-                     <p className="text-xs text-center text-gray-400">
-                       Share this code with your supplier.
-                     </p>
                   </div>
                </div>
              );

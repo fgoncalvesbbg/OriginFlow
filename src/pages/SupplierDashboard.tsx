@@ -8,7 +8,7 @@ import {
     logAccessCodeAttempt, getClientIP
 } from '../services/apiService';
 import { ensureSupplierAccessCode } from '../services/supplier/supplier.service';
-import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionUpdate, ProductionDelayReason } from '../types';
+import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { Box, ShieldCheck, ExternalLink, Calendar, LayoutDashboard, Clock, Bell, X, AlertCircle, FileText, ShoppingBag, Upload, CheckCircle, Factory, Key } from 'lucide-react';
 
@@ -65,6 +65,13 @@ const SupplierDashboard: React.FC = () => {
       setLoading(false);
       return;
     }
+
+    // Reset state when token changes
+    setIsAccessVerified(false);
+    setEnteredAccessCode('');
+    setSessionStartTime(null);
+    setError('');
+    setLoading(true);
 
     let isMounted = true;
     const controller = new AbortController();
