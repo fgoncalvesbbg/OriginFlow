@@ -5,11 +5,11 @@ import {
   getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate,
-  logAccessCodeAttempt
+  logAccessCodeAttempt, getSupplierProposals
 } from '../services/apiService';
-import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason } from '../types';
+import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload, Check } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -19,9 +19,17 @@ const SupplierDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [missingDocs, setMissingDocs] = useState<(ProjectDocument & { projectName: string, projectIdCode: string })[]>([]);
   const [openRfqs, setOpenRfqs] = useState<RFQEntry[]>([]);
+  const [proposals, setProposals] = useState<SupplierProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
+  const [submittingProposal, setSubmittingProposal] = useState(false);
+  const [proposalForm, setProposalForm] = useState({
+    title: '',
+    description: '',
+    fileUrl: ''
+  });
 
   // Manufacturing Widget Data
   const [projectsNeedingUpdate, setProjectsNeedingUpdate] = useState<{project: Project, daysUntilEtd: number}[]>([]);
@@ -112,12 +120,13 @@ const SupplierDashboard: React.FC = () => {
 
     const loadDashboardData = async () => {
       try {
-        const [pList, cList, nList, mDocs, rfqList] = await Promise.all([
+        const [pList, cList, nList, mDocs, rfqList, propList] = await Promise.all([
           getProjectsBySupplierToken(token!),
           getComplianceRequestsBySupplierId(supplier.id),
           getSupplierNotifications(supplier.id),
           getMissingDocumentsForSupplier(supplier.id),
-          getRFQsForSupplier(supplier.id)
+          getRFQsForSupplier(supplier.id),
+          getSupplierProposals(supplier.id)
         ]);
 
         if (!mounted) return;
@@ -127,6 +136,7 @@ const SupplierDashboard: React.FC = () => {
         setNotifications(nList);
         setMissingDocs(mDocs);
         setOpenRfqs(rfqList);
+        setProposals(propList);
 
         // Calculate Manufacturing Checks
         const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
@@ -240,6 +250,40 @@ const SupplierDashboard: React.FC = () => {
       alert("Delay reported successfully.");
     } catch (e) {
       alert("Error reporting delay.");
+    }
+  };
+
+  const handleSubmitProposal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supplier) return;
+
+    if (!proposalForm.title.trim() || !proposalForm.description.trim()) {
+      alert('Please fill in all required fields.');
+      return;
+    }
+
+    setSubmittingProposal(true);
+    try {
+      await createSupplierProposal(
+        supplier.id,
+        proposalForm.title,
+        proposalForm.description,
+        proposalForm.fileUrl
+      );
+
+      // Reset form and refresh proposals
+      setProposalForm({ title: '', description: '', fileUrl: '' });
+      setIsProposalModalOpen(false);
+
+      // Refresh proposals list
+      const updatedProposals = await getSupplierProposals(supplier.id);
+      setProposals(updatedProposals);
+
+      alert('Proposal submitted successfully!');
+    } catch (e) {
+      alert('Error submitting proposal. Please try again.');
+    } finally {
+      setSubmittingProposal(false);
     }
   };
 
@@ -453,34 +497,45 @@ const SupplierDashboard: React.FC = () => {
         )}
 
         {/* Compliance Section */}
-        {complianceReqs.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <ShieldCheck size={20} className="text-primary" />
-              Compliance Requests ({complianceReqs.length})
-            </h2>
+        <div className="mb-8">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <ShieldCheck size={20} className="text-primary" />
+            Compliance Requests ({complianceReqs.length})
+          </h2>
+          {complianceReqs.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-muted">
+              <p>No compliance requests at this time</p>
+            </div>
+          ) : (
             <div className="grid gap-4">
               {complianceReqs.map(c => (
                 <div key={c.id} className="bg-white rounded-lg shadow p-4">
-                  <h3 className="font-bold">{c.name}</h3>
-                  <p className="text-sm text-muted mt-1">{c.description}</p>
+                  <h3 className="font-bold">{c.requestId}</h3>
+                  <p className="text-sm text-muted mt-1">{c.projectName}</p>
+                  <div className="mt-2">
+                    <StatusBadge status={c.status} />
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Missing Documents */}
-        {missingDocs.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <FileText size={20} className="text-primary" />
-              Documents Needed ({missingDocs.length})
-            </h2>
+        <div className="mb-8">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <FileText size={20} className="text-primary" />
+            Documents Needed ({missingDocs.length})
+          </h2>
+          {missingDocs.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-muted">
+              <p>No documents required at this time</p>
+            </div>
+          ) : (
             <div className="grid gap-4">
               {missingDocs.map(d => (
                 <div key={d.id} className="bg-white rounded-lg shadow p-4 border-l-4 border-yellow-400">
-                  <h3 className="font-bold">{d.name}</h3>
+                  <h3 className="font-bold">{d.title}</h3>
                   <p className="text-sm text-muted">{d.projectName}</p>
                   {d.deadline && (
                     <p className="text-sm text-red-600 mt-2">
@@ -490,16 +545,20 @@ const SupplierDashboard: React.FC = () => {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* RFQs */}
-        {openRfqs.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <FileText size={20} className="text-primary" />
-              Open RFQs ({openRfqs.length})
-            </h2>
+        <div className="mb-8">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <ShoppingBag size={20} className="text-primary" />
+            Open RFQs ({openRfqs.length})
+          </h2>
+          {openRfqs.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-muted">
+              <p>No RFQs available at this time</p>
+            </div>
+          ) : (
             <div className="grid gap-4">
               {openRfqs.map(rfq => (
                 <div key={rfq.id} className="bg-white rounded-lg shadow p-4">
@@ -515,8 +574,70 @@ const SupplierDashboard: React.FC = () => {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* Proposals Section */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Upload size={20} className="text-primary" />
+              My Proposals ({proposals.length})
+            </h2>
+            <button
+              onClick={() => setIsProposalModalOpen(true)}
+              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition text-sm font-medium flex items-center gap-2"
+            >
+              <Upload size={16} />
+              Submit Proposal
+            </button>
           </div>
-        )}
+          {proposals.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center">
+              <Upload size={40} className="text-gray-300 mx-auto mb-4" />
+              <p className="text-muted mb-4">No proposals submitted yet</p>
+              <button
+                onClick={() => setIsProposalModalOpen(true)}
+                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition text-sm font-medium"
+              >
+                Submit Your First Proposal
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {proposals.map(p => (
+                <div key={p.id} className="bg-white rounded-lg shadow p-4 border-l-4 border-green-400">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h3 className="font-bold">{p.title}</h3>
+                      <p className="text-sm text-muted mt-1">{p.description}</p>
+                      <div className="mt-3 flex items-center gap-2">
+                        {p.status === 'new' ? (
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded flex items-center gap-1">
+                            <FileText size={12} />
+                            Pending Review
+                          </span>
+                        ) : p.status === 'approved' ? (
+                          <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded flex items-center gap-1">
+                            <Check size={12} />
+                            Approved
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded">
+                            {p.status}
+                          </span>
+                        )}
+                        <span className="text-xs text-muted">
+                          {new Date(p.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Update Modal */}
@@ -571,6 +692,100 @@ const SupplierDashboard: React.FC = () => {
                   className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark"
                 >
                   Report Delay
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Proposal Modal */}
+      {isProposalModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-lg w-full p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Upload size={20} className="text-primary" />
+                Submit a Proposal
+              </h2>
+              <button
+                onClick={() => setIsProposalModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitProposal} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Proposal Title <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={proposalForm.title}
+                  onChange={(e) => setProposalForm({ ...proposalForm, title: e.target.value })}
+                  placeholder="e.g., New Product Offering"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Description <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  value={proposalForm.description}
+                  onChange={(e) => setProposalForm({ ...proposalForm, description: e.target.value })}
+                  placeholder="Describe your proposal, including key features and benefits..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                  rows={4}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Document/File URL <span className="text-gray-500 text-xs">(optional)</span>
+                </label>
+                <input
+                  type="url"
+                  value={proposalForm.fileUrl}
+                  onChange={(e) => setProposalForm({ ...proposalForm, fileUrl: e.target.value })}
+                  placeholder="https://example.com/document.pdf"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              <p className="text-xs text-muted">
+                Submit your proposals, quotes, or business development ideas. Our team will review and respond within 2-3 business days.
+              </p>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsProposalModalOpen(false)}
+                  className="flex-1 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingProposal}
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+                >
+                  {submittingProposal ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={16} />
+                      Submit Proposal
+                    </>
+                  )}
                 </button>
               </div>
             </form>
