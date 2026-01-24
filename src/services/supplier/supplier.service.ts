@@ -112,8 +112,7 @@ export const ensureSupplierAccessCode = async (supplierId: string, signal?: Abor
         .update({ access_code: accessCode })
         .eq('id', supplierId)
         .select('access_code')
-        .single()
-        .abortSignal(signal);
+        .single();
 
     if (error) {
         console.error('Error creating access code:', error);
