@@ -80,7 +80,10 @@ const SuppliersList: React.FC = () => {
               setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, accessCode: code } : s));
               setSelectedSupplierForCode(prev => prev ? { ...prev, accessCode: code } : null);
           } catch (e: any) {
-              alert("Failed to generate access code: " + e.message);
+              const errorMsg = e.message || "Unknown error occurred";
+              console.error("Access code generation failed:", e);
+              alert(`Failed to generate access code: ${errorMsg}`);
+              setIsCodeModalOpen(false);
           } finally {
               setGeneratingCode(false);
           }
@@ -96,7 +99,9 @@ const SuppliersList: React.FC = () => {
           setSelectedSupplierForCode(prev => prev ? { ...prev, accessCode: code } : null);
           setCopiedCode(false);
       } catch (e: any) {
-          alert("Failed to regenerate access code: " + e.message);
+          const errorMsg = e.message || "Unknown error occurred";
+          console.error("Access code regeneration failed:", e);
+          alert(`Failed to regenerate access code: ${errorMsg}`);
       } finally {
           setGeneratingCode(false);
       }

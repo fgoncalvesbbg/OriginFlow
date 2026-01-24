@@ -50,9 +50,15 @@ const SupplierDashboard: React.FC = () => {
       setLoading(false);
       return;
     }
+
+    let isMounted = true;
+    const controller = new AbortController();
+
     const load = async () => {
       try {
         const sup = await getSupplierByToken(token);
+        if (!isMounted) return;
+
         if (!sup) {
           setError('Supplier not found. Please check your link.');
           setLoading(false);
@@ -64,30 +70,63 @@ const SupplierDashboard: React.FC = () => {
         if (!accessCode) {
           try {
             accessCode = await ensureSupplierAccessCode(sup.id);
+            if (!isMounted) return;
             sup.accessCode = accessCode;
-          } catch (err) {
+          } catch (err: any) {
+            if (!isMounted) return;
             console.error('Failed to generate access code:', err);
-            setError('Unable to configure access. Please contact support.');
+
+            if (err.message.includes('Supplier not found')) {
+              setError('Supplier record not found. Please contact support.');
+            } else if (err.message.includes('saved properly')) {
+              setError('Access configuration failed. Please refresh and try again.');
+            } else {
+              setError('Unable to configure access. Please try again or contact support.');
+            }
             setLoading(false);
             return;
           }
         }
 
         // Don't load full data yet - wait for access code verification
-        setSupplier(sup);
-        setLoading(false);
-      } catch (err) {
-        console.error(err);
-        setError('Failed to load portal.');
+        if (isMounted) {
+          setSupplier(sup);
+          setLoading(false);
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+
+        console.error('Portal load error:', err);
+
+        // Handle different error types
+        if (err.name === 'AbortError') {
+          // Silently ignore abort errors (user navigated away)
+          return;
+        } else if (err.message?.includes('timeout')) {
+          setError('Connection timed out. Please check your internet and try again.');
+        } else if (err.message?.includes('network')) {
+          setError('Network error. Please check your connection and try again.');
+        } else {
+          setError('Failed to load portal. Please refresh the page.');
+        }
         setLoading(false);
       }
     };
+
     load();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
   }, [token]);
 
   // Load supplier data after access code verification
   useEffect(() => {
     if (!isAccessVerified || !supplier) return;
+
+    let isMounted = true;
+    const controller = new AbortController();
 
     const loadDashboardData = async () => {
       try {
@@ -98,40 +137,66 @@ const SupplierDashboard: React.FC = () => {
           getMissingDocumentsForSupplier(supplier.id),
           getRFQsForSupplier(supplier.id)
         ]);
+
+        if (!isMounted) return;
+
         setProjects(pList);
         setComplianceReqs(cList);
         setNotifications(nList);
         setMissingDocs(mDocs);
         setOpenRfqs(rfqList);
 
-          // Calculate Manufacturing Checks
-          const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
-          
-          for (const p of pList) {
-              if (p.milestones?.etd && p.status === 'in_progress') {
-                  const etd = new Date(p.milestones.etd);
-                  const today = new Date();
-                  const diffTime = etd.getTime() - today.getTime();
-                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                  
-                  // Check triggers: 6 weeks (42 days), 4 weeks (28 days), 2 weeks (14 days)
-                  if ((diffDays <= 45 && diffDays >= 39) || (diffDays <= 30 && diffDays >= 25) || (diffDays <= 16 && diffDays >= 12)) {
-                      const updates = await getProductionUpdates(p.id);
-                      const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
-                      
-                      if (!recentUpdate) {
-                          needsUpdate.push({ project: p, daysUntilEtd: diffDays });
-                      }
-                  }
+        // Calculate Manufacturing Checks
+        const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
+
+        for (const p of pList) {
+          if (p.milestones?.etd && p.status === 'in_progress') {
+            const etd = new Date(p.milestones.etd);
+            const today = new Date();
+            const diffTime = etd.getTime() - today.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            // Check triggers: 6 weeks (42 days), 4 weeks (28 days), 2 weeks (14 days)
+            if ((diffDays <= 45 && diffDays >= 39) || (diffDays <= 30 && diffDays >= 25) || (diffDays <= 16 && diffDays >= 12)) {
+              const updates = await getProductionUpdates(p.id);
+              const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
+
+              if (!recentUpdate) {
+                needsUpdate.push({ project: p, daysUntilEtd: diffDays });
               }
+            }
           }
+        }
+
+        if (isMounted) {
           setProjectsNeedingUpdate(needsUpdate);
-      } catch (err) {
-          console.error(err);
-          setError('Failed to load dashboard data.');
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+
+        console.error('Dashboard data load error:', err);
+
+        // Handle different error types
+        if (err.name === 'AbortError') {
+          // Silently ignore abort errors (user navigated away)
+          return;
+        } else if (err.message?.includes('timeout')) {
+          setError('Failed to load some data. Please try refreshing.');
+        } else if (err.message?.includes('network')) {
+          setError('Network error loading dashboard. Please check your connection.');
+        } else {
+          // Don't show error for non-critical data load failures
+          console.warn('Non-critical data load failed, continuing...');
+        }
       }
     };
+
     loadDashboardData();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
   }, [token, supplier, isAccessVerified]);
 
   const handleVerifyAccessCode = (e: React.FormEvent) => {
@@ -139,16 +204,22 @@ const SupplierDashboard: React.FC = () => {
     setAccessCodeError('');
 
     if (!supplier?.accessCode) {
-      setAccessCodeError('Access code not available.');
+      setAccessCodeError('Access code not configured. Please refresh the page.');
+      return;
+    }
+
+    if (!enteredAccessCode || enteredAccessCode.length !== 6) {
+      setAccessCodeError('Please enter a valid 6-digit code.');
       return;
     }
 
     if (enteredAccessCode !== supplier.accessCode) {
-      setAccessCodeError('Invalid access code. Please try again.');
+      setAccessCodeError('Incorrect access code. Please try again.');
       setEnteredAccessCode('');
       return;
     }
 
+    setAccessCodeError('');
     setIsAccessVerified(true);
   };
 
@@ -228,7 +299,25 @@ const SupplierDashboard: React.FC = () => {
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   if (loading) return <div className="min-h-screen bg-light flex items-center justify-center text-muted">Loading Dashboard...</div>;
-  if (error) return <div className="min-h-screen bg-light flex items-center justify-center text-red-500 font-medium">{error}</div>;
+  if (error) return (
+    <div className="min-h-screen bg-light flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full border-l-4 border-red-500">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="text-red-500 flex-shrink-0 mt-1" size={24} />
+          <div>
+            <h2 className="text-lg font-bold text-gray-800 mb-2">Portal Error</h2>
+            <p className="text-gray-600 text-sm leading-relaxed mb-4">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full bg-indigo-600 text-white py-2 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
   if (!supplier) return null;
 
   return (
