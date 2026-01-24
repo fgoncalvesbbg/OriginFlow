@@ -120,7 +120,7 @@ const ComplianceDashboard: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
             <ShieldCheck className="text-indigo-600" /> Compliance Dashboard
-          </h2>
+          </h1>
           <p className="text-muted mt-1">Manage TCF requests and product compliance.</p>
         </div>
         <div className="flex gap-3">

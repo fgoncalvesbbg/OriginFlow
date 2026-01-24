@@ -81,7 +81,7 @@ const IMDashboard: React.FC = () => {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
            <BookOpen className="text-indigo-600" /> Instruction Manuals
-        </h2>
+        </h1>
         <p className="text-muted mt-1">Manage IM content templates for product categories.</p>
       </div>
 

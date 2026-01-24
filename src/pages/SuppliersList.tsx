@@ -123,7 +123,7 @@ const SuppliersList: React.FC = () => {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
            <Truck className="text-indigo-600" /> Suppliers Directory
-        </h2>
+        </h1>
         <p className="text-muted mt-1">Manage and access supplier portals.</p>
       </div>
 
