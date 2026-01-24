@@ -75,14 +75,7 @@ const SupplierDashboard: React.FC = () => {
           } catch (err: any) {
             if (!isMounted) return;
             console.error('Failed to generate access code:', err);
-
-            if (err.message.includes('Supplier not found')) {
-              setError('Supplier record not found. Please contact support.');
-            } else if (err.message.includes('saved properly')) {
-              setError('Access configuration failed. Please refresh and try again.');
-            } else {
-              setError('Unable to configure access. Please try again or contact support.');
-            }
+            setError('Unable to verify access. Please refresh the page and try again.');
             setLoading(false);
             return;
           }

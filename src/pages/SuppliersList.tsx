@@ -1,32 +1,45 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { getSuppliers, getProjects, ensureSupplierToken, ensureSupplierAccessCode, regenerateSupplierAccessCode, updateSupplier } from '../services/apiService';
-import { Supplier, Project, UserRole } from '../types';
-import { Truck, ExternalLink, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, Key, RotateCcw } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { Supplier, Project } from '../types';
+import { Truck, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, Key, RotateCcw } from 'lucide-react';
+import { useToast } from '../hooks/useToast';
 
 const SuppliersList: React.FC = () => {
-  const { user } = useAuth();
+  const { success, error } = useToast();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Edit State
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Access Code State
-  const [selectedSupplierForCode, setSelectedSupplierForCode] = useState<Supplier | null>(null);
-  const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
-  const [generatingCode, setGeneratingCode] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
+  // Access Code State - track which suppliers are generating codes
+  const [generatingCodeFor, setGeneratingCodeFor] = useState<string | null>(null);
+  const [copiedCodeFor, setCopiedCodeFor] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       const [sData, pData] = await Promise.all([getSuppliers(), getProjects()]);
-      setSuppliers(sData);
+
+      // Ensure all suppliers have access codes
+      const suppliersWithCodes = await Promise.all(
+        sData.map(async (supplier) => {
+          if (supplier.accessCode) return supplier;
+          try {
+            const code = await ensureSupplierAccessCode(supplier.id);
+            return { ...supplier, accessCode: code };
+          } catch (e) {
+            console.error(`Failed to generate code for supplier ${supplier.id}:`, e);
+            return supplier;
+          }
+        })
+      );
+
+      setSuppliers(suppliersWithCodes);
       setProjects(pData);
       setLoading(false);
     };
@@ -70,58 +83,51 @@ const SuppliersList: React.FC = () => {
       }
   };
 
-  const handleShowAccessCode = async (supplier: Supplier) => {
-      setSelectedSupplierForCode(supplier);
-      setIsCodeModalOpen(true);
-      if (!supplier.accessCode) {
-          setGeneratingCode(true);
-          try {
-              const code = await ensureSupplierAccessCode(supplier.id);
-              setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, accessCode: code } : s));
-              setSelectedSupplierForCode(prev => prev ? { ...prev, accessCode: code } : null);
-          } catch (e: any) {
-              const errorMsg = e.message || "Unknown error occurred";
-              console.error("Access code generation failed:", e);
-              alert(`Failed to generate access code: ${errorMsg}`);
-              setIsCodeModalOpen(false);
-          } finally {
-              setGeneratingCode(false);
-          }
-      }
+  const ensureAccessCode = async (supplierId: string): Promise<string | null> => {
+    const supplier = suppliers.find(s => s.id === supplierId);
+    if (supplier?.accessCode) return supplier.accessCode;
+
+    setGeneratingCodeFor(supplierId);
+    try {
+      const code = await ensureSupplierAccessCode(supplierId);
+      setSuppliers(prev => prev.map(s => s.id === supplierId ? { ...s, accessCode: code } : s));
+      return code;
+    } catch (e: any) {
+      console.error("Access code generation failed:", e);
+      error('Failed to generate access code. Please try again.');
+      return null;
+    } finally {
+      setGeneratingCodeFor(null);
+    }
   };
 
-  const handleRegenerateAccessCode = async () => {
-      if (!selectedSupplierForCode) return;
-      setGeneratingCode(true);
-      try {
-          const code = await regenerateSupplierAccessCode(selectedSupplierForCode.id);
-          setSuppliers(prev => prev.map(s => s.id === selectedSupplierForCode.id ? { ...s, accessCode: code } : s));
-          setSelectedSupplierForCode(prev => prev ? { ...prev, accessCode: code } : null);
-          setCopiedCode(false);
-      } catch (e: any) {
-          const errorMsg = e.message || "Unknown error occurred";
-          console.error("Access code regeneration failed:", e);
-          alert(`Failed to regenerate access code: ${errorMsg}`);
-      } finally {
-          setGeneratingCode(false);
-      }
+  const handleRegenerateAccessCode = async (supplierId: string) => {
+    setGeneratingCodeFor(supplierId);
+    try {
+      const code = await regenerateSupplierAccessCode(supplierId);
+      setSuppliers(prev => prev.map(s => s.id === supplierId ? { ...s, accessCode: code } : s));
+      success('New access code generated successfully');
+      setCopiedCodeFor(null);
+    } catch (e: any) {
+      console.error("Access code regeneration failed:", e);
+      error('Failed to regenerate access code. Please try again.');
+    } finally {
+      setGeneratingCodeFor(null);
+    }
   };
 
-  const handleCopyCode = () => {
-      if (selectedSupplierForCode?.accessCode) {
-          navigator.clipboard.writeText(selectedSupplierForCode.accessCode);
-          setCopiedCode(true);
-          setTimeout(() => setCopiedCode(false), 2000);
-      }
+  const handleCopyCode = (supplierId: string, accessCode: string) => {
+    navigator.clipboard.writeText(accessCode);
+    setCopiedCodeFor(supplierId);
+    success('Access code copied to clipboard');
+    setTimeout(() => setCopiedCodeFor(null), 2000);
   };
 
-  const filteredSuppliers = suppliers.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredSuppliers = suppliers.filter(s =>
+    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  const canEdit = user?.role === UserRole.ADMIN || user?.role === UserRole.PM;
 
   return (
     <Layout>
@@ -158,15 +164,13 @@ const SuppliersList: React.FC = () => {
              const activeCount = getActiveProjectCount(supplier.id);
              return (
                <div key={supplier.id} className="bg-white border border-gray-200 rounded-xl shadow hover:shadow-md transition-shadow p-6 flex flex-col group relative">
-                  {canEdit && (
-                      <button 
-                        onClick={() => handleEdit(supplier)}
-                        className="absolute top-4 right-4 p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                        title="Edit Supplier Info"
-                      >
-                          <Edit2 size={16} />
-                      </button>
-                  )}
+                  <button
+                    onClick={() => handleEdit(supplier)}
+                    className="absolute top-4 right-4 p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                    title="Edit Supplier Info"
+                  >
+                      <Edit2 size={16} />
+                  </button>
                   
                   <div className="flex justify-between items-start mb-4">
                      <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-bold text-lg">
@@ -185,21 +189,63 @@ const SuppliersList: React.FC = () => {
                      <span className="text-sm font-medium text-gray-700">{activeCount} Active Projects</span>
                   </div>
 
-                  <div className="mt-auto space-y-2">
+                  <div className="mt-auto space-y-3">
                      <button
                        onClick={() => handleOpenPortal(supplier)}
                        className="w-full flex items-center justify-center gap-2 bg-primary text-white py-2.5 rounded-xl font-medium hover:bg-indigo-600 transition-colors"
                      >
                        <LayoutDashboard size={16} /> View Supplier Portal
                      </button>
-                     <button
-                       onClick={() => handleShowAccessCode(supplier)}
-                       className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-600 py-2 rounded-xl font-medium hover:bg-indigo-100 transition-colors border border-indigo-200"
-                     >
-                       <Key size={16} /> Access Code
-                     </button>
+
+                     {/* Access Code Section */}
+                     <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-200">
+                       <p className="text-xs font-semibold text-indigo-700 uppercase mb-2">Portal Access Code</p>
+                       {supplier.accessCode ? (
+                         <div className="space-y-2">
+                           <div className="flex items-center gap-2">
+                             <div className="flex-1 font-mono font-bold text-lg text-indigo-600 tracking-widest">
+                               {supplier.accessCode}
+                             </div>
+                             <button
+                               onClick={() => handleCopyCode(supplier.id, supplier.accessCode!)}
+                               title="Copy code"
+                               className="p-1.5 bg-white rounded hover:bg-indigo-100 transition-colors"
+                             >
+                               <Copy size={14} className={copiedCodeFor === supplier.id ? "text-green-600" : "text-indigo-600"} />
+                             </button>
+                           </div>
+                           <button
+                             onClick={() => handleRegenerateAccessCode(supplier.id)}
+                             disabled={generatingCodeFor === supplier.id}
+                             className="w-full text-xs font-medium text-indigo-700 py-1 px-2 bg-white rounded hover:bg-indigo-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                           >
+                             <RotateCcw size={12} />
+                             {generatingCodeFor === supplier.id ? 'Generating...' : 'Regenerate'}
+                           </button>
+                         </div>
+                       ) : (
+                         <button
+                           onClick={() => ensureAccessCode(supplier.id)}
+                           disabled={generatingCodeFor === supplier.id}
+                           className="w-full bg-white text-indigo-600 font-medium py-1.5 rounded hover:bg-indigo-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                         >
+                           {generatingCodeFor === supplier.id ? (
+                             <>
+                               <Loader2 size={14} className="animate-spin" />
+                               Generating...
+                             </>
+                           ) : (
+                             <>
+                               <Key size={14} />
+                               Generate Code
+                             </>
+                           )}
+                         </button>
+                       )}
+                     </div>
+
                      <p className="text-xs text-center text-gray-400">
-                       Opens the view exactly as seen by the supplier.
+                       Share this code with your supplier.
                      </p>
                   </div>
                </div>
@@ -261,75 +307,6 @@ const SuppliersList: React.FC = () => {
           </div>
       )}
 
-      {/* Access Code Modal */}
-      {isCodeModalOpen && selectedSupplierForCode && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-                  <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 px-6 py-6 flex justify-between items-start">
-                      <div>
-                          <h3 className="font-bold text-lg text-white">Portal Access Code</h3>
-                          <p className="text-indigo-100 text-sm mt-1">{selectedSupplierForCode.name}</p>
-                      </div>
-                      <button onClick={() => setIsCodeModalOpen(false)} className="text-indigo-200 hover:text-white"><X size={20}/></button>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      {generatingCode ? (
-                          <div className="flex items-center justify-center py-8">
-                              <Loader2 size={24} className="animate-spin text-indigo-600" />
-                          </div>
-                      ) : selectedSupplierForCode.accessCode ? (
-                          <>
-                              <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4">
-                                  <p className="text-xs text-gray-600 font-semibold uppercase mb-2">Access Code</p>
-                                  <div className="flex items-center gap-3">
-                                      <div className="text-4xl font-mono font-bold text-indigo-600 tracking-widest">
-                                          {selectedSupplierForCode.accessCode}
-                                      </div>
-                                      <button
-                                          onClick={handleCopyCode}
-                                          className="p-2 bg-white border border-indigo-200 rounded-xl hover:bg-indigo-50 transition-colors"
-                                          title="Copy code to clipboard"
-                                      >
-                                          <Copy size={18} className={copiedCode ? "text-emerald-600" : "text-indigo-600"} />
-                                      </button>
-                                  </div>
-                                  {copiedCode && <p className="text-xs text-emerald-600 mt-2 font-medium">Copied to clipboard!</p>}
-                              </div>
-                              <div className="bg-light rounded-xl p-4 space-y-3">
-                                  <p className="text-sm text-gray-700">
-                                      <strong>This code is required for suppliers to access:</strong>
-                                  </p>
-                                  <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
-                                      <li>Supplier Portal (all portals)</li>
-                                      <li>Compliance requests (TCF)</li>
-                                      <li>Document uploads</li>
-                                      <li>RFQ submissions</li>
-                                  </ul>
-                                  <p className="text-xs text-muted mt-3">
-                                      Share this code via email or other secure channel.
-                                  </p>
-                              </div>
-                              <button
-                                  onClick={handleRegenerateAccessCode}
-                                  disabled={generatingCode}
-                                  className="w-full flex items-center justify-center gap-2 bg-amber-50 text-amber-600 py-2.5 rounded-xl font-medium hover:bg-orange-100 transition-colors border border-amber-200 disabled:opacity-50"
-                              >
-                                  <RotateCcw size={16} /> Regenerate Code
-                              </button>
-                          </>
-                      ) : (
-                          <p className="text-gray-600 text-center">Failed to generate access code. Please try again.</p>
-                      )}
-                      <button
-                          onClick={() => setIsCodeModalOpen(false)}
-                          className="w-full px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl text-sm font-medium transition-colors"
-                      >
-                          Done
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
     </Layout>
   );
 };
