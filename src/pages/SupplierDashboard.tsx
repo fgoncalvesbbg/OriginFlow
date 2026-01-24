@@ -4,12 +4,12 @@ import { useParams } from 'react-router-dom';
 import {
   getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
-  getRFQsForSupplier, createSupplierProposal, getProductionUpdates, saveProductionUpdate,
-  logAccessCodeAttempt, getSupplierProposals
+  getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
+  logAccessCodeAttempt, submitRFQEntry
 } from '../services/apiService';
-import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal } from '../types';
+import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload, Check } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -19,16 +19,20 @@ const SupplierDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [missingDocs, setMissingDocs] = useState<(ProjectDocument & { projectName: string, projectIdCode: string })[]>([]);
   const [openRfqs, setOpenRfqs] = useState<RFQEntry[]>([]);
-  const [proposals, setProposals] = useState<SupplierProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
-  const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
-  const [submittingProposal, setSubmittingProposal] = useState(false);
-  const [proposalForm, setProposalForm] = useState({
-    title: '',
-    description: '',
-    fileUrl: ''
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
+  const [submittingQuote, setSubmittingQuote] = useState(false);
+  const [selectedRfqForQuote, setSelectedRfqForQuote] = useState<RFQEntry | null>(null);
+  const [quoteForm, setQuoteForm] = useState({
+    unitPrice: '',
+    moq: '',
+    leadTimeWeeks: '',
+    toolingCost: '',
+    currency: 'USD',
+    supplierNotes: '',
+    quoteFileUrl: ''
   });
 
   // Manufacturing Widget Data
@@ -120,13 +124,12 @@ const SupplierDashboard: React.FC = () => {
 
     const loadDashboardData = async () => {
       try {
-        const [pList, cList, nList, mDocs, rfqList, propList] = await Promise.all([
+        const [pList, cList, nList, mDocs, rfqList] = await Promise.all([
           getProjectsBySupplierToken(token!),
           getComplianceRequestsBySupplierId(supplier.id),
           getSupplierNotifications(supplier.id),
           getMissingDocumentsForSupplier(supplier.id),
-          getRFQsForSupplier(supplier.id),
-          getSupplierProposals(supplier.id)
+          getRFQsForSupplier(supplier.id)
         ]);
 
         if (!mounted) return;
@@ -136,7 +139,6 @@ const SupplierDashboard: React.FC = () => {
         setNotifications(nList);
         setMissingDocs(mDocs);
         setOpenRfqs(rfqList);
-        setProposals(propList);
 
         // Calculate Manufacturing Checks
         const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
@@ -253,37 +255,49 @@ const SupplierDashboard: React.FC = () => {
     }
   };
 
-  const handleSubmitProposal = async (e: React.FormEvent) => {
+  const handleSubmitQuote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supplier) return;
+    if (!selectedRfqForQuote) return;
 
-    if (!proposalForm.title.trim() || !proposalForm.description.trim()) {
-      alert('Please fill in all required fields.');
+    if (!quoteForm.unitPrice) {
+      alert('Please enter a unit price.');
       return;
     }
 
-    setSubmittingProposal(true);
+    setSubmittingQuote(true);
     try {
-      await createSupplierProposal(
-        supplier.id,
-        proposalForm.title,
-        proposalForm.description,
-        proposalForm.fileUrl
-      );
+      await submitRFQEntry(selectedRfqForQuote.id, {
+        unitPrice: parseFloat(quoteForm.unitPrice),
+        moq: quoteForm.moq ? parseInt(quoteForm.moq) : undefined,
+        leadTimeWeeks: quoteForm.leadTimeWeeks ? parseInt(quoteForm.leadTimeWeeks) : undefined,
+        toolingCost: quoteForm.toolingCost ? parseFloat(quoteForm.toolingCost) : undefined,
+        currency: quoteForm.currency,
+        supplierNotes: quoteForm.supplierNotes,
+        quoteFileUrl: quoteForm.quoteFileUrl
+      });
 
-      // Reset form and refresh proposals
-      setProposalForm({ title: '', description: '', fileUrl: '' });
-      setIsProposalModalOpen(false);
+      // Reset form
+      setQuoteForm({
+        unitPrice: '',
+        moq: '',
+        leadTimeWeeks: '',
+        toolingCost: '',
+        currency: 'USD',
+        supplierNotes: '',
+        quoteFileUrl: ''
+      });
+      setIsQuoteModalOpen(false);
+      setSelectedRfqForQuote(null);
 
-      // Refresh proposals list
-      const updatedProposals = await getSupplierProposals(supplier.id);
-      setProposals(updatedProposals);
+      // Refresh RFQs list
+      const updatedRfqs = await getRFQsForSupplier(supplier!.id);
+      setOpenRfqs(updatedRfqs);
 
-      alert('Proposal submitted successfully!');
+      alert('Quote submitted successfully! Your quote is now visible to the PM.');
     } catch (e) {
-      alert('Error submitting proposal. Please try again.');
+      alert('Error submitting quote. Please try again.');
     } finally {
-      setSubmittingProposal(false);
+      setSubmittingQuote(false);
     }
   };
 
@@ -562,82 +576,53 @@ const SupplierDashboard: React.FC = () => {
             <div className="grid gap-4">
               {openRfqs.map(rfq => (
                 <div key={rfq.id} className="bg-white rounded-lg shadow p-4">
-                  <h3 className="font-bold">{rfq.rfqTitle}</h3>
-                  <p className="text-sm text-muted">{rfq.rfqIdentifier}</p>
-                  <div className="mt-2 flex gap-2">
-                    {rfq.status === 'open' && (
-                      <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">
-                        Open for Quotes
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1">
+                      <h3 className="font-bold">{rfq.rfqTitle}</h3>
+                      <p className="text-sm text-muted">{rfq.rfqIdentifier}</p>
+                    </div>
+                    {rfq.status === 'pending' ? (
+                      <button
+                        onClick={() => {
+                          setSelectedRfqForQuote(rfq);
+                          setIsQuoteModalOpen(true);
+                        }}
+                        className="ml-4 px-3 py-1 bg-primary text-white rounded text-sm hover:bg-primary-dark transition whitespace-nowrap"
+                      >
+                        Submit Quote
+                      </button>
+                    ) : rfq.status === 'submitted' ? (
+                      <span className="ml-4 px-3 py-1 bg-blue-100 text-blue-800 text-xs rounded font-medium whitespace-nowrap">
+                        Quote Submitted
+                      </span>
+                    ) : (
+                      <span className="ml-4 px-3 py-1 bg-gray-100 text-gray-800 text-xs rounded font-medium whitespace-nowrap">
+                        {rfq.status}
                       </span>
                     )}
                   </div>
+                  {rfq.status === 'submitted' && rfq.unitPrice && (
+                    <div className="mt-3 pt-3 border-t border-gray-200 text-sm">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-muted text-xs">Unit Price</p>
+                          <p className="font-bold">{rfq.currency || 'USD'} {rfq.unitPrice}</p>
+                        </div>
+                        {rfq.leadTimeWeeks && (
+                          <div>
+                            <p className="text-muted text-xs">Lead Time</p>
+                            <p className="font-bold">{rfq.leadTimeWeeks} weeks</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Proposals Section */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <Upload size={20} className="text-primary" />
-              My Proposals ({proposals.length})
-            </h2>
-            <button
-              onClick={() => setIsProposalModalOpen(true)}
-              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition text-sm font-medium flex items-center gap-2"
-            >
-              <Upload size={16} />
-              Submit Proposal
-            </button>
-          </div>
-          {proposals.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-8 text-center">
-              <Upload size={40} className="text-gray-300 mx-auto mb-4" />
-              <p className="text-muted mb-4">No proposals submitted yet</p>
-              <button
-                onClick={() => setIsProposalModalOpen(true)}
-                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition text-sm font-medium"
-              >
-                Submit Your First Proposal
-              </button>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {proposals.map(p => (
-                <div key={p.id} className="bg-white rounded-lg shadow p-4 border-l-4 border-green-400">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-bold">{p.title}</h3>
-                      <p className="text-sm text-muted mt-1">{p.description}</p>
-                      <div className="mt-3 flex items-center gap-2">
-                        {p.status === 'new' ? (
-                          <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded flex items-center gap-1">
-                            <FileText size={12} />
-                            Pending Review
-                          </span>
-                        ) : p.status === 'approved' ? (
-                          <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded flex items-center gap-1">
-                            <Check size={12} />
-                            Approved
-                          </span>
-                        ) : (
-                          <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded">
-                            {p.status}
-                          </span>
-                        )}
-                        <span className="text-xs text-muted">
-                          {new Date(p.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Update Modal */}
@@ -699,83 +684,140 @@ const SupplierDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Proposal Modal */}
-      {isProposalModalOpen && (
+      {/* Quote Submission Modal */}
+      {isQuoteModalOpen && selectedRfqForQuote && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-lg w-full p-6">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <Upload size={20} className="text-primary" />
-                Submit a Proposal
-              </h2>
+              <div>
+                <h2 className="text-xl font-bold">{selectedRfqForQuote.rfqTitle}</h2>
+                <p className="text-sm text-muted mt-1">{selectedRfqForQuote.rfqIdentifier}</p>
+              </div>
               <button
-                onClick={() => setIsProposalModalOpen(false)}
+                onClick={() => {
+                  setIsQuoteModalOpen(false);
+                  setSelectedRfqForQuote(null);
+                  setQuoteForm({
+                    unitPrice: '',
+                    moq: '',
+                    leadTimeWeeks: '',
+                    toolingCost: '',
+                    currency: 'USD',
+                    supplierNotes: '',
+                    quoteFileUrl: ''
+                  });
+                }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X size={24} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmitProposal} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Proposal Title <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={proposalForm.title}
-                  onChange={(e) => setProposalForm({ ...proposalForm, title: e.target.value })}
-                  placeholder="e.g., New Product Offering"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                  required
-                />
+            <form onSubmit={handleSubmitQuote} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Unit Price <span className="text-red-600">*</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={quoteForm.currency}
+                      onChange={(e) => setQuoteForm({ ...quoteForm, currency: e.target.value })}
+                      className="px-2 py-2 border border-gray-300 rounded-lg"
+                    >
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                      <option value="GBP">GBP</option>
+                      <option value="CNY">CNY</option>
+                    </select>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={quoteForm.unitPrice}
+                      onChange={(e) => setQuoteForm({ ...quoteForm, unitPrice: e.target.value })}
+                      placeholder="0.00"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">MOQ</label>
+                  <input
+                    type="number"
+                    value={quoteForm.moq}
+                    onChange={(e) => setQuoteForm({ ...quoteForm, moq: e.target.value })}
+                    placeholder="Minimum order qty"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Lead Time (weeks)</label>
+                  <input
+                    type="number"
+                    value={quoteForm.leadTimeWeeks}
+                    onChange={(e) => setQuoteForm({ ...quoteForm, leadTimeWeeks: e.target.value })}
+                    placeholder="e.g., 4"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Tooling Cost</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={quoteForm.toolingCost}
+                    onChange={(e) => setQuoteForm({ ...quoteForm, toolingCost: e.target.value })}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">
-                  Description <span className="text-red-600">*</span>
-                </label>
+                <label className="block text-sm font-medium mb-2">Notes</label>
                 <textarea
-                  value={proposalForm.description}
-                  onChange={(e) => setProposalForm({ ...proposalForm, description: e.target.value })}
-                  placeholder="Describe your proposal, including key features and benefits..."
+                  value={quoteForm.supplierNotes}
+                  onChange={(e) => setQuoteForm({ ...quoteForm, supplierNotes: e.target.value })}
+                  placeholder="Add any additional notes about your quote..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                  rows={4}
-                  required
+                  rows={3}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">
-                  Document/File URL <span className="text-gray-500 text-xs">(optional)</span>
-                </label>
+                <label className="block text-sm font-medium mb-2">Quote Document URL</label>
                 <input
                   type="url"
-                  value={proposalForm.fileUrl}
-                  onChange={(e) => setProposalForm({ ...proposalForm, fileUrl: e.target.value })}
-                  placeholder="https://example.com/document.pdf"
+                  value={quoteForm.quoteFileUrl}
+                  onChange={(e) => setQuoteForm({ ...quoteForm, quoteFileUrl: e.target.value })}
+                  placeholder="https://example.com/quote.pdf"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
                 />
               </div>
-
-              <p className="text-xs text-muted">
-                Submit your proposals, quotes, or business development ideas. Our team will review and respond within 2-3 business days.
-              </p>
 
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setIsProposalModalOpen(false)}
+                  onClick={() => {
+                    setIsQuoteModalOpen(false);
+                    setSelectedRfqForQuote(null);
+                  }}
                   className="flex-1 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingProposal}
+                  disabled={submittingQuote}
                   className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 font-medium flex items-center justify-center gap-2"
                 >
-                  {submittingProposal ? (
+                  {submittingQuote ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       Submitting...
@@ -783,7 +825,7 @@ const SupplierDashboard: React.FC = () => {
                   ) : (
                     <>
                       <Upload size={16} />
-                      Submit Proposal
+                      Submit Quote
                     </>
                   )}
                 </button>

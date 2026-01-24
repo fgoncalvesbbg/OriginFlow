@@ -941,7 +941,10 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
 export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId);
-    if (error) return [];
+    if (error) {
+        console.warn('Failed to fetch compliance requests by supplier:', error);
+        return [];
+    }
     return (data || []).map(mapComplianceRequest);
 };
 
