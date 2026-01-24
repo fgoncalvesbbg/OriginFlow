@@ -57,7 +57,7 @@ const SuppliersList: React.FC = () => {
     try {
         const token = await ensureSupplierToken(supplier.id);
         setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, portalToken: token } : s));
-        const url = `#/supplier-dashboard/${token}`;
+        const url = `${window.location.origin}/#/supplier-dashboard/${token}`;
         window.open(url, '_blank');
     } catch (e: any) {
         console.error("Failed to access supplier portal", e);

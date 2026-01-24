@@ -336,16 +336,16 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
     return undefined;
 };
 
-export const getProjectsBySupplierId = async (supplierId: string): Promise<Project[]> => {
+export const getProjectsBySupplierId = async (supplierId: string, signal?: AbortSignal): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId);
+    const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId).abortSignal(signal);
     if (error) return [];
     return (data || []).map(mapProject);
 };
 
-export const getProjectsBySupplierToken = async (token: string): Promise<Project[]> => {
+export const getProjectsBySupplierToken = async (token: string, signal?: AbortSignal): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token });
+    const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token }).abortSignal(signal);
     if (error) return [];
     return (data || []).map(mapProject);
 };
@@ -356,12 +356,13 @@ export const saveProjectMilestones = async (projectId: string, milestones: Proje
 
 // --- Manufacturing / Production Updates ---
 
-export const getProductionUpdates = async (projectId: string): Promise<ProductionUpdate[]> => {
+export const getProductionUpdates = async (projectId: string, signal?: AbortSignal): Promise<ProductionUpdate[]> => {
     if (!isLive) return [];
     const { data, error } = await supabase.from('production_updates')
         .select('*')
         .eq('project_id', projectId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal);
     if (error) return [];
     return (data || []).map(mapProductionUpdate);
 };
@@ -725,21 +726,22 @@ export const addDocumentComment = async (docId: string, content: string, authorN
     };
 };
 
-export const getMissingDocumentsForSupplier = async (supplierId: string): Promise<(ProjectDocument & { projectName: string, projectIdCode: string })[]> => {
+export const getMissingDocumentsForSupplier = async (supplierId: string, signal?: AbortSignal): Promise<(ProjectDocument & { projectName: string, projectIdCode: string })[]> => {
     if (!isLive) return [];
-    const projects = await getProjectsBySupplierId(supplierId);
+    const projects = await getProjectsBySupplierId(supplierId, signal);
     const activeProjects = projects.filter(p => p.status !== ProjectOverallStatus.ARCHIVED && p.status !== ProjectOverallStatus.CANCELLED && p.status !== ProjectOverallStatus.COMPLETED);
-    
+
     if (activeProjects.length === 0) return [];
 
     const projectIds = activeProjects.map(p => p.id);
-    
+
     const { data: docs, error } = await portalClient.from('project_documents')
         .select('*')
         .in('project_id', projectIds)
         .eq('responsible_party', 'supplier')
         .neq('status', 'approved')
-        .neq('status', 'uploaded');
+        .neq('status', 'uploaded')
+        .abortSignal(signal);
 
     if (error) return [];
 
@@ -830,9 +832,9 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
     } as any;
 };
 
-export const getSupplierNotifications = async (supplierId: string): Promise<Notification[]> => {
+export const getSupplierNotifications = async (supplierId: string, signal?: AbortSignal): Promise<Notification[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId);
+    const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId).abortSignal(signal);
     if (error) return [];
     return (data || []).map((n: any) => ({
         id: n.id,
@@ -956,9 +958,9 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
     await supabase.from('compliance_requests').delete().eq('id', id);
 };
 
-export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
+export const getComplianceRequestsBySupplierId = async (supplierId: string, signal?: AbortSignal): Promise<ComplianceRequest[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId);
+    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId).abortSignal(signal);
     if (error) return [];
     return (data || []).map(mapComplianceRequest);
 };
@@ -1307,15 +1309,16 @@ export const getRFQs = async (): Promise<RFQ[]> => {
     return (data || []).map(mapRFQ);
 };
 
-export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]> => {
+export const getRFQsForSupplier = async (supplierId: string, signal?: AbortSignal): Promise<RFQEntry[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.from('rfq_entries')
         .select('*, rfqs!inner(*)')
         .eq('supplier_id', supplierId)
-        .eq('rfqs.status', 'open');
-        
+        .eq('rfqs.status', 'open')
+        .abortSignal(signal);
+
     if (error) return [];
-    
+
     return (data || []).map((e: any) => ({
       id: e.id,
       rfqId: e.rfq_id,
@@ -1532,9 +1535,9 @@ export const createSupplierProposal = async (supplierId: string, title: string, 
 /**
  * Get client IP address
  */
-export const getClientIP = async (): Promise<string> => {
+export const getClientIP = async (signal?: AbortSignal): Promise<string> => {
     try {
-        const response = await fetch('https://api.ipify.org?format=json', { mode: 'cors' });
+        const response = await fetch('https://api.ipify.org?format=json', { mode: 'cors', signal });
         const data = await response.json();
         return data.ip || 'unknown';
     } catch (e) {

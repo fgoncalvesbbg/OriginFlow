@@ -25,9 +25,9 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
 /**
  * Get supplier by ID
  */
-export const getSupplierById = async (id: string): Promise<Supplier | undefined> => {
+export const getSupplierById = async (id: string, signal?: AbortSignal): Promise<Supplier | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await supabase.from('suppliers').select('*').eq('id', id).single();
+    const { data, error } = await supabase.from('suppliers').select('*').eq('id', id).single().abortSignal(signal);
     if (error || !data) return undefined;
     return mapSupplier(data);
 };
@@ -35,9 +35,9 @@ export const getSupplierById = async (id: string): Promise<Supplier | undefined>
 /**
  * Get supplier by portal token
  */
-export const getSupplierByToken = async (token: string): Promise<Supplier | undefined> => {
+export const getSupplierByToken = async (token: string, signal?: AbortSignal): Promise<Supplier | undefined> => {
     if (!isLive) return undefined;
-    const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle();
+    const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle().abortSignal(signal);
     if (error) return undefined;
     return data ? mapSupplier(data) : undefined;
 };
@@ -95,10 +95,10 @@ export const ensureSupplierToken = async (supplierId: string): Promise<string> =
 /**
  * Ensure supplier has an access code (create if doesn't exist)
  */
-export const ensureSupplierAccessCode = async (supplierId: string): Promise<string> => {
+export const ensureSupplierAccessCode = async (supplierId: string, signal?: AbortSignal): Promise<string> => {
     if (!supplierId) throw new Error("Supplier ID is required");
 
-    const sup = await getSupplierById(supplierId);
+    const sup = await getSupplierById(supplierId, signal);
     if (!sup) throw new Error("Supplier not found");
     if (sup.accessCode) return sup.accessCode;
 
@@ -112,7 +112,8 @@ export const ensureSupplierAccessCode = async (supplierId: string): Promise<stri
         .update({ access_code: accessCode })
         .eq('id', supplierId)
         .select('access_code')
-        .single();
+        .single()
+        .abortSignal(signal);
 
     if (error) {
         console.error('Error creating access code:', error);

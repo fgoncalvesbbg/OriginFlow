@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
     getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
@@ -42,11 +42,21 @@ const SupplierDashboard: React.FC = () => {
 
   // Get client IP on component mount
   useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+
     const fetchIP = async () => {
-      const ip = await getClientIP();
-      setClientIP(ip);
+      const ip = await getClientIP(controller.signal);
+      if (isMounted) {
+        setClientIP(ip);
+      }
     };
     fetchIP();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
   }, []);
 
   // Access Code Verification
@@ -72,13 +82,21 @@ const SupplierDashboard: React.FC = () => {
     setSessionStartTime(null);
     setError('');
     setLoading(true);
+    setSupplier(null);
+    setProjects([]);
+    setComplianceReqs([]);
+    setNotifications([]);
+    setMissingDocs([]);
+    setOpenRfqs([]);
+    setProjectsNeedingUpdate([]);
+    setShowNotifications(false);
 
     let isMounted = true;
     const controller = new AbortController();
 
     const load = async () => {
       try {
-        const sup = await getSupplierByToken(token);
+        const sup = await getSupplierByToken(token, controller.signal);
         if (!isMounted) return;
 
         if (!sup) {
@@ -91,7 +109,7 @@ const SupplierDashboard: React.FC = () => {
         let accessCode = sup.accessCode;
         if (!accessCode) {
           try {
-            accessCode = await ensureSupplierAccessCode(sup.id);
+            accessCode = await ensureSupplierAccessCode(sup.id, controller.signal);
             if (!isMounted) return;
             sup.accessCode = accessCode;
           } catch (err: any) {
@@ -138,27 +156,23 @@ const SupplierDashboard: React.FC = () => {
 
   // Session timeout - log out after 60 minutes of access
   useEffect(() => {
-    if (!isAccessVerified || !supplier) return;
-
-    // Set session start time
-    if (!sessionStartTime) {
-      setSessionStartTime(Date.now());
-      return;
-    }
+    if (!sessionStartTime) return;
 
     // Check if session has expired
-    const timer = setInterval(() => {
+    const intervalId = setInterval(() => {
       const elapsed = Date.now() - sessionStartTime;
       if (elapsed > SESSION_TIMEOUT) {
         setIsAccessVerified(false);
         setEnteredAccessCode('');
         setError('Your session has expired. Please enter your access code again.');
-        clearInterval(timer);
       }
     }, 60000); // Check every minute
 
-    return () => clearInterval(timer);
-  }, [isAccessVerified, supplier, sessionStartTime]);
+    return () => clearInterval(intervalId);
+  }, [sessionStartTime]);
+
+  // Request tracking to ignore stale responses
+  const requestIdRef = useRef(0);
 
   // Load supplier data after access code verification
   useEffect(() => {
@@ -166,18 +180,20 @@ const SupplierDashboard: React.FC = () => {
 
     let isMounted = true;
     const controller = new AbortController();
+    const currentRequestId = ++requestIdRef.current;
 
     const loadDashboardData = async () => {
       try {
         const [pList, cList, nList, mDocs, rfqList] = await Promise.all([
-          getProjectsBySupplierToken(token!),
-          getComplianceRequestsBySupplierId(supplier.id),
-          getSupplierNotifications(supplier.id),
-          getMissingDocumentsForSupplier(supplier.id),
-          getRFQsForSupplier(supplier.id)
+          getProjectsBySupplierToken(token!, controller.signal),
+          getComplianceRequestsBySupplierId(supplier.id, controller.signal),
+          getSupplierNotifications(supplier.id, controller.signal),
+          getMissingDocumentsForSupplier(supplier.id, controller.signal),
+          getRFQsForSupplier(supplier.id, controller.signal)
         ]);
 
-        if (!isMounted) return;
+        // Ignore stale responses
+        if (currentRequestId !== requestIdRef.current || !isMounted) return;
 
         setProjects(pList);
         setComplianceReqs(cList);
@@ -197,7 +213,7 @@ const SupplierDashboard: React.FC = () => {
 
             // Check triggers: 6 weeks (42 days), 4 weeks (28 days), 2 weeks (14 days)
             if ((diffDays <= 45 && diffDays >= 39) || (diffDays <= 30 && diffDays >= 25) || (diffDays <= 16 && diffDays >= 12)) {
-              const updates = await getProductionUpdates(p.id);
+              const updates = await getProductionUpdates(p.id, controller.signal);
               const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
 
               if (!recentUpdate) {
@@ -207,9 +223,10 @@ const SupplierDashboard: React.FC = () => {
           }
         }
 
-        if (isMounted) {
-          setProjectsNeedingUpdate(needsUpdate);
-        }
+        // Ignore stale responses again before setting final state
+        if (currentRequestId !== requestIdRef.current || !isMounted) return;
+
+        setProjectsNeedingUpdate(needsUpdate);
       } catch (err: any) {
         if (!isMounted) return;
 
