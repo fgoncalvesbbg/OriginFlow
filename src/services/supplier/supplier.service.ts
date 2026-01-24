@@ -27,7 +27,7 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
  */
 export const getSupplierById = async (id: string, signal?: AbortSignal): Promise<Supplier | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await supabase.from('suppliers').select('*').eq('id', id).single().abortSignal(signal);
+    const { data, error } = await supabase.from('suppliers').select('*').eq('id', id).single();
     if (error || !data) return undefined;
     return mapSupplier(data);
 };
@@ -37,7 +37,7 @@ export const getSupplierById = async (id: string, signal?: AbortSignal): Promise
  */
 export const getSupplierByToken = async (token: string, signal?: AbortSignal): Promise<Supplier | undefined> => {
     if (!isLive) return undefined;
-    const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle().abortSignal(signal);
+    const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle();
     if (error) return undefined;
     return data ? mapSupplier(data) : undefined;
 };

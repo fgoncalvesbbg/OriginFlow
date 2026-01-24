@@ -338,14 +338,14 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
 
 export const getProjectsBySupplierId = async (supplierId: string, signal?: AbortSignal): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId).abortSignal(signal);
+    const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map(mapProject);
 };
 
 export const getProjectsBySupplierToken = async (token: string, signal?: AbortSignal): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token }).abortSignal(signal);
+    const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token });
     if (error) return [];
     return (data || []).map(mapProject);
 };
@@ -361,8 +361,7 @@ export const getProductionUpdates = async (projectId: string, signal?: AbortSign
     const { data, error } = await supabase.from('production_updates')
         .select('*')
         .eq('project_id', projectId)
-        .order('created_at', { ascending: false })
-        .abortSignal(signal);
+        .order('created_at', { ascending: false });
     if (error) return [];
     return (data || []).map(mapProductionUpdate);
 };
@@ -740,8 +739,7 @@ export const getMissingDocumentsForSupplier = async (supplierId: string, signal?
         .in('project_id', projectIds)
         .eq('responsible_party', 'supplier')
         .neq('status', 'approved')
-        .neq('status', 'uploaded')
-        .abortSignal(signal);
+        .neq('status', 'uploaded');
 
     if (error) return [];
 
@@ -834,7 +832,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
 
 export const getSupplierNotifications = async (supplierId: string, signal?: AbortSignal): Promise<Notification[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId).abortSignal(signal);
+    const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map((n: any) => ({
         id: n.id,
@@ -960,7 +958,7 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
 
 export const getComplianceRequestsBySupplierId = async (supplierId: string, signal?: AbortSignal): Promise<ComplianceRequest[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId).abortSignal(signal);
+    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId);
     if (error) return [];
     return (data || []).map(mapComplianceRequest);
 };
@@ -1314,8 +1312,7 @@ export const getRFQsForSupplier = async (supplierId: string, signal?: AbortSigna
     const { data, error } = await portalClient.from('rfq_entries')
         .select('*, rfqs!inner(*)')
         .eq('supplier_id', supplierId)
-        .eq('rfqs.status', 'open')
-        .abortSignal(signal);
+        .eq('rfqs.status', 'open');
 
     if (error) return [];
 
