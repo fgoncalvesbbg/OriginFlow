@@ -286,6 +286,10 @@ USING (
   )
 );
 
+-- Public access for suppliers via token (RPC validates token + access code)
+CREATE POLICY "public_access_compliance_requests_via_token" ON public.compliance_requests
+FOR SELECT USING (true);
+
 -- =====================================================
 -- PRODUCTION UPDATES: SCOPE BY PROJECT PM
 -- =====================================================

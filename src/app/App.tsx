@@ -28,6 +28,7 @@ import ComplianceDashboard from '../pages/compliance/ComplianceDashboard';
 import CreateComplianceRequest from '../pages/compliance/CreateComplianceRequest';
 import ComplianceRequestDetail from '../pages/compliance/ComplianceRequestDetail';
 import SupplierCompliancePortal from '../pages/compliance/SupplierCompliancePortal';
+import SupplierCompliancePortalList from '../pages/compliance/SupplierCompliancePortalList';
 import ComplianceLibrary from '../pages/compliance/ComplianceLibrary';
 
 // IM Pages
@@ -60,6 +61,7 @@ const AppContent: React.FC = () => {
           <Route path="/supplier/:token" element={<SupplierPortal />} />
           <Route path="/supplier-dashboard/:token" element={<SupplierDashboard />} />
           <Route path="/compliance/supplier/:token" element={<SupplierCompliancePortal />} />
+          <Route path="/compliance/supplier-portal" element={<SupplierCompliancePortalList />} />
           <Route path="/sourcing/supplier/:token" element={<SupplierRFQPortal />} />
           <Route path="/im/preview/:templateId" element={<IMPreview />} />
 

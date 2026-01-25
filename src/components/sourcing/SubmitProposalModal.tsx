@@ -12,7 +12,7 @@ interface SubmitProposalModalProps {
 }
 
 const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClose, supplierId, onSuccess }) => {
-  const { showToast } = useToast();
+  const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState<CategoryL3[]>([]);
@@ -70,7 +70,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (file.size > 5 * 1024 * 1024) {
-        showToast('File too large. Max 5MB.', 'error');
+        showError('File too large. Max 5MB.');
         return;
       }
       const reader = new FileReader();
@@ -85,7 +85,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (file.size > 5 * 1024 * 1024) {
-        showToast('File too large. Max 5MB per file.', 'error');
+        showError('File too large. Max 5MB per file.');
         return;
       }
       const reader = new FileReader();
@@ -108,7 +108,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
-      showToast('Please enter a proposal title.', 'error');
+      showError('Please enter a proposal title.');
       return;
     }
 
@@ -142,13 +142,14 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
         attachments
       );
 
-      showToast('Proposal submitted successfully!', 'success');
+      success('Proposal submitted successfully!');
       resetForm();
       onClose();
       onSuccess();
     } catch (e: any) {
       console.error(e);
-      showToast('Error submitting proposal: ' + e.message, 'error');
+      const errorMessage = e?.message || (typeof e === 'string' ? e : 'An error occurred');
+      showError('Error submitting proposal: ' + errorMessage);
     } finally {
       setSubmitting(false);
     }
