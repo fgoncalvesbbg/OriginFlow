@@ -1,3 +1,7 @@
+-- IMPORTANT: After Migration 37, token parameter is uuid type
+-- This matches compliance_requests.token column type
+-- These are the canonical function signatures - do not change parameter types
+
 -- Create RPC function: get_compliance_request_secure
 -- Securely retrieves a compliance request by token and access code
 CREATE OR REPLACE FUNCTION get_compliance_request_secure(
@@ -19,6 +23,7 @@ RETURNS TABLE(
   created_at timestamptz,
   submitted_at timestamptz,
   completed_at timestamptz,
+  updated_at timestamptz,
   updated_by text,
   deadline date,
   change_log jsonb,
@@ -42,6 +47,7 @@ BEGIN
     cr.created_at,
     cr.submitted_at,
     cr.completed_at,
+    cr.updated_at,
     cr.updated_by,
     cr.deadline,
     cr.change_log,

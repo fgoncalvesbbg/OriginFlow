@@ -107,3 +107,21 @@ The `updated_at` column might not exist. If so, either:
 - The functions use `LIMIT 1` to ensure only one request is returned (efficiency)
 - Timestamps are automatically set using PostgreSQL's `NOW()` function
 - All field mappings match the `mapComplianceRequest()` utility function in the frontend code
+
+## Migration History
+
+### Migration 37 (2025-01)
+**Issue**: "Could not choose the best candidate function" error when accessing supplier portal
+**Root Cause**: Multiple versions of RPC functions with different parameter types (text vs uuid)
+**Solution**:
+- Fixed token column type from `text` to `uuid` to match RPC function signatures
+- Dropped all conflicting function overloads
+- Added missing `updated_at` column referenced by RPC function
+- Created composite index on (token, access_code) for performance optimization
+- Eliminated function overloading ambiguity
+
+**Impact**:
+- Supplier portal now works without errors
+- No application code changes required (Supabase client handles type conversion)
+- Portal authentication is now faster with index optimization
+- Zero breaking changes to existing code
