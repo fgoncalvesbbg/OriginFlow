@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
@@ -14,6 +14,7 @@ import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingB
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
+  const navigate = useNavigate();
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [complianceReqs, setComplianceReqs] = useState<ComplianceRequest[]>([]);
@@ -652,11 +653,20 @@ const SupplierDashboard: React.FC = () => {
           ) : (
             <div className="grid gap-4">
               {complianceReqs.map(c => (
-                <div key={c.id} className="bg-white rounded-lg shadow p-4">
+                <div
+                  key={c.id}
+                  onClick={() => navigate(`/compliance/supplier/${c.token}`)}
+                  className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md hover:border-primary border-l-4 border-primary transition-all"
+                >
                   <h3 className="font-bold">{c.requestId}</h3>
                   <p className="text-sm text-muted mt-1">{c.projectName}</p>
-                  <div className="mt-2">
-                    <StatusBadge status={c.status} />
+                  {c.accessCode && (
+                    <p className="text-sm font-mono bg-gray-50 rounded px-2 py-1 mt-2 inline-block">
+                      Code: <span className="text-blue-600 font-bold">{c.accessCode}</span>
+                    </p>
+                  )}
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-xs text-gray-500">Click to open</span>
                   </div>
                 </div>
               ))}
