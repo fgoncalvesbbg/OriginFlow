@@ -63,7 +63,7 @@ RETURNS TABLE(
   project_id uuid,
   project_name text,
   supplier_id uuid,
-  category_id text,
+  category_id uuid,
   features jsonb,
   status text,
   responses jsonb,

@@ -61,8 +61,8 @@ const SupplierCompliancePortalList: React.FC = () => {
     navigate(`/compliance/supplier/${req.token}`);
   };
 
-  const copyAccessCode = (code: string | undefined, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const copyAccessCode = (code: string | undefined, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (code) {
       navigator.clipboard.writeText(code);
       setCopiedCode(code);
@@ -201,29 +201,37 @@ const SupplierCompliancePortalList: React.FC = () => {
                     </div>
 
                     {/* Access Code and Action */}
-                    <div className="flex flex-col items-end gap-3">
-                      {/* Access Code Card */}
-                      <div className="bg-gray-50 rounded-lg px-4 py-3 border border-gray-200">
-                        <p className="text-xs text-gray-600 mb-1 font-medium">Access Code</p>
-                        <div className="flex items-center gap-2">
-                          <code className="text-lg font-bold text-blue-600 tracking-wider">
-                            {req.accessCode || '---'}
-                          </code>
-                          {req.accessCode && (
-                            <button
-                              onClick={(e) => copyAccessCode(req.accessCode, e)}
-                              className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-                              title="Copy access code"
-                            >
+                    <div className="flex flex-col items-end gap-3 w-full">
+                      {/* Access Code Card - Clickable */}
+                      {req.accessCode && (
+                        <button
+                          onClick={() => copyAccessCode(req.accessCode)}
+                          className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 rounded-lg px-4 py-4 border-2 border-blue-300 transition-all duration-200 cursor-pointer group"
+                          title="Click to copy access code"
+                        >
+                          <p className="text-xs text-blue-600 font-semibold mb-2 uppercase tracking-wider">
+                            Access Code (Click to Copy)
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <code className="text-2xl font-bold text-blue-700 tracking-widest font-mono">
+                              {req.accessCode}
+                            </code>
+                            <div className="transition-all duration-200">
                               {copiedCode === req.accessCode ? (
-                                <Check className="w-4 h-4 text-green-600" />
+                                <div className="flex flex-col items-center gap-1">
+                                  <Check className="w-6 h-6 text-green-600 animate-pulse" />
+                                  <span className="text-xs text-green-600 font-medium">Copied!</span>
+                                </div>
                               ) : (
-                                <Copy className="w-4 h-4 text-gray-500" />
+                                <div className="flex flex-col items-center gap-1 opacity-60 group-hover:opacity-100">
+                                  <Copy className="w-6 h-6 text-blue-600" />
+                                  <span className="text-xs text-blue-600 font-medium">Copy</span>
+                                </div>
                               )}
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                            </div>
+                          </div>
+                        </button>
+                      )}
 
                       {/* Open Button */}
                       <button
