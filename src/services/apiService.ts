@@ -9,6 +9,7 @@ import {
   RFQ, RFQEntry, RFQStatus, RFQEntryStatus, CategoryAttribute, RFQAttributeValue, RFQAttachment,
   SupplierProposal, ProductionUpdate, DeadlineItem
 } from '../types';
+import { generateUUID } from '../utils';
 
 export const COMPLIANCE_SECTIONS = [
     'General Requirements',
@@ -18,16 +19,6 @@ export const COMPLIANCE_SECTIONS = [
     'Packaging & Labeling',
     'Performance & Testing'
 ];
-
-export const generateUUID = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-};
 
 export const handleError = (error: any, context: string) => {
   if (!isLive) {
@@ -1648,17 +1639,6 @@ const generateRFQId = (): string => {
     const year = new Date().getFullYear();
     const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
     return `RFQ-${year}-${random}`;
-};
-
-/**
- * Helper function to generate UUID
- */
-const generateUUID = (): string => {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
 };
 
 /**

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { convertProposalToRFQ, getSuppliers } from '../../services/apiService';
 import { SupplierProposal, Supplier } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { useToast } from '../../hooks';
 import { useAuth } from '../../context/AuthContext';
 
 interface ConvertProposalModalProps {

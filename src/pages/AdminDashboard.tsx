@@ -6,10 +6,10 @@ import {
   getCategories, getProductFeatures, saveCategory, saveProductFeature,
   deleteCategory, deleteProductFeature,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
-  generateUUID,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects
 } from '../services/apiService';
+import { generateUUID } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Circle, Layers, Tag, Trash2, SlidersHorizontal, X, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';

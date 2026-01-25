@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Loader2, Layers, Image as ImageIcon, Upload, FileText } from 'lucide-react';
 import { createEnhancedSupplierProposal, getCategories, getCategoryAttributes } from '../../services/apiService';
 import { CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachment } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { useToast } from '../../hooks';
 
 interface SubmitProposalModalProps {
   isOpen: boolean;

@@ -5,7 +5,7 @@ import { getRFQs, getAllSupplierProposals, deleteRFQ } from '../../services/apiS
 import { RFQ, RFQStatus, SupplierProposal, UserRole } from '../../types';
 import { ShoppingBag, Plus, Search, ChevronRight, Clock, FileText, Paperclip, Download, Trash2, MoreHorizontal, Image as ImageIcon, Eye, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useToast } from '../../context/ToastContext';
+import { useToast } from '../../hooks';
 import ConvertProposalModal from '../../components/sourcing/ConvertProposalModal';
 
 const ConfirmationModal: React.FC<{
