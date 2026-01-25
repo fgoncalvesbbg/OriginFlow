@@ -39,13 +39,10 @@ const SupplierCompliancePortalList: React.FC = () => {
 
       setCategories(catMap);
 
-      // Filter to show only pending requests (not yet submitted)
-      const pendingReqs = reqs.filter(r => r.status === ComplianceRequestStatus.PENDING_SUPPLIER);
-      setRequests(pendingReqs);
+      // Show all requests (both pending and submitted)
+      setRequests(reqs);
 
-      if (pendingReqs.length === 0 && reqs.length > 0) {
-        setError('You have no pending TCF requests. All requests have been submitted or completed.');
-      } else if (pendingReqs.length === 0) {
+      if (reqs.length === 0) {
         setError('No TCF requests found for this Supplier ID.');
       }
     } catch (err: any) {
@@ -90,6 +87,21 @@ const SupplierCompliancePortalList: React.FC = () => {
     if (days < 0) return 'text-red-600';
     if (days <= 7) return 'text-orange-600';
     return 'text-green-600';
+  };
+
+  const isRequestSubmitted = (req: ComplianceRequest) => {
+    return req.status !== ComplianceRequestStatus.PENDING_SUPPLIER;
+  };
+
+  const getStatusBadge = (status: ComplianceRequestStatus) => {
+    const statusConfig: Record<ComplianceRequestStatus, { label: string; color: string; bgColor: string }> = {
+      [ComplianceRequestStatus.PENDING_SUPPLIER]: { label: 'Pending', color: 'text-amber-700', bgColor: 'bg-amber-50 border-amber-300' },
+      [ComplianceRequestStatus.SUBMITTED]: { label: 'Submitted', color: 'text-green-700', bgColor: 'bg-green-50 border-green-300' },
+      [ComplianceRequestStatus.UNDER_REVIEW]: { label: 'Under Review', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-300' },
+      [ComplianceRequestStatus.APPROVED]: { label: 'Approved', color: 'text-emerald-700', bgColor: 'bg-emerald-50 border-emerald-300' },
+      [ComplianceRequestStatus.REJECTED]: { label: 'Rejected', color: 'text-red-700', bgColor: 'bg-red-50 border-red-300' }
+    };
+    return statusConfig[status];
   };
 
   return (
@@ -156,21 +168,32 @@ const SupplierCompliancePortalList: React.FC = () => {
         {/* Requests List */}
         {searched && requests.length > 0 && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Your Pending TCF Requests</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Your TCF Requests</h2>
             {requests.map((req) => {
               const daysLeft = getDaysUntilDeadline(req.deadline);
+              const submitted = isRequestSubmitted(req);
+              const statusBadge = getStatusBadge(req.status);
               return (
                 <div
                   key={req.id}
-                  onClick={() => handleOpenPortal(req)}
-                  className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow cursor-pointer border-l-4 border-blue-500"
+                  onClick={() => !submitted && handleOpenPortal(req)}
+                  className={`bg-white rounded-lg shadow-md p-6 transition-all border-l-4 ${
+                    submitted
+                      ? 'border-gray-400 opacity-85'
+                      : 'border-blue-500 hover:shadow-lg cursor-pointer'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      {/* Project Name */}
-                      <h3 className="text-lg font-semibold text-gray-900 mb-1 truncate">
-                        {req.projectName}
-                      </h3>
+                      {/* Project Name and Status Badge */}
+                      <div className="flex items-start gap-2 mb-2">
+                        <h3 className="text-lg font-semibold text-gray-900 truncate">
+                          {req.projectName}
+                        </h3>
+                        <span className={`whitespace-nowrap text-xs font-semibold px-3 py-1 rounded-full border ${statusBadge.color} ${statusBadge.bgColor}`}>
+                          {statusBadge.label}
+                        </span>
+                      </div>
 
                       {/* Request ID and Category */}
                       <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-3">
@@ -202,8 +225,8 @@ const SupplierCompliancePortalList: React.FC = () => {
 
                     {/* Access Code and Action */}
                     <div className="flex flex-col items-end gap-3 w-full">
-                      {/* Access Code Card - Clickable */}
-                      {req.accessCode && (
+                      {/* Access Code Card - Clickable (only for pending requests) */}
+                      {!submitted && req.accessCode && (
                         <button
                           onClick={() => copyAccessCode(req.accessCode)}
                           className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 rounded-lg px-4 py-4 border-2 border-blue-300 transition-all duration-200 cursor-pointer group"
@@ -233,14 +256,44 @@ const SupplierCompliancePortalList: React.FC = () => {
                         </button>
                       )}
 
-                      {/* Open Button */}
-                      <button
-                        onClick={() => handleOpenPortal(req)}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap"
-                      >
-                        <Eye className="w-4 h-4" />
-                        Open Request
-                      </button>
+                      {/* Submission Info (for submitted requests) */}
+                      {submitted && (
+                        <div className="w-full bg-gray-50 rounded-lg px-4 py-4 border-2 border-gray-300 text-center">
+                          <p className="text-xs text-gray-600 font-semibold mb-1 uppercase tracking-wider">
+                            Status: {statusBadge.label}
+                          </p>
+                          {req.submittedAt && (
+                            <p className="text-sm text-gray-700 font-medium">
+                              Submitted: {formatDate(req.submittedAt)}
+                            </p>
+                          )}
+                          {req.respondentName && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              By: {req.respondentName}
+                              {req.respondentPosition && ` (${req.respondentPosition})`}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Open Button or Already Submitted Message */}
+                      {!submitted ? (
+                        <button
+                          onClick={() => handleOpenPortal(req)}
+                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap w-full justify-center"
+                        >
+                          <Eye className="w-4 h-4" />
+                          Open Request
+                        </button>
+                      ) : (
+                        <button
+                          disabled
+                          className="flex items-center gap-2 bg-gray-400 text-gray-100 px-4 py-2 rounded-lg font-medium cursor-not-allowed whitespace-nowrap w-full justify-center"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          Already Submitted
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -253,20 +306,24 @@ const SupplierCompliancePortalList: React.FC = () => {
         {searched && requests.length === 0 && !error && (
           <div className="bg-white rounded-lg shadow-md p-12 text-center">
             <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4 opacity-50" />
-            <p className="text-gray-600 text-lg">No pending TCF requests found.</p>
+            <p className="text-gray-600 text-lg">No TCF requests found for this Supplier ID.</p>
           </div>
         )}
 
         {/* Footer Info */}
         <div className="mt-8 bg-blue-50 rounded-lg p-6 border border-blue-200">
-          <h4 className="font-semibold text-gray-900 mb-2">How to complete your TCF request:</h4>
-          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700">
+          <h4 className="font-semibold text-gray-900 mb-3">How to complete your TCF request:</h4>
+          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700 mb-4">
             <li>Find your Supplier ID in your company information</li>
-            <li>Enter it above to see your pending requests</li>
-            <li>Click "Open Request" for the TCF you need to complete</li>
-            <li>Have your 6-digit access code ready (shown above)</li>
+            <li>Enter it above to see your TCF requests</li>
+            <li>For <span className="font-semibold">pending requests</span>: Click "Open Request" to complete</li>
+            <li>Have your 6-digit access code ready (shown on the request card)</li>
             <li>Answer all compliance questions and submit</li>
+            <li>Already submitted requests will show as "Submitted" with submission details</li>
           </ol>
+          <div className="bg-white rounded p-3 border border-blue-300">
+            <p className="text-xs text-gray-600"><span className="font-semibold">Status Legend:</span> <span className="text-amber-600 font-medium">Pending</span> = Needs completion | <span className="text-green-600 font-medium">Submitted</span> = Awaiting review | <span className="text-blue-600 font-medium">Under Review</span> = Being reviewed | <span className="text-emerald-600 font-medium">Approved</span> = Completed | <span className="text-red-600 font-medium">Rejected</span> = Needs revision</p>
+          </div>
         </div>
       </div>
     </div>
