@@ -216,14 +216,13 @@ const ProjectDetail: React.FC = () => {
       console.error('Error loading project data:', err);
     }
 
-      // Init timeline form
-      setTimelineForm({
-        poPlacement: p.milestones?.poPlacement || '',
-        massProduction: p.milestones?.massProduction || '',
-        etd: p.milestones?.etd || '',
-        eta: p.milestones?.eta || ''
-      });
-    }
+    // Init timeline form
+    setTimelineForm({
+      poPlacement: p.milestones?.poPlacement || '',
+      massProduction: p.milestones?.massProduction || '',
+      etd: p.milestones?.etd || '',
+      eta: p.milestones?.eta || ''
+    });
     setLoading(false);
   };
 
