@@ -836,32 +836,33 @@ export const getMissingDocumentsForSupplier = async (supplierId: string): Promis
 
 export const getDashboardStats = async (): Promise<DashboardStats & { newProposals: number }> => {
     if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 } as any;
-    
+
     const today = new Date();
     const nextPeriod = new Date();
     nextPeriod.setDate(today.getDate() + 14);
 
-    const [projectsRes, docsRes, proposalsRes, tcfRes] = await Promise.all([
-        supabase.from('projects').select('status'),
-        supabase.from('project_documents').select('*, projects!inner(name)').eq('status', 'uploaded'),
-        supabase.from('supplier_proposals').select('id').eq('status', 'new'),
-        supabase.from('compliance_requests').select('*, projects!inner(name)').eq('status', 'pending_supplier')
+    // Fetch all data in parallel - including deadline docs in the initial batch
+    const [projectsRes, docsRes, proposalsRes, tcfRes, deadlineDocsRes] = await Promise.all([
+        supabase.from('projects').select('status').limit(1000),
+        supabase.from('project_documents').select('*, projects!inner(name)').eq('status', 'uploaded').limit(500),
+        supabase.from('supplier_proposals').select('id').eq('status', 'new').limit(500),
+        supabase.from('compliance_requests').select('*, projects!inner(name)').eq('status', 'pending_supplier').limit(500),
+        supabase.from('project_documents')
+            .select('*, projects!inner(name)')
+            .not('deadline', 'is', null)
+            .neq('status', 'approved')
+            .lte('deadline', nextPeriod.toISOString())
+            .order('deadline')
+            .limit(500)
     ]);
 
     const projects = projectsRes.data || [];
     const activeProjects = projects.filter(p => p.status === ProjectOverallStatus.IN_PROGRESS).length;
     const pendingReviews = (docsRes.data || []).length;
     const newProposals = (proposalsRes.data || []).length;
-    
-    // Fetch all docs with deadlines
-    const { data: deadlineDocs } = await supabase.from('project_documents')
-        .select('*, projects!inner(name)')
-        .not('deadline', 'is', null)
-        .neq('status', 'approved')
-        .lte('deadline', nextPeriod.toISOString())
-        .order('deadline');
+    const deadlineDocs = deadlineDocsRes.data || [];
 
-    // Fetch all TCF requests with deadlines
+    // Process TCF deadlines
     const tcfDeadlines = (tcfRes.data || []).filter(r => r.deadline).map(r => {
         const dDate = new Date(r.deadline);
         const diff = Math.ceil((dDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
@@ -876,6 +877,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
         } as DeadlineItem;
     });
 
+    // Process document deadlines
     const docDeadlines = (deadlineDocs || []).map((d: any) => {
         const dDate = new Date(d.deadline);
         const diff = Math.ceil((dDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
@@ -938,7 +940,7 @@ export const markNotificationRead = async (id: string): Promise<void> => {
 
 export const getComplianceRequests = async (): Promise<ComplianceRequest[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase.from('compliance_requests').select('*').order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('compliance_requests').select('*').order('created_at', { ascending: false }).limit(1000);
   if (error) return [];
   return (data || []).map(mapComplianceRequest);
 };
@@ -984,15 +986,18 @@ export const getComplianceRequestByToken = async (token: string): Promise<Compli
 
 export const verifySupplierAccess = async (token: string, accessCode: string): Promise<ComplianceRequest> => {
     if (!isLive) throw new Error("Connection error: Supabase is not configured.");
-    const { data, error } = await portalClient.rpc('get_compliance_request_secure', { 
-        p_token: token, 
-        p_code: accessCode 
+    const { data, error } = await portalClient.rpc('get_compliance_request_secure', {
+        p_token: token,
+        p_code: accessCode
     });
-    
+
     if (error) handleError(error, 'verify access');
-    if (!data || data.length === 0) throw new Error('Invalid credentials');
-    
-    return mapComplianceRequest(data[0]);
+    if (!data) throw new Error('Invalid credentials');
+
+    const requestData = Array.isArray(data) ? data[0] : data;
+    if (!requestData) throw new Error('Invalid credentials');
+
+    return mapComplianceRequest(requestData);
 };
 
 export const submitComplianceResponseSecure = async (
@@ -1043,7 +1048,7 @@ export const checkComplianceDeadlines = async (): Promise<void> => {
 
 export const getCategories = async (): Promise<CategoryL3[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('categories_l3').select('*');
+    const { data, error } = await portalClient.from('categories_l3').select('*').limit(500);
     if (error) return [];
     return (data || []).map((c: any) => ({
         id: c.id,
@@ -1179,7 +1184,7 @@ export const addStandardRequirements = async (categoryId: string): Promise<void>
         { id: generateUUID(), categoryId, title: "LVD Report", description: "Low Voltage Directive Compliance", isMandatory: true, appliesByDefault: true, conditionFeatureIds: [] },
         { id: generateUUID(), categoryId, title: "EMC Report", description: "Electromagnetic Compatibility", isMandatory: true, appliesByDefault: true, conditionFeatureIds: [] }
     ];
-    for (const d of defaults) await saveRequirement(d);
+    await Promise.all(defaults.map(d => saveRequirement(d)));
 };
 
 // --- IM Templates ---

@@ -88,9 +88,12 @@ export const verifySupplierAccess = async (token: string, accessCode: string): P
     });
 
     if (error) handleError(error, 'verify access');
-    if (!data || data.length === 0) throw new Error('Invalid credentials');
+    if (!data) throw new Error('Invalid credentials');
 
-    return mapComplianceRequest(data[0]);
+    const requestData = Array.isArray(data) ? data[0] : data;
+    if (!requestData) throw new Error('Invalid credentials');
+
+    return mapComplianceRequest(requestData);
 };
 
 /**

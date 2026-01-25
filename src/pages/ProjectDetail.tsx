@@ -31,9 +31,9 @@ import {
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason 
 } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { 
-  CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil, 
-  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon
+import {
+  CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
+  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw
 } from 'lucide-react';
 import { ProjectAICopilot } from '../components/ProjectAICopilot';
 
@@ -154,9 +154,24 @@ const ProjectDetail: React.FC = () => {
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean, title: string, message: string, action: () => void }>({
     isOpen: false, title: '', message: '', action: () => {}
   });
+  const [refreshing, setRefreshing] = useState(false);
 
   const showNotification = (msg: string, type: 'success' | 'error') => {
     setNotification({ msg, type });
+  };
+
+  const handleRefreshData = async () => {
+    if (!id) return;
+    setRefreshing(true);
+    try {
+      await loadProjectData();
+      showNotification('Project data refreshed successfully!', 'success');
+    } catch (err) {
+      console.error('Error refreshing project data:', err);
+      showNotification('Failed to refresh project data', 'error');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -166,25 +181,40 @@ const ProjectDetail: React.FC = () => {
 
   const loadProjectData = async () => {
     if (!id) return;
-    const p = await getProjectById(id);
-    if (p) {
-      setProject(p);
-      const [sData, stepsData, docsData, compReqs, cats, imData, prodUpdates] = await Promise.all([
-        getSupplierById(p.supplierId),
-        getProjectSteps(p.id),
-        getProjectDocs(p.id),
-        getComplianceRequests(),
-        getCategories(),
-        getProjectIM(p.id),
-        getProductionUpdates(p.id)
-      ]);
-      setSupplier(sData || null);
-      setSteps(stepsData);
-      setDocs(docsData);
-      setComplianceRequests(compReqs.filter(r => r.projectId === p.id));
-      setCategories(cats);
-      setProjectIM(imData || null);
-      setProductionUpdates(prodUpdates);
+    try {
+      const p = await getProjectById(id);
+      if (p) {
+        setProject(p);
+        const [sData, stepsData, docsData, compReqs, cats, imData, prodUpdates] = await Promise.all([
+          getSupplierById(p.supplierId).catch(err => {
+            console.error('Error loading supplier:', err);
+            return null;
+          }),
+          getProjectSteps(p.id),
+          getProjectDocs(p.id),
+          getComplianceRequests().catch(err => {
+            console.error('Error loading compliance requests:', err);
+            return [];
+          }),
+          getCategories().catch(err => {
+            console.error('Error loading categories:', err);
+            return [];
+          }),
+          getProjectIM(p.id),
+          getProductionUpdates(p.id)
+        ]);
+        setSupplier(sData || null);
+        setSteps(stepsData);
+        setDocs(docsData);
+        // Filter compliance requests to only this project
+        setComplianceRequests(compReqs.filter(r => r.projectId === p.id));
+        setCategories(cats);
+        setProjectIM(imData || null);
+        setProductionUpdates(prodUpdates);
+      }
+    } catch (err: any) {
+      console.error('Error loading project data:', err);
+    }
 
       // Init timeline form
       setTimelineForm({
@@ -554,6 +584,14 @@ const ProjectDetail: React.FC = () => {
           </div>
         </div>
         <div className="flex gap-2">
+           <button
+             onClick={handleRefreshData}
+             disabled={refreshing}
+             title="Refresh all project data"
+             className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-50 disabled:cursor-not-allowed"
+           >
+             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} /> Refresh
+           </button>
            <button onClick={handleCopyLink} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-light">
               {copied ? <Check size={16} /> : <Copy size={16} />} Supplier Link
            </button>

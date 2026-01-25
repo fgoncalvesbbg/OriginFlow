@@ -15,7 +15,7 @@ import {
   CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
   DocStatus, ResponsibleParty, Supplier, Project
 } from '../../types';
-import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck } from 'lucide-react';
+import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck, RefreshCw } from 'lucide-react';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -56,6 +56,7 @@ const ComplianceRequestDetail: React.FC = () => {
   const [emailSent, setEmailSent] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [showAccessCode, setShowAccessCode] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Editable Form State
   const [answers, setAnswers] = useState<Record<string, ComplianceResponseStatus>>({});
@@ -68,27 +69,37 @@ const ComplianceRequestDetail: React.FC = () => {
 
   const loadData = async () => {
     if (!id) return;
-    const [r, allReqs, allFeats, allCats] = await Promise.all([
-      getComplianceRequestById(id),
-      getComplianceRequirements(),
-      getProductFeatures(),
-      getCategories()
-    ]);
+    try {
+      const [r, allReqs, allFeats, allCats] = await Promise.all([
+        getComplianceRequestById(id),
+        getComplianceRequirements(),
+        getProductFeatures(),
+        getCategories()
+      ]);
 
-    if (r) {
-      setReq(r);
-      setCategory(allCats.find(c => c.id === r.categoryId) || null);
-      setFeatures(allFeats);
-      
-      if (r.supplierId) {
-          getSupplierById(r.supplierId).then(setSupplier);
-      }
+      if (r) {
+        setReq(r);
+        setCategory(allCats.find(c => c.id === r.categoryId) || null);
+        setFeatures(allFeats);
 
-      if (r.projectId) {
-          getProjectById(r.projectId).then(setProject);
-      }
-      
-      const applicableReqs = allReqs.filter(requirement => {
+        // Fetch supplier and project in parallel with error handling
+        if (r.supplierId || r.projectId) {
+          Promise.all([
+            r.supplierId ? getSupplierById(r.supplierId).catch(err => {
+              console.error('Error loading supplier:', err);
+              return null;
+            }) : null,
+            r.projectId ? getProjectById(r.projectId).catch(err => {
+              console.error('Error loading project:', err);
+              return null;
+            }) : null
+          ]).then(([supplierData, projectData]) => {
+            if (supplierData) setSupplier(supplierData);
+            if (projectData) setProject(projectData);
+          });
+        }
+
+        const applicableReqs = allReqs.filter(requirement => {
         if (requirement.categoryId !== r.categoryId) return false;
         if (requirement.appliesByDefault && (!requirement.conditionFeatureIds || requirement.conditionFeatureIds.length === 0)) return true;
         const hasTriggerFeature = requirement.conditionFeatureIds?.some(fid => 
@@ -107,7 +118,22 @@ const ComplianceRequestDetail: React.FC = () => {
       setAnswers(initialAnswers);
       setComments(initialComments);
     }
+    } catch (err: any) {
+      console.error('Error loading compliance request:', err);
+    }
     setLoading(false);
+  };
+
+  const handleRefresh = async () => {
+    if (!id) return;
+    setRefreshing(true);
+    try {
+      await loadData();
+    } catch (err) {
+      console.error('Error refreshing data:', err);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleCopyLink = () => {
@@ -431,7 +457,16 @@ LaunchFlow PLM Platform`;
           <button onClick={handleCopyLink} className="flex items-center gap-2 px-4 py-2 bg-white border rounded shadow text-sm hover:bg-light">
             {copied ? 'Copied!' : <><Copy size={14} /> Copy Portal Link</>}
           </button>
-          
+
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Refresh compliance request data"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded shadow text-sm hover:bg-light text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
+          </button>
+
           {user?.role === UserRole.ADMIN && (
              <button onClick={() => setIsDeleteModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded shadow text-sm hover:bg-rose-50">
                <Trash2 size={14} /> Delete

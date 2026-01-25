@@ -11,7 +11,7 @@ import {
   reassignProjectPM, getProjects
 } from '../services/apiService';
 import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Circle, Layers, Tag, Trash2, SlidersHorizontal, X, Save, Loader2 } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Circle, Layers, Tag, Trash2, SlidersHorizontal, X, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const ConfirmationModal: React.FC<{
@@ -39,6 +39,7 @@ const ConfirmationModal: React.FC<{
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects'>('users');
+  const [refreshing, setRefreshing] = useState(false);
   
   // Core Data
   const [users, setUsers] = useState<User[]>([]);
@@ -99,6 +100,17 @@ const AdminDashboard: React.FC = () => {
     setFeatures(f);
     setAttributes(a);
     setProjects(p);
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } catch (err) {
+      console.error('Error refreshing data:', err);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // --- USER ACTIONS ---
@@ -473,11 +485,22 @@ const AdminDashboard: React.FC = () => {
         onCancel={() => setDeleteModal(prev => ({ ...prev, isOpen: false }))}
       />
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-primary flex items-center gap-2 mb-1">
-          <ShieldCheck className="text-indigo-600" /> Admin Console
-        </h1>
-        <p className="text-sm text-muted">System configuration and master data management.</p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-primary flex items-center gap-2 mb-1">
+            <ShieldCheck className="text-indigo-600" /> Admin Console
+          </h1>
+          <p className="text-sm text-muted">System configuration and master data management.</p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          title="Refresh all admin data"
+          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-light text-gray-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+          Refresh
+        </button>
       </div>
 
       <div className="flex border-b border-gray-200 mb-6 overflow-x-auto">

@@ -39,8 +39,11 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
     if (!isLive) return undefined;
     const { data: rpcData, error: rpcError } = await portalClient.rpc('get_project_by_token_secure', { p_token: token });
 
-    if (!rpcError && rpcData && rpcData.length > 0) {
-        return mapProject(rpcData[0]);
+    if (!rpcError && rpcData) {
+        const projectData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        if (projectData) {
+            return mapProject(projectData);
+        }
     }
     return undefined;
 };

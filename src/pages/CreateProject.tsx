@@ -20,10 +20,24 @@ const CreateProject: React.FC = () => {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSuppliers().then(setSuppliers);
-    getProfiles().then(setUsers);
+    Promise.all([
+      getSuppliers().catch(err => {
+        console.error('Error loading suppliers:', err);
+        setLoadError('Failed to load suppliers. Please refresh the page.');
+        return [];
+      }),
+      getProfiles().catch(err => {
+        console.error('Error loading users:', err);
+        setLoadError('Failed to load team members. Please refresh the page.');
+        return [];
+      })
+    ]).then(([suppliersData, usersData]) => {
+      setSuppliers(suppliersData);
+      setUsers(usersData);
+    });
   }, []);
 
   // Default PM to current user if available
@@ -62,7 +76,17 @@ const CreateProject: React.FC = () => {
         
         <div className="bg-white rounded-xl shadow border border-gray-200 p-8">
           <h1 className="text-3xl font-bold text-primary mb-6">Create New Project</h1>
-          
+
+          {loadError && (
+            <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded flex items-start gap-3">
+              <AlertTriangle className="text-yellow-600 shrink-0 mt-0.5" size={18} />
+              <div>
+                <h3 className="text-sm font-bold text-yellow-800">Data Load Error</h3>
+                <p className="text-sm text-yellow-700 mt-1">{loadError}</p>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="mb-6 bg-rose-50 border-l-4 border-red-500 p-4 rounded flex items-start gap-3">
               <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={18} />

@@ -10,7 +10,7 @@ import {
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload, Plus, Download } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload, Plus, Download, RefreshCw } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -56,6 +56,13 @@ const SupplierDashboard: React.FC = () => {
   // Session Management (60 min timeout)
   const SESSION_TIMEOUT = 60 * 60 * 1000;
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
+
+  // Dashboard State Management
+  const [dashboardError, setDashboardError] = useState('');
+  const [refreshingRfqs, setRefreshingRfqs] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
+  const [refreshingDashboard, setRefreshingDashboard] = useState(false);
 
   // Load supplier data on mount
   useEffect(() => {
@@ -127,7 +134,8 @@ const SupplierDashboard: React.FC = () => {
 
     const loadDashboardData = async () => {
       try {
-        const [pList, cList, nList, mDocs, rfqList, propList] = await Promise.all([
+        setDashboardError('');
+        const results = await Promise.allSettled([
           getProjectsBySupplierToken(token!),
           getComplianceRequestsBySupplierId(supplier.id),
           getSupplierNotifications(supplier.id),
@@ -138,6 +146,19 @@ const SupplierDashboard: React.FC = () => {
 
         if (!mounted) return;
 
+        const pList = results[0].status === 'fulfilled' ? results[0].value : [];
+        const cList = results[1].status === 'fulfilled' ? results[1].value : [];
+        const nList = results[2].status === 'fulfilled' ? results[2].value : [];
+        const mDocs = results[3].status === 'fulfilled' ? results[3].value : [];
+        const rfqList = results[4].status === 'fulfilled' ? results[4].value : [];
+        const propList = results[5].status === 'fulfilled' ? results[5].value : [];
+
+        // Check if any critical calls failed
+        const failedCalls = results.filter(r => r.status === 'rejected');
+        if (failedCalls.length > 0) {
+          setDashboardError(`Some data failed to load. ${failedCalls.length} section(s) may be incomplete. Please refresh the page if needed.`);
+        }
+
         setProjects(pList);
         setComplianceReqs(cList);
         setNotifications(nList);
@@ -145,23 +166,34 @@ const SupplierDashboard: React.FC = () => {
         setOpenRfqs(rfqList);
         setProposals(propList);
 
-        // Calculate Manufacturing Checks
+        // Calculate Manufacturing Checks - fetch all updates in parallel
         const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
 
-        for (const p of pList) {
-          if (p.milestones?.etd && p.status === 'in_progress') {
-            const etd = new Date(p.milestones.etd);
+        // Batch fetch all production updates for projects that might need updates
+        const projectsNeedingCheck = pList.filter(p => {
+          if (!p.milestones?.etd || p.status !== 'in_progress') return false;
+          const etd = new Date(p.milestones.etd);
+          const today = new Date();
+          const diffDays = Math.ceil((etd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          return (diffDays <= 45 && diffDays >= 39) || (diffDays <= 30 && diffDays >= 25) || (diffDays <= 16 && diffDays >= 12);
+        });
+
+        if (projectsNeedingCheck.length > 0) {
+          const updateResults = await Promise.all(
+            projectsNeedingCheck.map(p => getProductionUpdates(p.id))
+          );
+
+          for (let i = 0; i < projectsNeedingCheck.length; i++) {
+            const p = projectsNeedingCheck[i];
+            const updates = updateResults[i];
+            const etd = new Date(p.milestones!.etd!);
             const today = new Date();
-            const diffTime = etd.getTime() - today.getTime();
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            const diffDays = Math.ceil((etd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-            if ((diffDays <= 45 && diffDays >= 39) || (diffDays <= 30 && diffDays >= 25) || (diffDays <= 16 && diffDays >= 12)) {
-              const updates = await getProductionUpdates(p.id);
-              const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
+            const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
 
-              if (!recentUpdate) {
-                needsUpdate.push({ project: p, daysUntilEtd: diffDays });
-              }
+            if (!recentUpdate) {
+              needsUpdate.push({ project: p, daysUntilEtd: diffDays });
             }
           }
         }
@@ -172,7 +204,7 @@ const SupplierDashboard: React.FC = () => {
       } catch (err: any) {
         if (!mounted) return;
         console.error('Dashboard data load error:', err);
-        // Non-critical error - don't block the UI
+        setDashboardError('Failed to load dashboard. Please refresh the page.');
       }
     };
 
@@ -215,9 +247,58 @@ const SupplierDashboard: React.FC = () => {
     setIsAccessVerified(true);
   };
 
+  const handleRefreshDashboard = async () => {
+    if (!isAccessVerified || !supplier?.id) return;
+    setRefreshingDashboard(true);
+    setDashboardError('');
+    try {
+      const results = await Promise.allSettled([
+        getProjectsBySupplierToken(token!),
+        getComplianceRequestsBySupplierId(supplier.id),
+        getSupplierNotifications(supplier.id),
+        getMissingDocumentsForSupplier(supplier.id),
+        getRFQsForSupplier(supplier.id),
+        getSupplierProposals(supplier.id)
+      ]);
+
+      const pList = results[0].status === 'fulfilled' ? results[0].value : [];
+      const cList = results[1].status === 'fulfilled' ? results[1].value : [];
+      const nList = results[2].status === 'fulfilled' ? results[2].value : [];
+      const mDocs = results[3].status === 'fulfilled' ? results[3].value : [];
+      const rfqList = results[4].status === 'fulfilled' ? results[4].value : [];
+      const propList = results[5].status === 'fulfilled' ? results[5].value : [];
+
+      const failedCalls = results.filter(r => r.status === 'rejected');
+      if (failedCalls.length > 0) {
+        setDashboardError(`Some data failed to load. ${failedCalls.length} section(s) may be incomplete.`);
+      } else {
+        setToastMessage('Dashboard refreshed successfully!');
+        setToastType('success');
+      }
+
+      setProjects(pList);
+      setComplianceReqs(cList);
+      setNotifications(nList);
+      setMissingDocs(mDocs);
+      setOpenRfqs(rfqList);
+      setProposals(propList);
+    } catch (err: any) {
+      console.error('Error refreshing dashboard:', err);
+      setDashboardError('Failed to refresh dashboard. Please try again.');
+    } finally {
+      setRefreshingDashboard(false);
+    }
+  };
+
   const handleMarkRead = async (id: string) => {
-    await markNotificationRead(id);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    try {
+      await markNotificationRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    } catch (err: any) {
+      console.error('Error marking notification as read:', err);
+      setToastMessage('Failed to update notification');
+      setToastType('error');
+    }
   };
 
   const handleConfirmEtd = async (project: Project, currentEtd: string) => {
@@ -232,9 +313,12 @@ const SupplierDashboard: React.FC = () => {
         notes: 'Confirmed via Supplier Portal'
       });
       setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== project.id));
-      alert("ETD Confirmed!");
-    } catch (e) {
-      alert("Error confirming ETD.");
+      setToastMessage('ETD confirmed successfully!');
+      setToastType('success');
+    } catch (err: any) {
+      console.error('Error confirming ETD:', err);
+      setToastMessage('Failed to confirm ETD. Please try again.');
+      setToastType('error');
     }
   };
 
@@ -254,9 +338,12 @@ const SupplierDashboard: React.FC = () => {
       setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== updatingProject.id));
       setIsUpdateModalOpen(false);
       setUpdatingProject(null);
-      alert("Delay reported successfully.");
-    } catch (e) {
-      alert("Error reporting delay.");
+      setToastMessage('Delay reported successfully. Your PM has been notified.');
+      setToastType('success');
+    } catch (err: any) {
+      console.error('Error reporting delay:', err);
+      setToastMessage('Failed to report delay. Please try again.');
+      setToastType('error');
     }
   };
 
@@ -265,7 +352,8 @@ const SupplierDashboard: React.FC = () => {
     if (!selectedRfqForQuote) return;
 
     if (!quoteForm.unitPrice) {
-      alert('Please enter a unit price.');
+      setToastMessage('Please enter a unit price.');
+      setToastType('error');
       return;
     }
 
@@ -294,13 +382,24 @@ const SupplierDashboard: React.FC = () => {
       setIsQuoteModalOpen(false);
       setSelectedRfqForQuote(null);
 
-      // Refresh RFQs list
-      const updatedRfqs = await getRFQsForSupplier(supplier!.id);
-      setOpenRfqs(updatedRfqs);
-
-      alert('Quote submitted successfully! Your quote is now visible to the PM.');
-    } catch (e) {
-      alert('Error submitting quote. Please try again.');
+      // Refresh RFQs list with loading state
+      setRefreshingRfqs(true);
+      try {
+        const updatedRfqs = await getRFQsForSupplier(supplier!.id);
+        setOpenRfqs(updatedRfqs);
+        setToastMessage('Quote submitted successfully! Your quote is now visible to the PM.');
+        setToastType('success');
+      } catch (refreshErr: any) {
+        console.error('Error refreshing RFQs after submission:', refreshErr);
+        setToastMessage('Quote submitted, but failed to refresh list. Please refresh the page.');
+        setToastType('error');
+      } finally {
+        setRefreshingRfqs(false);
+      }
+    } catch (err: any) {
+      console.error('Error submitting quote:', err);
+      setToastMessage('Failed to submit quote. Please try again.');
+      setToastType('error');
     } finally {
       setSubmittingQuote(false);
     }
@@ -389,6 +488,15 @@ const SupplierDashboard: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={handleRefreshDashboard}
+              disabled={refreshingDashboard}
+              title="Refresh dashboard data"
+              className="p-2 hover:bg-gray-100 rounded-lg transition disabled:opacity-50"
+            >
+              <RefreshCw size={20} className={`text-muted ${refreshingDashboard ? 'animate-spin' : ''}`} />
+            </button>
+
             <div className="relative">
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
@@ -447,6 +555,22 @@ const SupplierDashboard: React.FC = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Error Banner */}
+        {dashboardError && (
+          <div className="mb-6 bg-red-50 border-l-4 border-red-400 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-red-800 font-medium">{dashboardError}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="text-red-600 hover:text-red-800 text-sm font-medium mt-2 underline"
+              >
+                Refresh Page
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Projects Section */}
         <div className="mb-8">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
@@ -572,6 +696,9 @@ const SupplierDashboard: React.FC = () => {
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <ShoppingBag size={20} className="text-primary" />
             Open RFQs ({openRfqs.length})
+            {refreshingRfqs && (
+              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin ml-2" />
+            )}
           </h2>
           {openRfqs.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-8 text-center text-muted">
@@ -901,12 +1028,37 @@ const SupplierDashboard: React.FC = () => {
         onClose={() => setIsProposalModalOpen(false)}
         supplierId={supplier?.id || ''}
         onSuccess={() => {
-          // Reload proposals after successful submission
+          // Reload proposals after successful submission with error handling
           if (supplier?.id) {
-            getSupplierProposals(supplier.id).then(setProposals);
+            getSupplierProposals(supplier.id)
+              .then(setProposals)
+              .catch(err => {
+                console.error('Error reloading proposals:', err);
+                setToastMessage('Proposal submitted, but failed to refresh list. Please refresh the page.');
+                setToastType('error');
+              });
           }
         }}
       />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg text-white font-medium max-w-sm z-50 ${
+          toastType === 'success' ? 'bg-green-600' :
+          toastType === 'error' ? 'bg-red-600' :
+          'bg-blue-600'
+        }`}>
+          <div className="flex items-start justify-between gap-4">
+            <span>{toastMessage}</span>
+            <button
+              onClick={() => setToastMessage('')}
+              className="text-white hover:opacity-80 text-lg leading-none"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
