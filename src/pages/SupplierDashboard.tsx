@@ -10,7 +10,7 @@ import {
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, ShoppingBag, Factory, Key, Upload, Plus, Download, RefreshCw, Copy, Check, CheckCircle } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Upload, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -65,13 +65,22 @@ const SupplierDashboard: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
 
-  // Contact PM State
-  const [isContactPmOpen, setIsContactPmOpen] = useState(false);
-  const [contactPmProject, setContactPmProject] = useState<Project | null>(null);
-  const [contactForm, setContactForm] = useState({
-    subject: '',
-    message: ''
-  });
+  // Proposal View State
+  const [isViewProposalOpen, setIsViewProposalOpen] = useState(false);
+  const [viewingProposal, setViewingProposal] = useState<SupplierProposal | null>(null);
+
+  // Project Grouping State
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+
+  const toggleProjectExpanded = (projectId: string) => {
+    const newExpanded = new Set(expandedProjects);
+    if (newExpanded.has(projectId)) {
+      newExpanded.delete(projectId);
+    } else {
+      newExpanded.add(projectId);
+    }
+    setExpandedProjects(newExpanded);
+  };
 
   // Session Management (60 min timeout)
   const SESSION_TIMEOUT = 60 * 60 * 1000;
@@ -160,8 +169,8 @@ const SupplierDashboard: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isContactPmOpen) {
-          setIsContactPmOpen(false);
+        if (isViewProposalOpen) {
+          setIsViewProposalOpen(false);
         }
         if (isQuoteModalOpen) {
           setIsQuoteModalOpen(false);
@@ -181,7 +190,7 @@ const SupplierDashboard: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isContactPmOpen, isQuoteModalOpen, isUpdateModalOpen, isProposalModalOpen, showNotifications]);
+  }, [isViewProposalOpen, isQuoteModalOpen, isUpdateModalOpen, isProposalModalOpen, showNotifications]);
 
   // Load dashboard data after access verification
   useEffect(() => {
@@ -541,33 +550,10 @@ const SupplierDashboard: React.FC = () => {
     }
   };
 
-  // Contact PM handlers
-  const handleOpenContactPm = (project: Project) => {
-    setContactPmProject(project);
-    setContactForm({ subject: '', message: '' });
-    setIsContactPmOpen(true);
-  };
-
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!contactForm.message.trim()) {
-      setToastMessage('Please enter a message');
-      setToastType('error');
-      return;
-    }
-
-    try {
-      // In a real implementation, this would call an API to create a notification
-      // For now, just show success
-      setToastMessage(`Message sent to Project Manager about ${contactPmProject?.name}`);
-      setToastType('success');
-      setIsContactPmOpen(false);
-      setContactForm({ subject: '', message: '' });
-    } catch (err: any) {
-      setToastMessage('Failed to send message');
-      setToastType('error');
-    }
+  // Proposal view handler
+  const handleViewProposal = (proposal: SupplierProposal) => {
+    setViewingProposal(proposal);
+    setIsViewProposalOpen(true);
   };
 
   // Calculate dashboard summary stats
@@ -694,7 +680,9 @@ const SupplierDashboard: React.FC = () => {
     };
   }, [filteredProjects, filteredDocuments, missingDocs, filteredCompliance]);
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  // Filter out TCF (Test Completion Form) submission notifications
+  const filteredNotifications = notifications.filter(n => !n.message.toLowerCase().includes('tcf') && !n.message.toLowerCase().includes('test completion form'));
+  const unreadCount = filteredNotifications.filter(n => !n.isRead).length;
 
   if (loading) return <div className="min-h-screen bg-light flex items-center justify-center text-muted">Loading Dashboard...</div>;
   if (error) return (
@@ -820,10 +808,10 @@ const SupplierDashboard: React.FC = () => {
                     </button>
                   </div>
                   <div className="max-h-96 overflow-y-auto">
-                    {notifications.length === 0 ? (
+                    {filteredNotifications.length === 0 ? (
                       <p className="p-4 text-muted text-sm">No notifications</p>
                     ) : (
-                      notifications.map(n => (
+                      filteredNotifications.map(n => (
                         <div
                           key={n.id}
                           className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition ${!n.isRead ? 'bg-primary-light' : ''}`}
@@ -1117,7 +1105,7 @@ const SupplierDashboard: React.FC = () => {
           </div>
         </section>
 
-        {/* Projects Section */}
+        {/* Grouped Projects Section */}
         <div className="mb-8">
           <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
             <ShoppingBag size={20} className="text-primary flex-shrink-0" />
@@ -1126,10 +1114,15 @@ const SupplierDashboard: React.FC = () => {
           {filteredProjects.length === 0 ? (
             <p className="text-muted text-sm">{debouncedSearchTerm ? 'No projects match your search' : 'No projects assigned'}</p>
           ) : (
-            <div className="grid gap-3 sm:gap-4">
+            <div className="space-y-3 sm:space-y-4">
               {filteredProjects.map(p => {
+                const isExpanded = expandedProjects.has(p.id);
                 const pendingDocs = filteredDocuments.filter(d => d.projectIdCode === p.projectId);
-                const pendingCompliance = filteredCompliance.filter(c => c.projectId === p.id && c.status === ComplianceRequestStatus.PENDING_SUPPLIER);
+                const allDocsForProject = missingDocs.filter(d => d.projectIdCode === p.projectId);
+                const allComplianceForProject = filteredCompliance.filter(c => c.projectId === p.id);
+                const pendingCompliance = allComplianceForProject.filter(c => c.status === ComplianceRequestStatus.PENDING_SUPPLIER);
+                const projectNeedsUpdate = projectsNeedingUpdate.find(pnu => pnu.project.id === p.id);
+
                 const nextAction = pendingDocs.length > 0
                   ? `Upload ${pendingDocs.length} document${pendingDocs.length > 1 ? 's' : ''}`
                   : pendingCompliance.length > 0
@@ -1137,310 +1130,243 @@ const SupplierDashboard: React.FC = () => {
                   : 'No pending actions';
 
                 return (
-                  <div key={p.id} className="bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 border-primary hover:shadow-md transition">
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div key={p.id} className="bg-white rounded-lg shadow border-l-4 border-primary overflow-hidden">
+                    {/* Project Header - Always Visible */}
+                    <button
+                      onClick={() => toggleProjectExpanded(p.id)}
+                      aria-expanded={isExpanded}
+                      className="w-full text-left p-3 sm:p-4 hover:bg-gray-50 transition flex items-start justify-between gap-3 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-base sm:text-lg break-words">{p.name}</h3>
-                        <p className="text-xs sm:text-sm text-muted">ID: {p.projectId}</p>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                            <ChevronRight size={20} className="text-gray-400" />
+                          </div>
+                          <h3 className="font-bold text-base sm:text-lg break-words">{p.name}</h3>
+                        </div>
+                        <p className="text-xs sm:text-sm text-muted ml-6">ID: {p.projectId}</p>
 
-                        {/* Key Milestones */}
-                        {p.milestones && (
-                          <div className="mt-2 text-xs sm:text-sm space-y-1 text-gray-600">
-                            {p.milestones.poDate && <p>🗓️ PO: {new Date(p.milestones.poDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
-                            {p.milestones.massProduction && <p>🏭 Mass Prod: {new Date(p.milestones.massProduction).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
-                            {p.milestones.etd && (
-                              <p className={getDaysUntil(p.milestones.etd)! < 0 ? 'text-red-600 font-medium' : 'text-gray-600'}>
-                                📦 ETD: {new Date(p.milestones.etd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({getDaysUntil(p.milestones.etd)} days)
+                        {/* Quick Status Preview */}
+                        <div className="mt-2 ml-6 flex flex-wrap items-center gap-2">
+                          <StatusBadge status={p.status} type="project" />
+                          <span className={`text-xs font-medium px-2 py-1 rounded ${
+                            nextAction === 'No pending actions'
+                              ? 'bg-green-50 text-green-700'
+                              : 'bg-amber-50 text-amber-700'
+                          }`}>
+                            {nextAction}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Project Details - Expanded Content */}
+                    {isExpanded && (
+                      <div className="border-t border-gray-200 bg-gray-50">
+                        <div className="p-3 sm:p-4 space-y-4">
+                          {/* Project Details */}
+                          <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <h4 className="font-bold text-sm mb-3">Project Details</h4>
+                            {p.milestones && (
+                              <div className="text-xs sm:text-sm space-y-2 text-gray-600">
+                                {p.milestones.poPlacement && <p>🗓️ PO: {new Date(p.milestones.poPlacement).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
+                                {p.milestones.massProduction && <p>🏭 Mass Prod: {new Date(p.milestones.massProduction).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
+                                {p.milestones.etd && (
+                                  <p className={getDaysUntil(p.milestones.etd)! < 0 ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                    📦 ETD: {new Date(p.milestones.etd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({getDaysUntil(p.milestones.etd)} days)
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Production Update Alert */}
+                          {projectNeedsUpdate && (
+                            <div className="bg-yellow-50 rounded-lg border-l-4 border-yellow-400 p-3">
+                              <p className="font-bold text-sm text-yellow-900 mb-2">⚠️ Production Status Update Needed</p>
+                              <p className="text-xs text-yellow-800 mb-2">
+                                ETD: {new Date(projectNeedsUpdate.project.milestones?.etd || '').toLocaleDateString()} ({projectNeedsUpdate.daysUntilEtd} days)
                               </p>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Next Action */}
-                        <div className={`mt-2 px-3 py-1 rounded-lg text-xs sm:text-sm font-medium ${
-                          nextAction === 'No pending actions'
-                            ? 'bg-green-50 text-green-700 border border-green-200'
-                            : 'bg-amber-50 text-amber-700 border border-amber-200'
-                        }`}>
-                          🎯 {nextAction}
-                        </div>
-
-                        <div className="mt-2 flex items-center gap-2">
-                          <StatusBadge status={p.status} />
-                        </div>
-                      </div>
-
-                      {/* Contact PM Button */}
-                      <button
-                        onClick={() => handleOpenContactPm(p)}
-                        aria-label={`Contact Project Manager about ${p.name}`}
-                        className="px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 text-xs sm:text-sm font-medium transition whitespace-nowrap w-full sm:w-auto"
-                      >
-                        💬 <span className="hidden sm:inline">Contact PM</span>
-                        <span className="sm:hidden">Message</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Manufacturing Checks */}
-        {projectsNeedingUpdate.length > 0 && (
-          <div className="mb-8 bg-yellow-50 border-l-4 border-yellow-400 rounded-lg p-3 sm:p-6">
-            <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2 text-yellow-900">
-              <Factory size={20} className="flex-shrink-0" />
-              <span>Production Status Updates Needed</span>
-            </h2>
-            <div className="space-y-3 sm:space-y-4">
-              {projectsNeedingUpdate.map(({ project, daysUntilEtd }) => (
-                <div key={project.id} className="bg-white rounded-lg p-3 sm:p-4">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
-                    <div className="min-w-0">
-                      <h3 className="font-bold text-sm sm:text-base break-words">{project.name}</h3>
-                      <p className="text-xs sm:text-sm text-muted">
-                        ETD: {new Date(project.milestones?.etd || '').toLocaleDateString()} ({daysUntilEtd} days)
-                      </p>
-                    </div>
-                    <div className="flex flex-col xs:flex-row gap-2 w-full sm:w-auto">
-                      <button
-                        onClick={() => handleConfirmEtd(project, project.milestones?.etd || '')}
-                        className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs sm:text-sm transition"
-                      >
-                        Confirm On Time
-                      </button>
-                      <button
-                        onClick={() => {
-                          setUpdatingProject(project);
-                          setIsUpdateModalOpen(true);
-                        }}
-                        className="px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-xs sm:text-sm transition"
-                      >
-                        Report Delay
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Compliance Section */}
-        <div className="mb-8">
-          <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
-            <ShieldCheck size={20} className="text-primary flex-shrink-0" />
-            <span>Compliance Requests {filteredCompliance.length !== complianceReqs.length && `(${filteredCompliance.length}/${complianceReqs.length})`}</span>
-          </h2>
-          {filteredCompliance.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center text-muted">
-              <p className="text-sm sm:text-base">{debouncedSearchTerm ? 'No compliance requests match your search' : 'No compliance requests at this time'}</p>
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:gap-4">
-              {filteredCompliance.map(c => {
-                const submitted = isRequestSubmitted(c);
-                const statusBadge = getStatusBadge(c.status);
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => !submitted && navigate(`/compliance/supplier/${c.token}`)}
-                    className={`bg-white rounded-lg shadow p-3 sm:p-6 transition-all border-l-4 ${
-                      submitted
-                        ? 'border-gray-400 opacity-85'
-                        : 'border-primary cursor-pointer hover:shadow-md'
-                    }`}
-                  >
-                    {/* Request ID and Status Badge */}
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
-                      <h3 className="font-bold text-base sm:text-lg break-words">{c.requestId}</h3>
-                      <span className={`whitespace-nowrap text-xs font-semibold px-3 py-1 rounded-full border ${statusBadge.color} ${statusBadge.bgColor}`}>
-                        {statusBadge.label}
-                      </span>
-                    </div>
-
-                    {/* Project Name */}
-                    <p className="text-sm text-muted mb-3">{c.projectName}</p>
-
-                    {/* Access Code or Submission Info */}
-                    {!submitted && c.accessCode && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copyAccessCode(c.accessCode);
-                        }}
-                        className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 rounded-lg px-4 py-3 border-2 border-blue-300 transition-all duration-200 cursor-pointer group mb-3"
-                        title="Click to copy access code"
-                      >
-                        <p className="text-xs text-blue-600 font-semibold mb-2 uppercase tracking-wider text-left">
-                          Access Code (Click to Copy)
-                        </p>
-                        <div className="flex items-center justify-between">
-                          <code className="text-xl font-bold text-blue-700 tracking-widest font-mono">
-                            {c.accessCode}
-                          </code>
-                          <div className="transition-all duration-200">
-                            {copiedCode === c.accessCode ? (
-                              <div className="flex flex-col items-center gap-1">
-                                <Check className="w-5 h-5 text-green-600 animate-pulse" />
-                                <span className="text-xs text-green-600 font-medium">Copied!</span>
+                              <div className="flex flex-col xs:flex-row gap-2">
+                                <button
+                                  onClick={() => handleConfirmEtd(projectNeedsUpdate.project, projectNeedsUpdate.project.milestones?.etd || '')}
+                                  className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700"
+                                >
+                                  Confirm On Time
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setUpdatingProject(projectNeedsUpdate.project);
+                                    setIsUpdateModalOpen(true);
+                                  }}
+                                  className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700"
+                                >
+                                  Report Delay
+                                </button>
                               </div>
-                            ) : (
-                              <div className="flex flex-col items-center gap-1 opacity-60 group-hover:opacity-100">
-                                <Copy className="w-5 h-5 text-blue-600" />
-                                <span className="text-xs text-blue-600 font-medium">Copy</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    )}
-
-                    {/* Submission Info (for submitted requests) */}
-                    {submitted && (
-                      <div className="bg-gray-50 rounded-lg px-4 py-3 border-2 border-gray-300 mb-3">
-                        <p className="text-xs text-gray-600 font-semibold mb-1 uppercase tracking-wider">
-                          Status: {statusBadge.label}
-                        </p>
-                        {c.submittedAt && (
-                          <p className="text-sm text-gray-700 font-medium">
-                            Submitted: {new Date(c.submittedAt).toLocaleDateString()}
-                          </p>
-                        )}
-                        {c.respondentName && (
-                          <p className="text-xs text-gray-600 mt-1">
-                            By: {c.respondentName}
-                            {c.respondentPosition && ` (${c.respondentPosition})`}
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Action Button */}
-                    <div className="flex items-center justify-between pt-2">
-                      {!submitted ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/compliance/supplier/${c.token}`);
-                          }}
-                          className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                        >
-                          Click to open →
-                        </button>
-                      ) : (
-                        <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">
-                          <CheckCircle size={14} />
-                          Already submitted
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Missing Documents */}
-        <div className="mb-8">
-          <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
-            <FileText size={20} className="text-primary flex-shrink-0" />
-            <span>Documents Needed {filteredDocuments.length !== missingDocs.length && `(${filteredDocuments.length}/${missingDocs.length})`}</span>
-          </h2>
-          {filteredDocuments.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center text-muted">
-              <p className="text-sm sm:text-base">{debouncedSearchTerm ? 'No documents match your search' : 'No documents required at this time'}</p>
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:gap-4">
-              {filteredDocuments.map(d => {
-                const isUploading = uploadingDocs[d.id];
-                const hasFile = selectedFiles[d.id];
-                const progress = uploadProgress[d.id] || 0;
-                const error = uploadErrors[d.id];
-
-                return (
-                  <div key={d.id} className="bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 border-yellow-400 hover:shadow-md transition">
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-sm sm:text-base break-words">{d.title}</h3>
-                        <p className="text-xs sm:text-sm text-muted">{d.projectName}</p>
-                        {d.deadline && (
-                          <p className={`mt-1 text-xs sm:text-sm ${getDaysUntil(d.deadline)! < 0 ? 'text-red-600 font-medium' : 'text-orange-600'}`}>
-                            📅 Due: {new Date(d.deadline).toLocaleDateString()} ({getDaysUntil(d.deadline)} days)
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Upload UI */}
-                    <div className="mt-3 space-y-2">
-                      {!hasFile ? (
-                        <>
-                          <label className="flex items-center justify-center px-3 py-2 border-2 border-dashed border-yellow-300 rounded-lg bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition text-xs sm:text-sm font-medium text-yellow-700">
-                            <input
-                              type="file"
-                              onChange={(e) => handleDocumentSelect(d.id, e.target.files)}
-                              className="hidden"
-                              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                              disabled={isUploading}
-                            />
-                            📎 Select File (Max 5MB)
-                          </label>
-                          {error && <p className="text-red-600 text-xs">{error}</p>}
-                        </>
-                      ) : (
-                        <>
-                          <div className="bg-blue-50 p-2 rounded-lg text-xs sm:text-sm">
-                            <p className="font-medium text-blue-700 break-words">✓ {selectedFiles[d.id]?.name}</p>
-                            <p className="text-blue-600">
-                              {((selectedFiles[d.id]?.size || 0) / 1024).toFixed(0)} KB
-                            </p>
-                          </div>
-
-                          {/* Progress Bar */}
-                          {isUploading && (
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <div
-                                className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                                style={{ width: `${progress}%` }}
-                              />
                             </div>
                           )}
 
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleDocumentUpload(d.id)}
-                              disabled={isUploading}
-                              className="flex-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs sm:text-sm font-medium transition disabled:opacity-50 flex items-center justify-center gap-1"
-                            >
-                              {isUploading ? (
-                                <>
-                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  {progress}%
-                                </>
-                              ) : (
-                                <>📤 Upload</>
-                              )}
-                            </button>
-                            {!isUploading && (
-                              <button
-                                onClick={() => {
-                                  setSelectedFiles({ ...selectedFiles, [d.id]: null });
-                                  setUploadErrors({ ...uploadErrors, [d.id]: '' });
-                                }}
-                                className="px-2 py-1.5 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 text-xs font-medium transition"
-                              >
-                                Clear
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
+                          {/* Documents for this Project */}
+                          {allDocsForProject.length > 0 && (
+                            <div>
+                              <h4 className="font-bold text-sm mb-2">Documents Needed ({allDocsForProject.length})</h4>
+                              <div className="space-y-2">
+                                {allDocsForProject.map(d => {
+                                  const isUploading = uploadingDocs[d.id];
+                                  const hasFile = selectedFiles[d.id];
+                                  const progress = uploadProgress[d.id] || 0;
+                                  const error = uploadErrors[d.id];
+
+                                  return (
+                                    <div key={d.id} className="bg-white rounded-lg p-3 border border-yellow-200 hover:shadow-sm transition">
+                                      <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium text-sm break-words">{d.title}</p>
+                                          {d.deadline && (
+                                            <p className={`text-xs mt-1 ${getDaysUntil(d.deadline)! < 0 ? 'text-red-600 font-medium' : 'text-orange-600'}`}>
+                                              📅 Due: {new Date(d.deadline).toLocaleDateString()} ({getDaysUntil(d.deadline)} days)
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Inline Upload */}
+                                      {!hasFile ? (
+                                        <label className="flex items-center justify-center px-3 py-2 border-2 border-dashed border-yellow-300 rounded bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition text-xs font-medium text-yellow-700">
+                                          <input
+                                            type="file"
+                                            onChange={(e) => handleDocumentSelect(d.id, e.target.files)}
+                                            className="hidden"
+                                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                            disabled={isUploading}
+                                          />
+                                          📎 Select
+                                        </label>
+                                      ) : (
+                                        <>
+                                          <div className="bg-blue-50 p-2 rounded text-xs mb-2">
+                                            <p className="font-medium text-blue-700 break-words">✓ {selectedFiles[d.id]?.name}</p>
+                                          </div>
+                                          {isUploading && (
+                                            <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
+                                              <div
+                                                className="bg-green-600 h-1.5 rounded-full transition-all"
+                                                style={{ width: `${progress}%` }}
+                                              />
+                                            </div>
+                                          )}
+                                          <div className="flex gap-2">
+                                            <button
+                                              onClick={() => handleDocumentUpload(d.id)}
+                                              disabled={isUploading}
+                                              className="flex-1 px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
+                                            >
+                                              {isUploading ? `${progress}%` : '📤 Upload'}
+                                            </button>
+                                            {!isUploading && (
+                                              <button
+                                                onClick={() => {
+                                                  setSelectedFiles({ ...selectedFiles, [d.id]: null });
+                                                  setUploadErrors({ ...uploadErrors, [d.id]: '' });
+                                                }}
+                                                className="px-2 py-1 bg-gray-300 text-gray-700 rounded text-xs font-medium hover:bg-gray-400"
+                                              >
+                                                Clear
+                                              </button>
+                                            )}
+                                          </div>
+                                        </>
+                                      )}
+                                      {error && <p className="text-red-600 text-xs mt-1">{error}</p>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Compliance Requests for this Project */}
+                          {allComplianceForProject.length > 0 && (
+                            <div>
+                              <h4 className="font-bold text-sm mb-2">Compliance Requests ({allComplianceForProject.length})</h4>
+                              <div className="space-y-2">
+                                {allComplianceForProject.map(c => {
+                                  const submitted = isRequestSubmitted(c);
+                                  const statusBadge = getStatusBadge(c.status);
+                                  return (
+                                    <div
+                                      key={c.id}
+                                      onClick={() => !submitted && navigate(`/compliance/supplier/${c.token}`)}
+                                      className={`bg-white rounded-lg p-3 border-l-4 cursor-pointer transition ${
+                                        submitted
+                                          ? 'border-gray-300 opacity-75'
+                                          : 'border-primary hover:shadow-sm'
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between gap-2 mb-2">
+                                        <p className="font-medium text-sm">{c.requestId}</p>
+                                        <span className={`text-xs font-semibold px-2 py-1 rounded-full border whitespace-nowrap ${statusBadge.color} ${statusBadge.bgColor}`}>
+                                          {statusBadge.label}
+                                        </span>
+                                      </div>
+                                      {!submitted && c.accessCode && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            copyAccessCode(c.accessCode);
+                                          }}
+                                          className="w-full text-xs py-2 px-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded text-blue-700 font-medium transition"
+                                        >
+                                          {copiedCode === c.accessCode ? '✓ Copied!' : '📋 Copy Code'}
+                                        </button>
+                                      )}
+                                      {submitted && (
+                                        <p className="text-xs text-gray-600">Submitted {c.submittedAt && new Date(c.submittedAt).toLocaleDateString()}</p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* RFQs for this Project */}
+                          {filteredRfqs.length > 0 && (
+                            <div>
+                              <h4 className="font-bold text-sm mb-2">RFQs ({filteredRfqs.length})</h4>
+                              <div className="space-y-2">
+                                {filteredRfqs.map(rfq => (
+                                  <div key={rfq.id} className="bg-white rounded-lg p-3 border border-gray-200">
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                      <p className="font-medium text-sm break-words">{rfq.rfqTitle}</p>
+                                      <span className={`text-xs px-2 py-1 rounded whitespace-nowrap ${
+                                        rfq.status === 'pending' ? 'bg-amber-100 text-amber-800' :
+                                        rfq.status === 'submitted' ? 'bg-green-100 text-green-800' :
+                                        'bg-gray-100 text-gray-800'
+                                      }`}>
+                                        {rfq.status === 'pending' ? 'Pending Quote' : rfq.status}
+                                      </span>
+                                    </div>
+                                    {rfq.status === 'pending' && (
+                                      <button
+                                        onClick={() => {
+                                          setSelectedRfqForQuote(rfq);
+                                          setIsQuoteModalOpen(true);
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-primary text-white rounded text-xs font-medium hover:bg-primary-dark transition"
+                                      >
+                                        Submit Quote
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1448,120 +1374,36 @@ const SupplierDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* RFQs */}
+        {/* Proposals Section */}
         <div className="mb-8">
           <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
-            <ShoppingBag size={20} className="text-primary flex-shrink-0" />
-            <span>Open RFQs {filteredRfqs.length !== openRfqs.length && `(${filteredRfqs.length}/${openRfqs.length})`}</span>
-            {refreshingRfqs && (
-              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin ml-2" />
-            )}
+            <Package size={20} className="text-primary flex-shrink-0" />
+            <span>My Proposals {filteredProposals.length !== proposals.length && `(${filteredProposals.length}/${proposals.length})`}</span>
           </h2>
-          {filteredRfqs.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center text-muted">
-              <p className="text-sm sm:text-base">{debouncedSearchTerm ? 'No RFQs match your search' : 'No RFQs available at this time'}</p>
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:gap-4">
-              {filteredRfqs.map(rfq => (
-                <div key={rfq.id} className="bg-white rounded-lg shadow p-3 sm:p-4">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-sm sm:text-base break-words">{rfq.rfqTitle}</h3>
-                      <p className="text-xs sm:text-sm text-muted">{rfq.rfqIdentifier}</p>
-                    </div>
-                    {rfq.status === 'pending' ? (
-                      <button
-                        onClick={() => {
-                          setSelectedRfqForQuote(rfq);
-                          setIsQuoteModalOpen(true);
-                        }}
-                        className="px-3 py-1 bg-primary text-white rounded text-xs sm:text-sm hover:bg-primary-dark transition whitespace-nowrap w-full sm:w-auto"
-                      >
-                        Submit Quote
-                      </button>
-                    ) : rfq.status === 'submitted' ? (
-                      <span className="px-3 py-1 bg-blue-100 text-blue-800 text-xs rounded font-medium whitespace-nowrap w-full sm:w-auto text-center sm:text-left">
-                        Quote Submitted
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-gray-100 text-gray-800 text-xs rounded font-medium whitespace-nowrap w-full sm:w-auto text-center sm:text-left">
-                        {rfq.status}
-                      </span>
-                    )}
-                  </div>
-                  {rfq.status === 'submitted' && rfq.unitPrice && (
-                    <div className="mt-3 pt-3 border-t border-gray-200 text-sm">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-muted text-xs">Unit Price</p>
-                          <p className="font-bold">{rfq.currency || 'USD'} {rfq.unitPrice}</p>
-                        </div>
-                        {rfq.leadTimeWeeks && (
-                          <div>
-                            <p className="text-muted text-xs">Lead Time</p>
-                            <p className="font-bold">{rfq.leadTimeWeeks} weeks</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* My Proposals */}
-        <div className="mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4">
-            <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-              <FileText size={20} className="text-primary flex-shrink-0" />
-              <span>My Proposals {filteredProposals.length !== proposals.length && `(${filteredProposals.length}/${proposals.length})`}</span>
-            </h2>
-            <button
-              onClick={() => setIsProposalModalOpen(true)}
-              className="flex items-center justify-center sm:justify-start gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-xs sm:text-sm font-medium w-full sm:w-auto"
-            >
-              <Plus size={16} /> <span>Submit New Proposal</span>
-            </button>
-          </div>
           {filteredProposals.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center text-muted">
-              <p className="text-sm sm:text-base">{debouncedSearchTerm ? 'No proposals match your search' : "You haven't submitted any proposals yet. Share your new products with us!"}</p>
-            </div>
+            <p className="text-muted text-sm">{debouncedSearchTerm ? 'No proposals match your search' : 'You haven\'t submitted any proposals yet'}</p>
           ) : (
-            <div className="grid gap-3 sm:gap-4">
-              {filteredProposals.map(prop => (
-                <div key={prop.id} className="bg-white rounded-lg shadow p-3 sm:p-4">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 mb-3">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-sm sm:text-base break-words">{prop.title}</h3>
-                      <p className="text-xs sm:text-sm text-muted mt-1">{prop.description}</p>
-                      {prop.categoryId && (
-                        <p className="text-xs text-gray-500 mt-2">Category: Electronics</p>
-                      )}
-                    </div>
-                    <span className={`ml-4 px-3 py-1 text-xs rounded font-medium whitespace-nowrap ${
-                      prop.status === 'new' ? 'bg-blue-100 text-blue-800' :
-                      prop.status === 'reviewed' ? 'bg-yellow-100 text-yellow-800' :
-                      prop.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                      prop.status === 'converted_to_rfq' ? 'bg-indigo-100 text-indigo-800' :
-                      'bg-gray-100 text-gray-800'
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredProposals.map(proposal => (
+                <button
+                  key={proposal.id}
+                  onClick={() => handleViewProposal(proposal)}
+                  className="bg-white rounded-lg shadow border border-gray-200 p-4 hover:shadow-md hover:border-primary transition text-left cursor-pointer"
+                  aria-label={`View proposal: ${proposal.title}`}
+                >
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <h3 className="font-bold text-sm break-words flex-1">{proposal.title}</h3>
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap flex-shrink-0 ${
+                      proposal.status === 'new' ? 'bg-blue-100 text-blue-700' :
+                      proposal.status === 'viewed' ? 'bg-amber-100 text-amber-700' :
+                      'bg-gray-100 text-gray-700'
                     }`}>
-                      {prop.status === 'converted_to_rfq' ? 'Converted to RFQ' : prop.status}
+                      {proposal.status}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <span>Submitted: {new Date(prop.createdAt).toLocaleDateString()}</span>
-                    {prop.attachments && prop.attachments.length > 0 && (
-                      <>
-                        <span>•</span>
-                        <span>{prop.attachments.length} file(s)</span>
-                      </>
-                    )}
-                  </div>
-                </div>
+                  <p className="text-xs text-muted line-clamp-2 mb-2">{proposal.description}</p>
+                  <p className="text-xs text-gray-500">Submitted {new Date(proposal.createdAt).toLocaleDateString()}</p>
+                </button>
               ))}
             </div>
           )}
@@ -1569,93 +1411,66 @@ const SupplierDashboard: React.FC = () => {
 
       </main>
 
-      {/* Contact PM Modal */}
-      {isContactPmOpen && contactPmProject && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-          role="presentation"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsContactPmOpen(false);
-          }}
-        >
-          <dialog
-            open
-            className="bg-white rounded-lg max-w-md w-full p-4 sm:p-6 max-h-screen overflow-y-auto"
-            aria-labelledby="contact-modal-title"
-          >
+      {/* View Proposal Modal */}
+      {isViewProposalOpen && viewingProposal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between gap-2 mb-4">
               <div className="min-w-0">
-                <h2 id="contact-modal-title" className="text-lg sm:text-xl font-bold break-words">
-                  Contact Project Manager
-                </h2>
-                <p className="text-xs sm:text-sm text-muted mt-1">{contactPmProject.name}</p>
+                <h2 className="text-lg sm:text-xl font-bold break-words">{viewingProposal.title}</h2>
+                <p className="text-xs sm:text-sm text-muted mt-1">Submitted {new Date(viewingProposal.createdAt).toLocaleDateString()}</p>
               </div>
               <button
-                onClick={() => setIsContactPmOpen(false)}
+                onClick={() => setIsViewProposalOpen(false)}
                 aria-label="Close dialog"
-                className="text-gray-400 hover:text-gray-600 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded p-1"
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
               >
                 <X size={24} />
               </button>
             </div>
 
-            <form onSubmit={handleSendMessage} className="space-y-4">
-              <div>
-                <label htmlFor="subject-input" className="block text-xs sm:text-sm font-medium text-dark mb-2">
-                  Subject (Optional)
-                </label>
-                <input
-                  id="subject-input"
-                  type="text"
-                  maxLength={100}
-                  value={contactForm.subject}
-                  onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })}
-                  placeholder="e.g., Progress update request"
-                  aria-describedby="subject-count"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                />
-                <p id="subject-count" className="text-xs text-gray-500 mt-1">
-                  {contactForm.subject.length}/100
-                </p>
-              </div>
+            <div className="space-y-4">
+              {viewingProposal.description && (
+                <div>
+                  <h3 className="font-bold text-sm mb-2">Description</h3>
+                  <p className="text-sm text-gray-600">{viewingProposal.description}</p>
+                </div>
+              )}
 
-              <div>
-                <label htmlFor="message-input" className="block text-xs sm:text-sm font-medium text-dark mb-2">
-                  Message <span className="text-red-600" aria-label="required">*</span>
-                </label>
-                <textarea
-                  id="message-input"
-                  required
-                  maxLength={500}
-                  rows={4}
-                  value={contactForm.message}
-                  onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
-                  placeholder="Type your message here..."
-                  aria-describedby="message-count"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none"
-                />
-                <p id="message-count" className="text-xs text-gray-500 mt-1">
-                  {contactForm.message.length}/500
-                </p>
-              </div>
+              {viewingProposal.fileUrl && (
+                <div>
+                  <h3 className="font-bold text-sm mb-2">Document</h3>
+                  <a
+                    href={viewingProposal.fileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+                  >
+                    View Proposal Document
+                  </a>
+                </div>
+              )}
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsContactPmOpen(false)}
-                  className="flex-1 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs sm:text-sm font-medium transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs sm:text-sm font-medium transition disabled:opacity-50"
-                >
-                  Send Message
-                </button>
+              <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                  viewingProposal.status === 'new' ? 'bg-blue-100 text-blue-700' :
+                  viewingProposal.status === 'viewed' ? 'bg-amber-100 text-amber-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>
+                  {viewingProposal.status}
+                </span>
               </div>
-            </form>
-          </dialog>
+            </div>
+
+            <div className="flex gap-2 pt-4 mt-4 border-t border-gray-200">
+              <button
+                onClick={() => setIsViewProposalOpen(false)}
+                className="flex-1 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

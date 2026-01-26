@@ -211,19 +211,20 @@ const ProjectDetail: React.FC = () => {
         setCategories(cats);
         setProjectIM(imData || null);
         setProductionUpdates(prodUpdates);
+
+        // Init timeline form
+        setTimelineForm({
+          poPlacement: p.milestones?.poPlacement || '',
+          massProduction: p.milestones?.massProduction || '',
+          etd: p.milestones?.etd || '',
+          eta: p.milestones?.eta || ''
+        });
       }
     } catch (err: any) {
       console.error('Error loading project data:', err);
+    } finally {
+      setLoading(false);
     }
-
-    // Init timeline form
-    setTimelineForm({
-      poPlacement: p.milestones?.poPlacement || '',
-      massProduction: p.milestones?.massProduction || '',
-      etd: p.milestones?.etd || '',
-      eta: p.milestones?.eta || ''
-    });
-    setLoading(false);
   };
 
   const handleCopyLink = () => {

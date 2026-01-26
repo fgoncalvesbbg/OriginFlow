@@ -10,7 +10,7 @@ import {
   ComplianceRequest, ComplianceRequirement, ProductFeature, 
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
-import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Box, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Info, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Box, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Info, RefreshCw, Check, ChevronDown } from 'lucide-react';
 
 const SupplierCompliancePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -32,6 +32,7 @@ const SupplierCompliancePortal: React.FC = () => {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [respondentName, setRespondentName] = useState('');
   const [respondentPosition, setRespondentPosition] = useState('');
+  const [expandedRequirements, setExpandedRequirements] = useState<Set<string>>(new Set());
 
   const handleLogin = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -219,6 +220,13 @@ const SupplierCompliancePortal: React.FC = () => {
     return a.localeCompare(b);
   });
 
+  const toggleExpanded = (id: string) => {
+    const newSet = new Set(expandedRequirements);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setExpandedRequirements(newSet);
+  };
+
   return (
     <div className="min-h-screen bg-light font-sans pb-20 text-primary">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow">
@@ -259,65 +267,136 @@ const SupplierCompliancePortal: React.FC = () => {
 
         {!submitted && (
             <div className="space-y-8">
-                {sortedSections.map(section => (
-                    <div key={section} className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
-                        <div className="bg-light px-6 py-3 border-b border-gray-200 flex items-center gap-2">
-                            <Folder size={16} className="text-gray-400"/>
-                            <h3 className="font-bold text-gray-800 text-xs uppercase tracking-widest">{section}</h3>
-                        </div>
-                        <div className="divide-y divide-slate-100">
-                            {groupedReqs[section].map(r => {
-                                const answer = answers[r.id];
-                                return (
-                                    <div key={r.id} className="p-6 hover:bg-light/30 transition-colors">
-                                        <div className="flex flex-col md:flex-row gap-6">
-                                            <div className="flex-1">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <h4 className="font-bold text-primary text-sm">{r.title}</h4>
-                                                    {r.isMandatory && <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold uppercase">Mandatory</span>}
+                {sortedSections.map(section => {
+                    const sectionReqs = groupedReqs[section];
+                    const completedCount = sectionReqs.filter(r => answers[r.id]).length;
+                    return (
+                        <div key={section} className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
+                            {/* Section Header with Progress */}
+                            <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Folder size={16} className="text-gray-400"/>
+                                    <h3 className="font-bold text-gray-800 text-xs uppercase tracking-widest">{section}</h3>
+                                </div>
+                                <span className="text-xs font-bold text-gray-500">{completedCount} / {sectionReqs.length} Complete</span>
+                            </div>
+
+                            {/* Table Header */}
+                            <div className="grid grid-cols-[40px_1fr_140px_130px] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                                <div></div>
+                                <div>Requirement</div>
+                                <div className="text-center">Rules</div>
+                                <div className="text-center">Response</div>
+                            </div>
+
+                            {/* Table Rows */}
+                            <div className="divide-y divide-gray-100">
+                                {sectionReqs.map((r, idx) => {
+                                    const answer = answers[r.id];
+                                    const isExpanded = expandedRequirements.has(r.id);
+
+                                    return (
+                                        <div key={r.id} className={`border-l-2 transition-colors ${
+                                            answer === ComplianceResponseStatus.COMPLY ? 'border-l-emerald-400 bg-emerald-50/30' :
+                                            answer === ComplianceResponseStatus.CANNOT_COMPLY ? 'border-l-rose-400 bg-rose-50/30' :
+                                            'border-l-transparent bg-white'
+                                        } ${idx % 2 === 1 ? 'bg-gray-50/50' : ''} hover:bg-indigo-50/30 transition-all`}>
+
+                                            {/* Main Row */}
+                                            <div
+                                                className="grid grid-cols-[40px_1fr_140px_130px] gap-3 px-4 py-3 cursor-pointer items-center"
+                                                onClick={() => toggleExpanded(r.id)}
+                                            >
+                                                {/* Column 1: Status Checkbox */}
+                                                <div className="flex items-center justify-center">
+                                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                                                        answer === ComplianceResponseStatus.COMPLY
+                                                            ? 'bg-emerald-500 border-emerald-500'
+                                                            : answer === ComplianceResponseStatus.CANNOT_COMPLY
+                                                            ? 'bg-rose-500 border-rose-500'
+                                                            : 'border-gray-300 bg-white'
+                                                    }`}>
+                                                        {answer && <Check size={12} className="text-white font-bold" />}
+                                                    </div>
                                                 </div>
-                                                <p className="text-xs text-gray-600 mb-4 leading-relaxed">{r.description}</p>
-                                                
-                                                {/* Unified Rules Summary Block */}
-                                                <div className="bg-gray-100/60 p-3 rounded-xl border border-gray-200 flex flex-wrap gap-x-8 gap-y-3 items-center">
-                                                    <div className="flex items-center gap-2 min-w-[130px]">
-                                                        <Clock size={14} className="text-gray-400" />
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight leading-none mb-0.5">Timing</span>
-                                                            <span className="text-xs font-bold text-gray-700">{r.timingType === 'POST_ETD' ? `Deferred (${r.timingWeeks}w post-ETD)` : 'Mandatory at ETD'}</span>
-                                                        </div>
+
+                                                {/* Column 2: Title + Mandatory Badge */}
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className="font-semibold text-sm text-primary truncate">{r.title}</span>
+                                                    {r.isMandatory && (
+                                                        <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide shrink-0">
+                                                            Req
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {/* Column 3: Rules Icons + Text */}
+                                                <div className="flex items-center justify-center gap-3 text-xs text-gray-600 flex-wrap">
+                                                    <div className="flex items-center gap-1 whitespace-nowrap">
+                                                        <Clock size={13} className={r.timingType === 'POST_ETD' ? 'text-amber-500' : 'text-gray-400'} />
+                                                        <span className="text-[10px]">{r.timingType === 'POST_ETD' ? `ETD+${r.timingWeeks}w` : 'At ETD'}</span>
                                                     </div>
-                                                    <div className="flex items-center gap-2 min-w-[150px]">
-                                                        <Building size={14} className="text-gray-400" />
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight leading-none mb-0.5">Report Origin</span>
-                                                            <span className="text-xs font-bold text-gray-700">{r.testReportOrigin === 'supplier_inhouse' ? 'Supplier In-House OK' : '3rd Party Lab (Mandatory)'}</span>
-                                                        </div>
+                                                    <div className="flex items-center gap-1 whitespace-nowrap">
+                                                        <Building size={13} className={r.testReportOrigin === 'third_party_mandatory' ? 'text-indigo-500' : 'text-gray-400'} />
+                                                        <span className="text-[10px]">{r.testReportOrigin === 'supplier_inhouse' ? 'In-House' : '3rd Party'}</span>
                                                     </div>
-                                                    <div className="flex items-center gap-2 min-w-[150px]">
-                                                        <FileCheck size={14} className="text-gray-400" />
-                                                        <div className="flex flex-col">
-                                                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight leading-none mb-0.5">Declaration Status</span>
-                                                            <span className="text-xs font-bold text-gray-700">{r.selfDeclarationAccepted ? 'Accepted' : 'Lab Report Required'}</span>
-                                                        </div>
+                                                    <div className="flex items-center gap-1 whitespace-nowrap">
+                                                        <FileCheck size={13} className={!r.selfDeclarationAccepted ? 'text-rose-500' : 'text-gray-400'} />
+                                                        <span className="text-[10px]">{r.selfDeclarationAccepted ? 'Self-Decl' : 'Lab Report'}</span>
                                                     </div>
+                                                </div>
+
+                                                {/* Column 4: Response Buttons */}
+                                                <div className="flex gap-1 justify-center" onClick={(e) => e.stopPropagation()}>
+                                                    <button
+                                                        onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
+                                                        className={`flex-1 py-1.5 px-2 text-xs font-bold rounded transition-all ${
+                                                            answer === ComplianceResponseStatus.COMPLY
+                                                                ? 'bg-emerald-600 text-white border border-emerald-600'
+                                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-emerald-400'
+                                                        }`}
+                                                        title="Confirm"
+                                                    >
+                                                        ✓
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
+                                                        className={`flex-1 py-1.5 px-2 text-xs font-bold rounded transition-all ${
+                                                            answer === ComplianceResponseStatus.CANNOT_COMPLY
+                                                                ? 'bg-rose-600 text-white border border-rose-600'
+                                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-rose-400'
+                                                        }`}
+                                                        title="Cannot Confirm"
+                                                    >
+                                                        ✗
+                                                    </button>
                                                 </div>
                                             </div>
 
-                                            <div className="w-full md:w-72 shrink-0 space-y-3 pt-2">
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})} className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${answer === ComplianceResponseStatus.COMPLY ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-300 hover:border-emerald-400'}`}>Confirm</button>
-                                                    <button onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})} className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${answer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-gray-600 border-gray-300 hover:border-rose-400'}`}>Cannot Confirm</button>
+                                            {/* Expandable Details Section */}
+                                            {isExpanded && (
+                                                <div className="px-4 pb-3 pl-16 space-y-2 bg-gray-50/50 border-t border-gray-100 animate-in slide-in-from-top-2 duration-200">
+                                                    <p className="text-xs text-gray-700 leading-relaxed pt-2">{r.description}</p>
+                                                    <textarea
+                                                        className="w-full text-xs border border-gray-200 rounded p-2 focus:ring-1 focus:ring-indigo-400 outline-none bg-white"
+                                                        placeholder="Optional notes..."
+                                                        rows={2}
+                                                        value={comments[r.id] || ''}
+                                                        onChange={(e) => {
+                                                            e.stopPropagation();
+                                                            setComments({...comments, [r.id]: e.target.value});
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
                                                 </div>
-                                                <textarea className="w-full text-xs border border-gray-200 rounded p-2 focus:ring-1 focus:ring-indigo-500 outline-none" placeholder="Notes (Optional)..." rows={2} value={comments[r.id] || ''} onChange={(e) => setComments({...comments, [r.id]: e.target.value})} />
-                                            </div>
+                                            )}
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
 
                 <div className="bg-white border border-gray-200 rounded-xl shadow p-8 mt-8">
                     <div className="flex items-center gap-2 mb-6 pb-2 border-b border-gray-100"><PenTool className="text-indigo-600" size={20} /><h3 className="font-bold text-gray-800">Final Declaration</h3></div>
