@@ -4,13 +4,13 @@ import { useParams } from 'react-router-dom';
 import {
   verifySupplierAccess, submitComplianceResponseSecure,
   getComplianceRequirements, getProductFeatures, getCategories,
-  COMPLIANCE_SECTIONS, getRFQsForSupplier
+  COMPLIANCE_SECTIONS
 } from '../../services/apiService';
 import {
   ComplianceRequest, ComplianceRequirement, ProductFeature,
-  CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus, RFQEntry
+  CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
-import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Box, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Info, RefreshCw, Check, ChevronDown } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check } from 'lucide-react';
 
 const SupplierCompliancePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -24,7 +24,6 @@ const SupplierCompliancePortal: React.FC = () => {
   const [req, setReq] = useState<ComplianceRequest | null>(null);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [category, setCategory] = useState<CategoryL3 | null>(null);
-  const [rfqEntries, setRfqEntries] = useState<RFQEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   
@@ -33,7 +32,6 @@ const SupplierCompliancePortal: React.FC = () => {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [respondentName, setRespondentName] = useState('');
   const [respondentPosition, setRespondentPosition] = useState('');
-  const [expandedDeadlineItem, setExpandedDeadlineItem] = useState<string | null>(null);
 
   const handleLogin = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -73,10 +71,9 @@ const SupplierCompliancePortal: React.FC = () => {
 
   const loadPortalDependencies = async (requestData: ComplianceRequest) => {
       try {
-          const [allReqs, allCats, rfqs] = await Promise.all([
+          const [allReqs, allCats] = await Promise.all([
             getComplianceRequirements(),
-            getCategories(),
-            getRFQsForSupplier(requestData.supplierId)
+            getCategories()
           ]);
 
           const cat = allCats.find(c => c.id === requestData.categoryId);
@@ -97,7 +94,6 @@ const SupplierCompliancePortal: React.FC = () => {
           });
 
           setRequirements(applicableReqs);
-          setRfqEntries(rfqs || []);
 
           const initialAnswers: Record<string, ComplianceResponseStatus> = {};
           const initialComments: Record<string, string> = {};
@@ -234,25 +230,6 @@ const SupplierCompliancePortal: React.FC = () => {
     return a.localeCompare(b);
   });
 
-  // Group unsubmitted requirements by timing
-  const getDeadlineLabel = (req: ComplianceRequirement): string => {
-    if (req.timingType === 'POST_ETD') {
-      return `ETD + ${req.timingWeeks} weeks`;
-    }
-    return 'At ETD';
-  };
-
-  const unsubmittedReqs = requirements.filter(r => !answers[r.id]);
-  const groupedByDeadline = unsubmittedReqs.reduce((acc, r) => {
-    const deadline = getDeadlineLabel(r);
-    if (!acc[deadline]) acc[deadline] = [];
-    acc[deadline].push(r);
-    return acc;
-  }, {} as Record<string, ComplianceRequirement[]>);
-
-  const deadlineOrder = ['At ETD', ...Array.from({length: 12}, (_, i) => `ETD + ${i+1} weeks`)];
-  const sortedDeadlines = Object.keys(groupedByDeadline)
-    .sort((a, b) => deadlineOrder.indexOf(a) - deadlineOrder.indexOf(b));
 
 
   return (
@@ -292,150 +269,6 @@ const SupplierCompliancePortal: React.FC = () => {
                 <div className="font-medium">{req.deadline ? new Date(req.deadline).toLocaleDateString() : 'None'}</div>
             </div>
         </div>
-
-        {/* RFQ Section - Show active RFQ requests for this supplier */}
-        {rfqEntries.length > 0 && (
-            <div className="mb-8 bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
-                <div className="bg-blue-50 px-6 py-3 border-b border-gray-200 flex items-center gap-2">
-                    <Box size={18} className="text-blue-600"/>
-                    <h3 className="font-bold text-gray-800 text-sm">Active RFQ Requests</h3>
-                    <span className="text-xs font-semibold text-blue-600 ml-auto">{rfqEntries.length} request{rfqEntries.length !== 1 ? 's' : ''}</span>
-                </div>
-                <div className="divide-y divide-gray-100">
-                    {rfqEntries.map((entry) => (
-                        <div key={entry.id} className="px-6 py-4 hover:bg-blue-50/30 transition-colors">
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="flex-1 min-w-0">
-                                    <h4 className="font-semibold text-gray-800">{entry.rfqTitle || 'RFQ Request'}</h4>
-                                    <p className="text-xs text-gray-500 mt-1 font-mono">{entry.rfqIdentifier}</p>
-                                    {entry.supplierNotes && (
-                                        <p className="text-xs text-gray-600 mt-2">{entry.supplierNotes}</p>
-                                    )}
-                                </div>
-                                <div className="flex flex-col items-end gap-2 shrink-0">
-                                    <span className={`text-xs font-bold px-3 py-1.5 rounded-full whitespace-nowrap ${
-                                        entry.status === 'submitted'
-                                            ? 'bg-emerald-100 text-emerald-700'
-                                            : entry.status === 'awarded'
-                                            ? 'bg-indigo-100 text-indigo-700'
-                                            : 'bg-amber-100 text-amber-700'
-                                    }`}>
-                                        {entry.status === 'pending' && 'Pending Response'}
-                                        {entry.status === 'submitted' && 'Quote Submitted'}
-                                        {entry.status === 'awarded' && 'Awarded'}
-                                    </span>
-                                </div>
-                            </div>
-
-                            {/* RFQ Details */}
-                            {(entry.unitPrice || entry.moq || entry.leadTimeWeeks) && (
-                                <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-4 text-xs">
-                                    {entry.unitPrice && (
-                                        <div>
-                                            <span className="text-gray-500 font-medium">Unit Price</span>
-                                            <p className="font-semibold text-gray-800 mt-0.5">
-                                                {entry.unitPrice} {entry.currency || 'USD'}
-                                            </p>
-                                        </div>
-                                    )}
-                                    {entry.moq && (
-                                        <div>
-                                            <span className="text-gray-500 font-medium">MOQ</span>
-                                            <p className="font-semibold text-gray-800 mt-0.5">{entry.moq.toLocaleString()} units</p>
-                                        </div>
-                                    )}
-                                    {entry.leadTimeWeeks && (
-                                        <div>
-                                            <span className="text-gray-500 font-medium">Lead Time</span>
-                                            <p className="font-semibold text-gray-800 mt-0.5">{entry.leadTimeWeeks} weeks</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {entry.submittedAt && (
-                                <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100">
-                                    Submitted on {new Date(entry.submittedAt).toLocaleDateString()}
-                                </p>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-        )}
-
-        {/* Deadlines Section - Show only if not submitted and there are pending items */}
-        {!submitted && unsubmittedReqs.length > 0 && (
-            <div className="mb-8 bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
-                <div className="bg-amber-50 px-6 py-3 border-b border-gray-200 flex items-center gap-2">
-                    <Calendar size={18} className="text-amber-600"/>
-                    <h3 className="font-bold text-gray-800 text-sm">Upcoming Deadlines</h3>
-                    <span className="text-xs font-semibold text-amber-600 ml-auto">{unsubmittedReqs.length} pending</span>
-                </div>
-                <div className="divide-y divide-gray-100">
-                    {sortedDeadlines.map(deadline => (
-                        <div key={deadline} className="px-6 py-4">
-                            <div className="flex items-center justify-between mb-3">
-                                <h4 className="font-semibold text-gray-800 flex items-center gap-2">
-                                    <Clock size={16} className="text-amber-600"/>
-                                    {deadline}
-                                </h4>
-                                <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">
-                                    {groupedByDeadline[deadline].length} items
-                                </span>
-                            </div>
-                            <div className="space-y-2">
-                                {groupedByDeadline[deadline].map(req => (
-                                    <div
-                                        key={req.id}
-                                        className="bg-gray-50 hover:bg-indigo-50 rounded-lg p-3 cursor-pointer transition-colors border border-gray-200"
-                                        onClick={() => setExpandedDeadlineItem(expandedDeadlineItem === req.id ? null : req.id)}
-                                    >
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-sm text-gray-800 truncate">{req.title}</p>
-                                                <p className="text-xs text-gray-600 mt-1 line-clamp-2">{req.description}</p>
-                                            </div>
-                                            <ChevronDown
-                                                size={16}
-                                                className={`text-gray-400 shrink-0 transition-transform ${
-                                                    expandedDeadlineItem === req.id ? 'rotate-180' : ''
-                                                }`}
-                                            />
-                                        </div>
-
-                                        {/* Expanded Details */}
-                                        {expandedDeadlineItem === req.id && (
-                                            <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
-                                                <div className="text-xs space-y-2">
-                                                    <div>
-                                                        <span className="font-semibold text-gray-700">Test Report Origin:</span>
-                                                        <span className="text-gray-600 ml-2">
-                                                            {req.testReportOrigin === 'supplier_inhouse' ? 'In-House' : '3rd Party'}
-                                                        </span>
-                                                    </div>
-                                                    <div>
-                                                        <span className="font-semibold text-gray-700">Accepted:</span>
-                                                        <span className="text-gray-600 ml-2">
-                                                            {req.selfDeclarationAccepted ? 'Self-Declaration' : 'Lab Report Only'}
-                                                        </span>
-                                                    </div>
-                                                    {req.isMandatory && (
-                                                        <div className="bg-rose-50 border border-rose-100 rounded p-2 text-rose-700 font-semibold">
-                                                            Mandatory Requirement
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        )}
 
         {/* Requirements Section - Read-only if submitted, editable otherwise */}
         <div className={`space-y-8 ${submitted ? 'opacity-60 pointer-events-none' : ''}`}>
