@@ -11,7 +11,11 @@ import {
 } from '../services/apiService';
 import { generateUUID } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Circle, Layers, Tag, Trash2, SlidersHorizontal, X, Save, Loader2, RefreshCw, ShoppingBag } from 'lucide-react';
+<<<<<<< HEAD
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
+=======
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
+>>>>>>> ab9b0fa (asd)
 import { useAuth } from '../context/AuthContext';
 
 const ConfirmationModal: React.FC<{
@@ -514,7 +518,7 @@ const AdminDashboard: React.FC = () => {
           <Layers size={18} /> Product Categories
         </button>
         <button onClick={() => setActiveTab('projects')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'projects' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
-          <ShoppingBag size={18} /> Projects
+          <Package size={18} /> Projects
         </button>
       </div>
 

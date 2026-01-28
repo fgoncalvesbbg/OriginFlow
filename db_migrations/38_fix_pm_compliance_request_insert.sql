@@ -1,13 +1,32 @@
--- Migration 38: Fix PM RLS policy for compliance_requests INSERT operations
--- Issue: PMs cannot INSERT compliance requests because the RLS policy lacks WITH CHECK clause
--- Solution: Add WITH CHECK clause to allow PMs to create requests for their projects
+-- Migration 38: Fix admin & PM RLS policies for compliance_requests INSERT operations
+-- Issue: Both ADMIN and PM policies lack WITH CHECK clause, blocking INSERT operations
+-- Solution: Add WITH CHECK clause to allow admins and PMs to create compliance requests
 
--- Drop the incomplete policy
+-- Drop the incomplete admin policy
+DROP POLICY IF EXISTS "admin_all_access_compliance_requests" ON public.compliance_requests;
+
+-- Recreate admin policy with both USING and WITH CHECK clauses
+CREATE POLICY "admin_all_access_compliance_requests" ON public.compliance_requests
+FOR ALL TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM public.profiles prof
+    WHERE prof.id = auth.uid()
+    AND prof.role = 'ADMIN'
+  )
+)
+WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM public.profiles prof
+    WHERE prof.id = auth.uid()
+    AND prof.role = 'ADMIN'
+  )
+);
+
+-- Drop the incomplete PM policy
 DROP POLICY IF EXISTS "pm_access_own_compliance_requests" ON public.compliance_requests;
 
--- Recreate with both USING and WITH CHECK clauses
--- USING: Controls visibility for SELECT and DELETE
--- WITH CHECK: Controls what rows can be inserted/updated
+-- Recreate PM policy with both USING and WITH CHECK clauses
 CREATE POLICY "pm_access_own_compliance_requests" ON public.compliance_requests
 FOR ALL TO authenticated
 USING (
