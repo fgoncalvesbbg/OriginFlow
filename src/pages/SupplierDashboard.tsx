@@ -82,6 +82,9 @@ const SupplierDashboard: React.FC = () => {
     setExpandedProjects(newExpanded);
   };
 
+  // Tab Navigation State
+  const [activeTab, setActiveTab] = useState<'projects' | 'rfq' | 'tcf' | 'proposals'>('projects');
+
   // Session Management (60 min timeout)
   const SESSION_TIMEOUT = 60 * 60 * 1000;
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
@@ -868,244 +871,114 @@ const SupplierDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Dashboard Summary Stats */}
-        <div className="mb-8 grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
-          {/* Active Projects */}
-          <div className="bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 border-blue-400 hover:shadow-md transition">
-            <p className="text-xs sm:text-sm text-muted font-medium uppercase tracking-wide">Active Projects</p>
-            <p className="text-2xl sm:text-3xl font-bold text-primary mt-2">{summaryStats.activeProjects}</p>
+        {/* Tab Navigation */}
+        <div className="mb-8 bg-white rounded-lg shadow border-b border-gray-200">
+          <div className="flex flex-wrap gap-0 sm:gap-1 p-1">
+            <button
+              onClick={() => setActiveTab('projects')}
+              className={`flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
+                activeTab === 'projects'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <ShoppingBag size={16} className="inline mr-2" />
+              Projects
+            </button>
+            <button
+              onClick={() => setActiveTab('rfq')}
+              className={`flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
+                activeTab === 'rfq'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <FileText size={16} className="inline mr-2" />
+              RFQ ({openRfqs.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('tcf')}
+              className={`flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
+                activeTab === 'tcf'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <ShieldCheck size={16} className="inline mr-2" />
+              TCF Requests ({complianceReqs.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('proposals')}
+              className={`flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
+                activeTab === 'proposals'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <Package size={16} className="inline mr-2" />
+              My Proposals ({proposals.length})
+            </button>
           </div>
-
-          {/* Pending Actions */}
-          <div className={`bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 transition hover:shadow-md ${summaryStats.pendingActions > 0 ? 'border-amber-400' : 'border-gray-400'}`}>
-            <p className="text-xs sm:text-sm text-muted font-medium uppercase tracking-wide">Pending Actions</p>
-            <p className={`text-2xl sm:text-3xl font-bold mt-2 ${summaryStats.pendingActions > 0 ? 'text-amber-600' : 'text-gray-600'}`}>
-              {summaryStats.pendingActions}
-            </p>
-          </div>
-
-          {/* Upcoming Deadlines */}
-          <div className={`bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 transition hover:shadow-md ${summaryStats.upcomingDeadlines > 0 ? 'border-orange-400' : 'border-gray-400'}`}>
-            <p className="text-xs sm:text-sm text-muted font-medium uppercase tracking-wide">Deadlines (7d)</p>
-            <p className={`text-2xl sm:text-3xl font-bold mt-2 ${summaryStats.upcomingDeadlines > 0 ? 'text-orange-600' : 'text-gray-600'}`}>
-              {summaryStats.upcomingDeadlines}
-            </p>
-          </div>
-
-          {/* Overdue Items */}
-          {summaryStats.overdueCount > 0 && (
-            <div className="bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 border-red-400 hover:shadow-md transition md:col-span-1">
-              <p className="text-xs sm:text-sm text-muted font-medium uppercase tracking-wide">Overdue</p>
-              <p className="text-2xl sm:text-3xl font-bold text-red-600 mt-2 animate-pulse">{summaryStats.overdueCount}</p>
-            </div>
-          )}
-
-          {/* Unread Notifications */}
-          {summaryStats.unreadNotifications > 0 && (
-            <div className="bg-white rounded-lg shadow p-3 sm:p-4 border-l-4 border-indigo-400 hover:shadow-md transition md:col-span-1">
-              <p className="text-xs sm:text-sm text-muted font-medium uppercase tracking-wide">Unread</p>
-              <p className="text-2xl sm:text-3xl font-bold text-indigo-600 mt-2">{summaryStats.unreadNotifications}</p>
-            </div>
-          )}
         </div>
 
-        {/* Dashboard Insights / Visualizations */}
-        <div className="mb-8 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-          {/* Project Status Distribution */}
-          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-            <h3 className="text-sm sm:text-base font-bold mb-4 flex items-center gap-2">
-              <div className="w-2 h-2 bg-indigo-600 rounded-full" />
-              Project Status
-            </h3>
-            {dashboardInsights.projectDistribution.total === 0 ? (
-              <p className="text-xs sm:text-sm text-muted text-center py-4">No projects to visualize</p>
-            ) : (
-              <div className="space-y-3">
-                {dashboardInsights.projectDistribution.inProgress > 0 && (
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-600">In Progress</span>
-                      <span className="text-xs font-bold text-gray-700">
-                        {dashboardInsights.projectDistribution.inProgress}/{dashboardInsights.projectDistribution.total}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full"
-                        style={{ width: `${(dashboardInsights.projectDistribution.inProgress / dashboardInsights.projectDistribution.total) * 100}%` }}
-                      />
-                    </div>
+        {/* Search and Filter Bar - shown for all tabs except proposals */}
+        {activeTab !== 'proposals' && (
+          <section aria-label="Search and filters">
+            <div className="mb-8 bg-white rounded-lg shadow p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                {/* Search Input */}
+                <div className="flex-1 relative">
+                  <label htmlFor="dashboard-search" className="sr-only">
+                    Search {activeTab}
+                  </label>
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
                   </div>
-                )}
-                {dashboardInsights.projectDistribution.archived > 0 && (
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-600">Archived</span>
-                      <span className="text-xs font-bold text-gray-700">
-                        {dashboardInsights.projectDistribution.archived}/{dashboardInsights.projectDistribution.total}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-gray-600 h-2 rounded-full"
-                        style={{ width: `${(dashboardInsights.projectDistribution.archived / dashboardInsights.projectDistribution.total) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {dashboardInsights.projectDistribution.cancelled > 0 && (
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-600">Cancelled</span>
-                      <span className="text-xs font-bold text-gray-700">
-                        {dashboardInsights.projectDistribution.cancelled}/{dashboardInsights.projectDistribution.total}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-red-600 h-2 rounded-full"
-                        style={{ width: `${(dashboardInsights.projectDistribution.cancelled / dashboardInsights.projectDistribution.total) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Document Upload Progress */}
-          <div className="bg-white rounded-lg shadow p-4 sm:p-6 flex flex-col items-center justify-center">
-            <h3 className="text-sm sm:text-base font-bold mb-4 w-full">Document Progress</h3>
-            {missingDocs.length === 0 ? (
-              <div className="text-center py-6">
-                <p className="text-2xl sm:text-3xl font-bold text-green-600">✓</p>
-                <p className="text-xs sm:text-sm text-muted mt-2">All documents uploaded</p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3">
-                <svg className="w-20 h-20" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="45" fill="none" stroke="#e5e7eb" strokeWidth="8" />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="45"
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="8"
-                    strokeDasharray={`${(dashboardInsights.docProgress / 100) * 283} 283`}
-                    strokeLinecap="round"
-                    transform="rotate(-90 50 50)"
-                    className="transition-all duration-500"
+                  <input
+                    id="dashboard-search"
+                    type="text"
+                    placeholder={activeTab === 'projects' ? 'Search projects...' : activeTab === 'rfq' ? 'Search RFQs...' : 'Search compliance requests...'}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    aria-label={`Search ${activeTab}`}
+                    className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                   />
-                  <text x="50" y="55" textAnchor="middle" fontSize="20" fontWeight="bold" className="fill-gray-800">
-                    {Math.round(dashboardInsights.docProgress)}%
-                  </text>
-                </svg>
-                <p className="text-xs sm:text-sm text-muted">
-                  {filteredDocuments.length} of {missingDocs.length} pending
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Compliance Timeline */}
-          <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-            <h3 className="text-sm sm:text-base font-bold mb-4 flex items-center gap-2">
-              <div className="w-2 h-2 bg-indigo-600 rounded-full" />
-              Deadlines (Next 5)
-            </h3>
-            {dashboardInsights.complianceTimeline.length === 0 ? (
-              <p className="text-xs sm:text-sm text-muted text-center py-4">No upcoming deadlines</p>
-            ) : (
-              <div className="space-y-2">
-                {dashboardInsights.complianceTimeline.map((compliance) => {
-                  const daysLeft = getDaysUntil(compliance.deadline);
-                  const isOverdue = daysLeft! < 0;
-                  const isUrgent = daysLeft! <= 3 && daysLeft! >= 0;
-
-                  return (
-                    <div key={compliance.id} className="flex items-center gap-2 text-xs">
-                      <span
-                        className={`px-2 py-1 rounded font-mono font-bold whitespace-nowrap ${
-                          isOverdue
-                            ? 'bg-red-100 text-red-700'
-                            : isUrgent
-                            ? 'bg-orange-100 text-orange-700'
-                            : 'bg-blue-100 text-blue-700'
-                        }`}
-                      >
-                        {isOverdue ? 'OVERDUE' : daysLeft! === 0 ? 'TODAY' : `${daysLeft}d`}
-                      </span>
-                      <span className="flex-1 text-gray-600 truncate">{compliance.requestId}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Search and Filter Bar */}
-        <section aria-label="Search and filters">
-          <div className="mb-8 bg-white rounded-lg shadow p-4 sm:p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              {/* Search Input */}
-              <div className="flex-1 relative">
-                <label htmlFor="dashboard-search" className="sr-only">
-                  Search dashboard
-                </label>
-                <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none">
-                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      aria-label="Clear search"
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
+                    >
+                      <X size={18} />
+                    </button>
+                  )}
                 </div>
-                <input
-                  id="dashboard-search"
-                  type="text"
-                  placeholder="Search projects, compliance, documents..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  aria-label="Search dashboard"
-                  aria-describedby="search-results"
-                  className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                />
-                {searchTerm && (
-                  <button
-                    onClick={() => setSearchTerm('')}
-                    aria-label="Clear search"
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
-                  >
-                    <X size={18} />
-                  </button>
-                )}
-              </div>
 
-              {/* Filter Toggles */}
-              <div className="flex gap-2 flex-wrap sm:flex-nowrap">
-                <button
-                  onClick={() => setFilterActionItemsOnly(!filterActionItemsOnly)}
-                  aria-pressed={filterActionItemsOnly}
-                  className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
-                    filterActionItemsOnly
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Action Items Only
-                </button>
+                {/* Filter Toggles */}
+                <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                  <button
+                    onClick={() => setFilterActionItemsOnly(!filterActionItemsOnly)}
+                    aria-pressed={filterActionItemsOnly}
+                    className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
+                      filterActionItemsOnly
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Action Items Only
+                  </button>
+                </div>
               </div>
             </div>
+          </section>
+        )}
 
-            {/* Results Counter */}
-            {debouncedSearchTerm && (
-              <div id="search-results" className="mt-3 text-xs sm:text-sm text-muted" role="status" aria-live="polite">
-                Found: {filteredProjects.length} projects, {filteredCompliance.length} compliance, {filteredDocuments.length} documents, {filteredRfqs.length} RFQs, {filteredProposals.length} proposals
-              </div>
-            )}
-          </div>
-        </section>
+        {/* Tab Content */}
 
-        {/* Grouped Projects Section */}
+        {/* PROJECTS TAB */}
+        {activeTab === 'projects' && (
         <div className="mb-8">
           <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
             <ShoppingBag size={20} className="text-primary flex-shrink-0" />
@@ -1373,15 +1246,139 @@ const SupplierDashboard: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
-        {/* Proposals Section */}
+        {/* RFQ TAB */}
+        {activeTab === 'rfq' && (
         <div className="mb-8">
           <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
-            <Package size={20} className="text-primary flex-shrink-0" />
-            <span>My Proposals {filteredProposals.length !== proposals.length && `(${filteredProposals.length}/${proposals.length})`}</span>
+            <FileText size={20} className="text-primary flex-shrink-0" />
+            <span>RFQ Requests {filteredRfqs.length !== openRfqs.length && `(${filteredRfqs.length}/${openRfqs.length})`}</span>
           </h2>
+          {filteredRfqs.length === 0 ? (
+            <p className="text-muted text-sm">{debouncedSearchTerm ? 'No RFQs match your search' : 'No RFQ requests available'}</p>
+          ) : (
+            <div className="space-y-3">
+              {filteredRfqs.map(rfq => (
+                <div key={rfq.id} className="bg-white rounded-lg shadow border border-gray-200 p-4">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-base break-words">{rfq.rfqTitle}</h3>
+                      <p className="text-xs sm:text-sm text-muted mt-1">{rfq.rfqIdentifier}</p>
+                    </div>
+                    <span className={`text-xs px-3 py-1 rounded whitespace-nowrap flex-shrink-0 font-semibold ${
+                      rfq.status === 'pending' ? 'bg-amber-100 text-amber-800' :
+                      rfq.status === 'submitted' ? 'bg-green-100 text-green-800' :
+                      rfq.status === 'closed' ? 'bg-gray-100 text-gray-800' :
+                      'bg-blue-100 text-blue-800'
+                    }`}>
+                      {rfq.status === 'pending' ? 'Pending Quote' : rfq.status}
+                    </span>
+                  </div>
+                  {rfq.status === 'pending' && (
+                    <button
+                      onClick={() => {
+                        setSelectedRfqForQuote(rfq);
+                        setIsQuoteModalOpen(true);
+                      }}
+                      className="w-full px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition"
+                    >
+                      Submit Quote
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        )}
+
+        {/* TCF REQUESTS TAB (Compliance) */}
+        {activeTab === 'tcf' && (
+        <div className="mb-8">
+          <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
+            <ShieldCheck size={20} className="text-primary flex-shrink-0" />
+            <span>TCF Requests {filteredCompliance.length !== complianceReqs.length && `(${filteredCompliance.length}/${complianceReqs.length})`}</span>
+          </h2>
+          {filteredCompliance.length === 0 ? (
+            <p className="text-muted text-sm">{debouncedSearchTerm ? 'No TCF requests match your search' : 'No TCF requests available'}</p>
+          ) : (
+            <div className="space-y-3">
+              {filteredCompliance.map(compliance => {
+                const submitted = isRequestSubmitted(compliance);
+                const statusBadge = getStatusBadge(compliance.status);
+                const daysLeft = getDaysUntil(compliance.deadline);
+
+                return (
+                  <div
+                    key={compliance.id}
+                    className={`bg-white rounded-lg shadow border-l-4 p-4 cursor-pointer transition ${
+                      submitted
+                        ? 'border-gray-300 opacity-75'
+                        : 'border-primary hover:shadow-md'
+                    }`}
+                    onClick={() => !submitted && navigate(`/compliance/supplier/${compliance.token}`)}
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-base break-words">{compliance.requestId}</h3>
+                        <p className="text-xs sm:text-sm text-muted mt-1">{compliance.projectName}</p>
+                      </div>
+                      <span className={`text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap flex-shrink-0 ${statusBadge.color} ${statusBadge.bgColor}`}>
+                        {statusBadge.label}
+                      </span>
+                    </div>
+                    {compliance.deadline && (
+                      <p className={`text-xs mt-2 ${daysLeft! < 0 ? 'text-red-600 font-medium' : 'text-orange-600'}`}>
+                        📅 Due: {new Date(compliance.deadline).toLocaleDateString()} ({daysLeft} days)
+                      </p>
+                    )}
+                    {!submitted && compliance.accessCode && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyAccessCode(compliance.accessCode);
+                        }}
+                        className="w-full text-xs py-2 px-3 mt-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded text-blue-700 font-medium transition"
+                      >
+                        {copiedCode === compliance.accessCode ? '✓ Copied!' : '📋 Copy Access Code'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        )}
+
+        {/* PROPOSALS TAB */}
+        {activeTab === 'proposals' && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+              <Package size={20} className="text-primary flex-shrink-0" />
+              <span>My Proposals {filteredProposals.length !== proposals.length && `(${filteredProposals.length}/${proposals.length})`}</span>
+            </h2>
+            <button
+              onClick={() => setIsProposalModalOpen(true)}
+              className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition flex items-center gap-2"
+            >
+              <Plus size={16} />
+              New Proposal
+            </button>
+          </div>
           {filteredProposals.length === 0 ? (
-            <p className="text-muted text-sm">{debouncedSearchTerm ? 'No proposals match your search' : 'You haven\'t submitted any proposals yet'}</p>
+            <div className="bg-white rounded-lg shadow p-8 text-center">
+              <p className="text-muted text-sm mb-4">{debouncedSearchTerm ? 'No proposals match your search' : 'You haven\'t submitted any proposals yet'}</p>
+              <button
+                onClick={() => setIsProposalModalOpen(true)}
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition inline-flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Submit Your First Proposal
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProposals.map(proposal => (
@@ -1408,6 +1405,7 @@ const SupplierDashboard: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
       </main>
 
