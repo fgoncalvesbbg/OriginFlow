@@ -10,7 +10,7 @@ import {
   ComplianceRequest, ComplianceRequirement, ProductFeature,
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
-import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight } from 'lucide-react';
 
 const SupplierCompliancePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -32,6 +32,7 @@ const SupplierCompliancePortal: React.FC = () => {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [respondentName, setRespondentName] = useState('');
   const [respondentPosition, setRespondentPosition] = useState('');
+  const [isDeadlineCalendarExpanded, setIsDeadlineCalendarExpanded] = useState(true);
 
   const handleLogin = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -230,7 +231,48 @@ const SupplierCompliancePortal: React.FC = () => {
     return a.localeCompare(b);
   });
 
+  // Helper function to calculate actual deadline date
+  const calculateDeadlineDate = (globalDeadline: string | undefined, requirement: ComplianceRequirement): Date | null => {
+    if (!globalDeadline) return null;
+    const etd = new Date(globalDeadline);
+    if (requirement.timingType === 'POST_ETD' && requirement.timingWeeks) {
+      etd.setDate(etd.getDate() + (requirement.timingWeeks * 7));
+    }
+    return etd;
+  };
 
+  // Helper function to get human-readable days until/since date
+  const getDaysUntil = (date: Date): string => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+
+    const diffTime = targetDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) return `${Math.abs(diffDays)} days overdue`;
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Tomorrow';
+    return `in ${diffDays} days`;
+  };
+
+  // Group open requirements by deadline date
+  const openReqs = requirements.filter(r => !answers[r.id]);
+  const groupedByDate: Record<string, {date: Date, reqs: ComplianceRequirement[]}> = {};
+
+  openReqs.forEach(requirement => {
+    const deadline = calculateDeadlineDate(req?.deadline, requirement);
+    if (deadline) {
+      const dateKey = deadline.toISOString().split('T')[0];
+      if (!groupedByDate[dateKey]) {
+        groupedByDate[dateKey] = {date: deadline, reqs: []};
+      }
+      groupedByDate[dateKey].reqs.push(requirement);
+    }
+  });
+
+  const sortedDates = Object.values(groupedByDate).sort((a, b) => a.date.getTime() - b.date.getTime());
 
   return (
     <div className="min-h-screen bg-light font-sans pb-20 text-primary">
@@ -269,6 +311,69 @@ const SupplierCompliancePortal: React.FC = () => {
                 <div className="font-medium">{req.deadline ? new Date(req.deadline).toLocaleDateString() : 'None'}</div>
             </div>
         </div>
+
+        {/* Upcoming Deadlines Timeline - Collapsible */}
+        {!submitted && sortedDates.length > 0 && (
+            <div className="mb-8 bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
+                {/* Header with collapse toggle */}
+                <div
+                  onClick={() => setIsDeadlineCalendarExpanded(!isDeadlineCalendarExpanded)}
+                  className="bg-amber-50 px-6 py-3 border-b border-gray-200 flex items-center gap-2 cursor-pointer hover:bg-amber-100 transition-colors"
+                >
+                  <ChevronRight size={18} className={`text-amber-600 transition-transform ${isDeadlineCalendarExpanded ? 'rotate-90' : ''}`}/>
+                  <Calendar size={18} className="text-amber-600"/>
+                  <h3 className="font-bold text-gray-800 text-sm">Upcoming Deadlines</h3>
+                  <span className="text-xs font-semibold text-amber-600 ml-auto">{openReqs.length} open items</span>
+                </div>
+
+                {/* Collapsible content */}
+                {isDeadlineCalendarExpanded && (
+                  <div className="divide-y divide-gray-100">
+                    {sortedDates.map(({date, reqs}) => (
+                      <div key={date.toISOString()} className="px-6 py-4">
+                        {/* Date header with urgency color coding */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                              <Clock size={16} className="text-amber-600"/>
+                              {date.toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'})}
+                            </h4>
+                            {/* Days until */}
+                            <p className="text-xs text-gray-500 mt-1">
+                              {getDaysUntil(date)}
+                            </p>
+                          </div>
+                          <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">
+                            {reqs.length} item{reqs.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+
+                        {/* Requirements list */}
+                        <div className="space-y-2">
+                          {reqs.map(req => (
+                            <div key={req.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                              <p className="font-medium text-sm text-gray-800">{req.title}</p>
+                              <p className="text-xs text-gray-600 mt-1">{req.description}</p>
+                              {/* Tags for mandatory, timing, etc */}
+                              <div className="flex items-center gap-2 mt-2">
+                                {req.isMandatory && (
+                                  <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold uppercase">
+                                    Required
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-gray-500">
+                                  {req.section}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+        )}
 
         {/* Requirements Section - Read-only if submitted, editable otherwise */}
         <div className={`space-y-8 ${submitted ? 'opacity-60 pointer-events-none' : ''}`}>
