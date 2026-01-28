@@ -1,5 +1,6 @@
 
-import { supabase, portalClient, isLive } from './core/supabase.client';
+import { supabase, portalClient } from './core/supabase.client';
+import { isLive } from '../config/environment.config';
 import {
   Project, Supplier, User, ComplianceRequest, ComplianceRequestStatus,
   CategoryL3, ProductFeature, ComplianceRequirement, ProjectStep, ProjectDocument,

@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { isLive, APP_CONFIG } from '../../config/environment.config';
+import { APP_CONFIG } from '../../config/environment.config';
 
 /**
  * Standard Supabase client for authenticated requests
@@ -7,7 +7,15 @@ import { isLive, APP_CONFIG } from '../../config/environment.config';
  */
 export const supabase = createClient(
     APP_CONFIG.supabaseUrl,
-    APP_CONFIG.supabaseAnonKey
+    APP_CONFIG.supabaseAnonKey,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storageKey: 'sb-auth-token'
+      }
+    }
 );
 
 /**
@@ -22,5 +30,3 @@ export const portalClient = createClient(APP_CONFIG.supabaseUrl, APP_CONFIG.supa
     storageKey: 'sb-portal-auth-token'
   }
 });
-
-export { isLive } from '../../config/environment.config';

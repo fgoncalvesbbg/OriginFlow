@@ -2,7 +2,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
 import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services/apiService';
-import { supabase, isLive } from '../services/core/supabase.client';
+import { supabase } from '../services/core/supabase.client';
+import { isLive } from '../config/environment.config';
 
 interface AuthContextType {
   user: User | null;
