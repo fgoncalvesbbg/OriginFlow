@@ -3,9 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getCategories, getIMTemplates, createIMTemplate, createCategory, updateIMTemplate } from '../../services/apiService';
+import { getCategories, getIMTemplates, createIMTemplate, updateIMTemplate } from '../../services/apiService';
 import { CategoryL3, IMTemplate } from '../../types';
-import { BookOpen, Plus, Edit, FileText, ArrowRight, ShieldCheck, CheckCircle2, Lock, Unlock } from 'lucide-react';
+import { BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock } from 'lucide-react';
 
 const IMDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -54,27 +54,7 @@ const IMDashboard: React.FC = () => {
     }
   };
 
-  const handleInitializeMaster = async () => {
-      setCreatingId('master');
-      try {
-         let cat = companyCat;
-         if (!cat) {
-            cat = await createCategory('Company Standards');
-         }
-         await createIMTemplate(cat.id, 'Main Company Template');
-         navigate(`/im/template/${cat.id}`);
-      } catch(e: any) {
-         console.error(e);
-         alert(`Failed to initialize master template: ${e instanceof Error ? e.message : JSON.stringify(e)}`);
-         setCreatingId(null);
-      }
-  };
-
   if (loading) return <Layout><div>Loading...</div></Layout>;
-
-  const companyCat = categories.find(c => c.name === 'Company Standards');
-  const companyTemplate = companyCat ? templates.find(t => t.categoryId === companyCat.id) : null;
-  const otherCategories = categories.filter(c => c.name !== 'Company Standards');
 
   return (
     <Layout>
@@ -85,40 +65,9 @@ const IMDashboard: React.FC = () => {
         <p className="text-muted mt-1">Manage IM content templates for product categories.</p>
       </div>
 
-      {/* Main Company Template Section */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-8 text-white mb-10 shadow-lg flex flex-col md:flex-row justify-between items-center gap-6">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-               <ShieldCheck className="text-indigo-400" size={28} />
-               <h3 className="text-2xl font-bold">Company Master Template</h3>
-            </div>
-            <p className="text-gray-300 max-w-xl">
-               Define the standard layout, branding, cover page styles, and legal disclaimers applied to all new instruction manuals.
-            </p>
-          </div>
-          <div>
-             {companyTemplate && companyCat ? (
-               <Link 
-                 to={`/im/template/${companyCat.id}`} 
-                 className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-500 shadow-md transition-all"
-               >
-                 <Edit size={18} /> Edit Main Template
-               </Link>
-             ) : (
-               <button 
-                 onClick={handleInitializeMaster}
-                 disabled={creatingId === 'master'}
-                 className="flex items-center gap-2 bg-white text-primary px-6 py-3 rounded-xl font-bold hover:bg-gray-100 shadow-md transition-all disabled:opacity-70"
-               >
-                 {creatingId === 'master' ? 'Initializing...' : <><Plus size={18} /> Initialize Master Template</>}
-               </button>
-             )}
-          </div>
-      </div>
-
       <h3 className="text-lg font-bold text-gray-800 mb-4">Category Templates</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-         {otherCategories.map(cat => {
+         {categories.map(cat => {
            const template = templates.find(t => t.categoryId === cat.id);
            
            return (
@@ -182,7 +131,7 @@ const IMDashboard: React.FC = () => {
            );
          })}
          
-         {otherCategories.length === 0 && (
+         {categories.length === 0 && (
             <div className="col-span-3 text-center py-12 text-gray-400 bg-light border border-dashed border-gray-200 rounded-xl">
                No product categories defined. Go to Admin Console to add categories.
             </div>

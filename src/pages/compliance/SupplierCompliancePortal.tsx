@@ -1,14 +1,14 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { 
+import {
   verifySupplierAccess, submitComplianceResponseSecure,
   getComplianceRequirements, getProductFeatures, getCategories,
-  COMPLIANCE_SECTIONS
+  COMPLIANCE_SECTIONS, getRFQsForSupplier
 } from '../../services/apiService';
-import { 
-  ComplianceRequest, ComplianceRequirement, ProductFeature, 
-  CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
+import {
+  ComplianceRequest, ComplianceRequirement, ProductFeature,
+  CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus, RFQEntry
 } from '../../types';
 import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Box, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Info, RefreshCw, Check, ChevronDown } from 'lucide-react';
 
@@ -24,6 +24,7 @@ const SupplierCompliancePortal: React.FC = () => {
   const [req, setReq] = useState<ComplianceRequest | null>(null);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [category, setCategory] = useState<CategoryL3 | null>(null);
+  const [rfqEntries, setRfqEntries] = useState<RFQEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   
@@ -32,7 +33,7 @@ const SupplierCompliancePortal: React.FC = () => {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [respondentName, setRespondentName] = useState('');
   const [respondentPosition, setRespondentPosition] = useState('');
-  const [expandedRequirements, setExpandedRequirements] = useState<Set<string>>(new Set());
+  const [expandedDeadlineItem, setExpandedDeadlineItem] = useState<string | null>(null);
 
   const handleLogin = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -72,29 +73,31 @@ const SupplierCompliancePortal: React.FC = () => {
 
   const loadPortalDependencies = async (requestData: ComplianceRequest) => {
       try {
-          const [allReqs, allCats] = await Promise.all([
+          const [allReqs, allCats, rfqs] = await Promise.all([
             getComplianceRequirements(),
-            getCategories()
+            getCategories(),
+            getRFQsForSupplier(requestData.supplierId)
           ]);
 
           const cat = allCats.find(c => c.id === requestData.categoryId);
           setCategory(cat || null);
-          
+
           const applicableReqs = allReqs.filter(requirement => {
             if (requirement.categoryId !== requestData.categoryId) return false;
 
             if (requirement.appliesByDefault && (!requirement.conditionFeatureIds || requirement.conditionFeatureIds.length === 0)) {
                 return true;
             }
-            
+
             const featureList = requestData.features || [];
             return (requirement.conditionFeatureIds || []).some(fid => {
                 const matchedFeature = featureList.find(f => f.featureId === fid);
                 return matchedFeature?.value === true;
             });
           });
-          
+
           setRequirements(applicableReqs);
+          setRfqEntries(rfqs || []);
 
           const initialAnswers: Record<string, ComplianceResponseStatus> = {};
           const initialComments: Record<string, string> = {};
@@ -104,7 +107,7 @@ const SupplierCompliancePortal: React.FC = () => {
           });
           setAnswers(initialAnswers);
           setComments(initialComments);
-          
+
       } catch (e: any) {
           console.error("[Portal] Dependency load error:", e.message);
           throw new Error("Credentials verified, but failed to load requirement library. " + e.message);
@@ -121,6 +124,17 @@ const SupplierCompliancePortal: React.FC = () => {
       const allAnswered = requirements.every(r => answers[r.id]);
       if (!allAnswered) {
           alert("Please provide a response (Confirm or Cannot Confirm) for every requirement.");
+          return;
+      }
+
+      // Check if all "Cannot Confirm" responses have mandatory comments
+      const cannotConfirmWithoutComments = requirements.filter(r =>
+          answers[r.id] === ComplianceResponseStatus.CANNOT_COMPLY &&
+          !comments[r.id]?.trim()
+      );
+
+      if (cannotConfirmWithoutComments.length > 0) {
+          alert(`Please provide a comment for all "Cannot Confirm" responses. Missing comments for ${cannotConfirmWithoutComments.length} requirement(s).`);
           return;
       }
 
@@ -220,12 +234,26 @@ const SupplierCompliancePortal: React.FC = () => {
     return a.localeCompare(b);
   });
 
-  const toggleExpanded = (id: string) => {
-    const newSet = new Set(expandedRequirements);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setExpandedRequirements(newSet);
+  // Group unsubmitted requirements by timing
+  const getDeadlineLabel = (req: ComplianceRequirement): string => {
+    if (req.timingType === 'POST_ETD') {
+      return `ETD + ${req.timingWeeks} weeks`;
+    }
+    return 'At ETD';
   };
+
+  const unsubmittedReqs = requirements.filter(r => !answers[r.id]);
+  const groupedByDeadline = unsubmittedReqs.reduce((acc, r) => {
+    const deadline = getDeadlineLabel(r);
+    if (!acc[deadline]) acc[deadline] = [];
+    acc[deadline].push(r);
+    return acc;
+  }, {} as Record<string, ComplianceRequirement[]>);
+
+  const deadlineOrder = ['At ETD', ...Array.from({length: 12}, (_, i) => `ETD + ${i+1} weeks`)];
+  const sortedDeadlines = Object.keys(groupedByDeadline)
+    .sort((a, b) => deadlineOrder.indexOf(a) - deadlineOrder.indexOf(b));
+
 
   return (
     <div className="min-h-screen bg-light font-sans pb-20 text-primary">
@@ -265,13 +293,157 @@ const SupplierCompliancePortal: React.FC = () => {
             </div>
         </div>
 
-        {!submitted && (
-            <div className="space-y-8">
+        {/* RFQ Section - Show active RFQ requests for this supplier */}
+        {rfqEntries.length > 0 && (
+            <div className="mb-8 bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
+                <div className="bg-blue-50 px-6 py-3 border-b border-gray-200 flex items-center gap-2">
+                    <Box size={18} className="text-blue-600"/>
+                    <h3 className="font-bold text-gray-800 text-sm">Active RFQ Requests</h3>
+                    <span className="text-xs font-semibold text-blue-600 ml-auto">{rfqEntries.length} request{rfqEntries.length !== 1 ? 's' : ''}</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                    {rfqEntries.map((entry) => (
+                        <div key={entry.id} className="px-6 py-4 hover:bg-blue-50/30 transition-colors">
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1 min-w-0">
+                                    <h4 className="font-semibold text-gray-800">{entry.rfqTitle || 'RFQ Request'}</h4>
+                                    <p className="text-xs text-gray-500 mt-1 font-mono">{entry.rfqIdentifier}</p>
+                                    {entry.supplierNotes && (
+                                        <p className="text-xs text-gray-600 mt-2">{entry.supplierNotes}</p>
+                                    )}
+                                </div>
+                                <div className="flex flex-col items-end gap-2 shrink-0">
+                                    <span className={`text-xs font-bold px-3 py-1.5 rounded-full whitespace-nowrap ${
+                                        entry.status === 'submitted'
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : entry.status === 'awarded'
+                                            ? 'bg-indigo-100 text-indigo-700'
+                                            : 'bg-amber-100 text-amber-700'
+                                    }`}>
+                                        {entry.status === 'pending' && 'Pending Response'}
+                                        {entry.status === 'submitted' && 'Quote Submitted'}
+                                        {entry.status === 'awarded' && 'Awarded'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* RFQ Details */}
+                            {(entry.unitPrice || entry.moq || entry.leadTimeWeeks) && (
+                                <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-4 text-xs">
+                                    {entry.unitPrice && (
+                                        <div>
+                                            <span className="text-gray-500 font-medium">Unit Price</span>
+                                            <p className="font-semibold text-gray-800 mt-0.5">
+                                                {entry.unitPrice} {entry.currency || 'USD'}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {entry.moq && (
+                                        <div>
+                                            <span className="text-gray-500 font-medium">MOQ</span>
+                                            <p className="font-semibold text-gray-800 mt-0.5">{entry.moq.toLocaleString()} units</p>
+                                        </div>
+                                    )}
+                                    {entry.leadTimeWeeks && (
+                                        <div>
+                                            <span className="text-gray-500 font-medium">Lead Time</span>
+                                            <p className="font-semibold text-gray-800 mt-0.5">{entry.leadTimeWeeks} weeks</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {entry.submittedAt && (
+                                <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100">
+                                    Submitted on {new Date(entry.submittedAt).toLocaleDateString()}
+                                </p>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* Deadlines Section - Show only if not submitted and there are pending items */}
+        {!submitted && unsubmittedReqs.length > 0 && (
+            <div className="mb-8 bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
+                <div className="bg-amber-50 px-6 py-3 border-b border-gray-200 flex items-center gap-2">
+                    <Calendar size={18} className="text-amber-600"/>
+                    <h3 className="font-bold text-gray-800 text-sm">Upcoming Deadlines</h3>
+                    <span className="text-xs font-semibold text-amber-600 ml-auto">{unsubmittedReqs.length} pending</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                    {sortedDeadlines.map(deadline => (
+                        <div key={deadline} className="px-6 py-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                                    <Clock size={16} className="text-amber-600"/>
+                                    {deadline}
+                                </h4>
+                                <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">
+                                    {groupedByDeadline[deadline].length} items
+                                </span>
+                            </div>
+                            <div className="space-y-2">
+                                {groupedByDeadline[deadline].map(req => (
+                                    <div
+                                        key={req.id}
+                                        className="bg-gray-50 hover:bg-indigo-50 rounded-lg p-3 cursor-pointer transition-colors border border-gray-200"
+                                        onClick={() => setExpandedDeadlineItem(expandedDeadlineItem === req.id ? null : req.id)}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium text-sm text-gray-800 truncate">{req.title}</p>
+                                                <p className="text-xs text-gray-600 mt-1 line-clamp-2">{req.description}</p>
+                                            </div>
+                                            <ChevronDown
+                                                size={16}
+                                                className={`text-gray-400 shrink-0 transition-transform ${
+                                                    expandedDeadlineItem === req.id ? 'rotate-180' : ''
+                                                }`}
+                                            />
+                                        </div>
+
+                                        {/* Expanded Details */}
+                                        {expandedDeadlineItem === req.id && (
+                                            <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                                                <div className="text-xs space-y-2">
+                                                    <div>
+                                                        <span className="font-semibold text-gray-700">Test Report Origin:</span>
+                                                        <span className="text-gray-600 ml-2">
+                                                            {req.testReportOrigin === 'supplier_inhouse' ? 'In-House' : '3rd Party'}
+                                                        </span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="font-semibold text-gray-700">Accepted:</span>
+                                                        <span className="text-gray-600 ml-2">
+                                                            {req.selfDeclarationAccepted ? 'Self-Declaration' : 'Lab Report Only'}
+                                                        </span>
+                                                    </div>
+                                                    {req.isMandatory && (
+                                                        <div className="bg-rose-50 border border-rose-100 rounded p-2 text-rose-700 font-semibold">
+                                                            Mandatory Requirement
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* Requirements Section - Read-only if submitted, editable otherwise */}
+        <div className={`space-y-8 ${submitted ? 'opacity-60 pointer-events-none' : ''}`}>
                 {sortedSections.map(section => {
                     const sectionReqs = groupedReqs[section];
                     const completedCount = sectionReqs.filter(r => answers[r.id]).length;
                     return (
-                        <div key={section} className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
+                        <div key={section} className={`bg-white border rounded-xl shadow overflow-hidden ${submitted ? 'border-gray-100 bg-gray-50' : 'border-gray-200'}`}>
                             {/* Section Header with Progress */}
                             <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
@@ -293,7 +465,6 @@ const SupplierCompliancePortal: React.FC = () => {
                             <div className="divide-y divide-gray-100">
                                 {sectionReqs.map((r, idx) => {
                                     const answer = answers[r.id];
-                                    const isExpanded = expandedRequirements.has(r.id);
 
                                     return (
                                         <div key={r.id} className={`border-l-2 transition-colors ${
@@ -304,8 +475,7 @@ const SupplierCompliancePortal: React.FC = () => {
 
                                             {/* Main Row */}
                                             <div
-                                                className="grid grid-cols-[40px_1fr_140px_130px] gap-3 px-4 py-3 cursor-pointer items-center"
-                                                onClick={() => toggleExpanded(r.id)}
+                                                className="grid grid-cols-[40px_1fr_140px_130px] gap-3 px-4 py-3 items-center"
                                             >
                                                 {/* Column 1: Status Checkbox */}
                                                 <div className="flex items-center justify-center">
@@ -349,23 +519,25 @@ const SupplierCompliancePortal: React.FC = () => {
                                                 {/* Column 4: Response Buttons */}
                                                 <div className="flex gap-1 justify-center" onClick={(e) => e.stopPropagation()}>
                                                     <button
-                                                        onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
+                                                        onClick={() => !submitted && setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
+                                                        disabled={submitted}
                                                         className={`flex-1 py-1.5 px-2 text-xs font-bold rounded transition-all ${
                                                             answer === ComplianceResponseStatus.COMPLY
                                                                 ? 'bg-emerald-600 text-white border border-emerald-600'
                                                                 : 'bg-white text-gray-600 border border-gray-200 hover:border-emerald-400'
-                                                        }`}
+                                                        } ${submitted ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                         title="Confirm"
                                                     >
                                                         ✓
                                                     </button>
                                                     <button
-                                                        onClick={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
+                                                        onClick={() => !submitted && setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
+                                                        disabled={submitted}
                                                         className={`flex-1 py-1.5 px-2 text-xs font-bold rounded transition-all ${
                                                             answer === ComplianceResponseStatus.CANNOT_COMPLY
                                                                 ? 'bg-rose-600 text-white border border-rose-600'
                                                                 : 'bg-white text-gray-600 border border-gray-200 hover:border-rose-400'
-                                                        }`}
+                                                        } ${submitted ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                         title="Cannot Confirm"
                                                     >
                                                         ✗
@@ -373,23 +545,43 @@ const SupplierCompliancePortal: React.FC = () => {
                                                 </div>
                                             </div>
 
-                                            {/* Expandable Details Section */}
-                                            {isExpanded && (
-                                                <div className="px-4 pb-3 pl-16 space-y-2 bg-gray-50/50 border-t border-gray-100 animate-in slide-in-from-top-2 duration-200">
-                                                    <p className="text-xs text-gray-700 leading-relaxed pt-2">{r.description}</p>
-                                                    <textarea
-                                                        className="w-full text-xs border border-gray-200 rounded p-2 focus:ring-1 focus:ring-indigo-400 outline-none bg-white"
-                                                        placeholder="Optional notes..."
-                                                        rows={2}
-                                                        value={comments[r.id] || ''}
-                                                        onChange={(e) => {
-                                                            e.stopPropagation();
-                                                            setComments({...comments, [r.id]: e.target.value});
-                                                        }}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                </div>
-                                            )}
+                                            {/* Description and Comment Section - Always Visible */}
+                                            <div className="px-4 pb-3 pl-16 space-y-3 bg-gray-50/50 border-t border-gray-100">
+                                                <p className="text-xs text-gray-700 leading-relaxed pt-2">{r.description}</p>
+
+                                                {/* Show comment box when response is "Cannot Confirm" */}
+                                                {answer === ComplianceResponseStatus.CANNOT_COMPLY && (
+                                                    <div>
+                                                        <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1">
+                                                            <span>Reason for Unable to Comply</span>
+                                                            <span className="text-red-500">*</span>
+                                                        </label>
+                                                        <textarea
+                                                            disabled={submitted}
+                                                            className={`w-full text-xs border rounded p-2 focus:ring-1 focus:ring-indigo-400 outline-none resize-none ${
+                                                                submitted ? 'bg-gray-100 cursor-not-allowed opacity-70' : 'bg-white'
+                                                            } ${
+                                                                !comments[r.id]?.trim()
+                                                                    ? 'border-red-300 focus:ring-red-400'
+                                                                    : 'border-gray-200'
+                                                            }`}
+                                                            placeholder="Please provide a comment explaining why you cannot comply with this requirement..."
+                                                            rows={2}
+                                                            value={comments[r.id] || ''}
+                                                            onChange={(e) => {
+                                                                if (!submitted) {
+                                                                    e.stopPropagation();
+                                                                    setComments({...comments, [r.id]: e.target.value});
+                                                                }
+                                                            }}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        />
+                                                        {!comments[r.id]?.trim() && (
+                                                            <p className="text-[10px] text-red-500 mt-1">This field is required when responding "Cannot Confirm"</p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -398,33 +590,34 @@ const SupplierCompliancePortal: React.FC = () => {
                     );
                 })}
 
-                <div className="bg-white border border-gray-200 rounded-xl shadow p-8 mt-8">
-                    <div className="flex items-center gap-2 mb-6 pb-2 border-b border-gray-100"><PenTool className="text-indigo-600" size={20} /><h3 className="font-bold text-gray-800">Final Declaration</h3></div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className={`bg-white border rounded-xl shadow p-8 mt-8 ${submitted ? 'border-gray-100 bg-gray-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center gap-2 mb-6 pb-2 border-b border-gray-100"><PenTool className={submitted ? 'text-gray-400' : 'text-indigo-600'} size={20} /><h3 className={`font-bold ${submitted ? 'text-gray-400' : 'text-gray-800'}`}>Final Declaration</h3></div>
+                    <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${submitted ? 'opacity-60' : ''}`}>
                         <div>
                             <label className="block text-xs font-bold text-muted uppercase mb-1">Full Name <span className="text-red-500">*</span></label>
-                            <input type="text" className="w-full border border-gray-300 rounded p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Name of representative" value={respondentName} onChange={(e) => setRespondentName(e.target.value)} />
+                            <input type="text" disabled={submitted} className={`w-full border rounded p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none ${submitted ? 'bg-gray-100 border-gray-100 cursor-not-allowed' : 'border-gray-300'}`} placeholder="Name of representative" value={respondentName} onChange={(e) => !submitted && setRespondentName(e.target.value)} />
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-muted uppercase mb-1">Position <span className="text-red-500">*</span></label>
-                            <input type="text" className="w-full border border-gray-300 rounded p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Quality Manager" value={respondentPosition} onChange={(e) => setRespondentPosition(e.target.value)} />
+                            <input type="text" disabled={submitted} className={`w-full border rounded p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none ${submitted ? 'bg-gray-100 border-gray-100 cursor-not-allowed' : 'border-gray-300'}`} placeholder="e.g. Quality Manager" value={respondentPosition} onChange={(e) => !submitted && setRespondentPosition(e.target.value)} />
                         </div>
                     </div>
                 </div>
 
-                <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 -mx-6 px-6 mt-12 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)] flex justify-between items-center z-10">
-                    <div className="flex items-center gap-3">
-                      <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-600 transition-all duration-700" style={{ width: `${requirements.length ? (requirements.filter(r => answers[r.id]).length / requirements.length) * 100 : 100}%` }} />
-                      </div>
-                      <span className="text-[10px] font-bold text-muted uppercase tracking-wide">{requirements.filter(r => answers[r.id]).length} / {requirements.length} Items Done</span>
+                {!submitted && (
+                    <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 -mx-6 px-6 mt-12 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)] flex justify-between items-center z-10">
+                        <div className="flex items-center gap-3">
+                          <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-indigo-600 transition-all duration-700" style={{ width: `${requirements.length ? (requirements.filter(r => answers[r.id]).length / requirements.length) * 100 : 100}%` }} />
+                          </div>
+                          <span className="text-[10px] font-bold text-muted uppercase tracking-wide">{requirements.filter(r => answers[r.id]).length} / {requirements.length} Items Done</span>
+                        </div>
+                        <button onClick={handleSubmit} disabled={loading || (requirements.length > 0 && requirements.filter(r => answers[r.id]).length < requirements.length)} className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-bold hover:bg-indigo-700 shadow-lg transition-all disabled:opacity-50 disabled:bg-gray-200 flex items-center gap-2">
+                            {loading ? <Loader2 className="animate-spin" size={18} /> : <><CheckCircle size={18}/> Submit Response</>}
+                        </button>
                     </div>
-                    <button onClick={handleSubmit} disabled={loading || (requirements.length > 0 && requirements.filter(r => answers[r.id]).length < requirements.length)} className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-bold hover:bg-indigo-700 shadow-lg transition-all disabled:opacity-50 disabled:bg-gray-200 flex items-center gap-2">
-                        {loading ? <Loader2 className="animate-spin" size={18} /> : <><CheckCircle size={18}/> Submit Response</>}
-                    </button>
-                </div>
+                )}
             </div>
-        )}
       </main>
     </div>
   );

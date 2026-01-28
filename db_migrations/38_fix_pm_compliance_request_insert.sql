@@ -27,6 +27,7 @@ WITH CHECK (
 DROP POLICY IF EXISTS "pm_access_own_compliance_requests" ON public.compliance_requests;
 
 -- Recreate PM policy with both USING and WITH CHECK clauses
+-- Allows PMs to access: (1) requests linked to their projects, OR (2) standalone requests (null project_id)
 CREATE POLICY "pm_access_own_compliance_requests" ON public.compliance_requests
 FOR ALL TO authenticated
 USING (
@@ -34,8 +35,11 @@ USING (
     SELECT 1 FROM public.profiles prof
     WHERE prof.id = auth.uid()
     AND prof.role = 'PM'
-    AND compliance_requests.project_id IN (
-      SELECT id FROM public.projects WHERE pm_id = auth.uid()
+    AND (
+      compliance_requests.project_id IS NULL
+      OR compliance_requests.project_id IN (
+        SELECT id FROM public.projects WHERE pm_id = auth.uid()
+      )
     )
   )
 )
@@ -44,8 +48,11 @@ WITH CHECK (
     SELECT 1 FROM public.profiles prof
     WHERE prof.id = auth.uid()
     AND prof.role = 'PM'
-    AND compliance_requests.project_id IN (
-      SELECT id FROM public.projects WHERE pm_id = auth.uid()
+    AND (
+      compliance_requests.project_id IS NULL
+      OR compliance_requests.project_id IN (
+        SELECT id FROM public.projects WHERE pm_id = auth.uid()
+      )
     )
   )
 );

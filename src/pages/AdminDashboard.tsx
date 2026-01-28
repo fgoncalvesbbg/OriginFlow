@@ -11,11 +11,7 @@ import {
 } from '../services/apiService';
 import { generateUUID } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
-<<<<<<< HEAD
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
-=======
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
->>>>>>> ab9b0fa (asd)
 import { useAuth } from '../context/AuthContext';
 
 const ConfirmationModal: React.FC<{
