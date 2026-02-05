@@ -8,6 +8,7 @@ export {
   getSupplierById,
   getSupplierByToken,
   createSupplier,
-  updateSupplier,
-  ensureSupplierToken
+  updateSupplier
 } from './supplier.service';
+
+export { ensureSupplierToken } from '../apiService';

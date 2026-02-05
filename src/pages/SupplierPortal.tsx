@@ -26,27 +26,54 @@ const SupplierPortal: React.FC = () => {
       setLoading(false);
       return;
     }
+
+    let mounted = true;
+    const controller = new AbortController();
+
     const load = async () => {
-      const p = await getProjectByToken(token);
-      if (!p) {
-        setError("Project not found or link expired.");
+      try {
+        const p = await getProjectByToken(token);
+
+        if (!mounted || controller.signal.aborted) return;
+
+        if (!p) {
+          setError("Project not found or link expired.");
+          setLoading(false);
+          return;
+        }
+
+        const [stepsData, docsData] = await Promise.all([
+          getProjectSteps(p.id),
+          getProjectDocs(p.id)
+        ]);
+
+        if (!mounted || controller.signal.aborted) return;
+
+        // Filter only visible docs
+        const visibleDocs = docsData.filter(d => d.isVisibleToSupplier);
+
+        setProject(p);
+        setSteps(stepsData);
+        setDocs(visibleDocs);
         setLoading(false);
-        return;
+      } catch (err: any) {
+        if (!mounted || controller.signal.aborted) return;
+        if (err.name === 'AbortError') {
+          console.debug('Portal load cancelled');
+          return;
+        }
+        console.error('Portal load error:', err);
+        setError("Failed to load portal. Please refresh the page.");
+        setLoading(false);
       }
-      const [stepsData, docsData] = await Promise.all([
-        getProjectSteps(p.id),
-        getProjectDocs(p.id)
-      ]);
-      
-      // Filter only visible docs
-      const visibleDocs = docsData.filter(d => d.isVisibleToSupplier);
-      
-      setProject(p);
-      setSteps(stepsData);
-      setDocs(visibleDocs);
-      setLoading(false);
     };
+
     load();
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
   }, [token]);
 
   const triggerUpload = (docId: string) => {

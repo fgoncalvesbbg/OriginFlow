@@ -4,7 +4,8 @@
  */
 
 // Core infrastructure
-export { supabase, portalClient, isLive } from './core/supabase.client';
+export { supabase, portalClient } from './core/supabase.client';
+export { isLive } from '../config/environment.config';
 
 // Auth module
 export {

@@ -10,7 +10,7 @@ import {
   ComplianceRequest, ComplianceRequirement, ProductFeature,
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
-import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle } from 'lucide-react';
 
 const SupplierCompliancePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -32,7 +32,10 @@ const SupplierCompliancePortal: React.FC = () => {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [respondentName, setRespondentName] = useState('');
   const [respondentPosition, setRespondentPosition] = useState('');
-  const [isDeadlineCalendarExpanded, setIsDeadlineCalendarExpanded] = useState(true);
+
+  // Filter and Sort State
+  const [filterMode, setFilterMode] = useState<'all' | 'unanswered' | 'mandatory' | 'answered'>('unanswered');
+  const [sortMode, setSortMode] = useState<'section' | 'mandatory'>('section');
 
   const handleLogin = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -215,7 +218,33 @@ const SupplierCompliancePortal: React.FC = () => {
 
   if (!req) return null;
 
-  const groupedReqs = requirements.reduce((acc, r) => {
+  // Apply filters
+  const filteredRequirements = requirements.filter(req => {
+    const hasAnswer = !!answers[req.id];
+    switch (filterMode) {
+      case 'unanswered':
+        return !hasAnswer;
+      case 'answered':
+        return hasAnswer;
+      case 'mandatory':
+        return req.isMandatory;
+      case 'all':
+      default:
+        return true;
+    }
+  });
+
+  // Apply sorting for mandatory-first mode
+  const sortedRequirements = [...filteredRequirements].sort((a, b) => {
+    if (sortMode === 'mandatory') {
+      if (a.isMandatory !== b.isMandatory) {
+        return a.isMandatory ? -1 : 1;
+      }
+    }
+    return 0;
+  });
+
+  const groupedReqs = sortedRequirements.reduce((acc, r) => {
       const sec = r.section || 'General Requirements';
       if (!acc[sec]) acc[sec] = [];
       acc[sec].push(r);
@@ -231,48 +260,43 @@ const SupplierCompliancePortal: React.FC = () => {
     return a.localeCompare(b);
   });
 
-  // Helper function to calculate actual deadline date
-  const calculateDeadlineDate = (globalDeadline: string | undefined, requirement: ComplianceRequirement): Date | null => {
-    if (!globalDeadline) return null;
-    const etd = new Date(globalDeadline);
-    if (requirement.timingType === 'POST_ETD' && requirement.timingWeeks) {
-      etd.setDate(etd.getDate() + (requirement.timingWeeks * 7));
-    }
-    return etd;
+  // Calculate progress stats
+  const totalReqs = requirements.length;
+  const completedReqs = Object.keys(answers).length;
+  const remainingReqs = totalReqs - completedReqs;
+  const percentage = totalReqs > 0 ? Math.round((completedReqs / totalReqs) * 100) : 0;
+  const unansweredCount = requirements.filter(r => !answers[r.id]).length;
+  const answeredCount = completedReqs;
+  const mandatoryCount = requirements.filter(r => r.isMandatory).length;
+
+  // Tooltip Component
+  const Tooltip: React.FC<{text: string, children: React.ReactNode}> = ({text, children}) => {
+    const [show, setShow] = useState(false);
+
+    return (
+      <div className="relative inline-block">
+        <button
+          type="button"
+          onMouseEnter={() => setShow(true)}
+          onMouseLeave={() => setShow(false)}
+          onClick={(e) => { e.preventDefault(); setShow(!show); }}
+          className="text-gray-400 hover:text-indigo-600 transition-colors inline-flex items-center"
+        >
+          {children}
+        </button>
+        {show && (
+          <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-normal">
+            <div className="relative">
+              {text}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1">
+                <div className="border-4 border-transparent border-t-gray-900" />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
-
-  // Helper function to get human-readable days until/since date
-  const getDaysUntil = (date: Date): string => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const targetDate = new Date(date);
-    targetDate.setHours(0, 0, 0, 0);
-
-    const diffTime = targetDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) return `${Math.abs(diffDays)} days overdue`;
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Tomorrow';
-    return `in ${diffDays} days`;
-  };
-
-  // Group open requirements by deadline date
-  const openReqs = requirements.filter(r => !answers[r.id]);
-  const groupedByDate: Record<string, {date: Date, reqs: ComplianceRequirement[]}> = {};
-
-  openReqs.forEach(requirement => {
-    const deadline = calculateDeadlineDate(req?.deadline, requirement);
-    if (deadline) {
-      const dateKey = deadline.toISOString().split('T')[0];
-      if (!groupedByDate[dateKey]) {
-        groupedByDate[dateKey] = {date: deadline, reqs: []};
-      }
-      groupedByDate[dateKey].reqs.push(requirement);
-    }
-  });
-
-  const sortedDates = Object.values(groupedByDate).sort((a, b) => a.date.getTime() - b.date.getTime());
 
   return (
     <div className="min-h-screen bg-light font-sans pb-20 text-primary">
@@ -312,67 +336,118 @@ const SupplierCompliancePortal: React.FC = () => {
             </div>
         </div>
 
-        {/* Upcoming Deadlines Timeline - Collapsible */}
-        {!submitted && sortedDates.length > 0 && (
-            <div className="mb-8 bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
-                {/* Header with collapse toggle */}
-                <div
-                  onClick={() => setIsDeadlineCalendarExpanded(!isDeadlineCalendarExpanded)}
-                  className="bg-amber-50 px-6 py-3 border-b border-gray-200 flex items-center gap-2 cursor-pointer hover:bg-amber-100 transition-colors"
-                >
-                  <ChevronRight size={18} className={`text-amber-600 transition-transform ${isDeadlineCalendarExpanded ? 'rotate-90' : ''}`}/>
-                  <Calendar size={18} className="text-amber-600"/>
-                  <h3 className="font-bold text-gray-800 text-sm">Upcoming Deadlines</h3>
-                  <span className="text-xs font-semibold text-amber-600 ml-auto">{openReqs.length} open items</span>
-                </div>
-
-                {/* Collapsible content */}
-                {isDeadlineCalendarExpanded && (
-                  <div className="divide-y divide-gray-100">
-                    {sortedDates.map(({date, reqs}) => (
-                      <div key={date.toISOString()} className="px-6 py-4">
-                        {/* Date header with urgency color coding */}
-                        <div className="flex items-center justify-between mb-3">
-                          <div>
-                            <h4 className="font-semibold text-gray-800 flex items-center gap-2">
-                              <Clock size={16} className="text-amber-600"/>
-                              {date.toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'})}
-                            </h4>
-                            {/* Days until */}
-                            <p className="text-xs text-gray-500 mt-1">
-                              {getDaysUntil(date)}
-                            </p>
-                          </div>
-                          <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">
-                            {reqs.length} item{reqs.length !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-
-                        {/* Requirements list */}
-                        <div className="space-y-2">
-                          {reqs.map(req => (
-                            <div key={req.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                              <p className="font-medium text-sm text-gray-800">{req.title}</p>
-                              <p className="text-xs text-gray-600 mt-1">{req.description}</p>
-                              {/* Tags for mandatory, timing, etc */}
-                              <div className="flex items-center gap-2 mt-2">
-                                {req.isMandatory && (
-                                  <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold uppercase">
-                                    Required
-                                  </span>
-                                )}
-                                <span className="text-[10px] text-gray-500">
-                                  {req.section}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+        {/* Progress Overview Card */}
+        {!submitted && (
+          <div className="mb-6 bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl shadow p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                <CheckCircle size={20} className="text-indigo-600" />
+                Overall Progress
+              </h3>
+              <span className="text-2xl font-bold text-indigo-600">{percentage}%</span>
             </div>
+
+            <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
+              <div
+                className="bg-gradient-to-r from-indigo-500 to-blue-500 h-3 rounded-full transition-all duration-500"
+                style={{width: `${percentage}%`}}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-bold text-gray-800">{totalReqs}</div>
+                <div className="text-xs text-gray-600 uppercase">Total</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-emerald-600">{completedReqs}</div>
+                <div className="text-xs text-gray-600 uppercase">Completed</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-amber-600">{remainingReqs}</div>
+                <div className="text-xs text-gray-600 uppercase">Remaining</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Filter and Sort Bar */}
+        {!submitted && (
+          <div className="mb-6 bg-white border border-gray-200 rounded-xl shadow p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium text-gray-700">Show:</span>
+
+              <button
+                onClick={() => setFilterMode('unanswered')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  filterMode === 'unanswered'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Unanswered ({unansweredCount})
+              </button>
+
+              <button
+                onClick={() => setFilterMode('all')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  filterMode === 'all'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                All ({totalReqs})
+              </button>
+
+              <button
+                onClick={() => setFilterMode('mandatory')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  filterMode === 'mandatory'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Mandatory Only ({mandatoryCount})
+              </button>
+
+              <button
+                onClick={() => setFilterMode('answered')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  filterMode === 'answered'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Answered ({answeredCount})
+              </button>
+
+              <div className="h-6 w-px bg-gray-300 mx-1" />
+
+              <span className="text-sm font-medium text-gray-700">Sort:</span>
+
+              <button
+                onClick={() => setSortMode('section')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  sortMode === 'section'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                By Section
+              </button>
+
+              <button
+                onClick={() => setSortMode('mandatory')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  sortMode === 'mandatory'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Mandatory First
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Requirements Section - Read-only if submitted, editable otherwise */}
@@ -392,130 +467,174 @@ const SupplierCompliancePortal: React.FC = () => {
                             </div>
 
                             {/* Table Header */}
-                            <div className="grid grid-cols-[40px_1fr_140px_130px] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200 text-[10px] font-bold text-gray-500 uppercase tracking-wide">
-                                <div></div>
-                                <div>Requirement</div>
-                                <div className="text-center">Rules</div>
-                                <div className="text-center">Response</div>
-                            </div>
-
-                            {/* Table Rows */}
-                            <div className="divide-y divide-gray-100">
-                                {sectionReqs.map((r, idx) => {
+                            {/* Card-Based Layout */}
+                            <div className="space-y-3 p-4">
+                                {sectionReqs.map((r) => {
                                     const answer = answers[r.id];
+                                    const borderColor = answer === ComplianceResponseStatus.COMPLY
+                                        ? 'border-l-emerald-500'
+                                        : answer === ComplianceResponseStatus.CANNOT_COMPLY
+                                          ? 'border-l-rose-500'
+                                          : 'border-l-transparent';
+                                    const bgColor = answer === ComplianceResponseStatus.COMPLY
+                                        ? 'bg-emerald-50/30'
+                                        : answer === ComplianceResponseStatus.CANNOT_COMPLY
+                                          ? 'bg-rose-50/30'
+                                          : 'bg-white hover:bg-gray-50';
 
                                     return (
-                                        <div key={r.id} className={`border-l-2 transition-colors ${
-                                            answer === ComplianceResponseStatus.COMPLY ? 'border-l-emerald-400 bg-emerald-50/30' :
-                                            answer === ComplianceResponseStatus.CANNOT_COMPLY ? 'border-l-rose-400 bg-rose-50/30' :
-                                            'border-l-transparent bg-white'
-                                        } ${idx % 2 === 1 ? 'bg-gray-50/50' : ''} hover:bg-indigo-50/30 transition-all`}>
+                                        <div
+                                            key={r.id}
+                                            className={`border-l-4 ${borderColor} ${bgColor} border border-gray-200 rounded-lg shadow-sm transition-all`}
+                                        >
+                                            <div className="p-4">
+                                                {/* Header with Title and Buttons */}
+                                                <div className="flex items-start justify-between gap-4 mb-3">
+                                                    {/* Left: Title + Status */}
+                                                    <div className="flex-1 flex items-start gap-3">
+                                                        {/* Checkbox Status */}
+                                                        <div
+                                                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-1 transition-all ${
+                                                                answer
+                                                                    ? 'bg-indigo-600 border-indigo-600'
+                                                                    : 'border-gray-300 bg-white'
+                                                            }`}
+                                                        >
+                                                            {answer && <Check size={12} className="text-white" />}
+                                                        </div>
 
-                                            {/* Main Row */}
-                                            <div
-                                                className="grid grid-cols-[40px_1fr_140px_130px] gap-3 px-4 py-3 items-center"
-                                            >
-                                                {/* Column 1: Status Checkbox */}
-                                                <div className="flex items-center justify-center">
-                                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-                                                        answer === ComplianceResponseStatus.COMPLY
-                                                            ? 'bg-emerald-500 border-emerald-500'
-                                                            : answer === ComplianceResponseStatus.CANNOT_COMPLY
-                                                            ? 'bg-rose-500 border-rose-500'
-                                                            : 'border-gray-300 bg-white'
-                                                    }`}>
-                                                        {answer && <Check size={12} className="text-white font-bold" />}
+                                                        {/* Title + Badges */}
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2 flex-wrap mb-2">
+                                                                <h4 className="font-semibold text-sm text-gray-800">{r.title}</h4>
+                                                                {r.isMandatory && (
+                                                                    <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-1">
+                                                                        Required
+                                                                        <Tooltip text="Required items MUST be completed for submission. Your response will be rejected if any required item is marked 'Cannot Confirm' without a valid business reason.">
+                                                                            <HelpCircle size={10} />
+                                                                        </Tooltip>
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Description */}
+                                                            <p className="text-xs text-gray-600 leading-relaxed">{r.description}</p>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Right: Response Buttons */}
+                                                    <div className="flex gap-2 flex-shrink-0">
+                                                        <button
+                                                            onClick={() =>
+                                                                !submitted &&
+                                                                setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})
+                                                            }
+                                                            disabled={submitted}
+                                                            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                                                                answer === ComplianceResponseStatus.COMPLY
+                                                                    ? 'bg-emerald-500 text-white'
+                                                                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-emerald-50'
+                                                            } ${submitted ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            <Check size={14} />
+                                                            Confirm
+                                                        </button>
+                                                        <button
+                                                            onClick={() =>
+                                                                !submitted &&
+                                                                setAnswers({
+                                                                    ...answers,
+                                                                    [r.id]: ComplianceResponseStatus.CANNOT_COMPLY
+                                                                })
+                                                            }
+                                                            disabled={submitted}
+                                                            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                                                                answer === ComplianceResponseStatus.CANNOT_COMPLY
+                                                                    ? 'bg-rose-500 text-white'
+                                                                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-rose-50'
+                                                            } ${submitted ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            <X size={14} />
+                                                            Cannot Confirm
+                                                        </button>
                                                     </div>
                                                 </div>
 
-                                                {/* Column 2: Title + Mandatory Badge */}
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <span className="font-semibold text-sm text-primary truncate">{r.title}</span>
-                                                    {r.isMandatory && (
-                                                        <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide shrink-0">
-                                                            Req
-                                                        </span>
+                                                {/* Rules Row with Tooltips */}
+                                                <div className="flex items-center gap-4 text-xs text-gray-600 mb-2 flex-wrap">
+                                                    {r.timingType && (
+                                                        <div className="flex items-center gap-1">
+                                                            <Clock size={12} className="text-amber-600" />
+                                                            <span>
+                                                                {r.timingType === 'POST_ETD'
+                                                                    ? `ETD+${r.timingWeeks}w`
+                                                                    : 'At ETD'}
+                                                            </span>
+                                                            <Tooltip text="This indicates when the test report or documentation must be completed relative to the Estimated Time of Delivery (ETD). 'At ETD' means it must be ready when the product ships. 'ETD+Xw' means X weeks after delivery.">
+                                                                <HelpCircle size={12} />
+                                                            </Tooltip>
+                                                        </div>
+                                                    )}
+                                                    {r.testReportOrigin && (
+                                                        <div className="flex items-center gap-1">
+                                                            <Building size={12} className="text-blue-600" />
+                                                            <span>
+                                                                {r.testReportOrigin === 'supplier_inhouse'
+                                                                    ? 'In-House'
+                                                                    : '3rd Party'}
+                                                            </span>
+                                                            <Tooltip text="'In-House' means your own lab can perform the test. '3rd Party' means you must use an independent testing laboratory accredited for this specific test.">
+                                                                <HelpCircle size={12} />
+                                                            </Tooltip>
+                                                        </div>
+                                                    )}
+                                                    {r.selfDeclarationAccepted !== undefined && (
+                                                        <div className="flex items-center gap-1">
+                                                            <FileCheck
+                                                                size={12}
+                                                                className={
+                                                                    r.selfDeclarationAccepted
+                                                                        ? 'text-green-600'
+                                                                        : 'text-rose-600'
+                                                                }
+                                                            />
+                                                            <span>
+                                                                {r.selfDeclarationAccepted
+                                                                    ? 'Self-Decl OK'
+                                                                    : 'Lab Report Req'}
+                                                            </span>
+                                                            <Tooltip text="'Self-Decl OK' means you can provide a signed declaration confirming compliance without independent testing. 'Lab Report Req' means you must provide test results from a qualified laboratory.">
+                                                                <HelpCircle size={12} />
+                                                            </Tooltip>
+                                                        </div>
                                                     )}
                                                 </div>
 
-                                                {/* Column 3: Rules Icons + Text */}
-                                                <div className="flex items-center justify-center gap-3 text-xs text-gray-600 flex-wrap">
-                                                    <div className="flex items-center gap-1 whitespace-nowrap">
-                                                        <Clock size={13} className={r.timingType === 'POST_ETD' ? 'text-amber-500' : 'text-gray-400'} />
-                                                        <span className="text-[10px]">{r.timingType === 'POST_ETD' ? `ETD+${r.timingWeeks}w` : 'At ETD'}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1 whitespace-nowrap">
-                                                        <Building size={13} className={r.testReportOrigin === 'third_party_mandatory' ? 'text-indigo-500' : 'text-gray-400'} />
-                                                        <span className="text-[10px]">{r.testReportOrigin === 'supplier_inhouse' ? 'In-House' : '3rd Party'}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1 whitespace-nowrap">
-                                                        <FileCheck size={13} className={!r.selfDeclarationAccepted ? 'text-rose-500' : 'text-gray-400'} />
-                                                        <span className="text-[10px]">{r.selfDeclarationAccepted ? 'Self-Decl' : 'Lab Report'}</span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Column 4: Response Buttons */}
-                                                <div className="flex gap-1 justify-center" onClick={(e) => e.stopPropagation()}>
-                                                    <button
-                                                        onClick={() => !submitted && setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
-                                                        disabled={submitted}
-                                                        className={`flex-1 py-1.5 px-2 text-xs font-bold rounded transition-all ${
-                                                            answer === ComplianceResponseStatus.COMPLY
-                                                                ? 'bg-emerald-600 text-white border border-emerald-600'
-                                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-emerald-400'
-                                                        } ${submitted ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                        title="Confirm"
-                                                    >
-                                                        ✓
-                                                    </button>
-                                                    <button
-                                                        onClick={() => !submitted && setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
-                                                        disabled={submitted}
-                                                        className={`flex-1 py-1.5 px-2 text-xs font-bold rounded transition-all ${
-                                                            answer === ComplianceResponseStatus.CANNOT_COMPLY
-                                                                ? 'bg-rose-600 text-white border border-rose-600'
-                                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-rose-400'
-                                                        } ${submitted ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                        title="Cannot Confirm"
-                                                    >
-                                                        ✗
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* Description and Comment Section - Always Visible */}
-                                            <div className="px-4 pb-3 pl-16 space-y-3 bg-gray-50/50 border-t border-gray-100">
-                                                <p className="text-xs text-gray-700 leading-relaxed pt-2">{r.description}</p>
-
-                                                {/* Show comment box when response is "Cannot Confirm" */}
+                                                {/* Comment Section */}
                                                 {answer === ComplianceResponseStatus.CANNOT_COMPLY && (
-                                                    <div>
-                                                        <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1">
-                                                            <span>Reason for Unable to Comply</span>
-                                                            <span className="text-red-500">*</span>
+                                                    <div className="mt-3 pt-3 border-t border-gray-200">
+                                                        <label className="block text-xs font-medium text-gray-700 mb-2">
+                                                            Explanation Required <span className="text-rose-500">*</span>
                                                         </label>
                                                         <textarea
-                                                            disabled={submitted}
-                                                            className={`w-full text-xs border rounded p-2 focus:ring-1 focus:ring-indigo-400 outline-none resize-none ${
-                                                                submitted ? 'bg-gray-100 cursor-not-allowed opacity-70' : 'bg-white'
-                                                            } ${
-                                                                !comments[r.id]?.trim()
-                                                                    ? 'border-red-300 focus:ring-red-400'
-                                                                    : 'border-gray-200'
-                                                            }`}
-                                                            placeholder="Please provide a comment explaining why you cannot comply with this requirement..."
-                                                            rows={2}
                                                             value={comments[r.id] || ''}
-                                                            onChange={(e) => {
-                                                                if (!submitted) {
-                                                                    e.stopPropagation();
-                                                                    setComments({...comments, [r.id]: e.target.value});
-                                                                }
-                                                            }}
-                                                            onClick={(e) => e.stopPropagation()}
+                                                            onChange={(e) =>
+                                                                !submitted &&
+                                                                setComments({...comments, [r.id]: e.target.value})
+                                                            }
+                                                            disabled={submitted}
+                                                            className={`w-full px-3 py-2 text-xs border rounded-lg ${
+                                                                !comments[r.id]?.trim()
+                                                                    ? 'border-rose-300 bg-rose-50'
+                                                                    : 'border-gray-300'
+                                                            } focus:ring-2 focus:ring-indigo-500 outline-none resize-none`}
+                                                            rows={2}
+                                                            placeholder="Please explain why you cannot confirm this requirement..."
                                                         />
                                                         {!comments[r.id]?.trim() && (
-                                                            <p className="text-[10px] text-red-500 mt-1">This field is required when responding "Cannot Confirm"</p>
+                                                            <p className="text-xs text-rose-600 mt-1">
+                                                                Comment is required for "Cannot Confirm" responses
+                                                            </p>
                                                         )}
                                                     </div>
                                                 )}

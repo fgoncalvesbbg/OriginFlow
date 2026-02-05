@@ -5,7 +5,7 @@ import {
   getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
-  logAccessCodeAttempt, submitRFQEntry, getSupplierProposals
+  logAccessCodeAttempt, submitRFQEntry, getSupplierProposals, addDocumentComment
 } from '../services/apiService';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
@@ -64,6 +64,8 @@ const SupplierDashboard: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const [docComments, setDocComments] = useState<Record<string, string>>({});
+  const [submittingComments, setSubmittingComments] = useState<Record<string, boolean>>({});
 
   // Proposal View State
   const [isViewProposalOpen, setIsViewProposalOpen] = useState(false);
@@ -106,13 +108,14 @@ const SupplierDashboard: React.FC = () => {
     }
 
     let mounted = true;
+    const controller = new AbortController();
 
     const loadPortal = async () => {
       try {
         // Fetch supplier by token
         const sup = await getSupplierByToken(token);
 
-        if (!mounted) return;
+        if (!mounted || controller.signal.aborted) return;
 
         if (!sup) {
           setError('Supplier not found. Please check your link.');
@@ -129,7 +132,12 @@ const SupplierDashboard: React.FC = () => {
         setSupplier(sup);
         setLoading(false);
       } catch (err: any) {
-        if (!mounted) return;
+        if (!mounted || controller.signal.aborted) return;
+        // Ignore AbortError when component unmounts
+        if (err.name === 'AbortError') {
+          console.debug('Portal load cancelled');
+          return;
+        }
         console.error('Portal load error:', err);
         setError('Failed to load portal. Please refresh the page.');
         setLoading(false);
@@ -140,6 +148,7 @@ const SupplierDashboard: React.FC = () => {
 
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [token]);
 
@@ -200,20 +209,46 @@ const SupplierDashboard: React.FC = () => {
     if (!isAccessVerified || !supplier?.id) return;
 
     let mounted = true;
+    const controller = new AbortController();
+
+    // Retry wrapper for API calls to handle database locks
+    const retryApiCall = async <T,>(
+      fn: () => Promise<T>,
+      maxRetries: number = 3,
+      delayMs: number = 100
+    ): Promise<T> => {
+      let lastError: any;
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          return await fn();
+        } catch (err: any) {
+          lastError = err;
+          // Don't retry on abort errors or if component unmounted
+          if (err.name === 'AbortError' || !mounted || controller.signal.aborted) {
+            throw err;
+          }
+          // Exponential backoff: 100ms, 200ms, 400ms
+          if (i < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, delayMs * Math.pow(2, i)));
+          }
+        }
+      }
+      throw lastError;
+    };
 
     const loadDashboardData = async () => {
       try {
         setDashboardError('');
         const results = await Promise.allSettled([
-          getProjectsBySupplierToken(token!),
-          getComplianceRequestsBySupplierId(supplier.id),
-          getSupplierNotifications(supplier.id),
-          getMissingDocumentsForSupplier(supplier.id),
-          getRFQsForSupplier(supplier.id),
-          getSupplierProposals(supplier.id)
+          retryApiCall(() => getProjectsBySupplierToken(token!)),
+          retryApiCall(() => getComplianceRequestsBySupplierId(supplier.id)),
+          retryApiCall(() => getSupplierNotifications(supplier.id)),
+          retryApiCall(() => getMissingDocumentsForSupplier(supplier.id)),
+          retryApiCall(() => getRFQsForSupplier(supplier.id)),
+          retryApiCall(() => getSupplierProposals(supplier.id))
         ]);
 
-        if (!mounted) return;
+        if (!mounted || controller.signal.aborted) return;
 
         const pList = results[0].status === 'fulfilled' ? results[0].value : [];
         const cList = results[1].status === 'fulfilled' ? results[1].value : [];
@@ -225,6 +260,7 @@ const SupplierDashboard: React.FC = () => {
         // Check if any critical calls failed
         const failedCalls = results.filter(r => r.status === 'rejected');
         if (failedCalls.length > 0) {
+          console.warn(`Dashboard: ${failedCalls.length} data source(s) failed to load:`, failedCalls);
           setDashboardError(`Some data failed to load. ${failedCalls.length} section(s) may be incomplete. Please refresh the page if needed.`);
         }
 
@@ -247,31 +283,44 @@ const SupplierDashboard: React.FC = () => {
           return (diffDays <= 45 && diffDays >= 39) || (diffDays <= 30 && diffDays >= 25) || (diffDays <= 16 && diffDays >= 12);
         });
 
-        if (projectsNeedingCheck.length > 0) {
-          const updateResults = await Promise.all(
-            projectsNeedingCheck.map(p => getProductionUpdates(p.id))
-          );
+        if (projectsNeedingCheck.length > 0 && mounted && !controller.signal.aborted) {
+          try {
+            const updateResults = await Promise.allSettled(
+              projectsNeedingCheck.map(p => retryApiCall(() => getProductionUpdates(p.id)))
+            );
 
-          for (let i = 0; i < projectsNeedingCheck.length; i++) {
-            const p = projectsNeedingCheck[i];
-            const updates = updateResults[i];
-            const etd = new Date(p.milestones!.etd!);
-            const today = new Date();
-            const diffDays = Math.ceil((etd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+            if (!mounted || controller.signal.aborted) return;
 
-            const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
+            for (let i = 0; i < projectsNeedingCheck.length; i++) {
+              const p = projectsNeedingCheck[i];
+              const updates = updateResults[i].status === 'fulfilled' ? updateResults[i].value : [];
+              const etd = new Date(p.milestones!.etd!);
+              const today = new Date();
+              const diffDays = Math.ceil((etd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-            if (!recentUpdate) {
-              needsUpdate.push({ project: p, daysUntilEtd: diffDays });
+              const recentUpdate = updates.length > 0 && (new Date().getTime() - new Date(updates[0].createdAt).getTime()) < (7 * 24 * 60 * 60 * 1000);
+
+              if (!recentUpdate) {
+                needsUpdate.push({ project: p, daysUntilEtd: diffDays });
+              }
             }
+
+            if (mounted && !controller.signal.aborted) {
+              setProjectsNeedingUpdate(needsUpdate);
+            }
+          } catch (updateErr: any) {
+            if (!mounted || controller.signal.aborted) return;
+            if (updateErr.name === 'AbortError') return;
+            console.error('Error loading production updates:', updateErr);
+            // Continue without manufacturing checks rather than failing entire dashboard
           }
         }
-
-        if (mounted) {
-          setProjectsNeedingUpdate(needsUpdate);
-        }
       } catch (err: any) {
-        if (!mounted) return;
+        if (!mounted || controller.signal.aborted) return;
+        if (err.name === 'AbortError') {
+          console.debug('Dashboard load cancelled');
+          return;
+        }
         console.error('Dashboard data load error:', err);
         setDashboardError('Failed to load dashboard. Please refresh the page.');
       }
@@ -281,6 +330,7 @@ const SupplierDashboard: React.FC = () => {
 
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [isAccessVerified, supplier?.id, token]);
 
@@ -300,8 +350,13 @@ const SupplierDashboard: React.FC = () => {
 
     const isCorrect = enteredAccessCode === supplier.accessCode;
 
-    // Log the attempt
-    await logAccessCodeAttempt(supplier.id, enteredAccessCode, 'unknown', isCorrect);
+    // Log the attempt (fire-and-forget with error handling)
+    logAccessCodeAttempt(supplier.id, enteredAccessCode, 'unknown', isCorrect)
+      .catch((err: any) => {
+        if (err.name !== 'AbortError') {
+          console.error('Failed to log access attempt:', err);
+        }
+      });
 
     if (!isCorrect) {
       setAccessCodeError(
@@ -550,6 +605,33 @@ const SupplierDashboard: React.FC = () => {
     } finally {
       setUploadingDocs({ ...uploadingDocs, [docId]: false });
       setUploadProgress({ ...uploadProgress, [docId]: 0 });
+    }
+  };
+
+  const handleMarkDocumentDone = async (docId: string) => {
+    const comment = docComments[docId];
+    if (!comment.trim()) {
+      setToastMessage('Please add a comment before marking as done.');
+      setToastType('error');
+      return;
+    }
+
+    setSubmittingComments({ ...submittingComments, [docId]: true });
+
+    try {
+      await addDocumentComment(docId, comment, supplier?.name || 'Supplier', 'supplier');
+
+      // Remove from missing docs
+      setMissingDocs(prev => prev.filter(d => d.id !== docId));
+      setDocComments({ ...docComments, [docId]: '' });
+      setToastMessage('Document marked as done with comment!');
+      setToastType('success');
+    } catch (err: any) {
+      console.error('Error marking document done:', err);
+      setToastMessage('Failed to submit comment. Please try again.');
+      setToastType('error');
+    } finally {
+      setSubmittingComments({ ...submittingComments, [docId]: false });
     }
   };
 
@@ -1090,6 +1172,8 @@ const SupplierDashboard: React.FC = () => {
                                   const hasFile = selectedFiles[d.id];
                                   const progress = uploadProgress[d.id] || 0;
                                   const error = uploadErrors[d.id];
+                                  const isSubmittingComment = submittingComments[d.id];
+                                  const comment = docComments[d.id] || '';
 
                                   return (
                                     <div key={d.id} className="bg-white rounded-lg p-3 border border-yellow-200 hover:shadow-sm transition">
@@ -1152,6 +1236,28 @@ const SupplierDashboard: React.FC = () => {
                                         </>
                                       )}
                                       {error && <p className="text-red-600 text-xs mt-1">{error}</p>}
+
+                                      {/* Comment Section */}
+                                      <div className="mt-3 pt-3 border-t border-yellow-100">
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Add a comment (optional)</label>
+                                        <textarea
+                                          value={comment}
+                                          onChange={(e) => setDocComments({ ...docComments, [d.id]: e.target.value })}
+                                          placeholder="Type your message here..."
+                                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs resize-none focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                                          rows={2}
+                                          disabled={isSubmittingComment}
+                                        />
+                                        {comment.trim() && (
+                                          <button
+                                            onClick={() => handleMarkDocumentDone(d.id)}
+                                            disabled={isSubmittingComment}
+                                            className="w-full mt-2 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                                          >
+                                            {isSubmittingComment ? 'Submitting...' : '✓ Mark as Done'}
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                   );
                                 })}
@@ -1200,40 +1306,6 @@ const SupplierDashboard: React.FC = () => {
                                     </div>
                                   );
                                 })}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* RFQs for this Project */}
-                          {filteredRfqs.length > 0 && (
-                            <div>
-                              <h4 className="font-bold text-sm mb-2">RFQs ({filteredRfqs.length})</h4>
-                              <div className="space-y-2">
-                                {filteredRfqs.map(rfq => (
-                                  <div key={rfq.id} className="bg-white rounded-lg p-3 border border-gray-200">
-                                    <div className="flex items-start justify-between gap-2 mb-2">
-                                      <p className="font-medium text-sm break-words">{rfq.rfqTitle}</p>
-                                      <span className={`text-xs px-2 py-1 rounded whitespace-nowrap ${
-                                        rfq.status === 'pending' ? 'bg-amber-100 text-amber-800' :
-                                        rfq.status === 'submitted' ? 'bg-green-100 text-green-800' :
-                                        'bg-gray-100 text-gray-800'
-                                      }`}>
-                                        {rfq.status === 'pending' ? 'Pending Quote' : rfq.status}
-                                      </span>
-                                    </div>
-                                    {rfq.status === 'pending' && (
-                                      <button
-                                        onClick={() => {
-                                          setSelectedRfqForQuote(rfq);
-                                          setIsQuoteModalOpen(true);
-                                        }}
-                                        className="w-full px-3 py-1.5 bg-primary text-white rounded text-xs font-medium hover:bg-primary-dark transition"
-                                      >
-                                        Submit Quote
-                                      </button>
-                                    )}
-                                  </div>
-                                ))}
                               </div>
                             </div>
                           )}

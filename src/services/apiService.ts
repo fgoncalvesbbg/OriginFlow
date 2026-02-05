@@ -1041,14 +1041,19 @@ export const checkComplianceDeadlines = async (): Promise<void> => {
 export const getCategories = async (): Promise<CategoryL3[]> => {
     if (!isLive) return [];
     const { data, error } = await portalClient.from('categories_l3').select('*').limit(500);
-    if (error) return [];
-    return (data || []).map((c: any) => ({
+    if (error) {
+      console.error('Error fetching categories:', error);
+      return [];
+    }
+    const categories = (data || []).map((c: any) => ({
         id: c.id,
         name: c.name,
         active: c.active,
         isFinalized: c.is_finalized,
         finalizedAt: c.finalized_at
     }));
+    console.log('Fetched categories:', categories);
+    return categories;
 };
 
 export const saveCategory = async (cat: CategoryL3): Promise<void> => {
@@ -1222,7 +1227,11 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
 export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMTemplate | undefined> => {
     if (!categoryId || !isLive) return undefined;
     const { data, error } = await supabase.from('im_templates').select('*').eq('category_id', categoryId).single();
-    if (error) return undefined;
+    if (error) {
+      console.error('Error fetching IM template by category:', categoryId, error);
+      return undefined;
+    }
+    console.log('Fetched IM template by category:', data);
     return {
       id: data.id,
       categoryId: data.category_id,
@@ -1276,8 +1285,12 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
 
 export const getIMSections = async (templateId: string): Promise<IMSection[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('im_sections').select('*').eq('template_id', templateId);
-    if (error) return [];
+    const { data, error } = await supabase.from('im_sections').select('*').eq('template_id', templateId);
+    if (error) {
+      console.error('Error fetching IM sections for template:', templateId, error);
+      return [];
+    }
+    console.log('Fetched IM sections:', data);
     return (data || []).map((s: any) => ({
       id: s.id,
       templateId: s.template_id,

@@ -26,11 +26,19 @@ const SupplierRFQPortal: React.FC = () => {
 
   useEffect(() => {
     if (!token) { setError('Invalid link'); setLoading(false); return; }
-    
+
+    let mounted = true;
+    const controller = new AbortController();
+
     const load = async () => {
         try {
             const res = await getRFQEntryByToken(token);
-            if (!res) { setError('RFQ not found or link expired'); }
+
+            if (!mounted || controller.signal.aborted) return;
+
+            if (!res) {
+              setError('RFQ not found or link expired');
+            }
             else {
                 setRfq(res.rfq);
                 setEntry(res.entry);
@@ -38,13 +46,26 @@ const SupplierRFQPortal: React.FC = () => {
                     setSuccess(true);
                 }
             }
-        } catch (e) {
+        } catch (e: any) {
+            if (!mounted || controller.signal.aborted) return;
+            if (e.name === 'AbortError') {
+              console.debug('RFQ portal load cancelled');
+              return;
+            }
+            console.error('RFQ portal load error:', e);
             setError('Failed to load data');
         } finally {
-            setLoading(false);
+            if (mounted && !controller.signal.aborted) {
+              setLoading(false);
+            }
         }
     };
     load();
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
   }, [token]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,8 +93,13 @@ const SupplierRFQPortal: React.FC = () => {
               quoteFileUrl: formData.quoteFileUrl
           });
           setSuccess(true);
-      } catch (e) {
-          alert("Failed to submit quote");
+      } catch (e: any) {
+          if (e.name === 'AbortError') {
+            console.debug('Quote submission cancelled');
+            return;
+          }
+          console.error('Quote submission error:', e);
+          alert("Failed to submit quote. Please try again.");
       } finally {
           setSubmitting(false);
       }
