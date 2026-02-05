@@ -1184,7 +1184,11 @@ export const addStandardRequirements = async (categoryId: string): Promise<void>
 export const getIMTemplates = async (): Promise<IMTemplate[]> => {
     if (!isLive) return [];
     const { data, error } = await supabase.from('im_templates').select('*');
-    if (error) return [];
+    if (error) {
+      console.error('Error fetching IM templates:', error);
+      return [];
+    }
+    console.log('Fetched IM templates:', data);
     return (data || []).map((t: any) => ({
       id: t.id,
       categoryId: t.category_id,
