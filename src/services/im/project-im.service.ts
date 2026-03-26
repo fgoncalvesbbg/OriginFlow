@@ -63,8 +63,9 @@ export const saveProjectIM = async (projectId: string, templateId: string, place
 };
 
 /**
- * Delete project IM record
+ * Delete project IM record by project id
  */
 export const deleteProjectIM = async (projectId: string): Promise<void> => {
-    await supabase.from('project_ims').delete().eq('id', projectId);
+    const { error } = await supabase.from('project_ims').delete().eq('project_id', projectId);
+    if (error) handleError(error, 'deleteProjectIM');
 };
