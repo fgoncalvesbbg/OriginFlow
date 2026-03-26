@@ -25,7 +25,7 @@ import {
   getProjectIM,
   getProductionUpdates,
   saveProductionUpdate
-} from '../services/apiService';
+} from '../services';
 import { 
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty, 
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason 

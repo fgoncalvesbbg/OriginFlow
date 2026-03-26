@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getCategories, getIMTemplates, createIMTemplate, updateIMTemplate } from '../../services/apiService';
+import { getCategories, getIMTemplates, createIMTemplate, updateIMTemplate } from '../../services';
 import { CategoryL3, IMTemplate } from '../../types';
 import { BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock } from 'lucide-react';
 

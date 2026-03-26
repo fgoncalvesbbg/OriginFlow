@@ -1,3 +1,12 @@
+/**
+ * @deprecated Legacy monolithic service module.
+ *
+ * New and migrated call sites should import from domain modules via `src/services/index.ts`
+ * (for example `import { getProjects } from '../services'`).
+ *
+ * This file remains as a compatibility layer while non-page components are migrated.
+ */
+
 
 import { supabase, portalClient } from './core/supabase.client';
 import { isLive } from '../config/environment.config';
@@ -201,6 +210,7 @@ export const triggerEmailNotification = async (payload: {
 };
 
 // --- Projects ---
+// @deprecated Duplicate CRUD surface. Prefer exports from `src/services/project/*` via `src/services/index.ts`.
 
 export const getProjects = async (): Promise<Project[]> => {
     if (!isLive) return [];
@@ -388,6 +398,7 @@ export const saveProductionUpdate = async (update: Partial<ProductionUpdate>): P
 };
 
 // --- Suppliers ---
+// @deprecated Duplicate CRUD surface. Prefer exports from `src/services/supplier/*` via `src/services/index.ts`.
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
     if (!isLive) return [];

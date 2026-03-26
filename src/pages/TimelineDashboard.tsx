@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { getProjects, getAllProductionUpdates, getSuppliers } from '../services/apiService';
+import { getProjects, getAllProductionUpdates, getSuppliers } from '../services';
 import { Project, ProductionUpdate, Supplier } from '../types';
 import { CalendarClock, ChevronRight, AlertTriangle, Truck, Factory, Flag, FileText, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
 

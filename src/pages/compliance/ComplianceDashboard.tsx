@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getComplianceRequests, getSuppliers, getCategories, getProjects, deleteComplianceRequest } from '../../services/apiService';
+import { getComplianceRequests, getSuppliers, getCategories, getProjects, deleteComplianceRequest } from '../../services';
 import { ComplianceRequest, Supplier, CategoryL3, ComplianceRequestStatus, Project, UserRole } from '../../types';
 import { Plus, Search, Filter, ShieldCheck, ChevronRight, Calendar, BookOpen, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';

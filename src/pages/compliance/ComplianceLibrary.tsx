@@ -5,7 +5,7 @@ import {
   getCategories, getProductFeatures, getComplianceRequirements, 
   saveRequirement, deleteRequirement, addStandardRequirements,
   COMPLIANCE_SECTIONS
-} from '../../services/apiService';
+} from '../../services';
 import { CategoryL3, ProductFeature, ComplianceRequirement } from '../../types';
 // Added comment above fix: Adding missing X icon to lucide-react imports
 import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X } from 'lucide-react';

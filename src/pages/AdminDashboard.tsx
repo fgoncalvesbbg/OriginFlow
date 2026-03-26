@@ -8,7 +8,7 @@ import {
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects
-} from '../services/apiService';
+} from '../services';
 import { generateUUID } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';

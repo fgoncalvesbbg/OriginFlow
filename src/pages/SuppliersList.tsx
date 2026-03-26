@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { getSuppliers, getProjects, regenerateSupplierAccessCode, updateSupplier } from '../services/apiService';
+import { getSuppliers, getProjects, regenerateSupplierAccessCode, updateSupplier } from '../services';
 import { Supplier, Project } from '../types';
 import { Truck, Search, Mail, Box, LayoutDashboard, Edit2, X, Save, Loader2, Copy, RotateCcw } from 'lucide-react';
 import { useToast } from '../hooks/useToast';

@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile } from '../services/apiService';
+import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile } from '../services';
 import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload } from 'lucide-react';

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
-import { triggerEmailNotification } from '../services/apiService';
+import { triggerEmailNotification } from '../services';
 import { ArrowLeft, Mail, Send, Loader2, CheckCircle, AlertTriangle, Code, Terminal, ServerCrash, Key, ExternalLink, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 

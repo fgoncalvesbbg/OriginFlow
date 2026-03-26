@@ -6,7 +6,7 @@ import {
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
   logAccessCodeAttempt, submitRFQEntry, getSupplierProposals, addDocumentComment
-} from '../services/apiService';
+} from '../services';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';

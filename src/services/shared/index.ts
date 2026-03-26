@@ -18,3 +18,5 @@ export {
   getDocumentComments,
   addDocumentComment
 } from './document-comment.service';
+
+export { logAccessCodeAttempt } from '../apiService';

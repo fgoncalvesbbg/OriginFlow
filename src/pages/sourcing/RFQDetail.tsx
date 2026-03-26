@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getRFQById, awardRFQ, deleteRFQ } from '../../services/apiService';
+import { getRFQById, awardRFQ, deleteRFQ } from '../../services';
 import { RFQ, RFQEntry, RFQEntryStatus, RFQStatus, UserRole } from '../../types';
 import { ArrowLeft, Link as LinkIcon, Award, CheckCircle, DollarSign, Package, Truck, Wrench, Plus, Copy, List, Paperclip, FileText, Download, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';

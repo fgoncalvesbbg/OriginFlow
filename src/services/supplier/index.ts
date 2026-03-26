@@ -11,4 +11,4 @@ export {
   updateSupplier
 } from './supplier.service';
 
-export { ensureSupplierToken } from '../apiService';
+export { ensureSupplierToken, assignSupplierToPMs, getSupplierPMs, reassignProjectPM, regenerateSupplierAccessCode } from '../apiService';

@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject } from '../services/apiService';
+import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject } from '../services';
 import { Project, Supplier, UserRole, DashboardStats, ProjectOverallStatus } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';

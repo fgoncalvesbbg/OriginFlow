@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getSuppliers, createRFQ, getCategories, getCategoryAttributes } from '../../services/apiService';
+import { getSuppliers, createRFQ, getCategories, getCategoryAttributes } from '../../services';
 import { Supplier, CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachment } from '../../types';
 import { ArrowLeft, Loader2, Users, Layers, Image as ImageIcon, Upload, Paperclip, X, FileText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
