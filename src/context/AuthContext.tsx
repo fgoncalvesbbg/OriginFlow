@@ -45,12 +45,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Added comment above fix: Subscribing to auth changes on component mount
   useEffect(() => {
-    if (!isLive) {
-        setIsLoading(false);
-        return;
-    }
-
     let isMounted = true;
+    let subscription: { unsubscribe: () => void } | undefined;
+
+    if (!isLive) {
+      setIsLoading(false);
+      return () => {
+        isMounted = false;
+        subscription?.unsubscribe();
+      };
+    }
 
     const initializeAuth = async () => {
       // Determine if we are on a public portal route
@@ -85,7 +89,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // 2. Listen for session changes
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         console.debug('[Auth] Session event:', event);
         if (isMounted) {
           if (session?.user) {
@@ -96,14 +100,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setIsLoading(false);
         }
       });
-
-      return () => {
-        isMounted = false;
-        subscription.unsubscribe();
-      };
+      subscription = data.subscription;
     };
 
     initializeAuth();
+
+    return () => {
+      isMounted = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, pass: string) => {
