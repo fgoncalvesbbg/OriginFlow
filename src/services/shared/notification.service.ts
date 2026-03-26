@@ -57,6 +57,54 @@ export const markNotificationRead = async (id: string): Promise<void> => {
 };
 
 /**
+ * Create or update a supplier notification keyed by supplier + link.
+ * This keeps deadline reminders idempotent across repeated app mounts.
+ */
+export const upsertSupplierNotification = async (payload: {
+    supplierId: string;
+    message: string;
+    link: string;
+}): Promise<void> => {
+    if (!isLive || !payload.supplierId || !payload.message || !payload.link) return;
+
+    const { data: existing, error: findError } = await supabase
+        .from('notifications')
+        .select('id')
+        .eq('supplier_id', payload.supplierId)
+        .eq('link', payload.link)
+        .maybeSingle();
+
+    if (findError) {
+        console.warn('Failed to query existing supplier notification:', findError.message);
+        return;
+    }
+
+    if (existing?.id) {
+        const { error: updateError } = await supabase
+            .from('notifications')
+            .update({
+                message: payload.message,
+                is_read: false
+            })
+            .eq('id', existing.id);
+
+        if (updateError) console.warn('Failed to update supplier notification:', updateError.message);
+        return;
+    }
+
+    const { error: insertError } = await supabase.from('notifications').insert({
+        user_id: payload.supplierId,
+        supplier_id: payload.supplierId,
+        message: payload.message,
+        link: payload.link,
+        is_read: false,
+        created_at: new Date().toISOString()
+    });
+
+    if (insertError) console.warn('Failed to create supplier notification:', insertError.message);
+};
+
+/**
  * Trigger email notification (currently suppressed per project settings)
  */
 export const triggerEmailNotification = async (payload: {
