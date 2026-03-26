@@ -244,11 +244,20 @@ create policy "Enable all for im sections" on public.im_sections for all using (
 create policy "Enable all for project ims" on public.project_ims for all using (auth.role() = 'authenticated');
 
 -- Public access via token policies
+revoke insert, update, delete on public.suppliers from anon;
+revoke insert, update, delete on public.projects from anon;
+revoke insert, update, delete on public.project_documents from anon;
+revoke insert, update, delete on public.document_comments from anon;
+revoke insert, update, delete on public.compliance_requests from anon;
+
 create policy "Allow public access to suppliers via token" on public.suppliers for select using (true);
 create policy "Allow public access to projects via token" on public.projects for select using (true);
-create policy "Allow public access to docs via token" on public.project_documents for all using (true);
-create policy "Allow public access to doc comments via token" on public.document_comments for all using (true);
-create policy "Allow public access to compliance requests via token" on public.compliance_requests for all using (true);
+-- Supplier portal document reads are public; writes must go through SECURITY DEFINER RPCs that validate token + access code
+create policy "Allow public access to docs via token" on public.project_documents for select using (is_visible_to_supplier = true);
+-- Supplier portal comment reads are public; writes must go through SECURITY DEFINER RPCs that validate token + access code
+create policy "Allow public access to doc comments via token" on public.document_comments for select using (true);
+-- Compliance request reads are public for portal bootstrapping; writes are enforced by public.submit_compliance_response_secure(...)
+create policy "Allow public access to compliance requests via token" on public.compliance_requests for select using (true);
 
 -- Master Data Public Read Access (Needed for Supplier Portals)
 create policy "Allow public read access to categories" on public.categories_l3 for select using (true);
