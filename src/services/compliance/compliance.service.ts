@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { ComplianceRequest, ComplianceResponseItem, ComplianceRequestStatus } from '../../types';
 import { mapComplianceRequest } from '../../utils/mappers.utils';
 import { handleError, generateUUID } from '../../utils';
+import { upsertSupplierNotification } from '../shared/notification.service';
 
 /**
  * Get all compliance requests
@@ -139,7 +140,49 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
 };
 
 /**
- * Check and process compliance deadlines (empty stub for now)
+ * Check pending compliance deadlines and keep supplier notifications in sync.
  */
 export const checkComplianceDeadlines = async (): Promise<void> => {
+    if (!isLive) return;
+
+    const { data, error } = await supabase
+        .from('compliance_requests')
+        .select('*')
+        .eq('status', ComplianceRequestStatus.PENDING_SUPPLIER)
+        .not('deadline', 'is', null);
+
+    if (error) {
+        console.warn('Failed to check compliance deadlines:', error.message);
+        return;
+    }
+
+    const now = new Date();
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const reminderWindowDays = 14;
+
+    for (const rawRequest of data || []) {
+        const request = mapComplianceRequest(rawRequest);
+        if (!request.deadline || !request.supplierId) continue;
+
+        const deadlineDate = new Date(request.deadline);
+        if (Number.isNaN(deadlineDate.getTime())) continue;
+
+        const daysLeft = Math.ceil((deadlineDate.getTime() - now.getTime()) / msPerDay);
+        if (daysLeft > reminderWindowDays) continue;
+
+        let message = `Compliance request ${request.requestId} is due on ${deadlineDate.toLocaleDateString()}.`;
+        if (daysLeft < 0) {
+            message = `Compliance request ${request.requestId} is overdue by ${Math.abs(daysLeft)} day(s).`;
+        } else if (daysLeft === 0) {
+            message = `Compliance request ${request.requestId} is due today.`;
+        } else {
+            message = `Compliance request ${request.requestId} is due in ${daysLeft} day(s).`;
+        }
+
+        await upsertSupplierNotification({
+            supplierId: request.supplierId,
+            message,
+            link: `/compliance/supplier/${request.token}`
+        });
+    }
 };
