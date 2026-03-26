@@ -286,7 +286,8 @@ USING (
   )
 );
 
--- Public access for suppliers via token (RPC validates token + access code)
+-- Public read access is used only to bootstrap portal flows.
+-- Write/update is enforced by SECURITY DEFINER RPC public.submit_compliance_response_secure(token, access_code, ...).
 CREATE POLICY "public_access_compliance_requests_via_token" ON public.compliance_requests
 FOR SELECT USING (true);
 
@@ -413,16 +414,24 @@ END $$;
 -- PUBLIC ACCESS POLICIES (MAINTAIN FOR SUPPLIER PORTALS)
 -- =====================================================
 
--- Keep public access via token for supplier portal functionality
--- These allow unauthenticated or public access for specific use cases
+-- Keep limited public read access for supplier portal bootstrapping.
+-- IMPORTANT: Portal write paths must use SECURITY DEFINER RPCs that validate token + access code
+-- (e.g., public.submit_compliance_response_secure(...)); direct anon table writes are intentionally not allowed.
+REVOKE INSERT, UPDATE, DELETE ON public.suppliers FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.projects FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.project_documents FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.document_comments FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.compliance_requests FROM anon;
+
 CREATE POLICY "Allow public access to suppliers via token" ON public.suppliers
 FOR SELECT USING (true);
 
 CREATE POLICY "Allow public access to projects via token" ON public.projects
 FOR SELECT USING (true);
 
+-- Documents are read-only for public role; supplier submissions must be handled by SECURITY DEFINER RPCs.
 CREATE POLICY "Allow public access to docs via token" ON public.project_documents
-FOR ALL USING (true);
+FOR SELECT USING (is_visible_to_supplier = true);
 
 CREATE POLICY "Allow public read access to categories" ON public.categories_l3
 FOR SELECT USING (true);
