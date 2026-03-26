@@ -19,3 +19,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/1buDBiNMWeQPfX3MfF4WIsO
 3. (Optional) Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` if you want live Supabase data
 4. Run the app:
    `npm run dev`
+
+## Service Migration Checklist (apiService ➜ domain services)
+
+When adding or refactoring service calls, use this quick checklist to avoid reintroducing duplicate CRUD logic:
+
+- [ ] Import services from `src/services/index.ts` (or domain modules), not `src/services/apiService.ts`.
+- [ ] If a page still depends on a missing service export, add/re-export it in the relevant domain module first.
+- [ ] Keep `apiService.ts` as compatibility-only; annotate any temporary duplicate methods as deprecated.
+- [ ] After migration, verify no page imports `apiService.ts` (`rg "services/apiService" src/pages -n`).
+- [ ] Prefer adding new CRUD logic in domain-specific files (e.g., `src/services/project/*`) and export via `src/services/index.ts`.

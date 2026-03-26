@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getProjects, getSuppliers, getCategories, getProductFeatures, createComplianceRequest } from '../../services/apiService';
+import { getProjects, getSuppliers, getCategories, getProductFeatures, createComplianceRequest } from '../../services';
 import { Project, Supplier, CategoryL3, ProductFeature } from '../../types';
 import { AlertCircle, ArrowLeft, Loader2, Lock } from 'lucide-react';
 

@@ -8,7 +8,7 @@ import {
   getProductFeatures, getCategories, submitComplianceResponse, deleteComplianceRequest,
   addDocument, uploadFile, getProjectDocs, COMPLIANCE_SECTIONS, getSupplierById,
   getProjectById
-} from '../../services/apiService';
+} from '../../services';
 import { useAuth } from '../../context/AuthContext';
 import { 
   ComplianceRequest, ComplianceRequirement, ProductFeature, 

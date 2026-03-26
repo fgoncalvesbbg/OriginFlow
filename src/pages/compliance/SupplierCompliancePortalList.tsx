@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getComplianceRequestsBySupplierId, getCategories } from '../../services/apiService';
+import { getComplianceRequestsBySupplierId, getCategories } from '../../services';
 import { ComplianceRequest, CategoryL3, ComplianceRequestStatus } from '../../types';
 import { Search, Clock, AlertCircle, CheckCircle, Loader2, Eye, Copy, Check } from 'lucide-react';
 

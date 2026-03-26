@@ -8,7 +8,7 @@ import {
     getProjectById, getIMTemplateById, getIMSections, 
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
     addDocument, uploadFile, getComplianceRequests, getProductFeatures
-} from '../../services/apiService';
+} from '../../services';
 import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
 

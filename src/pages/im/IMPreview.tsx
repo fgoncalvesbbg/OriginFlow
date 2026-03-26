@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getIMTemplateById, getIMSections } from '../../services/apiService';
+import { getIMTemplateById, getIMSections } from '../../services';
 import { IMTemplate, IMSection } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
 

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { getSuppliers, createProject, getProfiles } from '../services/apiService';
+import { getSuppliers, createProject, getProfiles } from '../services';
 import { Supplier, User } from '../types';
 import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';

@@ -72,11 +72,14 @@ export const getProjectsBySupplierToken = async (token: string): Promise<Project
  * Create a new project with initial steps and documents
  */
 export const createProject = async (name: string, supplierId: string, projectId: string, pmId: string): Promise<Project> => {
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { data, error } = await supabase.from('projects').insert({
         name,
         supplier_id: supplierId,
         project_id_code: projectId,
         pm_id: pmId,
+        created_by: user?.id,
         status: ProjectOverallStatus.IN_PROGRESS,
         current_step: 1,
         created_at: new Date().toISOString(),

@@ -35,3 +35,5 @@ export {
   saveCategoryAttribute,
   deleteCategoryAttribute
 } from './compliance-requirement.service';
+
+export { COMPLIANCE_SECTIONS } from '../apiService';

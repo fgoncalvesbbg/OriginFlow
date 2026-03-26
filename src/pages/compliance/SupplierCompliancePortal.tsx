@@ -5,7 +5,7 @@ import {
   verifySupplierAccess, submitComplianceResponseSecure,
   getComplianceRequirements, getProductFeatures, getCategories,
   COMPLIANCE_SECTIONS
-} from '../../services/apiService';
+} from '../../services';
 import {
   ComplianceRequest, ComplianceRequirement, ProductFeature,
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus

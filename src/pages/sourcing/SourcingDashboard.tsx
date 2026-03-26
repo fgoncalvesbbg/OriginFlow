@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getRFQs, getAllSupplierProposals, deleteRFQ } from '../../services/apiService';
+import { getRFQs, getAllSupplierProposals, deleteRFQ } from '../../services';
 import { RFQ, RFQStatus, SupplierProposal, UserRole } from '../../types';
 import { ShoppingBag, Plus, Search, ChevronRight, Clock, FileText, Paperclip, Download, Trash2, MoreHorizontal, Image as ImageIcon, Eye, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';

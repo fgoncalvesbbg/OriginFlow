@@ -51,7 +51,11 @@ export {
   getSupplierByToken,
   createSupplier,
   updateSupplier,
-  ensureSupplierToken
+  ensureSupplierToken,
+  assignSupplierToPMs,
+  getSupplierPMs,
+  reassignProjectPM,
+  regenerateSupplierAccessCode
 } from './supplier';
 
 // Manufacturing module
@@ -68,6 +72,7 @@ export {
   getSupplierNotifications,
   markNotificationRead,
   triggerEmailNotification,
+  logAccessCodeAttempt,
   getDocumentComments as getSharedDocumentComments,
   addDocumentComment as addSharedDocumentComment
 } from './shared';
@@ -97,7 +102,8 @@ export {
   addStandardRequirements,
   getCategoryAttributes,
   saveCategoryAttribute,
-  deleteCategoryAttribute
+  deleteCategoryAttribute,
+  COMPLIANCE_SECTIONS
 } from './compliance';
 
 // IM module

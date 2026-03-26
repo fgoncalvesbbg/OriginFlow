@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getRFQEntryByToken, submitRFQEntry } from '../../services/apiService';
+import { getRFQEntryByToken, submitRFQEntry } from '../../services';
 import { RFQ, RFQEntry, RFQStatus, RFQEntryStatus } from '../../types';
 import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, List, Upload, Paperclip } from 'lucide-react';
 
