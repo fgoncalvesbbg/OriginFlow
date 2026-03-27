@@ -1,16 +1,44 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import Layout from '../../components/Layout';
 import { 
     getProjectById, getIMTemplateById, getIMSections, 
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
     addDocument, uploadFile, getComplianceRequests, getProductFeatures
 } from '../../services';
-import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature } from '../../types';
+import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
+import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
+
+
+const DEFAULT_MASTER_PAGES: Record<IMMasterLayoutName, IMMasterPageOverride> = {
+  cover: {},
+  chapter: {},
+  body: {},
+  appendix: {},
+  end: {}
+};
+
+const resolveSectionLayout = (section: IMSection, sectionLayoutMap?: Record<string, IMMasterLayoutName>): IMMasterLayoutName => {
+  if (!sectionLayoutMap) return 'body';
+  return (
+    sectionLayoutMap[section.id] ||
+    sectionLayoutMap[section.parentId ? 'type:subsection' : 'type:section'] ||
+    sectionLayoutMap[section.isPlaceholder ? 'type:placeholder' : 'type:content'] ||
+    sectionLayoutMap.default ||
+    'body'
+  );
+};
+
+const getBackgroundStyle = (override?: IMMasterPageOverride) => {
+  const bg = override?.background?.trim();
+  if (!bg) return undefined;
+  if (bg.startsWith('http') || bg.startsWith('data:image') || bg.includes('gradient')) {
+    return { backgroundImage: bg.startsWith('gradient') ? bg : `url(${bg})`, backgroundSize: 'cover', backgroundPosition: 'center' };
+  }
+  return { backgroundColor: bg };
+};
 
 // Internal Confirmation Modal
 const ConfirmationModal: React.FC<{
@@ -315,76 +343,29 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-      if (!previewRef.current || !project) {
-          console.error("Preview ref or project missing");
-          alert("Could not find preview element to generate PDF.");
+      if (!project) {
+          console.error("Project missing");
+          alert("Could not load project details to generate PDF.");
           return;
       }
       setGenerating(true);
       
       try {
-          // Clone the preview element to capture full height independent of scroll container
-          const element = previewRef.current;
-          
-          // Create a container for the clone to ensure it renders in a "visible" context
-          const container = document.createElement('div');
-          container.style.position = 'absolute';
-          container.style.top = '0';
-          container.style.left = '-9999px';
-          container.style.width = '210mm'; // Force A4 width context
-          document.body.appendChild(container);
+          const shouldUseLegacyRenderer =
+              import.meta.env.VITE_IM_PDF_LEGACY_HTML2CANVAS === 'true' ||
+              window.localStorage.getItem('im.export.legacyHtml2canvas') === 'true';
 
-          const clone = element.cloneNode(true) as HTMLElement;
-          
-          // Reset styles on the clone to ensure it expands fully
-          clone.style.transform = 'none';
-          clone.style.height = 'auto';
-          clone.style.width = '100%';
-          clone.style.overflow = 'visible';
-          clone.style.maxHeight = 'none';
-          
-          container.appendChild(clone);
-
-          // Wait a bit for images to "load" in the new context and layout to settle
-          await new Promise(resolve => setTimeout(resolve, 800));
-
-          const canvas = await html2canvas(clone, { 
-              scale: 2, // Retina quality
-              useCORS: true, 
-              logging: false,
-              allowTaint: true,
-              backgroundColor: '#ffffff',
-              windowWidth: 210 * 3.7795275591 * 2, // Approximate pixel width for 210mm
+          const pdfBlob = await renderProjectIMPdf({
+              previewElement: previewRef.current,
+              projectName: project.name,
+              language: activeLang,
+              template,
+              sections,
+              formData,
+              conditions,
+              useLegacyHtml2Canvas: shouldUseLegacyRenderer,
           });
-          
-          // Clean up DOM
-          document.body.removeChild(container);
 
-          // Create PDF
-          const imgData = canvas.toDataURL('image/jpeg', 0.95);
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = pdf.internal.pageSize.getHeight();
-          
-          const imgProps = pdf.getImageProperties(imgData);
-          const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-          
-          let heightLeft = imgHeight;
-          let position = 0;
-          
-          // First page
-          pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
-          heightLeft -= pdfHeight;
-          
-          // Subsequent pages
-          while (heightLeft > 0) {
-              position -= pdfHeight;
-              pdf.addPage();
-              pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
-              heightLeft -= pdfHeight;
-          }
-          
-          const pdfBlob = pdf.output('blob');
           const fileName = `${project.name.replace(/\s+/g, '_')}_Manual_${activeLang.toUpperCase()}.pdf`;
           const file = new File([pdfBlob], fileName, { type: "application/pdf" });
 
@@ -721,7 +702,7 @@ const ProjectIMGenerator: React.FC = () => {
   }
 
   const orderedSections = sections.sort((a, b) => a.order - b.order);
-  const primaryColor = template?.metadata?.primaryColor || '#0f172a';
+  const imThemeVars = getIMThemeVariables(template?.metadata);
   
   // Computed values for current language
   const displayTitle = formData['__cover_title'] !== undefined ? formData['__cover_title'] : (project?.name || 'Product Name');
@@ -742,65 +723,7 @@ const ProjectIMGenerator: React.FC = () => {
          onCancel={() => setShowDeleteConfirm(false)}
        />
 
-       <style>{`
-         .im-preview-content ul { list-style-type: disc !important; padding-left: 1.5em !important; margin-bottom: 1em !important; display: block !important; }
-         .im-preview-content ol { list-style-type: decimal !important; padding-left: 1.5em !important; margin-bottom: 1em !important; display: block !important; }
-         .im-preview-content li { display: list-item !important; margin-bottom: 0.25em !important; }
-         .im-preview-content p { margin-bottom: 1em !important; display: block !important; }
-         .im-preview-content b, .im-preview-content strong { font-weight: bold !important; }
-         .im-preview-content i, .im-preview-content em { font-style: italic !important; }
-         .im-preview-content u { text-decoration: underline !important; }
-         .im-interactive-placeholder { display: inline-block !important; }
-         
-         /* Visual Block Styles */
-        .im-block-wrapper {
-            display: flex;
-            align-items: flex-start;
-            gap: 1.5rem;
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-            border-radius: 6px;
-            border-left: 6px solid;
-            background-color: #fff;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .im-block-icon {
-            flex-shrink: 0;
-            width: 64px;
-            height: 64px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .im-block-content {
-            flex: 1;
-            min-width: 0;
-        }
-        .im-block-title {
-            display: block;
-            font-weight: 800;
-            text-transform: uppercase;
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
-            letter-spacing: 0.05em;
-        }
 
-        .im-block-warning { background-color: #fff7ed; border-left-color: #f97316; }
-        .im-block-warning .im-block-title { color: #c2410c; }
-
-        .im-block-caution { background-color: #fefce8; border-left-color: #eab308; }
-        .im-block-caution .im-block-title { color: #854d0e; }
-
-        .im-block-electric { background-color: #fef2f2; border-left-color: #dc2626; }
-        .im-block-electric .im-block-title { color: #b91c1c; }
-
-        .im-block-info { background-color: #eff6ff; border-left-color: #3b82f6; }
-        .im-block-info .im-block-title { color: #1d4ed8; }
-
-        .im-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-        .im-table th, .im-table td { border: 1px solid #cbd5e1; padding: 0.5rem; }
-        .im-table th { background-color: #f1f5f9; font-weight: bold; text-align: left; }
-       `}</style>
        <input 
           type="file" 
           ref={fileInputRef} 
@@ -809,7 +732,7 @@ const ProjectIMGenerator: React.FC = () => {
           onChange={(e) => e.target.files?.[0] && uploadId && handleImageUpload(uploadId, e.target.files[0])} 
        />
 
-       <div className="h-[calc(100vh-100px)] flex flex-col">
+       <div className="h-[calc(100vh-100px)] flex flex-col" style={imThemeVars}>
            <div className="flex justify-between items-center mb-4">
                <div className="flex items-center gap-3">
                    <button onClick={() => navigate(`/project/${projectId}`)} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
@@ -986,7 +909,7 @@ const ProjectIMGenerator: React.FC = () => {
                    <div className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center" onClick={handlePreviewClick}>
                        <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top">
                           {/* COVER PAGE */}
-                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page">
+                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page" style={getBackgroundStyle(masterPages.cover)}>
                              {displayCoverImage && <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${displayCoverImage})` }} />}
                              <div className="flex-1 p-[20mm] flex flex-col justify-between">
                                 <div>
@@ -994,7 +917,7 @@ const ProjectIMGenerator: React.FC = () => {
                                    <h1 className="text-4xl font-bold text-primary mb-4">{displayTitle}</h1>
                                    <p className="text-xl text-muted uppercase tracking-widest font-light">{displaySubtitle}</p>
                                 </div>
-                                <div className="border-t-4 pt-6" style={{ borderColor: primaryColor }}>
+                                <div className="border-t-4 pt-6" style={{ borderColor: 'var(--im-primary-color)' }}>
                                    <p className="text-sm font-bold text-primary uppercase mb-1">{template?.metadata?.companyName || 'Company Name'}</p>
                                    <p className="text-xs text-muted">Original Instructions</p>
                                 </div>
@@ -1005,15 +928,15 @@ const ProjectIMGenerator: React.FC = () => {
                               <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
                                   {orderedSections.map(section => (
                                       <div key={section.id} className="mb-8">
-                                          <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: primaryColor }}>{section.title}</h3>
-                                          <div className="im-preview-content" dangerouslySetInnerHTML={{ __html: processContent(section.content[activeLang] || '') }} />
+                                          <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)' }}>{section.title}</h3>
+                                          <div className="im-content" dangerouslySetInnerHTML={{ __html: processContent(section.content[activeLang] || '') }} />
                                       </div>
                                   ))}
                               </div>
                               
                               {/* FOOTER */}
-                              {displayFooter && (
-                                  <div className="absolute bottom-0 left-0 right-0 p-8 border-t border-gray-100 text-center text-xs text-gray-400">
+                              {displayFooter && masterPages.body?.footerVariant !== 'none' && (
+                                  <div className={`absolute bottom-0 left-0 right-0 p-8 border-t border-gray-100 text-center text-xs ${masterPages.body?.footerVariant === 'minimal' ? 'text-gray-300' : 'text-gray-400'}`}>
                                       {displayFooter}
                                   </div>
                               )}
@@ -1022,7 +945,7 @@ const ProjectIMGenerator: React.FC = () => {
                           {/* BACK PAGE */}
                           {template?.metadata?.backPageContent && (
                               <div className="min-h-[297mm] bg-light p-[20mm] flex flex-col justify-end mt-4 break-before-page">
-                                  <div className="border-t pt-8" style={{ borderColor: primaryColor }}>
+                                  <div className="border-t pt-8" style={{ borderColor: 'var(--im-primary-color)' }}>
                                       <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
                                       <div className="mt-10 text-xs text-gray-400 text-center">
                                           &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.

@@ -3,10 +3,12 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getProductFeatures } from '../../services';
-import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
+import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata, IMMasterLayoutName } from '../../types';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
+import './styles/im-content.css';
+import { getIMThemeVariables } from './styles/im-theme';
 
 const ALL_LANGUAGES = [
   { code: 'en', label: 'English (Default)' },
@@ -21,6 +23,14 @@ const ALL_LANGUAGES = [
   { code: 'ja', label: 'Japanese (JP)' },
   { code: 'tr', label: 'Turkish (TR)' },
   { code: 'ru', label: 'Russian (RU)' }
+];
+
+const SECTION_LAYOUT_OPTIONS: { value: IMMasterLayoutName; label: string }[] = [
+  { value: 'chapter', label: 'Chapter' },
+  { value: 'body', label: 'Body' },
+  { value: 'appendix', label: 'Appendix' },
+  { value: 'cover', label: 'Cover' },
+  { value: 'end', label: 'End' }
 ];
 
 // --- Internal Confirmation Modal ---
@@ -282,21 +292,6 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
 
   return (
     <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
-      <style>{`
-        .im-editor-content p { margin-bottom: 1em !important; }
-        .im-placeholder { display: inline-block; vertical-align: middle; cursor: default; user-select: none; white-space: nowrap; }
-        .im-condition { display: inline-block; vertical-align: middle; cursor: default; border-style: dashed; user-select: none; }
-        .im-block-wrapper { display: flex; align-items: flex-start; gap: 1.5rem; padding: 1.5rem; margin: 1rem 0; border-radius: 6px; border-left: 6px solid; background-color: #fff; }
-        .im-block-icon { flex-shrink: 0; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; }
-        .im-block-content { flex: 1; min-width: 0; }
-        .im-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 0.5rem; }
-        .im-block-warning { background-color: #fff7ed; border-left-color: #f97316; }
-        .im-block-caution { background-color: #fefce8; border-left-color: #eab308; }
-        .im-block-electric { background-color: #fef2f2; border-left-color: #dc2626; }
-        .im-block-info { background-color: #eff6ff; border-left-color: #3b82f6; }
-        .im-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-        .im-table th, .im-table td { border: 1px solid #cbd5e1; padding: 0.5rem; }
-      `}</style>
 
       <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
         <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 1, content: [{ type: 'text', text: 'Heading 1' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H1</button>
@@ -318,37 +313,23 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           </>
         )}
       </div>
-
-      <div className="flex-1 overflow-y-auto bg-white p-4 space-y-3">
-        {!blocks.length && !isFocused && placeholder && <div className="text-gray-400 pointer-events-none select-none">{placeholder}</div>}
-        {blocks.map((block) => (
-          <div key={block.id} className={`rounded-lg border ${selectedBlockId === block.id ? 'border-indigo-300 ring-1 ring-indigo-100' : 'border-transparent'} p-2`} onClick={() => setSelectedBlockId(block.id)}>
-            {(block.type === 'paragraph' || block.type === 'heading' || block.type === 'callout' || block.type === 'conditional') && (
-              <div
-                className={`im-editor-content outline-none min-h-[28px] ${block.type === 'heading' ? (block.level === 1 ? 'text-3xl font-bold' : block.level === 2 ? 'text-2xl font-semibold' : 'text-xl font-semibold') : ''}`}
-                contentEditable
-                suppressContentEditableWarning
-                onFocus={() => { setIsFocused(true); setSelectedBlockId(block.id); }}
-                onBlur={() => setIsFocused(false)}
-                onInput={(e) => updateTextualBlock(block.id, (e.currentTarget as HTMLDivElement).innerHTML)}
-                dangerouslySetInnerHTML={{ __html: serializeInline(block.content) }}
-              />
-            )}
-            {block.type === 'table' && (
-              <table className="im-table">
-                <thead><tr>{block.rows[0]?.map((h, idx) => <th key={idx}>{h}</th>)}</tr></thead>
-                <tbody>{block.rows.slice(1).map((row, rIdx) => <tr key={rIdx}>{row.map((cell, cIdx) => <td key={cIdx}>{cell}</td>)}</tr>)}</tbody>
-              </table>
-            )}
-            {block.type === 'image' && <img src={block.src} alt={block.alt || 'Section image'} className="max-w-full h-auto rounded" />}
-            {block.type === 'legacy_html' && (
-              <div className="border border-amber-200 bg-amber-50 rounded p-3">
-                <div className="text-xs uppercase tracking-wide text-amber-700 font-semibold mb-1">Legacy HTML (fallback rendering)</div>
-                <div dangerouslySetInnerHTML={{ __html: block.html }} />
-              </div>
-            )}
-          </div>
-        ))}
+      
+      <div className="flex-1 relative bg-white cursor-text" onClick={() => { contentRef.current?.focus(); }}>
+        {!initialContent && !isFocused && placeholder && (
+           <div className="absolute top-4 left-4 text-gray-400 pointer-events-none select-none z-10">{placeholder}</div>
+        )}
+        <div className="absolute inset-0 overflow-y-auto">
+          <div 
+            ref={contentRef}
+            className="min-h-full p-4 outline-none im-content max-w-none font-sans"
+            contentEditable
+            onInput={handleChange}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => { setIsFocused(false); saveSelection(); }}
+            onMouseUp={saveSelection}
+            onKeyUp={saveSelection}
+          />
+        </div>
       </div>
     </div>
   );
@@ -394,7 +375,9 @@ const IMTemplateEditor: React.FC = () => {
      companyLogoUrl: '',
      companyName: '',
      backPageContent: '',
-     footerText: ''
+     footerText: '',
+     masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {} },
+     sectionLayoutMap: {}
   });
 
   useEffect(() => {
@@ -415,7 +398,13 @@ const IMTemplateEditor: React.FC = () => {
     if (temp) {
       setTemplate(temp);
       setTemplateLanguages(temp.languages || ['en', 'de', 'fr', 'es', 'it']);
-      if (temp.metadata) setMetaSettings(temp.metadata);
+      if (temp.metadata) {
+        setMetaSettings({
+          ...temp.metadata,
+          masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {}, ...(temp.metadata.masterPages || {}) },
+          sectionLayoutMap: temp.metadata.sectionLayoutMap || {}
+        });
+      }
       
       const secs = await getIMSections(temp.id);
       setSections(secs);
@@ -649,19 +638,53 @@ const IMTemplateEditor: React.FC = () => {
     }
   };
 
+
+  const handleSectionLayoutChange = async (sectionId: string, layout: IMMasterLayoutName) => {
+    if (!template) return;
+
+    const nextMetadata: IMTemplateMetadata = {
+      ...metaSettings,
+      sectionLayoutMap: {
+        ...(metaSettings.sectionLayoutMap || {}),
+        [sectionId]: layout
+      }
+    };
+
+    setMetaSettings(nextMetadata);
+    setTemplate(prev => prev ? ({ ...prev, metadata: nextMetadata }) : prev);
+
+    try {
+      await updateIMTemplate(template.id, { metadata: nextMetadata, lastUpdatedBy: user?.name });
+      setLastSaved(new Date());
+    } catch (e) {
+      console.error('Failed to save section layout mapping', e);
+    }
+  };
+
   const renderSidebarItem = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+     const selectedLayout = metaSettings.sectionLayoutMap?.[s.id] || 'body';
      return (
        <div key={s.id} className="flex flex-col">
            <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
               <span className="text-gray-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
               <span className="truncate flex-1">{s.title}</span>
-              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+              <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
                   {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
                   <div className="flex flex-col">
                      <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronUp size={12} /></button>
                      <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronDown size={12} /></button>
                   </div>
+                  <select
+                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600"
+                    value={selectedLayout}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => handleSectionLayoutChange(s.id, e.target.value as IMMasterLayoutName)}
+                  >
+                    {SECTION_LAYOUT_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
               </div>
               {s.isPlaceholder && <LayoutTemplate size={12} className="text-gray-400 shrink-0" />}
            </div>
@@ -677,10 +700,11 @@ const IMTemplateEditor: React.FC = () => {
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
   const categoryFeatures = complianceFeatures.filter(f => f.categoryId === categoryId);
+  const imThemeVars = getIMThemeVariables(metaSettings);
 
   return (
     <Layout>
-       <div className="flex flex-col h-[calc(100vh-100px)]">
+       <div className="flex flex-col h-[calc(100vh-100px)]" style={imThemeVars}>
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
