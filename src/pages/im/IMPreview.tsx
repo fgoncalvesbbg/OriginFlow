@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { getIMTemplateById, getIMSections } from '../../services';
 import { IMTemplate, IMSection } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
+import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 
 const ALL_LANGUAGES = [
   { code: 'en', label: 'English' },
@@ -61,8 +62,15 @@ const IMPreview: React.FC = () => {
   // Filter available languages based on what's enabled in the template
   const enabledLanguages = ALL_LANGUAGES.filter(l => template.languages?.includes(l.code));
   
+  const metadata = normalizeIMTemplateMetadata(template.metadata);
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
-  const primaryColor = template.metadata?.primaryColor || '#0f172a';
+  const pageBackground = metadata.assets?.backgroundAssetUrl
+    ? `url(${metadata.assets.backgroundAssetUrl}) center/cover no-repeat`
+    : undefined;
+  const watermark = metadata.assets?.watermarkAssetUrl
+    ? `url(${metadata.assets.watermarkAssetUrl}) center/50% no-repeat`
+    : undefined;
+  const primaryColor = metadata.primaryColor;
 
   const renderSection = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => a.order - b.order);
@@ -74,7 +82,7 @@ const IMPreview: React.FC = () => {
         <div key={s.id} className={isSub ? 'mt-6 ml-8' : 'mt-10'}>
             <div className="flex items-baseline gap-3 mb-3">
                <span className={`${isSub ? 'text-gray-400 text-lg' : 'text-gray-300 text-xl'} font-bold`}>{indexPrefix}</span>
-               <h3 className={`${isSub ? 'text-lg text-gray-700' : 'text-xl text-gray-800'} font-bold`}>{s.title}</h3>
+               <h3 className={`${isSub ? 'text-lg text-gray-700' : 'text-xl text-gray-800'} font-bold`} style={{ color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{s.title}</h3>
             </div>
             
             {s.isPlaceholder ? (
@@ -84,7 +92,7 @@ const IMPreview: React.FC = () => {
                   <p className="text-xs mt-1">Content for this section is project-specific and will be added during production.</p>
                </div>
             ) : (
-               <div className="text-gray-700 leading-relaxed pl-8 font-sans im-content">
+               <div className="text-gray-700 leading-relaxed pl-8 font-sans im-content" style={{ color: metadata.brand?.textColors.body, fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }}>
                   {content ? (
                      <div dangerouslySetInnerHTML={{ __html: content }} />
                   ) : (
@@ -207,46 +215,49 @@ const IMPreview: React.FC = () => {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="bg-white shadow-lg rounded-xl border border-gray-200 min-h-[800px] relative overflow-hidden">
+        <div className="bg-white shadow-lg rounded-xl border border-gray-200 min-h-[800px] relative overflow-hidden" data-icon-set={metadata.assets?.iconSet}>
            {/* COVER PAGE */}
-           <div className="min-h-[800px] flex flex-col relative bg-white border-b border-gray-100">
-             {template.metadata?.coverImageUrl && (
-                <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${template.metadata.coverImageUrl})` }} />
+           <div className="min-h-[800px] flex flex-col relative bg-white border-b border-gray-100" style={{ background: pageBackground }} data-page-template={metadata.pages?.coverTemplate}>
+             {metadata.coverImageUrl && (
+                <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${metadata.coverImageUrl})` }} />
              )}
              <div className="flex-1 p-12 flex flex-col justify-between">
                 <div>
-                   {template.metadata?.companyLogoUrl && (
-                      <img src={template.metadata.companyLogoUrl} alt="Logo" className="h-16 object-contain mb-10" />
+                   {metadata.companyLogoUrl && (
+                      <img src={metadata.companyLogoUrl} alt="Logo" className="h-16 object-contain mb-10" />
                    )}
-                   <h1 className="text-5xl font-bold text-primary mb-4">Product Name</h1>
-                   <p className="text-xl text-muted uppercase tracking-widest font-light">Instruction Manual</p>
+                   <h1 className="text-5xl font-bold text-primary mb-4" style={{ color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>Product Name</h1>
+                   <p className="text-xl text-muted uppercase tracking-widest font-light" style={{ color: metadata.brand?.textColors.muted, fontFamily: metadata.brand?.fontFamilies.body }}>Instruction Manual</p>
                 </div>
                 <div className="border-t-4 pt-6" style={{ borderColor: primaryColor }}>
-                   <p className="text-lg font-bold text-primary uppercase mb-1">{template.metadata?.companyName || 'Company Name'}</p>
+                   <p className="text-lg font-bold text-primary uppercase mb-1">{metadata.companyName || 'Company Name'}</p>
                    <p className="text-sm text-muted">Original Instructions</p>
                 </div>
              </div>
            </div>
 
            {/* CONTENT PAGES */}
-           <div className="p-12 pb-24 min-h-[800px]">
+           <div className="p-12 pb-24 min-h-[800px] relative" style={{ background: pageBackground, backgroundBlendMode: 'normal' }} data-page-template={metadata.pages?.bodyTemplate}>
+               {watermark && <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ background: watermark }} />}
+               <div className="relative">
                {rootSections.map((section, index) => renderSection(section, `${index + 1}.`, 0))}
+               </div>
            </div>
 
            {/* FOOTER */}
-           {template.metadata?.footerText && (
+           {metadata.footerText && (
               <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-gray-100 text-center text-xs text-gray-400">
-                 {template.metadata.footerText}
+                 {metadata.footerText}
               </div>
            )}
 
            {/* BACK PAGE */}
-           {template.metadata?.backPageContent && (
-             <div className="min-h-[800px] bg-light p-12 flex flex-col justify-end mt-4 border-t border-gray-200">
+           {metadata.backPageContent && (
+             <div className="min-h-[800px] bg-light p-12 flex flex-col justify-end mt-4 border-t border-gray-200" style={{ background: pageBackground }} data-page-template={metadata.pages?.endPageVariants?.[0] || 'standard-end'}>
                 <div className="border-t pt-8" style={{ borderColor: primaryColor }}>
-                    <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
+                    <div dangerouslySetInnerHTML={{ __html: metadata.backPageContent }} />
                     <div className="mt-10 text-xs text-gray-400 text-center">
-                       &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.
+                       &copy; {new Date().getFullYear()} {metadata.companyName || 'Company Name'}. All rights reserved.
                     </div>
                 </div>
              </div>

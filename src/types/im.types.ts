@@ -5,6 +5,53 @@
 export interface IMTemplateMetadata {
   pageSize: 'a4' | 'letter' | 'a5';
   primaryColor: string;
+  brand?: {
+    fontFamilies: {
+      body: string;
+      heading: string;
+    };
+    fontSizes: {
+      body: number;
+      small: number;
+    };
+    headingScale: {
+      h1: number;
+      h2: number;
+      h3: number;
+    };
+    textColors: {
+      primary: string;
+      heading: string;
+      body: string;
+      muted: string;
+    };
+  };
+  layout?: {
+    margins: {
+      top: number;
+      right: number;
+      bottom: number;
+      left: number;
+    };
+    columns: {
+      count: number;
+      gap: number;
+    };
+    headerHeight: number;
+    footerHeight: number;
+    pageNumberingStyle: 'numeric' | 'roman' | 'none';
+  };
+  assets?: {
+    iconSet: string;
+    watermarkAssetUrl?: string;
+    backgroundAssetUrl?: string;
+  };
+  pages?: {
+    coverTemplate: string;
+    chapterOpenerTemplate: string;
+    bodyTemplate: string;
+    endPageVariants: string[];
+  };
   coverImageUrl?: string;
   companyLogoUrl?: string;
   companyName?: string;

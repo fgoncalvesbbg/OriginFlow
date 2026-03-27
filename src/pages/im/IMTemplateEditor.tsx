@@ -7,6 +7,7 @@ import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata }
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
+import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 
 const ALL_LANGUAGES = [
   { code: 'en', label: 'English (Default)' },
@@ -268,15 +269,7 @@ const IMTemplateEditor: React.FC = () => {
   const [condFeatureId, setCondFeatureId] = useState('');
   const [placeholderConfig, setPlaceholderConfig] = useState<{type: 'text' | 'image', label: string}>({ type: 'text', label: '' });
 
-  const [metaSettings, setMetaSettings] = useState<IMTemplateMetadata>({
-     pageSize: 'a4',
-     primaryColor: '#0f172a',
-     coverImageUrl: '',
-     companyLogoUrl: '',
-     companyName: '',
-     backPageContent: '',
-     footerText: ''
-  });
+  const [metaSettings, setMetaSettings] = useState<IMTemplateMetadata>(normalizeIMTemplateMetadata());
 
   useEffect(() => {
     if (!categoryId) return;
@@ -296,7 +289,7 @@ const IMTemplateEditor: React.FC = () => {
     if (temp) {
       setTemplate(temp);
       setTemplateLanguages(temp.languages || ['en', 'de', 'fr', 'es', 'it']);
-      if (temp.metadata) setMetaSettings(temp.metadata);
+      setMetaSettings(normalizeIMTemplateMetadata(temp.metadata));
       
       const secs = await getIMSections(temp.id);
       setSections(secs);
@@ -508,6 +501,11 @@ const IMTemplateEditor: React.FC = () => {
     });
   }, [selectedSectionId, activeLang]);
 
+  const updateMetaNumber = (value: string, fallback: number, onValid: (num: number) => void) => {
+    const numericValue = Number(value);
+    onValid(Number.isFinite(numericValue) ? numericValue : fallback);
+  };
+
   const handleSaveMetadata = async () => {
       if (!template) return;
       setSaving(true);
@@ -705,11 +703,11 @@ const IMTemplateEditor: React.FC = () => {
                     <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
-                            <input type="color" className="w-full h-10 rounded cursor-pointer" value={metaSettings.primaryColor} onChange={(e) => setMetaSettings({...metaSettings, primaryColor: e.target.value})} />
+                            <input type="color" className="w-full h-10 rounded cursor-pointer" value={metaSettings.primaryColor} onChange={(e) => setMetaSettings(prev => ({...prev, primaryColor: e.target.value, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, primary: e.target.value, heading: prev.brand!.textColors.heading || e.target.value } }}))} />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Page Size</label>
-                            <select className="w-full border rounded p-2 text-sm" value={metaSettings.pageSize} onChange={(e) => setMetaSettings({...metaSettings, pageSize: e.target.value as any})}>
+                            <select className="w-full border rounded p-2 text-sm" value={metaSettings.pageSize} onChange={(e) => setMetaSettings(prev => ({...prev, pageSize: e.target.value as IMTemplateMetadata['pageSize']}))}>
                                 <option value="a4">A4</option>
                                 <option value="letter">US Letter</option>
                                 <option value="a5">A5</option>
@@ -718,7 +716,55 @@ const IMTemplateEditor: React.FC = () => {
                     </div>
                     <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Footer Text (Global)</label>
-                        <input className="w-full border rounded p-2 text-sm" value={metaSettings.footerText || ''} onChange={(e) => setMetaSettings({...metaSettings, footerText: e.target.value})} placeholder="e.g. Copyright 2025 Company Name" />
+                        <input className="w-full border rounded p-2 text-sm" value={metaSettings.footerText || ''} onChange={(e) => setMetaSettings(prev => ({...prev, footerText: e.target.value}))} placeholder="e.g. Copyright 2025 Company Name" />
+                    </div>
+
+                    <div className="border rounded-lg p-4 mb-4">
+                        <h4 className="font-semibold text-sm mb-3">Brand</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <input className="border rounded p-2 text-sm" value={metaSettings.brand?.fontFamilies.body || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontFamilies: { ...prev.brand!.fontFamilies, body: e.target.value } } }))} placeholder="Body font family" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.brand?.fontFamilies.heading || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontFamilies: { ...prev.brand!.fontFamilies, heading: e.target.value } } }))} placeholder="Heading font family" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.brand?.fontSizes.body || 12} onChange={(e) => updateMetaNumber(e.target.value, 12, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontSizes: { ...prev.brand!.fontSizes, body: num } } })))} placeholder="Body size" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.brand?.fontSizes.small || 10} onChange={(e) => updateMetaNumber(e.target.value, 10, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontSizes: { ...prev.brand!.fontSizes, small: num } } })))} placeholder="Small text size" />
+                            <input className="border rounded p-2 text-sm" type="number" step="0.1" value={metaSettings.brand?.headingScale.h1 || 2.6} onChange={(e) => updateMetaNumber(e.target.value, 2.6, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, headingScale: { ...prev.brand!.headingScale, h1: num } } })))} placeholder="H1 scale" />
+                            <input className="border rounded p-2 text-sm" type="number" step="0.1" value={metaSettings.brand?.headingScale.h2 || 1.8} onChange={(e) => updateMetaNumber(e.target.value, 1.8, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, headingScale: { ...prev.brand!.headingScale, h2: num } } })))} placeholder="H2 scale" />
+                            <input className="border rounded p-2 text-sm" type="number" step="0.1" value={metaSettings.brand?.headingScale.h3 || 1.3} onChange={(e) => updateMetaNumber(e.target.value, 1.3, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, headingScale: { ...prev.brand!.headingScale, h3: num } } })))} placeholder="H3 scale" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.brand?.textColors.body || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, body: e.target.value } } }))} placeholder="Body color (#334155)" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.brand?.textColors.heading || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, heading: e.target.value } } }))} placeholder="Heading color" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.brand?.textColors.muted || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, muted: e.target.value } } }))} placeholder="Muted color" />
+                        </div>
+                    </div>
+
+                    <div className="border rounded-lg p-4 mb-4">
+                        <h4 className="font-semibold text-sm mb-3">Layout</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.margins.top || 20} onChange={(e) => updateMetaNumber(e.target.value, 20, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, margins: { ...prev.layout!.margins, top: num } } })))} placeholder="Top margin (mm)" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.margins.right || 20} onChange={(e) => updateMetaNumber(e.target.value, 20, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, margins: { ...prev.layout!.margins, right: num } } })))} placeholder="Right margin (mm)" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.margins.bottom || 20} onChange={(e) => updateMetaNumber(e.target.value, 20, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, margins: { ...prev.layout!.margins, bottom: num } } })))} placeholder="Bottom margin (mm)" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.margins.left || 20} onChange={(e) => updateMetaNumber(e.target.value, 20, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, margins: { ...prev.layout!.margins, left: num } } })))} placeholder="Left margin (mm)" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.columns.count || 1} onChange={(e) => updateMetaNumber(e.target.value, 1, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, columns: { ...prev.layout!.columns, count: num } } })))} placeholder="Columns count" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.columns.gap || 8} onChange={(e) => updateMetaNumber(e.target.value, 8, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, columns: { ...prev.layout!.columns, gap: num } } })))} placeholder="Columns gap (mm)" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.headerHeight || 18} onChange={(e) => updateMetaNumber(e.target.value, 18, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, headerHeight: num } })))} placeholder="Header height (mm)" />
+                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.layout?.footerHeight || 18} onChange={(e) => updateMetaNumber(e.target.value, 18, (num) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, footerHeight: num } })))} placeholder="Footer height (mm)" />
+                            <select className="border rounded p-2 text-sm col-span-2" value={metaSettings.layout?.pageNumberingStyle || 'numeric'} onChange={(e) => setMetaSettings(prev => ({ ...prev, layout: { ...prev.layout!, pageNumberingStyle: e.target.value as 'numeric' | 'roman' | 'none' } }))}>
+                                <option value="numeric">Page numbering: Numeric</option>
+                                <option value="roman">Page numbering: Roman</option>
+                                <option value="none">Page numbering: None</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="border rounded-lg p-4 mb-4">
+                        <h4 className="font-semibold text-sm mb-3">Assets & Pages</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <input className="border rounded p-2 text-sm" value={metaSettings.assets?.iconSet || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, assets: { ...prev.assets!, iconSet: e.target.value } }))} placeholder="Icon set name" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.assets?.watermarkAssetUrl || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, assets: { ...prev.assets!, watermarkAssetUrl: e.target.value } }))} placeholder="Watermark URL" />
+                            <input className="border rounded p-2 text-sm col-span-2" value={metaSettings.assets?.backgroundAssetUrl || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, assets: { ...prev.assets!, backgroundAssetUrl: e.target.value } }))} placeholder="Background asset URL" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.pages?.coverTemplate || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, pages: { ...prev.pages!, coverTemplate: e.target.value } }))} placeholder="Cover template" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.pages?.chapterOpenerTemplate || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, pages: { ...prev.pages!, chapterOpenerTemplate: e.target.value } }))} placeholder="Chapter opener template" />
+                            <input className="border rounded p-2 text-sm" value={metaSettings.pages?.bodyTemplate || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, pages: { ...prev.pages!, bodyTemplate: e.target.value } }))} placeholder="Body template" />
+                            <input className="border rounded p-2 text-sm" value={(metaSettings.pages?.endPageVariants || []).join(', ')} onChange={(e) => setMetaSettings(prev => ({ ...prev, pages: { ...prev.pages!, endPageVariants: e.target.value.split(',').map(v => v.trim()).filter(Boolean) } }))} placeholder="End variants (comma separated)" />
+                        </div>
                     </div>
                     <div className="flex justify-end gap-2 mt-6">
                         <button onClick={() => setIsSettingsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
