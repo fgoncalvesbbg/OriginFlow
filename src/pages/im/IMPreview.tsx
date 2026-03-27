@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { getIMTemplateById, getIMSections } from '../../services';
 import { IMTemplate, IMSection } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
+import './styles/im-content.css';
+import { getIMThemeVariables } from './styles/im-theme';
 
 const ALL_LANGUAGES = [
   { code: 'en', label: 'English' },
@@ -62,7 +64,7 @@ const IMPreview: React.FC = () => {
   const enabledLanguages = ALL_LANGUAGES.filter(l => template.languages?.includes(l.code));
   
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
-  const primaryColor = template.metadata?.primaryColor || '#0f172a';
+  const imThemeVars = getIMThemeVariables(template.metadata);
 
   const renderSection = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => a.order - b.order);
@@ -99,83 +101,7 @@ const IMPreview: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-light pb-20 font-sans">
-      {/* Add custom styles for standard HTML elements inside content */}
-      <style>{`
-         .im-content ul { 
-           list-style-type: disc !important; 
-           padding-left: 1.5em !important; 
-           margin-bottom: 1em !important; 
-           display: block !important;
-         }
-         .im-content ol { 
-           list-style-type: decimal !important; 
-           padding-left: 1.5em !important; 
-           margin-bottom: 1em !important; 
-           display: block !important;
-         }
-         .im-content li { 
-           display: list-item !important; 
-           margin-bottom: 0.25em !important; 
-         }
-         .im-content p { 
-           margin-bottom: 1em !important; 
-           display: block !important;
-         }
-         .im-content b, .im-content strong { font-weight: bold !important; }
-         .im-content i, .im-content em { font-style: italic !important; }
-         .im-content u { text-decoration: underline !important; }
-
-         /* Block Styles */
-        .im-block-wrapper {
-            display: flex;
-            align-items: flex-start;
-            gap: 1.5rem;
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-            border-radius: 6px;
-            border-left: 6px solid;
-            background-color: #fff;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .im-block-icon {
-            flex-shrink: 0;
-            width: 64px;
-            height: 64px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .im-block-content {
-            flex: 1;
-            min-width: 0;
-        }
-        .im-block-title {
-            display: block;
-            font-weight: 800;
-            text-transform: uppercase;
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
-            letter-spacing: 0.05em;
-        }
-
-        .im-block-warning { background-color: #fff7ed; border-left-color: #f97316; }
-        .im-block-warning .im-block-title { color: #c2410c; }
-
-        .im-block-caution { background-color: #fefce8; border-left-color: #eab308; }
-        .im-block-caution .im-block-title { color: #854d0e; }
-
-        .im-block-electric { background-color: #fef2f2; border-left-color: #dc2626; }
-        .im-block-electric .im-block-title { color: #b91c1c; }
-
-        .im-block-info { background-color: #eff6ff; border-left-color: #3b82f6; }
-        .im-block-info .im-block-title { color: #1d4ed8; }
-
-        .im-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-        .im-table th, .im-table td { border: 1px solid #cbd5e1; padding: 0.5rem; }
-        .im-table th { background-color: #f1f5f9; font-weight: bold; text-align: left; }
-      `}</style>
-
+    <div className="min-h-screen bg-light pb-20 font-sans" style={imThemeVars}>
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow">
         <div className="max-w-4xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -221,7 +147,7 @@ const IMPreview: React.FC = () => {
                    <h1 className="text-5xl font-bold text-primary mb-4">Product Name</h1>
                    <p className="text-xl text-muted uppercase tracking-widest font-light">Instruction Manual</p>
                 </div>
-                <div className="border-t-4 pt-6" style={{ borderColor: primaryColor }}>
+                <div className="border-t-4 pt-6" style={{ borderColor: 'var(--im-primary-color)' }}>
                    <p className="text-lg font-bold text-primary uppercase mb-1">{template.metadata?.companyName || 'Company Name'}</p>
                    <p className="text-sm text-muted">Original Instructions</p>
                 </div>
@@ -243,7 +169,7 @@ const IMPreview: React.FC = () => {
            {/* BACK PAGE */}
            {template.metadata?.backPageContent && (
              <div className="min-h-[800px] bg-light p-12 flex flex-col justify-end mt-4 border-t border-gray-200">
-                <div className="border-t pt-8" style={{ borderColor: primaryColor }}>
+                <div className="border-t pt-8" style={{ borderColor: 'var(--im-primary-color)' }}>
                     <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
                     <div className="mt-10 text-xs text-gray-400 text-center">
                        &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.

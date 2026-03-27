@@ -7,6 +7,8 @@ import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata }
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
+import './styles/im-content.css';
+import { getIMThemeVariables } from './styles/im-theme';
 
 const ALL_LANGUAGES = [
   { code: 'en', label: 'English (Default)' },
@@ -161,36 +163,6 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
 
   return (
     <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
-      <style>{`
-        .im-editor-content ul { list-style-type: disc !important; padding-left: 1.5em !important; margin-bottom: 1em !important; }
-        .im-editor-content ol { list-style-type: decimal !important; padding-left: 1.5em !important; margin-bottom: 1em !important; }
-        .im-editor-content li { display: list-item !important; margin-bottom: 0.25em !important; }
-        .im-editor-content b, .im-editor-content strong { font-weight: bold !important; }
-        .im-editor-content i, .im-editor-content em { font-style: italic !important; }
-        .im-editor-content u { text-decoration: underline !important; }
-        .im-editor-content p { margin-bottom: 1em !important; display: block !important; }
-        .im-placeholder { display: inline-block; vertical-align: middle; cursor: default; user-select: none; white-space: nowrap; }
-        .im-condition { display: inline-block; vertical-align: middle; cursor: default; border-style: dashed; user-select: none; }
-        
-        .im-block-wrapper { display: flex; align-items: flex-start; gap: 1.5rem; padding: 1.5rem; margin: 1.5rem 0; border-radius: 6px; border-left: 6px solid; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .im-block-icon { flex-shrink: 0; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; }
-        .im-block-content { flex: 1; min-width: 0; }
-        .im-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 0.5rem; letter-spacing: 0.05em; }
-
-        .im-block-warning { background-color: #fff7ed; border-left-color: #f97316; }
-        .im-block-warning .im-block-title { color: #c2410c; }
-        .im-block-caution { background-color: #fefce8; border-left-color: #eab308; }
-        .im-block-caution .im-block-title { color: #854d0e; }
-        .im-block-electric { background-color: #fef2f2; border-left-color: #dc2626; }
-        .im-block-electric .im-block-title { color: #b91c1c; }
-        .im-block-info { background-color: #eff6ff; border-left-color: #3b82f6; }
-        .im-block-info .im-block-title { color: #1d4ed8; }
-
-        /* Improved Table Styles */
-        .im-table { width: 100%; border-collapse: collapse; margin: 1rem 0; table-layout: auto; }
-        .im-table th, .im-table td { border: 1px solid #cbd5e1; padding: 0.5rem; vertical-align: top; }
-        .im-table th { background-color: #f1f5f9; font-weight: bold; text-align: left; }
-      `}</style>
 
       <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
         <button onMouseDown={(e) => { e.preventDefault(); exec('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold"><Bold size={16} /></button>
@@ -221,7 +193,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         <div className="absolute inset-0 overflow-y-auto">
           <div 
             ref={contentRef}
-            className="min-h-full p-4 outline-none im-editor-content max-w-none font-sans"
+            className="min-h-full p-4 outline-none im-content max-w-none font-sans"
             contentEditable
             onInput={handleChange}
             onFocus={() => setIsFocused(true)}
@@ -577,10 +549,11 @@ const IMTemplateEditor: React.FC = () => {
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
   const categoryFeatures = complianceFeatures.filter(f => f.categoryId === categoryId);
+  const imThemeVars = getIMThemeVariables(metaSettings);
 
   return (
     <Layout>
-       <div className="flex flex-col h-[calc(100vh-100px)]">
+       <div className="flex flex-col h-[calc(100vh-100px)]" style={imThemeVars}>
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
