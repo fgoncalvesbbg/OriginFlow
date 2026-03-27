@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getProductFeatures } from '../../services';
-import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata } from '../../types';
+import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata, IMMasterLayoutName } from '../../types';
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
@@ -21,6 +21,14 @@ const ALL_LANGUAGES = [
   { code: 'ja', label: 'Japanese (JP)' },
   { code: 'tr', label: 'Turkish (TR)' },
   { code: 'ru', label: 'Russian (RU)' }
+];
+
+const SECTION_LAYOUT_OPTIONS: { value: IMMasterLayoutName; label: string }[] = [
+  { value: 'chapter', label: 'Chapter' },
+  { value: 'body', label: 'Body' },
+  { value: 'appendix', label: 'Appendix' },
+  { value: 'cover', label: 'Cover' },
+  { value: 'end', label: 'End' }
 ];
 
 // --- Internal Confirmation Modal ---
@@ -275,7 +283,9 @@ const IMTemplateEditor: React.FC = () => {
      companyLogoUrl: '',
      companyName: '',
      backPageContent: '',
-     footerText: ''
+     footerText: '',
+     masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {} },
+     sectionLayoutMap: {}
   });
 
   useEffect(() => {
@@ -296,7 +306,13 @@ const IMTemplateEditor: React.FC = () => {
     if (temp) {
       setTemplate(temp);
       setTemplateLanguages(temp.languages || ['en', 'de', 'fr', 'es', 'it']);
-      if (temp.metadata) setMetaSettings(temp.metadata);
+      if (temp.metadata) {
+        setMetaSettings({
+          ...temp.metadata,
+          masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {}, ...(temp.metadata.masterPages || {}) },
+          sectionLayoutMap: temp.metadata.sectionLayoutMap || {}
+        });
+      }
       
       const secs = await getIMSections(temp.id);
       setSections(secs);
@@ -549,19 +565,53 @@ const IMTemplateEditor: React.FC = () => {
     }
   };
 
+
+  const handleSectionLayoutChange = async (sectionId: string, layout: IMMasterLayoutName) => {
+    if (!template) return;
+
+    const nextMetadata: IMTemplateMetadata = {
+      ...metaSettings,
+      sectionLayoutMap: {
+        ...(metaSettings.sectionLayoutMap || {}),
+        [sectionId]: layout
+      }
+    };
+
+    setMetaSettings(nextMetadata);
+    setTemplate(prev => prev ? ({ ...prev, metadata: nextMetadata }) : prev);
+
+    try {
+      await updateIMTemplate(template.id, { metadata: nextMetadata, lastUpdatedBy: user?.name });
+      setLastSaved(new Date());
+    } catch (e) {
+      console.error('Failed to save section layout mapping', e);
+    }
+  };
+
   const renderSidebarItem = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+     const selectedLayout = metaSettings.sectionLayoutMap?.[s.id] || 'body';
      return (
        <div key={s.id} className="flex flex-col">
            <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
               <span className="text-gray-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
               <span className="truncate flex-1">{s.title}</span>
-              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+              <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
                   {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
                   <div className="flex flex-col">
                      <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronUp size={12} /></button>
                      <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronDown size={12} /></button>
                   </div>
+                  <select
+                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600"
+                    value={selectedLayout}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => handleSectionLayoutChange(s.id, e.target.value as IMMasterLayoutName)}
+                  >
+                    {SECTION_LAYOUT_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
               </div>
               {s.isPlaceholder && <LayoutTemplate size={12} className="text-gray-400 shrink-0" />}
            </div>

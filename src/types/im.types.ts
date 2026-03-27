@@ -2,6 +2,14 @@
  * Instruction Manual (IM) module types
  */
 
+export type IMMasterLayoutName = 'cover' | 'chapter' | 'body' | 'appendix' | 'end';
+
+export interface IMMasterPageOverride {
+  background?: string;
+  iconStrip?: string;
+  footerVariant?: 'default' | 'minimal' | 'none' | string;
+}
+
 export interface IMTemplateMetadata {
   pageSize: 'a4' | 'letter' | 'a5';
   primaryColor: string;
@@ -10,6 +18,8 @@ export interface IMTemplateMetadata {
   companyName?: string;
   backPageContent?: string;
   footerText?: string;
+  masterPages?: Partial<Record<IMMasterLayoutName, IMMasterPageOverride>>;
+  sectionLayoutMap?: Record<string, IMMasterLayoutName>;
 }
 
 export interface IMTemplate {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getIMTemplateById, getIMSections } from '../../services';
-import { IMTemplate, IMSection } from '../../types';
+import { IMTemplate, IMSection, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
 
 const ALL_LANGUAGES = [
@@ -18,6 +18,35 @@ const ALL_LANGUAGES = [
   { code: 'tr', label: 'Turkish' },
   { code: 'ru', label: 'Russian' }
 ];
+
+
+const DEFAULT_MASTER_PAGES: Record<IMMasterLayoutName, IMMasterPageOverride> = {
+  cover: {},
+  chapter: {},
+  body: {},
+  appendix: {},
+  end: {}
+};
+
+const resolveSectionLayout = (section: IMSection, sectionLayoutMap?: Record<string, IMMasterLayoutName>): IMMasterLayoutName => {
+  if (!sectionLayoutMap) return 'body';
+  return (
+    sectionLayoutMap[section.id] ||
+    sectionLayoutMap[section.parentId ? 'type:subsection' : 'type:section'] ||
+    sectionLayoutMap[section.isPlaceholder ? 'type:placeholder' : 'type:content'] ||
+    sectionLayoutMap.default ||
+    'body'
+  );
+};
+
+const getBackgroundStyle = (override?: IMMasterPageOverride) => {
+  const bg = override?.background?.trim();
+  if (!bg) return undefined;
+  if (bg.startsWith('http') || bg.startsWith('data:image') || bg.includes('gradient')) {
+    return { backgroundImage: bg.startsWith('gradient') ? bg : `url(${bg})`, backgroundSize: 'cover', backgroundPosition: 'center' };
+  }
+  return { backgroundColor: bg };
+};
 
 const IMPreview: React.FC = () => {
   const { templateId } = useParams<{ templateId: string }>();
@@ -63,19 +92,24 @@ const IMPreview: React.FC = () => {
   
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
   const primaryColor = template.metadata?.primaryColor || '#0f172a';
+  const masterPages = { ...DEFAULT_MASTER_PAGES, ...(template.metadata?.masterPages || {}) };
 
   const renderSection = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => a.order - b.order);
      const isSub = level > 0;
-     
      const content = s.content[activeLang];
+     const layout = resolveSectionLayout(s, template.metadata?.sectionLayoutMap);
+     const layoutOverride = masterPages[layout];
 
      return (
-        <div key={s.id} className={isSub ? 'mt-6 ml-8' : 'mt-10'}>
+        <div key={s.id} className={isSub ? 'mt-6 ml-8' : 'mt-10'} style={getBackgroundStyle(layoutOverride)}>
             <div className="flex items-baseline gap-3 mb-3">
                <span className={`${isSub ? 'text-gray-400 text-lg' : 'text-gray-300 text-xl'} font-bold`}>{indexPrefix}</span>
                <h3 className={`${isSub ? 'text-lg text-gray-700' : 'text-xl text-gray-800'} font-bold`}>{s.title}</h3>
+               <span className="text-[10px] uppercase tracking-wide text-gray-400">{layout}</span>
             </div>
+
+            {layoutOverride?.iconStrip && <div className="text-xs text-gray-500 mb-3">{layoutOverride.iconStrip}</div>}
             
             {s.isPlaceholder ? (
                <div className="bg-light border border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center text-gray-400">
@@ -209,7 +243,7 @@ const IMPreview: React.FC = () => {
       <main className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white shadow-lg rounded-xl border border-gray-200 min-h-[800px] relative overflow-hidden">
            {/* COVER PAGE */}
-           <div className="min-h-[800px] flex flex-col relative bg-white border-b border-gray-100">
+           <div className="min-h-[800px] flex flex-col relative bg-white border-b border-gray-100" style={getBackgroundStyle(masterPages.cover)}>
              {template.metadata?.coverImageUrl && (
                 <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${template.metadata.coverImageUrl})` }} />
              )}
@@ -234,15 +268,15 @@ const IMPreview: React.FC = () => {
            </div>
 
            {/* FOOTER */}
-           {template.metadata?.footerText && (
-              <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-gray-100 text-center text-xs text-gray-400">
+           {template.metadata?.footerText && masterPages.body?.footerVariant !== 'none' && (
+              <div className={`absolute bottom-0 left-0 right-0 p-6 border-t border-gray-100 text-center text-xs ${masterPages.body?.footerVariant === 'minimal' ? 'text-gray-300' : 'text-gray-400'}`}>
                  {template.metadata.footerText}
               </div>
            )}
 
            {/* BACK PAGE */}
            {template.metadata?.backPageContent && (
-             <div className="min-h-[800px] bg-light p-12 flex flex-col justify-end mt-4 border-t border-gray-200">
+             <div className="min-h-[800px] bg-light p-12 flex flex-col justify-end mt-4 border-t border-gray-200" style={getBackgroundStyle(masterPages.end)}>
                 <div className="border-t pt-8" style={{ borderColor: primaryColor }}>
                     <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
                     <div className="mt-10 text-xs text-gray-400 text-center">
