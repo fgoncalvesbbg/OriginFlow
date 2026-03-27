@@ -293,7 +293,8 @@ const SupplierDashboard: React.FC = () => {
 
             for (let i = 0; i < projectsNeedingCheck.length; i++) {
               const p = projectsNeedingCheck[i];
-              const updates = updateResults[i].status === 'fulfilled' ? updateResults[i].value : [];
+              const settled = updateResults[i];
+              const updates = settled.status === 'fulfilled' ? settled.value : [];
               const etd = new Date(p.milestones!.etd!);
               const today = new Date();
               const diffDays = Math.ceil((etd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -1341,7 +1342,6 @@ const SupplierDashboard: React.FC = () => {
                     <span className={`text-xs px-3 py-1 rounded whitespace-nowrap flex-shrink-0 font-semibold ${
                       rfq.status === 'pending' ? 'bg-amber-100 text-amber-800' :
                       rfq.status === 'submitted' ? 'bg-green-100 text-green-800' :
-                      rfq.status === 'closed' ? 'bg-gray-100 text-gray-800' :
                       'bg-blue-100 text-blue-800'
                     }`}>
                       {rfq.status === 'pending' ? 'Pending Quote' : rfq.status}

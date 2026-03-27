@@ -88,6 +88,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [blocks, setBlocks] = useState<EditorBlock[]>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const parseInlineNodes = useCallback((container: HTMLElement): InlineNode[] => {
     const inlines: InlineNode[] = [];
@@ -257,6 +258,27 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       return block;
     }));
   };
+
+  const saveSelection = useCallback(() => {
+    // Selection persistence is handled by the browser for this editor implementation.
+  }, []);
+
+  const handleChange = useCallback((event: React.FormEvent<HTMLDivElement>) => {
+    if (!selectedBlockId) return;
+    updateTextualBlock(selectedBlockId, event.currentTarget.innerHTML);
+  }, [selectedBlockId]);
+
+  useEffect(() => {
+    if (!contentRef.current || !selectedBlockId) return;
+    const selected = blocks.find((block) => block.id === selectedBlockId);
+    if (!selected) return;
+
+    if (selected.type === 'paragraph' || selected.type === 'heading' || selected.type === 'callout' || selected.type === 'conditional') {
+      contentRef.current.innerHTML = serializeInline(selected.content);
+    } else {
+      contentRef.current.innerHTML = '';
+    }
+  }, [blocks, selectedBlockId, serializeInline]);
 
   const insertBlock = (type: BlockInsertType) => {
     const newBlock: EditorBlock = type === 'table'

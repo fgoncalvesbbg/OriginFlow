@@ -13,7 +13,7 @@ interface ConvertProposalModalProps {
 }
 
 const ConvertProposalModal: React.FC<ConvertProposalModalProps> = ({ isOpen, onClose, proposal, onSuccess }) => {
-  const { showToast } = useToast();
+  const { addToast } = useToast();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -54,7 +54,7 @@ const ConvertProposalModal: React.FC<ConvertProposalModalProps> = ({ isOpen, onC
     if (!user || !proposal) return;
 
     if (selectedSupplierIds.size === 0) {
-      showToast('Please select at least one supplier.', 'error');
+      addToast('Please select at least one supplier.', 'error');
       return;
     }
 
@@ -67,12 +67,12 @@ const ConvertProposalModal: React.FC<ConvertProposalModalProps> = ({ isOpen, onC
         Array.from(selectedSupplierIds)
       );
 
-      showToast('Proposal converted to RFQ successfully!', 'success');
+      addToast('Proposal converted to RFQ successfully!', 'success');
       onClose();
       onSuccess(rfq.id);
     } catch (e: any) {
       console.error(e);
-      showToast('Error converting proposal: ' + e.message, 'error');
+      addToast('Error converting proposal: ' + e.message, 'error');
     } finally {
       setLoading(false);
     }

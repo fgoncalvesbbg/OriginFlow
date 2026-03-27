@@ -94,6 +94,10 @@ const IMPreview: React.FC = () => {
   
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
   const imThemeVars = getIMThemeVariables(template.metadata);
+  const masterPages = {
+    ...DEFAULT_MASTER_PAGES,
+    ...(template.metadata?.masterPages || {})
+  };
 
   const renderSection = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => a.order - b.order);

@@ -10,6 +10,7 @@ import {
 import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
+import { getIMThemeVariables } from './styles/im-theme';
 
 
 const DEFAULT_MASTER_PAGES: Record<IMMasterLayoutName, IMMasterPageOverride> = {
@@ -703,6 +704,10 @@ const ProjectIMGenerator: React.FC = () => {
 
   const orderedSections = sections.sort((a, b) => a.order - b.order);
   const imThemeVars = getIMThemeVariables(template?.metadata);
+  const masterPages = {
+    ...DEFAULT_MASTER_PAGES,
+    ...(template?.metadata?.masterPages || {})
+  };
   
   // Computed values for current language
   const displayTitle = formData['__cover_title'] !== undefined ? formData['__cover_title'] : (project?.name || 'Product Name');
