@@ -33,7 +33,7 @@ const ConfirmationModal: React.FC<{
 const SourcingDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { showToast } = useToast();
+  const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<'rfq' | 'proposals'>('rfq');
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [proposals, setProposals] = useState<SupplierProposal[]>([]);
