@@ -1,8 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import Layout from '../../components/Layout';
 import { 
     getProjectById, getIMTemplateById, getIMSections, 
@@ -11,6 +9,7 @@ import {
 } from '../../services';
 import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
+import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
 
 // Internal Confirmation Modal
 const ConfirmationModal: React.FC<{
@@ -315,76 +314,29 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-      if (!previewRef.current || !project) {
-          console.error("Preview ref or project missing");
-          alert("Could not find preview element to generate PDF.");
+      if (!project) {
+          console.error("Project missing");
+          alert("Could not load project details to generate PDF.");
           return;
       }
       setGenerating(true);
       
       try {
-          // Clone the preview element to capture full height independent of scroll container
-          const element = previewRef.current;
-          
-          // Create a container for the clone to ensure it renders in a "visible" context
-          const container = document.createElement('div');
-          container.style.position = 'absolute';
-          container.style.top = '0';
-          container.style.left = '-9999px';
-          container.style.width = '210mm'; // Force A4 width context
-          document.body.appendChild(container);
+          const shouldUseLegacyRenderer =
+              import.meta.env.VITE_IM_PDF_LEGACY_HTML2CANVAS === 'true' ||
+              window.localStorage.getItem('im.export.legacyHtml2canvas') === 'true';
 
-          const clone = element.cloneNode(true) as HTMLElement;
-          
-          // Reset styles on the clone to ensure it expands fully
-          clone.style.transform = 'none';
-          clone.style.height = 'auto';
-          clone.style.width = '100%';
-          clone.style.overflow = 'visible';
-          clone.style.maxHeight = 'none';
-          
-          container.appendChild(clone);
-
-          // Wait a bit for images to "load" in the new context and layout to settle
-          await new Promise(resolve => setTimeout(resolve, 800));
-
-          const canvas = await html2canvas(clone, { 
-              scale: 2, // Retina quality
-              useCORS: true, 
-              logging: false,
-              allowTaint: true,
-              backgroundColor: '#ffffff',
-              windowWidth: 210 * 3.7795275591 * 2, // Approximate pixel width for 210mm
+          const pdfBlob = await renderProjectIMPdf({
+              previewElement: previewRef.current,
+              projectName: project.name,
+              language: activeLang,
+              template,
+              sections,
+              formData,
+              conditions,
+              useLegacyHtml2Canvas: shouldUseLegacyRenderer,
           });
-          
-          // Clean up DOM
-          document.body.removeChild(container);
 
-          // Create PDF
-          const imgData = canvas.toDataURL('image/jpeg', 0.95);
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = pdf.internal.pageSize.getHeight();
-          
-          const imgProps = pdf.getImageProperties(imgData);
-          const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-          
-          let heightLeft = imgHeight;
-          let position = 0;
-          
-          // First page
-          pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
-          heightLeft -= pdfHeight;
-          
-          // Subsequent pages
-          while (heightLeft > 0) {
-              position -= pdfHeight;
-              pdf.addPage();
-              pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
-              heightLeft -= pdfHeight;
-          }
-          
-          const pdfBlob = pdf.output('blob');
           const fileName = `${project.name.replace(/\s+/g, '_')}_Manual_${activeLang.toUpperCase()}.pdf`;
           const file = new File([pdfBlob], fileName, { type: "application/pdf" });
 
