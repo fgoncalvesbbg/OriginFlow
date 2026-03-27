@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getProductFeatures } from '../../services';
 import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
 
@@ -46,166 +46,271 @@ const ConfirmationModal: React.FC<{
   );
 };
 
-// --- Simple Rich Text Editor Component ---
+// --- Structured Rich Text Editor ---
+type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric';
+
+type InlineNode =
+  | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
+  | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string }
+  | { type: 'condition'; id: string; featureId: string; featureName?: string; content: string };
+
+type EditorBlock =
+  | { id: string; type: 'paragraph'; content: InlineNode[] }
+  | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
+  | { id: string; type: 'callout'; variant: 'warning' | 'caution' | 'electric' | 'info'; content: InlineNode[] }
+  | { id: string; type: 'image'; src: string; alt?: string }
+  | { id: string; type: 'table'; rows: string[][] }
+  | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
+  | { id: string; type: 'legacy_html'; html: string };
+
 interface EditorProps {
   initialContent: string;
   onChange: (html: string) => void;
   placeholder?: string;
   onInsertPlaceholder?: (type: 'text' | 'image') => void;
   onInsertCondition?: () => void;
-  onInsertBlock?: (type: 'warning' | 'info' | 'table' | 'caution' | 'electric') => void;
   minimal?: boolean;
 }
 
-const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, onInsertBlock, minimal }) => {
-  const contentRef = useRef<HTMLDivElement>(null);
+const createId = () => Math.random().toString(36).slice(2, 11);
+
+const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, minimal }) => {
+  const [blocks, setBlocks] = useState<EditorBlock[]>([]);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
-  const savedRange = useRef<Range | null>(null);
+
+  const parseInlineNodes = useCallback((container: HTMLElement): InlineNode[] => {
+    const inlines: InlineNode[] = [];
+
+    const walk = (node: Node, marks: Array<'bold' | 'italic' | 'underline'> = []) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        if (text) inlines.push({ type: 'text', text, marks: marks.length ? marks : undefined });
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node as HTMLElement;
+
+      if (el.classList.contains('im-placeholder')) {
+        inlines.push({
+          type: 'placeholder',
+          id: el.dataset.id || createId(),
+          placeholderType: (el.dataset.type as 'text' | 'image') || 'text',
+          label: decodeURIComponent(el.dataset.label || '').trim() || el.textContent?.replace(/[\[\]]/g, '').trim() || 'Text'
+        });
+        return;
+      }
+
+      if (el.classList.contains('im-condition')) {
+        inlines.push({
+          type: 'condition',
+          id: el.dataset.id || createId(),
+          featureId: el.dataset.featureId || 'manual',
+          featureName: el.dataset.featureName || '',
+          content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || ''
+        });
+        return;
+      }
+
+      if (el.tagName === 'BR') {
+        inlines.push({ type: 'text', text: '\n', marks: marks.length ? marks : undefined });
+        return;
+      }
+
+      const nextMarks = [...marks];
+      if (['B', 'STRONG'].includes(el.tagName) && !nextMarks.includes('bold')) nextMarks.push('bold');
+      if (['I', 'EM'].includes(el.tagName) && !nextMarks.includes('italic')) nextMarks.push('italic');
+      if (el.tagName === 'U' && !nextMarks.includes('underline')) nextMarks.push('underline');
+
+      Array.from(el.childNodes).forEach((child) => walk(child, nextMarks));
+    };
+
+    Array.from(container.childNodes).forEach((child) => walk(child));
+    return inlines;
+  }, []);
+
+  const serializeInline = useCallback((inlines: InlineNode[]): string => inlines.map((inline) => {
+    if (inline.type === 'placeholder') {
+      const colorClass = inline.placeholderType === 'text' ? 'bg-amber-100 border-yellow-300 text-amber-800' : 'bg-indigo-100 border-indigo-300 text-blue-800';
+      return `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${inline.placeholderType}" data-id="${inline.id}" data-label="${encodeURIComponent(inline.label)}">[${inline.label}]</span>&nbsp;`;
+    }
+
+    if (inline.type === 'condition') {
+      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" title="Condition: ${inline.featureName || 'Manual'}"><span class="font-bold text-xs uppercase mr-1">[${inline.featureId === 'manual' ? 'Optional' : 'Auto-Spec'}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
+    }
+
+    let textHtml = inline.text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br />');
+    (inline.marks || []).forEach((mark) => {
+      if (mark === 'bold') textHtml = `<strong>${textHtml}</strong>`;
+      if (mark === 'italic') textHtml = `<em>${textHtml}</em>`;
+      if (mark === 'underline') textHtml = `<u>${textHtml}</u>`;
+    });
+    return textHtml;
+  }).join(''), []);
+
+  const deserializeHtmlToBlocks = useCallback((html: string): EditorBlock[] => {
+    if (!html.trim()) return [{ id: createId(), type: 'paragraph', content: [] }];
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+    const root = doc.body.firstElementChild as HTMLElement;
+    const parsed: EditorBlock[] = [];
+
+    Array.from(root.childNodes).forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+        parsed.push({ id: createId(), type: 'paragraph', content: [{ type: 'text', text: node.textContent }] });
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      const el = node as HTMLElement;
+      if (el.matches('h1, h2, h3')) {
+        parsed.push({ id: createId(), type: 'heading', level: Number(el.tagName[1]) as 1 | 2 | 3, content: parseInlineNodes(el) });
+        return;
+      }
+      if (el.tagName === 'P') {
+        parsed.push({ id: createId(), type: 'paragraph', content: parseInlineNodes(el) });
+        return;
+      }
+      if (el.classList.contains('im-block-wrapper')) {
+        const contentEl = el.querySelector('.im-block-content') as HTMLElement | null;
+        const variant = (['warning', 'caution', 'electric', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as 'warning' | 'caution' | 'electric' | 'info';
+        parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(contentEl || el) });
+        return;
+      }
+      if (el.tagName === 'IMG') {
+        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '' });
+        return;
+      }
+      if (el.tagName === 'TABLE') {
+        const rows = Array.from(el.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((cell) => (cell.textContent || '').trim()));
+        parsed.push({ id: createId(), type: 'table', rows: rows.length ? rows : [['Header 1', 'Header 2'], ['Value 1', 'Value 2']] });
+        return;
+      }
+      if (el.classList.contains('im-condition') && !el.closest('p, h1, h2, h3, .im-block-wrapper')) {
+        parsed.push({ id: createId(), type: 'conditional', condition: { id: el.dataset.id || createId(), featureId: el.dataset.featureId || 'manual', featureName: el.dataset.featureName || '' }, content: [{ type: 'condition', id: el.dataset.id || createId(), featureId: el.dataset.featureId || 'manual', featureName: el.dataset.featureName || '', content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || '' }] });
+        return;
+      }
+      parsed.push({ id: createId(), type: 'legacy_html', html: el.outerHTML });
+    });
+
+    return parsed.length ? parsed : [{ id: createId(), type: 'paragraph', content: [] }];
+  }, [parseInlineNodes]);
+
+  const serializeBlocksToHtml = useCallback((list: EditorBlock[]): string => {
+    return list.map((block) => {
+      if (block.type === 'paragraph') return `<p>${serializeInline(block.content)}</p>`;
+      if (block.type === 'heading') return `<h${block.level}>${serializeInline(block.content)}</h${block.level}>`;
+      if (block.type === 'callout') {
+        const warningIcon = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:100%;"><path d="M12 2L2 22h20L12 2z" fill="#FACC15" stroke="black" stroke-width="2" stroke-linejoin="round"/><path d="M12 8v6M12 17v.5" stroke="black" stroke-width="2.5" stroke-linecap="round"/></svg>`;
+        const electricIcon = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:100%;"><path d="M12 2L2 22h20L12 2z" fill="#FACC15" stroke="black" stroke-width="2" stroke-linejoin="round"/><path d="M13 7l-3 6h2.5l-2 5 4-7h-2.5l1-4z" fill="black"/></svg>`;
+        const title = block.variant === 'electric' ? 'ELECTRIC HAZARD' : block.variant.toUpperCase();
+        const icon = block.variant === 'info' ? '' : `<div class="im-block-icon">${block.variant === 'electric' ? electricIcon : warningIcon}</div>`;
+        return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
+      }
+      if (block.type === 'image') return `<img src="${block.src}" alt="${block.alt || ''}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" />`;
+      if (block.type === 'table') {
+        const [headerRow, ...body] = block.rows;
+        const th = (headerRow || []).map((cell) => `<th>${cell}</th>`).join('');
+        const tr = body.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+        return `<table class="im-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+      }
+      if (block.type === 'conditional') {
+        return `<p>${serializeInline([{ type: 'condition', id: block.condition.id, featureId: block.condition.featureId, featureName: block.condition.featureName, content: block.content.map((x) => x.type === 'text' ? x.text : '').join(' ').trim() || 'Conditional content' }])}</p>`;
+      }
+      return block.html;
+    }).join('');
+  }, [serializeInline]);
 
   useEffect(() => {
-    if (contentRef.current && contentRef.current.innerHTML !== initialContent) {
-      if (Math.abs(contentRef.current.innerHTML.length - initialContent.length) > 5) {
-          contentRef.current.innerHTML = initialContent;
-      } else if (!contentRef.current.innerHTML) {
-          contentRef.current.innerHTML = initialContent;
-      }
-    }
-  }, [initialContent]);
+    const next = deserializeHtmlToBlocks(initialContent || '');
+    setBlocks(next);
+    if (!selectedBlockId && next.length) setSelectedBlockId(next[0].id);
+  }, [deserializeHtmlToBlocks, initialContent]);
 
-  const saveSelection = () => {
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          if (contentRef.current && contentRef.current.contains(range.commonAncestorContainer)) {
-             savedRange.current = range.cloneRange();
-          }
+  useEffect(() => {
+    onChange(serializeBlocksToHtml(blocks));
+  }, [blocks, onChange, serializeBlocksToHtml]);
+
+  const updateTextualBlock = (id: string, htmlValue: string) => {
+    const doc = new DOMParser().parseFromString(`<div>${htmlValue}</div>`, 'text/html');
+    const container = doc.body.firstElementChild as HTMLElement;
+    const parsed = parseInlineNodes(container);
+    setBlocks((prev) => prev.map((block) => {
+      if (block.id !== id) return block;
+      if (block.type === 'paragraph' || block.type === 'heading' || block.type === 'callout' || block.type === 'conditional') {
+        return { ...block, content: parsed } as EditorBlock;
       }
+      return block;
+    }));
   };
 
-  const restoreSelection = () => {
-      const selection = window.getSelection();
-      if (savedRange.current && selection) {
-          selection.removeAllRanges();
-          selection.addRange(savedRange.current);
-      }
-  };
-
-  const exec = (command: string, value: string | undefined = undefined) => {
-    restoreSelection();
-    contentRef.current?.focus();
-    document.execCommand(command, false, value);
-    handleChange();
-  };
-
-  const handleChange = () => {
-    if (contentRef.current) {
-        const html = contentRef.current.innerHTML;
-        if (html === '<br>' || html.trim() === '') {
-           onChange('');
-        } else {
-           onChange(html);
-        }
-        saveSelection();
-    }
+  const insertBlock = (type: BlockInsertType) => {
+    const newBlock: EditorBlock = type === 'table'
+      ? { id: createId(), type: 'table', rows: [['Header 1', 'Header 2'], ['Row 1 Col 1', 'Row 1 Col 2']] }
+      : { id: createId(), type: 'callout', variant: type, content: [{ type: 'text', text: type === 'warning' ? 'Indicates a hazardous situation which, if not avoided, could result in serious injury or death.' : type === 'caution' ? 'Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.' : type === 'electric' ? 'Risk of electric shock. Disconnect power before servicing.' : 'Offers helpful tips and information for using your product.' }] };
+    setBlocks((prev) => [...prev, newBlock]);
+    setSelectedBlockId(newBlock.id);
   };
 
   useEffect(() => {
     (window as any).currentEditorInsertHtml = (htmlString: string) => {
-        if (!contentRef.current) return;
-        contentRef.current.focus();
-        const selection = window.getSelection();
-        if (!selection) return;
+      const doc = new DOMParser().parseFromString(`<div>${htmlString}</div>`, 'text/html');
+      const container = doc.body.firstElementChild as HTMLElement;
+      const inlineNodes = parseInlineNodes(container);
+      if (!inlineNodes.length) return;
 
-        if (savedRange.current) {
-            try {
-                selection.removeAllRanges();
-                selection.addRange(savedRange.current);
-            } catch (e) { }
+      setBlocks((prev) => {
+        const idx = prev.findIndex((b) => b.id === selectedBlockId && (b.type === 'paragraph' || b.type === 'heading' || b.type === 'callout' || b.type === 'conditional'));
+        if (idx === -1) {
+          const block: EditorBlock = { id: createId(), type: 'paragraph', content: inlineNodes };
+          setSelectedBlockId(block.id);
+          return [...prev, block];
         }
-
-        let range: Range | null = null;
-        if (selection.rangeCount > 0 && contentRef.current.contains(selection.anchorNode)) {
-            range = selection.getRangeAt(0);
-        } else {
-            range = document.createRange();
-            range.selectNodeContents(contentRef.current);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        }
-
-        if (range) {
-            range.deleteContents();
-            const el = document.createElement('div');
-            el.innerHTML = htmlString;
-            const frag = document.createDocumentFragment();
-            let node, lastNode;
-            while ((node = el.firstChild)) {
-                lastNode = frag.appendChild(node);
-            }
-            range.insertNode(frag);
-
-            if (lastNode) {
-                range = range.cloneRange();
-                range.setStartAfter(lastNode);
-                range.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(range);
-                savedRange.current = range;
-            }
-        }
-        handleChange();
+        const next = [...prev];
+        const selected = next[idx] as any;
+        selected.content = [...(selected.content || []), ...inlineNodes];
+        return next;
+      });
     };
+
     return () => { (window as any).currentEditorInsertHtml = undefined; };
-  }, [onChange]);
+  }, [parseInlineNodes, selectedBlockId]);
 
   return (
     <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
       <style>{`
-        .im-editor-content ul { list-style-type: disc !important; padding-left: 1.5em !important; margin-bottom: 1em !important; }
-        .im-editor-content ol { list-style-type: decimal !important; padding-left: 1.5em !important; margin-bottom: 1em !important; }
-        .im-editor-content li { display: list-item !important; margin-bottom: 0.25em !important; }
-        .im-editor-content b, .im-editor-content strong { font-weight: bold !important; }
-        .im-editor-content i, .im-editor-content em { font-style: italic !important; }
-        .im-editor-content u { text-decoration: underline !important; }
-        .im-editor-content p { margin-bottom: 1em !important; display: block !important; }
+        .im-editor-content p { margin-bottom: 1em !important; }
         .im-placeholder { display: inline-block; vertical-align: middle; cursor: default; user-select: none; white-space: nowrap; }
         .im-condition { display: inline-block; vertical-align: middle; cursor: default; border-style: dashed; user-select: none; }
-        
-        .im-block-wrapper { display: flex; align-items: flex-start; gap: 1.5rem; padding: 1.5rem; margin: 1.5rem 0; border-radius: 6px; border-left: 6px solid; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .im-block-wrapper { display: flex; align-items: flex-start; gap: 1.5rem; padding: 1.5rem; margin: 1rem 0; border-radius: 6px; border-left: 6px solid; background-color: #fff; }
         .im-block-icon { flex-shrink: 0; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; }
         .im-block-content { flex: 1; min-width: 0; }
-        .im-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 0.5rem; letter-spacing: 0.05em; }
-
+        .im-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 0.5rem; }
         .im-block-warning { background-color: #fff7ed; border-left-color: #f97316; }
-        .im-block-warning .im-block-title { color: #c2410c; }
         .im-block-caution { background-color: #fefce8; border-left-color: #eab308; }
-        .im-block-caution .im-block-title { color: #854d0e; }
         .im-block-electric { background-color: #fef2f2; border-left-color: #dc2626; }
-        .im-block-electric .im-block-title { color: #b91c1c; }
         .im-block-info { background-color: #eff6ff; border-left-color: #3b82f6; }
-        .im-block-info .im-block-title { color: #1d4ed8; }
-
-        /* Improved Table Styles */
-        .im-table { width: 100%; border-collapse: collapse; margin: 1rem 0; table-layout: auto; }
-        .im-table th, .im-table td { border: 1px solid #cbd5e1; padding: 0.5rem; vertical-align: top; }
-        .im-table th { background-color: #f1f5f9; font-weight: bold; text-align: left; }
+        .im-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+        .im-table th, .im-table td { border: 1px solid #cbd5e1; padding: 0.5rem; }
       `}</style>
 
       <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
-        <button onMouseDown={(e) => { e.preventDefault(); exec('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold"><Bold size={16} /></button>
-        <button onMouseDown={(e) => { e.preventDefault(); exec('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic"><Italic size={16} /></button>
-        <button onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline"><Underline size={16} /></button>
-        <div className="w-px h-4 bg-gray-300 mx-1"></div>
-        <button onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bullet List"><List size={16} /></button>
+        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 1, content: [{ type: 'text', text: 'Heading 1' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H1</button>
+        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 2, content: [{ type: 'text', text: 'Heading 2' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H2</button>
+        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 3, content: [{ type: 'text', text: 'Heading 3' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H3</button>
+        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'paragraph', content: [] }]); }} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Paragraph</button>
         {!minimal && (
           <>
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('warning'); }} className="p-1.5 hover:bg-orange-100 hover:text-amber-600 rounded text-gray-600" title="Warning Block"><AlertTriangle size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('caution'); }} className="p-1.5 hover:bg-amber-100 hover:text-amber-600 rounded text-gray-600" title="Caution Block"><AlertOctagon size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('electric'); }} className="p-1.5 hover:bg-rose-100 hover:text-rose-600 rounded text-gray-600" title="Electric Hazard"><Zap size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('info'); }} className="p-1.5 hover:bg-indigo-100 hover:text-indigo-600 rounded text-gray-600" title="Info Block"><Info size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertBlock?.('table'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Insert Table"><TableIcon size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('warning'); }} className="p-1.5 hover:bg-orange-100 hover:text-amber-600 rounded text-gray-600" title="Warning Block"><AlertTriangle size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('caution'); }} className="p-1.5 hover:bg-amber-100 hover:text-amber-600 rounded text-gray-600" title="Caution Block"><AlertOctagon size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('electric'); }} className="p-1.5 hover:bg-rose-100 hover:text-rose-600 rounded text-gray-600" title="Electric Hazard"><Zap size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('info'); }} className="p-1.5 hover:bg-indigo-100 hover:text-indigo-600 rounded text-gray-600" title="Info Block"><Info size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('table'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Insert Table"><TableIcon size={16} /></button>
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
             <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('text'); }} className="flex items-center gap-1 px-2 py-1 bg-amber-50 text-yellow-700 hover:bg-amber-100 rounded text-xs font-medium border border-amber-200" title="Insert User Input Field"><Type size={14} /> Text</button>
             <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('image'); }} className="flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-xs font-medium border border-indigo-200" title="Insert Image Upload Field"><ImageIcon size={14} /> Img</button>
@@ -213,23 +318,37 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           </>
         )}
       </div>
-      
-      <div className="flex-1 relative bg-white cursor-text" onClick={() => { contentRef.current?.focus(); }}>
-        {!initialContent && !isFocused && placeholder && (
-           <div className="absolute top-4 left-4 text-gray-400 pointer-events-none select-none z-10">{placeholder}</div>
-        )}
-        <div className="absolute inset-0 overflow-y-auto">
-          <div 
-            ref={contentRef}
-            className="min-h-full p-4 outline-none im-editor-content max-w-none font-sans"
-            contentEditable
-            onInput={handleChange}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => { setIsFocused(false); saveSelection(); }}
-            onMouseUp={saveSelection}
-            onKeyUp={saveSelection}
-          />
-        </div>
+
+      <div className="flex-1 overflow-y-auto bg-white p-4 space-y-3">
+        {!blocks.length && !isFocused && placeholder && <div className="text-gray-400 pointer-events-none select-none">{placeholder}</div>}
+        {blocks.map((block) => (
+          <div key={block.id} className={`rounded-lg border ${selectedBlockId === block.id ? 'border-indigo-300 ring-1 ring-indigo-100' : 'border-transparent'} p-2`} onClick={() => setSelectedBlockId(block.id)}>
+            {(block.type === 'paragraph' || block.type === 'heading' || block.type === 'callout' || block.type === 'conditional') && (
+              <div
+                className={`im-editor-content outline-none min-h-[28px] ${block.type === 'heading' ? (block.level === 1 ? 'text-3xl font-bold' : block.level === 2 ? 'text-2xl font-semibold' : 'text-xl font-semibold') : ''}`}
+                contentEditable
+                suppressContentEditableWarning
+                onFocus={() => { setIsFocused(true); setSelectedBlockId(block.id); }}
+                onBlur={() => setIsFocused(false)}
+                onInput={(e) => updateTextualBlock(block.id, (e.currentTarget as HTMLDivElement).innerHTML)}
+                dangerouslySetInnerHTML={{ __html: serializeInline(block.content) }}
+              />
+            )}
+            {block.type === 'table' && (
+              <table className="im-table">
+                <thead><tr>{block.rows[0]?.map((h, idx) => <th key={idx}>{h}</th>)}</tr></thead>
+                <tbody>{block.rows.slice(1).map((row, rIdx) => <tr key={rIdx}>{row.map((cell, cIdx) => <td key={cIdx}>{cell}</td>)}</tr>)}</tbody>
+              </table>
+            )}
+            {block.type === 'image' && <img src={block.src} alt={block.alt || 'Section image'} className="max-w-full h-auto rounded" />}
+            {block.type === 'legacy_html' && (
+              <div className="border border-amber-200 bg-amber-50 rounded p-3">
+                <div className="text-xs uppercase tracking-wide text-amber-700 font-semibold mb-1">Legacy HTML (fallback rendering)</div>
+                <div dangerouslySetInnerHTML={{ __html: block.html }} />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -327,25 +446,6 @@ const IMTemplateEditor: React.FC = () => {
     const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}" data-label="${labelAttr}">[${label}]</span>&nbsp;`;
     insertHtmlToCurrentEditor(html);
     setIsPlaceholderModalOpen(false);
-  };
-
-  const handleInsertBlock = (type: 'warning' | 'info' | 'table' | 'caution' | 'electric') => {
-      let html = '';
-      const isoWarningIcon = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:100%;"><path d="M12 2L2 22h20L12 2z" fill="#FACC15" stroke="black" stroke-width="2" stroke-linejoin="round"/><path d="M12 8v6M12 17v.5" stroke="black" stroke-width="2.5" stroke-linecap="round"/></svg>`;
-      const isoElectricIcon = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:100%;"><path d="M12 2L2 22h20L12 2z" fill="#FACC15" stroke="black" stroke-width="2" stroke-linejoin="round"/><path d="M13 7l-3 6h2.5l-2 5 4-7h-2.5l1-4z" fill="black"/></svg>`;
-
-      if (type === 'warning') {
-          html = `<div class="im-block-wrapper im-block-warning"><div class="im-block-icon">${isoWarningIcon}</div><div class="im-block-content"><strong class="im-block-title">WARNING</strong><p>Indicates a hazardous situation which, if not avoided, could result in serious injury or death.</p></div></div><p></p>`;
-      } else if (type === 'caution') {
-          html = `<div class="im-block-wrapper im-block-caution"><div class="im-block-icon">${isoWarningIcon}</div><div class="im-block-content"><strong class="im-block-title">CAUTION</strong><p>Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.</p></div></div><p></p>`;
-      } else if (type === 'electric') {
-          html = `<div class="im-block-wrapper im-block-electric"><div class="im-block-icon">${isoElectricIcon}</div><div class="im-block-content"><strong class="im-block-title">ELECTRIC HAZARD</strong><p>Risk of electric shock. Disconnect power before servicing.</p></div></div><p></p>`;
-      } else if (type === 'info') {
-           html = `<div class="im-block-wrapper im-block-info"><div class="im-block-content"><strong class="im-block-title">ℹ️ Note</strong><p>Offers helpful tips and information for using your product.</p></div></div><p></p>`;
-      } else if (type === 'table') {
-          html = `<table class="im-table"><thead><tr><th>Header 1</th><th>Header 2</th></tr></thead><tbody><tr><td>Row 1 Col 1</td><td>Row 1 Col 2</td></tr><tr><td>Row 2 Col 1</td><td>Row 2 Col 2</td></tr></tbody></table><p></p>`;
-      }
-      insertHtmlToCurrentEditor(html);
   };
 
   const handleUploadAsset = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -683,7 +783,6 @@ const IMTemplateEditor: React.FC = () => {
                               placeholder="Enter content..."
                               onInsertPlaceholder={handleInsertPlaceholder}
                               onInsertCondition={handleOpenConditionModal}
-                              onInsertBlock={handleInsertBlock}
                            />
                         </div>
                      </div>
