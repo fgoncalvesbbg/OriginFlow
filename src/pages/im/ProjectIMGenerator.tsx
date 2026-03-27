@@ -7,9 +7,38 @@ import {
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
     addDocument, uploadFile, getComplianceRequests, getProductFeatures
 } from '../../services';
-import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature } from '../../types';
+import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
+
+
+const DEFAULT_MASTER_PAGES: Record<IMMasterLayoutName, IMMasterPageOverride> = {
+  cover: {},
+  chapter: {},
+  body: {},
+  appendix: {},
+  end: {}
+};
+
+const resolveSectionLayout = (section: IMSection, sectionLayoutMap?: Record<string, IMMasterLayoutName>): IMMasterLayoutName => {
+  if (!sectionLayoutMap) return 'body';
+  return (
+    sectionLayoutMap[section.id] ||
+    sectionLayoutMap[section.parentId ? 'type:subsection' : 'type:section'] ||
+    sectionLayoutMap[section.isPlaceholder ? 'type:placeholder' : 'type:content'] ||
+    sectionLayoutMap.default ||
+    'body'
+  );
+};
+
+const getBackgroundStyle = (override?: IMMasterPageOverride) => {
+  const bg = override?.background?.trim();
+  if (!bg) return undefined;
+  if (bg.startsWith('http') || bg.startsWith('data:image') || bg.includes('gradient')) {
+    return { backgroundImage: bg.startsWith('gradient') ? bg : `url(${bg})`, backgroundSize: 'cover', backgroundPosition: 'center' };
+  }
+  return { backgroundColor: bg };
+};
 
 // Internal Confirmation Modal
 const ConfirmationModal: React.FC<{
@@ -880,7 +909,7 @@ const ProjectIMGenerator: React.FC = () => {
                    <div className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center" onClick={handlePreviewClick}>
                        <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top">
                           {/* COVER PAGE */}
-                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page">
+                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page" style={getBackgroundStyle(masterPages.cover)}>
                              {displayCoverImage && <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${displayCoverImage})` }} />}
                              <div className="flex-1 p-[20mm] flex flex-col justify-between">
                                 <div>
@@ -906,8 +935,8 @@ const ProjectIMGenerator: React.FC = () => {
                               </div>
                               
                               {/* FOOTER */}
-                              {displayFooter && (
-                                  <div className="absolute bottom-0 left-0 right-0 p-8 border-t border-gray-100 text-center text-xs text-gray-400">
+                              {displayFooter && masterPages.body?.footerVariant !== 'none' && (
+                                  <div className={`absolute bottom-0 left-0 right-0 p-8 border-t border-gray-100 text-center text-xs ${masterPages.body?.footerVariant === 'minimal' ? 'text-gray-300' : 'text-gray-400'}`}>
                                       {displayFooter}
                                   </div>
                               )}

@@ -32,6 +32,8 @@ export type {
 
 // IM types
 export type {
+  IMMasterLayoutName,
+  IMMasterPageOverride,
   IMTemplateMetadata,
   IMTemplate,
   IMSection,
