@@ -197,18 +197,6 @@ const mapRFQ = (r: any): RFQ => {
   };
 };
 
-// --- Notifications & Edge Functions ---
-
-export const triggerEmailNotification = async (payload: {
-  to: string;
-  subject: string;
-  html: string;
-  type: 'tcf_submission' | 'test' | 'rfq_invite';
-}) => {
-  console.info("Email notification suppressed per project settings.", payload.type);
-  return { success: true, message: "Email suppressed" };
-};
-
 // --- Projects ---
 // @deprecated Duplicate CRUD surface. Prefer exports from `src/services/project/*` via `src/services/index.ts`.
 
@@ -307,7 +295,8 @@ export const getProjectSteps = async (projectId: string): Promise<ProjectStep[]>
 };
 
 export const updateStepStatus = async (stepId: string, status: StepStatus): Promise<void> => {
-    await supabase.from('project_steps').update({ status }).eq('id', stepId);
+    const { error } = await supabase.from('project_steps').update({ status }).eq('id', stepId);
+    if (error) handleError(error, 'updateStepStatus');
 };
 
 export const getProjectDocs = async (projectId: string): Promise<ProjectDocument[]> => {
@@ -673,7 +662,8 @@ export const logout = async (): Promise<void> => {
 };
 
 export const updateUserRole = async (userId: string, role: UserRole): Promise<void> => {
-    await supabase.from('profiles').update({ role }).eq('id', userId);
+    const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
+    if (error) handleError(error, 'updateUserRole');
 };
 
 // --- Documents ---
@@ -838,7 +828,7 @@ export const getMissingDocumentsForSupplier = async (supplierId: string): Promis
 // --- Stats & Notifications ---
 
 export const getDashboardStats = async (): Promise<DashboardStats & { newProposals: number }> => {
-    if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 } as any;
+    if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 };
 
     const today = new Date();
     const nextPeriod = new Date();
@@ -904,7 +894,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
         overdueCount,
         upcomingDeadlines: combined,
         newProposals
-    } as any;
+    };
 };
 
 export const getSupplierNotifications = async (supplierId: string): Promise<Notification[]> => {
@@ -936,7 +926,8 @@ export const getNotifications = async (): Promise<Notification[]> => {
 };
 
 export const markNotificationRead = async (id: string): Promise<void> => {
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    if (error) handleError(error, 'markNotificationRead');
 };
 
 // --- Compliance ---
@@ -1029,11 +1020,13 @@ export const submitComplianceResponse = async (reqId: string, responses: Complia
     if (status === ComplianceRequestStatus.APPROVED) updates.completed_at = new Date().toISOString();
     if (user) updates.updated_by = user;
     
-    await supabase.from('compliance_requests').update(updates).eq('id', reqId);
+    const { error } = await supabase.from('compliance_requests').update(updates).eq('id', reqId);
+    if (error) handleError(error, 'submitComplianceResponse');
 };
 
 export const deleteComplianceRequest = async (id: string): Promise<void> => {
-    await supabase.from('compliance_requests').delete().eq('id', id);
+    const { error } = await supabase.from('compliance_requests').delete().eq('id', id);
+    if (error) handleError(error, 'deleteComplianceRequest');
 };
 
 export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
@@ -1044,9 +1037,6 @@ export const getComplianceRequestsBySupplierId = async (supplierId: string): Pro
         return [];
     }
     return (data || []).map(mapComplianceRequest);
-};
-
-export const checkComplianceDeadlines = async (): Promise<void> => {
 };
 
 export const getCategories = async (): Promise<CategoryL3[]> => {
@@ -1063,7 +1053,6 @@ export const getCategories = async (): Promise<CategoryL3[]> => {
         isFinalized: c.is_finalized,
         finalizedAt: c.finalized_at
     }));
-    console.log('Fetched categories:', categories);
     return categories;
 };
 
@@ -1204,7 +1193,6 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
       console.error('Error fetching IM templates:', error);
       return [];
     }
-    console.log('Fetched IM templates:', data);
     return (data || []).map((t: any) => ({
       id: t.id,
       categoryId: t.category_id,
@@ -1242,7 +1230,6 @@ export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMT
       console.error('Error fetching IM template by category:', categoryId, error);
       return undefined;
     }
-    console.log('Fetched IM template by category:', data);
     return {
       id: data.id,
       categoryId: data.category_id,
@@ -1291,7 +1278,8 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
     
     payload.updated_at = new Date().toISOString();
 
-    await supabase.from('im_templates').update(payload).eq('id', id);
+    const { error } = await supabase.from('im_templates').update(payload).eq('id', id);
+    if (error) handleError(error, 'updateIMTemplate');
 };
 
 export const getIMSections = async (templateId: string): Promise<IMSection[]> => {
@@ -1301,7 +1289,6 @@ export const getIMSections = async (templateId: string): Promise<IMSection[]> =>
       console.error('Error fetching IM sections for template:', templateId, error);
       return [];
     }
-    console.log('Fetched IM sections:', data);
     return (data || []).map((s: any) => ({
       id: s.id,
       templateId: s.template_id,

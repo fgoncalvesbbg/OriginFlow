@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
-import { getNotifications, markNotificationRead, getDashboardStats } from '../services/apiService';
+import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
 
 interface LayoutProps {
   children: React.ReactNode;

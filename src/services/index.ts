@@ -55,7 +55,8 @@ export {
   assignSupplierToPMs,
   getSupplierPMs,
   reassignProjectPM,
-  regenerateSupplierAccessCode
+  regenerateSupplierAccessCode,
+  logAccessCodeAttempt
 } from './supplier';
 
 // Manufacturing module
@@ -72,7 +73,6 @@ export {
   getSupplierNotifications,
   markNotificationRead,
   triggerEmailNotification,
-  logAccessCodeAttempt,
   getDocumentComments as getSharedDocumentComments,
   addDocumentComment as addSharedDocumentComment
 } from './shared';

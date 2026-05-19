@@ -34,7 +34,7 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
 export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefined> => {
     if (!id || !isLive) return undefined;
     const { data, error } = await portalClient.from('im_templates').select('*').eq('id', id).single();
-    if (error) return undefined;
+    if (error || !data) return undefined;
     return {
       id: data.id,
       categoryId: data.category_id,
@@ -54,7 +54,7 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
 export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMTemplate | undefined> => {
     if (!categoryId || !isLive) return undefined;
     const { data, error } = await supabase.from('im_templates').select('*').eq('category_id', categoryId).single();
-    if (error) return undefined;
+    if (error || !data) return undefined;
     return {
       id: data.id,
       categoryId: data.category_id,
@@ -81,6 +81,7 @@ export const createIMTemplate = async (categoryId: string, name: string): Promis
         updated_at: new Date().toISOString()
     }).select().single();
     if (error) handleError(error, 'createIMTemplate');
+    if (!data) throw new Error('createIMTemplate: no data returned');
     return {
       id: data.id,
       categoryId: data.category_id,
@@ -109,5 +110,6 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
 
     payload.updated_at = new Date().toISOString();
 
-    await supabase.from('im_templates').update(payload).eq('id', id);
+    const { error } = await supabase.from('im_templates').update(payload).eq('id', id);
+    if (error) handleError(error, 'updateIMTemplate');
 };

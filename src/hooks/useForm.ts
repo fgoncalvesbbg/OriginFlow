@@ -43,19 +43,14 @@ export const useForm = <T extends Record<string, any>>({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const setFieldValue = useCallback((field: keyof T, value: any) => {
-    setValues(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    // Clear error for this field when user starts typing
-    if (errors[field as string]) {
-      setErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[field as string];
-        return newErrors;
-      });
-    }
-  }, [errors]);
+    setValues(prev => ({ ...prev, [field]: value }));
+    setErrors(prev => {
+      if (!prev[field as string]) return prev;
+      const next = { ...prev };
+      delete next[field as string];
+      return next;
+    });
+  }, []);
 
   const setFieldError = useCallback((field: keyof T, fieldErrors: string[]) => {
     setErrors(prev => ({

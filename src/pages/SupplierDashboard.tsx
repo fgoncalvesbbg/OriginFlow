@@ -1128,7 +1128,7 @@ const SupplierDashboard: React.FC = () => {
                                 {p.milestones.poPlacement && <p>🗓️ PO: {new Date(p.milestones.poPlacement).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
                                 {p.milestones.massProduction && <p>🏭 Mass Prod: {new Date(p.milestones.massProduction).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>}
                                 {p.milestones.etd && (
-                                  <p className={getDaysUntil(p.milestones.etd)! < 0 ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                  <p className={(getDaysUntil(p.milestones.etd) ?? 0) < 0 ? 'text-red-600 font-medium' : 'text-gray-600'}>
                                     📦 ETD: {new Date(p.milestones.etd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({getDaysUntil(p.milestones.etd)} days)
                                   </p>
                                 )}
@@ -1182,7 +1182,7 @@ const SupplierDashboard: React.FC = () => {
                                         <div className="flex-1 min-w-0">
                                           <p className="font-medium text-sm break-words">{d.title}</p>
                                           {d.deadline && (
-                                            <p className={`text-xs mt-1 ${getDaysUntil(d.deadline)! < 0 ? 'text-red-600 font-medium' : 'text-orange-600'}`}>
+                                            <p className={`text-xs mt-1 ${(getDaysUntil(d.deadline) ?? 0) < 0 ? 'text-red-600 font-medium' : 'text-orange-600'}`}>
                                               📅 Due: {new Date(d.deadline).toLocaleDateString()} ({getDaysUntil(d.deadline)} days)
                                             </p>
                                           )}

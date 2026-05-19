@@ -59,7 +59,7 @@ const ModalComponent: React.FC<ModalComponentProps> = ({ modal, onClose }) => {
   };
 
   const title = modal.options.title || (modal.type === 'alert' ? 'Alert' : 'Confirm');
-  const okText = (modal.options as any).okText || (modal.options as any).confirmText || 'OK';
+  const okText = modal.options.okText || (modal.options as ConfirmOptions).confirmText || 'OK';
   const cancelText = modal.options.cancelText || 'Cancel';
 
   return (

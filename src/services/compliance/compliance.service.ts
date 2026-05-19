@@ -136,7 +136,8 @@ export const submitComplianceResponse = async (reqId: string, responses: Complia
  * Delete a compliance request
  */
 export const deleteComplianceRequest = async (id: string): Promise<void> => {
-    await supabase.from('compliance_requests').delete().eq('id', id);
+    const { error } = await supabase.from('compliance_requests').delete().eq('id', id);
+    if (error) handleError(error, 'deleteComplianceRequest');
 };
 
 /**

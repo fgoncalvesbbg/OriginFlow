@@ -62,12 +62,13 @@ const ConfirmationModal: React.FC<{
 };
 
 const NotificationToast: React.FC<{ message: string, type: 'success' | 'error' | null, onClose: () => void }> = ({ message, type, onClose }) => {
-  if (!type) return null;
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
+    if (!type) return;
     const timer = setTimeout(onClose, 3000);
     return () => clearTimeout(timer);
-  }, [message, onClose]);
+  }, [message, type, onClose]);
+
+  if (!type) return null;
 
   return (
     <div className={`fixed top-4 right-4 z-[70] px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium animate-in slide-in-from-right-5 ${
@@ -120,7 +121,7 @@ const ProjectDetail: React.FC = () => {
   const [isNewDoc, setIsNewDoc] = useState(false);
   
   // Expanded Docs for History
-  const [expandedDocIds, setExpandedDocIds] = useState<Set<string>>(new Set());
+  const [expandedDocIds, setExpandedDocIds] = useState<Record<string, boolean>>({});
   
   // Edit Project Modal State
   const [isEditProjectOpen, setIsEditProjectOpen] = useState(false);
@@ -256,13 +257,7 @@ const ProjectDetail: React.FC = () => {
   const toggleDocHistory = (e: React.MouseEvent, docId: string) => {
     e.stopPropagation();
     e.preventDefault();
-    const newSet = new Set(expandedDocIds);
-    if (newSet.has(docId)) {
-      newSet.delete(docId);
-    } else {
-      newSet.add(docId);
-    }
-    setExpandedDocIds(newSet);
+    setExpandedDocIds(prev => ({ ...prev, [docId]: !prev[docId] }));
   };
 
   // --- Manufacturing Update ---
@@ -498,9 +493,7 @@ const ProjectDetail: React.FC = () => {
         try {
             const updatedDoc = await uploadFile(uploadingDocId, file, false);
             setDocs(docs.map(d => d.id === uploadingDocId ? updatedDoc : d));
-            const newSet = new Set(expandedDocIds);
-            newSet.add(uploadingDocId);
-            setExpandedDocIds(newSet);
+            setExpandedDocIds(prev => ({ ...prev, [uploadingDocId]: true }));
             showNotification('File uploaded successfully', 'success');
         } catch (err: any) {
             console.error("Upload failed", err);
@@ -706,7 +699,7 @@ const ProjectDetail: React.FC = () => {
                           </div>
                         </div>
                         
-                        {expandedDocIds.has(doc.id) && doc.versions && doc.versions.length > 0 && (
+                        {expandedDocIds[doc.id] && doc.versions && doc.versions.length > 0 && (
                            <div className="mt-3 pl-12 pr-4">
                               <p className="text-xs font-bold text-muted uppercase mb-2">Version History</p>
                               <div className="space-y-2">

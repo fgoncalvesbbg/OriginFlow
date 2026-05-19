@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { convertProposalToRFQ, getSuppliers } from '../../services/apiService';
+import { convertProposalToRFQ, getSuppliers } from '../../services';
 import { SupplierProposal, Supplier } from '../../types';
 import { useToast } from '../../hooks';
 import { useAuth } from '../../context/AuthContext';

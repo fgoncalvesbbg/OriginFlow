@@ -35,7 +35,7 @@ const PMDashboard: React.FC = () => {
       ]);
       setProjects(pData);
       setSuppliers(sData);
-      setStats(statsData as any);
+      setStats(statsData);
     } catch (e: any) {
       console.error("Failed to load dashboard data", e);
       setErrorMsg(e.message || "Failed to load data.");

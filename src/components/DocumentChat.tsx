@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { getDocumentComments, addDocumentComment } from '../services/apiService';
+import { getDocumentComments, addDocumentComment } from '../services';
 import { DocumentComment } from '../types';
 import { MessageSquare, Send, X, Loader2 } from 'lucide-react';
 

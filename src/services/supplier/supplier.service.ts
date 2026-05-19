@@ -5,9 +5,9 @@
 
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { Supplier } from '../../types';
-import { mapSupplier } from '../../utils/mappers.utils';
-import { handleError } from '../../utils';
+import { Supplier, User, Project } from '../../types';
+import { mapSupplier, mapProfile, mapProject } from '../../utils/mappers.utils';
+import { handleError, generateUUID } from '../../utils';
 
 /**
  * Get all suppliers
@@ -105,4 +105,64 @@ export const regenerateSupplierAccessCode = async (supplierId: string): Promise<
     }
 
     return data.access_code;
+};
+
+export const ensureSupplierToken = async (supplierId: string): Promise<string> => {
+    if (!supplierId) throw new Error("Supplier ID is required");
+    const sup = await getSupplierById(supplierId);
+    if (!sup) throw new Error("Supplier not found");
+    if (sup.portalToken) return sup.portalToken;
+    const token = generateUUID();
+    const { error } = await supabase.from('suppliers').update({ portal_token: token }).eq('id', supplierId);
+    if (error) handleError(error, 'ensureSupplierToken');
+    return token;
+};
+
+export const assignSupplierToPMs = async (supplierId: string, pmIds: string[]): Promise<void> => {
+    if (!supplierId || !pmIds.length) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from('supplier_pm_assignments').delete().eq('supplier_id', supplierId);
+    const assignments = pmIds.map(pmId => ({ supplier_id: supplierId, pm_id: pmId, assigned_by: user?.id }));
+    const { error } = await supabase.from('supplier_pm_assignments').insert(assignments);
+    if (error) handleError(error, 'assignSupplierToPMs');
+};
+
+export const getSupplierPMs = async (supplierId: string): Promise<User[]> => {
+    if (!supplierId || !isLive) return [];
+    const { data, error } = await supabase.from('supplier_pm_assignments').select('pm_id').eq('supplier_id', supplierId);
+    if (error) return [];
+    const pmIds = (data || []).map((d: any) => d.pm_id);
+    if (!pmIds.length) return [];
+    const { data: profiles, error: profileError } = await supabase.from('profiles').select('*').in('id', pmIds);
+    if (profileError) return [];
+    return (profiles || []).map(mapProfile);
+};
+
+export const reassignProjectPM = async (projectId: string, newPmId: string): Promise<Project> => {
+    const { data, error } = await supabase.from('projects').update({ pm_id: newPmId }).eq('id', projectId).select().single();
+    if (error) handleError(error, 'reassignProjectPM');
+    if (!data) throw new Error('reassignProjectPM: no data returned');
+    return mapProject(data);
+};
+
+export const logAccessCodeAttempt = async (
+    supplierId: string,
+    accessCode: string,
+    ipAddress: string,
+    success: boolean
+): Promise<void> => {
+    try {
+        const { error } = await portalClient.from('supplier_access_logs').insert({
+            supplier_id: supplierId,
+            access_code: accessCode,
+            ip_address: ipAddress,
+            success,
+            created_at: new Date().toISOString()
+        });
+        if (error) {
+            console.error('Failed to log access code attempt:', error);
+        }
+    } catch (e) {
+        console.error('Error logging access code attempt:', e);
+    }
 };

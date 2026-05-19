@@ -23,6 +23,7 @@ const CreateProject: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     Promise.all([
       getSuppliers().catch(err => {
         console.error('Error loading suppliers:', err);
@@ -35,9 +36,11 @@ const CreateProject: React.FC = () => {
         return [];
       })
     ]).then(([suppliersData, usersData]) => {
+      if (!mounted) return;
       setSuppliers(suppliersData);
       setUsers(usersData);
     });
+    return () => { mounted = false; };
   }, []);
 
   // Default PM to current user if available
