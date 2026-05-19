@@ -6,6 +6,8 @@ import { getSuppliers, createRFQ, getCategories, getCategoryAttributes } from '.
 import { Supplier, CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachment } from '../../types';
 import { ArrowLeft, Loader2, Users, Layers, Image as ImageIcon, Upload, Paperclip, X, FileText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import AttributeInput from '../../components/common/AttributeInput';
+import { validateAttributeValue } from '../../utils';
 
 const CreateRFQ: React.FC = () => {
   const navigate = useNavigate();
@@ -28,8 +30,9 @@ const CreateRFQ: React.FC = () => {
   const [attachments, setAttachments] = useState<RFQAttachment[]>([]);
 
   // Dynamic Attributes State
-  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({}); // AttrID -> Value
-  const [attributeTypes, setAttributeTypes] = useState<Record<string, 'fixed' | 'range' | 'text'>>({}); // AttrID -> Type choice
+  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({});
+  const [attributeTypes, setAttributeTypes] = useState<Record<string, 'fixed' | 'range' | 'text'>>({});
+  const [attributeErrors, setAttributeErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const load = async () => {
@@ -51,24 +54,23 @@ const CreateRFQ: React.FC = () => {
 
   const handleCategoryChange = (catId: string) => {
       setSelectedCategory(catId);
-      // Reset attributes for new category
       const catAttrs = allAttributes.filter(a => a.categoryId === catId);
-      const initialTypes: Record<string, any> = {};
+      const initialTypes: Record<string, 'fixed' | 'range' | 'text'> = {};
       const initialValues: Record<string, string> = {};
-      
       catAttrs.forEach(attr => {
-          initialTypes[attr.id] = attr.dataType === 'number' ? 'fixed' : 'text';
+          const isNumeric = attr.dataType === 'integer' || attr.dataType === 'decimal' || attr.dataType === 'number' as any;
+          initialTypes[attr.id] = isNumeric ? 'fixed' : 'text';
           initialValues[attr.id] = '';
       });
-      
       setAttributeTypes(initialTypes);
       setAttributeValues(initialValues);
+      setAttributeErrors({});
   };
 
   const handleAttributeTypeChange = (attrId: string, type: 'fixed' | 'range') => {
       setAttributeTypes(prev => ({ ...prev, [attrId]: type }));
-      // Clear value when switching type to avoid confusion
       setAttributeValues(prev => ({ ...prev, [attrId]: '' }));
+      setAttributeErrors(prev => ({ ...prev, [attrId]: '' }));
   };
 
   // File Helpers
@@ -110,12 +112,25 @@ const CreateRFQ: React.FC = () => {
           alert("Please select at least one supplier.");
           return;
       }
+
+      const currentCatAttributes = allAttributes.filter(a => a.categoryId === selectedCategory);
+
+      // Validate attributes before submit
+      const newErrors: Record<string, string> = {};
+      currentCatAttributes.forEach(attr => {
+          const err = validateAttributeValue(attr, attributeValues[attr.id] || '', attributeTypes[attr.id] as any || 'text');
+          if (err) newErrors[attr.id] = err;
+      });
+      if (Object.keys(newErrors).length > 0) {
+          setAttributeErrors(newErrors);
+          return;
+      }
+
       setSubmitting(true);
-      
+
       // Prepare Attributes Payload
       const attributesPayload: RFQAttributeValue[] = [];
-      const currentCatAttributes = allAttributes.filter(a => a.categoryId === selectedCategory);
-      
+
       currentCatAttributes.forEach(attr => {
           const val = attributeValues[attr.id];
           if (val) {
@@ -254,45 +269,18 @@ const CreateRFQ: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
                         {currentCatAttributes.map(attr => (
                             <div key={attr.id} className="bg-white p-4 rounded border border-gray-200 shadow">
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-sm font-bold text-gray-800">{attr.name}</label>
-                                    {attr.dataType === 'number' && (
-                                        <div className="flex bg-gray-100 rounded p-0.5 text-[10px] font-bold">
-                                            <button 
-                                                type="button"
-                                                onClick={() => handleAttributeTypeChange(attr.id, 'fixed')}
-                                                className={`px-2 py-0.5 rounded transition-colors ${attributeTypes[attr.id] === 'fixed' ? 'bg-white shadow text-indigo-600' : 'text-muted'}`}
-                                            >
-                                                Fixed
-                                            </button>
-                                            <button 
-                                                type="button"
-                                                onClick={() => handleAttributeTypeChange(attr.id, 'range')}
-                                                className={`px-2 py-0.5 rounded transition-colors ${attributeTypes[attr.id] === 'range' ? 'bg-white shadow text-indigo-600' : 'text-muted'}`}
-                                            >
-                                                Range
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                                
-                                {attributeTypes[attr.id] === 'range' ? (
-                                    <input 
-                                        type="text"
-                                        className="w-full border border-gray-300 rounded p-2 text-sm focus:border-indigo-500 outline-none"
-                                        placeholder="e.g. 100-200"
-                                        value={attributeValues[attr.id] || ''}
-                                        onChange={e => setAttributeValues({...attributeValues, [attr.id]: e.target.value})}
-                                    />
-                                ) : (
-                                    <input 
-                                        type={attr.dataType === 'number' ? 'number' : 'text'}
-                                        className="w-full border border-gray-300 rounded p-2 text-sm focus:border-indigo-500 outline-none"
-                                        placeholder={attr.dataType === 'number' ? 'e.g. 100' : 'Specification...'}
-                                        value={attributeValues[attr.id] || ''}
-                                        onChange={e => setAttributeValues({...attributeValues, [attr.id]: e.target.value})}
-                                    />
-                                )}
+                                <label className="block text-sm font-bold text-gray-800 mb-2">
+                                    {attr.name}
+                                    {attr.validationRules?.required && <span className="text-rose-500 ml-1">*</span>}
+                                </label>
+                                <AttributeInput
+                                    attribute={attr}
+                                    value={attributeValues[attr.id] || ''}
+                                    onChange={v => setAttributeValues(prev => ({ ...prev, [attr.id]: v }))}
+                                    mode={attributeTypes[attr.id] as 'fixed' | 'range' | 'text' || 'text'}
+                                    onModeChange={type => handleAttributeTypeChange(attr.id, type)}
+                                    error={attributeErrors[attr.id]}
+                                />
                             </div>
                         ))}
                     </div>

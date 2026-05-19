@@ -5,7 +5,7 @@
 
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { ComplianceRequirement, CategoryAttribute } from '../../types';
+import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
 
 /**
@@ -81,7 +81,8 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
         id: a.id,
         categoryId: a.category_id,
         name: a.name,
-        dataType: a.dataType
+        dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
+        validationRules: a.validation_rules ?? undefined,
     }));
 };
 
@@ -93,7 +94,8 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         id: attr.id,
         category_id: attr.categoryId,
         name: attr.name,
-        dataType: attr.dataType
+        data_type: attr.dataType,
+        validation_rules: attr.validationRules ?? null,
     };
     const { error } = await supabase.from('category_attributes').upsert(payload);
     if (error) handleError(error, 'saveCategoryAttribute');

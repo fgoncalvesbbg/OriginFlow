@@ -201,7 +201,7 @@ const AdminDashboard: React.FC = () => {
         setEditingItem({ name: '', active: true, categoryId: selectedCategoryDetail });
     } else {
         if (!selectedCategoryDetail) return;
-        setEditingItem({ name: '', categoryId: selectedCategoryDetail, dataType: 'text' });
+        setEditingItem({ name: '', categoryId: selectedCategoryDetail, dataType: 'text', validationRules: {} });
     }
     setIsModalOpen(true);
   };
@@ -369,7 +369,9 @@ const AdminDashboard: React.FC = () => {
                             <div key={a.id} className="p-4 bg-white border border-gray-200 rounded-xl shadow hover:shadow-md flex justify-between items-center group">
                                 <div>
                                     <div className="font-bold text-gray-800">{a.name}</div>
-                                    <div className="text-xs text-muted mt-1 capitalize badge bg-gray-100 inline-block px-2 py-0.5 rounded border border-gray-200">Type: {a.dataType}</div>
+                                    <div className="text-xs text-muted mt-1 capitalize badge bg-gray-100 inline-block px-2 py-0.5 rounded border border-gray-200">
+                                      {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''}{a.validationRules?.min !== undefined || a.validationRules?.max !== undefined ? ` [${a.validationRules?.min ?? ''}–${a.validationRules?.max ?? ''}]` : ''}
+                                    </div>
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <button onClick={() => handleEditItem(a, 'attribute')} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
@@ -685,17 +687,116 @@ const AdminDashboard: React.FC = () => {
               </div>
 
               {modalType === 'attribute' && (
-                  <div>
+                  <>
+                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Data Type</label>
-                      <select 
+                      <select
                         className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         value={editingItem.dataType}
-                        onChange={e => setEditingItem({...editingItem, dataType: e.target.value})}
+                        onChange={e => setEditingItem({ ...editingItem, dataType: e.target.value, validationRules: {} })}
                       >
-                          <option value="text">Text</option>
-                          <option value="number">Number</option>
+                        <option value="text">Text (free input)</option>
+                        <option value="integer">Integer (whole number)</option>
+                        <option value="decimal">Decimal (fractional number)</option>
+                        <option value="boolean">Boolean (Yes / No)</option>
+                        <option value="enum">Dropdown (fixed options list)</option>
                       </select>
-                  </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Placeholder / Hint (optional)</label>
+                      <input
+                        type="text"
+                        className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editingItem.validationRules?.placeholder || ''}
+                        onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, placeholder: e.target.value } })}
+                        placeholder="e.g. Enter value in watts"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="attrRequired"
+                        className="w-4 h-4 text-indigo-600 rounded"
+                        checked={!!editingItem.validationRules?.required}
+                        onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, required: e.target.checked } })}
+                      />
+                      <label htmlFor="attrRequired" className="text-sm text-gray-700 select-none">Required field</label>
+                    </div>
+
+                    {(editingItem.dataType === 'integer' || editingItem.dataType === 'decimal') && (
+                      <div className="bg-indigo-50 p-3 rounded-md border border-indigo-200 space-y-3">
+                        <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide">Numeric Rules</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Unit (e.g. W, mm, kg)</label>
+                            <input
+                              type="text"
+                              className="w-full border border-gray-300 p-2 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                              value={editingItem.validationRules?.unit || ''}
+                              onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, unit: e.target.value } })}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Step</label>
+                            <input
+                              type="number"
+                              className="w-full border border-gray-300 p-2 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                              value={editingItem.validationRules?.step ?? ''}
+                              onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, step: e.target.value ? Number(e.target.value) : undefined } })}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Min value</label>
+                            <input
+                              type="number"
+                              className="w-full border border-gray-300 p-2 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                              value={editingItem.validationRules?.min ?? ''}
+                              onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, min: e.target.value ? Number(e.target.value) : undefined } })}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Max value</label>
+                            <input
+                              type="number"
+                              className="w-full border border-gray-300 p-2 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                              value={editingItem.validationRules?.max ?? ''}
+                              onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, max: e.target.value ? Number(e.target.value) : undefined } })}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="attrAllowRange"
+                            className="w-4 h-4 text-indigo-600 rounded"
+                            checked={!!editingItem.validationRules?.allowRange}
+                            onChange={e => setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, allowRange: e.target.checked } })}
+                          />
+                          <label htmlFor="attrAllowRange" className="text-xs text-gray-700 select-none">Allow range input (min–max)</label>
+                        </div>
+                      </div>
+                    )}
+
+                    {editingItem.dataType === 'enum' && (
+                      <div className="bg-indigo-50 p-3 rounded-md border border-indigo-200">
+                        <label className="block text-xs font-bold text-indigo-700 uppercase tracking-wide mb-2">Allowed Options</label>
+                        <textarea
+                          rows={4}
+                          className="w-full border border-gray-300 p-2 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                          placeholder="One option per line, or comma-separated&#10;e.g. Red&#10;Green&#10;Blue"
+                          value={(editingItem.validationRules?.enumOptions ?? []).join('\n')}
+                          onChange={e => {
+                            const raw = e.target.value;
+                            const opts = raw.split(/[\n,]/).map((s: string) => s.trim()).filter(Boolean);
+                            setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, enumOptions: opts } });
+                          }}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Supplier will see a dropdown with only these choices.</p>
+                      </div>
+                    )}
+                  </>
               )}
 
               {modalType === 'supplier' && (

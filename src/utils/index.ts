@@ -31,3 +31,4 @@ export {
 } from './validators.utils';
 
 export type { ValidationResult } from './validators.utils';
+export { validateAttributeValue } from './attribute-validation.utils';

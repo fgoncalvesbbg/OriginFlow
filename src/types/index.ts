@@ -27,7 +27,9 @@ export type {
   ComplianceResponseItem,
   ChangeLogEntry,
   ComplianceRequest,
-  CategoryAttribute
+  CategoryAttribute,
+  AttributeDataType,
+  AttributeValidationRules
 } from './compliance.types';
 
 // IM types

@@ -81,9 +81,23 @@ export interface ComplianceRequest {
   respondentPosition?: string;
 }
 
+export type AttributeDataType = 'text' | 'integer' | 'decimal' | 'boolean' | 'enum';
+
+export interface AttributeValidationRules {
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  allowRange?: boolean;
+  enumOptions?: string[];
+  placeholder?: string;
+  required?: boolean;
+}
+
 export interface CategoryAttribute {
   id: string;
   categoryId: string;
   name: string;
-  dataType: 'text' | 'number';
+  dataType: AttributeDataType;
+  validationRules?: AttributeValidationRules;
 }
