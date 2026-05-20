@@ -1,12 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
-import { 
-  getCategories, getProductFeatures, getComplianceRequirements, 
+import {
+  getCategories, getComplianceRequirements,
   saveRequirement, deleteRequirement, addStandardRequirements,
   COMPLIANCE_SECTIONS
 } from '../../services';
-import { CategoryL3, ProductFeature, ComplianceRequirement } from '../../types';
+import { CategoryL3, ComplianceRequirement } from '../../types';
 // Added comment above fix: Adding missing X icon to lucide-react imports
 import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -50,7 +50,6 @@ const ConfirmationModal: React.FC<{
 
 const ComplianceLibrary: React.FC = () => {
   const [categories, setCategories] = useState<CategoryL3[]>([]);
-  const [features, setFeatures] = useState<ProductFeature[]>([]);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -83,11 +82,10 @@ const ComplianceLibrary: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [c, f, r] = await Promise.all([
-        getCategories(), getProductFeatures(), getComplianceRequirements()
+      const [c, r] = await Promise.all([
+        getCategories(), getComplianceRequirements()
       ]);
       setCategories(c);
-      setFeatures(f);
       setRequirements(r);
     } catch (error) {
       console.error("Failed to load library data", error);
@@ -200,15 +198,6 @@ const ComplianceLibrary: React.FC = () => {
           }
       });
   }
-
-  const toggleFeatureCondition = (featureId: string) => {
-    const current = editingItem.conditionFeatureIds || [];
-    if (current.includes(featureId)) {
-      setEditingItem({ ...editingItem, conditionFeatureIds: current.filter((id: string) => id !== featureId) });
-    } else {
-      setEditingItem({ ...editingItem, conditionFeatureIds: [...current, featureId] });
-    }
-  };
 
   const toggleSection = (section: string) => {
       const next = new Set(expandedSections);
@@ -460,17 +449,6 @@ const ComplianceLibrary: React.FC = () => {
                                                 </div>
                                             </div>
                                             
-                                            {r.conditionFeatureIds.length > 0 && (
-                                                <div className="flex items-center gap-1.5">
-                                                    <Sparkles size={12} className="text-purple-400" />
-                                                    <div className="flex flex-wrap gap-1">
-                                                        {r.conditionFeatureIds.map(fid => {
-                                                            const fName = features.find(f => f.id === fid)?.name;
-                                                            return <span key={fid} className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">{fName}</span>;
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>
                                     </div>
                                     
@@ -748,28 +726,6 @@ const ComplianceLibrary: React.FC = () => {
                   </div>
               </div>
 
-              <div className="bg-light p-4 rounded-xl border border-gray-200">
-                <label className="block text-sm font-bold text-gray-700 mb-2">Applicable Features (Conditions)</label>
-                <div className="flex flex-wrap gap-2">
-                  {features.filter(f => f.categoryId === (editingItem.categoryId || selectedCategoryForReqs)).map(feat => {
-                    const isSelected = editingItem.conditionFeatureIds?.includes(feat.id);
-                    return (
-                      <button
-                        key={feat.id}
-                        type="button"
-                        onClick={() => toggleFeatureCondition(feat.id)}
-                        className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                          isSelected 
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow' 
-                            : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'
-                        }`}
-                      >
-                        {feat.name} {isSelected && '✓'}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             </form>
             </div>
               

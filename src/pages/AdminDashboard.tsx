@@ -3,14 +3,14 @@ import Layout from '../components/Layout';
 import {
   getProfiles, updateUserRole,
   getSuppliers, createSupplier, ensureSupplierToken, updateSupplier,
-  getCategories, getProductFeatures, saveCategory, saveProductFeature,
-  deleteCategory, deleteProductFeature,
+  getCategories, saveCategory,
+  deleteCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects
 } from '../services';
 import { generateUUID } from '../utils';
-import { User, UserRole, Supplier, CategoryL3, ProductFeature, CategoryAttribute } from '../types';
+import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -45,7 +45,6 @@ const AdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<CategoryL3[]>([]);
-  const [features, setFeatures] = useState<ProductFeature[]>([]);
   const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
   
   // Forms & UI State
@@ -61,12 +60,12 @@ const AdminDashboard: React.FC = () => {
   const [selectedProjectForReassignment, setSelectedProjectForReassignment] = useState<any>(null);
   const [newPMIdForProject, setNewPMIdForProject] = useState<string>('');
 
-  // Category/Feature/Attribute Editing State
+  // Category/Attribute Editing State
   const [selectedCategoryDetail, setSelectedCategoryDetail] = useState<string | null>(null);
-  const [detailView, setDetailView] = useState<'features' | 'attributes'>('features');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'category' | 'feature' | 'attribute' | 'supplier'>('category');
+  const [modalType, setModalType] = useState<'category' | 'attribute' | 'supplier'>('category');
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [enumOptionsDraft, setEnumOptionsDraft] = useState<string>('');
 
   // Delete Modal State
   const [deleteModal, setDeleteModal] = useState<{
@@ -86,18 +85,16 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const [u, s, c, f, a, p] = await Promise.all([
+    const [u, s, c, a, p] = await Promise.all([
       getProfiles(),
       getSuppliers(),
       getCategories(),
-      getProductFeatures(),
       getCategoryAttributes(),
       getProjects()
     ]);
     setUsers(u);
     setSuppliers(s);
     setCategories(c);
-    setFeatures(f);
     setAttributes(a);
     setProjects(p);
   };
@@ -191,24 +188,25 @@ const AdminDashboard: React.FC = () => {
     setProjectReassignmentModalOpen(true);
   };
 
-  // --- CATEGORY & FEATURE ACTIONS ---
-  const openAddModal = (type: 'category' | 'feature' | 'attribute') => {
+  // --- CATEGORY & ATTRIBUTE ACTIONS ---
+  const openAddModal = (type: 'category' | 'attribute') => {
     setModalType(type);
     if (type === 'category') {
       setEditingItem({ name: '', active: true, isFinalized: false });
-    } else if (type === 'feature') {
-        if (!selectedCategoryDetail) return;
-        setEditingItem({ name: '', active: true, categoryId: selectedCategoryDetail });
     } else {
         if (!selectedCategoryDetail) return;
         setEditingItem({ name: '', categoryId: selectedCategoryDetail, dataType: 'text', validationRules: {} });
+        setEnumOptionsDraft('');
     }
     setIsModalOpen(true);
   };
 
-  const handleEditItem = (item: any, type: 'category' | 'feature' | 'attribute' | 'supplier') => {
+  const handleEditItem = (item: any, type: 'category' | 'attribute' | 'supplier') => {
     setModalType(type);
     setEditingItem({ ...item });
+    if (type === 'attribute') {
+      setEnumOptionsDraft((item.validationRules?.enumOptions ?? []).join('\n'));
+    }
     setIsModalOpen(true);
   };
 
@@ -223,23 +221,6 @@ const AdminDashboard: React.FC = () => {
           loadData();
         } catch (e: any) {
           alert(`Failed to delete category: ${e.message}`);
-        }
-        setDeleteModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
-  };
-
-  const handleDeleteFeature = (id: string) => {
-    setDeleteModal({
-      isOpen: true,
-      title: 'Delete Feature',
-      message: 'Are you sure you want to delete this feature?',
-      onConfirm: async () => {
-        try {
-          await deleteProductFeature(id);
-          loadData();
-        } catch (e: any) {
-          alert(`Failed to delete feature: ${e.message}`);
         }
         setDeleteModal(prev => ({ ...prev, isOpen: false }));
       }
@@ -269,9 +250,6 @@ const AdminDashboard: React.FC = () => {
         if (modalType === 'category') {
           const item = editingItem as CategoryL3;
           await saveCategory({ ...item, id: item.id || generateUUID() });
-        } else if (modalType === 'feature') {
-          const item = editingItem as ProductFeature;
-          await saveProductFeature({ ...item, id: item.id || generateUUID() });
         } else if (modalType === 'attribute') {
           const item = editingItem as CategoryAttribute;
           await saveCategoryAttribute({ ...item, id: item.id || generateUUID() });
@@ -313,83 +291,41 @@ const AdminDashboard: React.FC = () => {
                 <div className="flex justify-between items-center mb-6">
                     <div>
                         <h3 className="text-xl font-bold text-primary">{category?.name}</h3>
-                        <div className="flex gap-4 mt-2">
-                            <button 
-                                onClick={() => setDetailView('features')}
-                                className={`text-sm font-medium pb-2 border-b-2 transition-colors ${detailView === 'features' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}
-                            >
-                                Compliance Features
-                            </button>
-                            <button 
-                                onClick={() => setDetailView('attributes')}
-                                className={`text-sm font-medium pb-2 border-b-2 transition-colors ${detailView === 'attributes' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}
-                            >
-                                Sourcing Attributes
-                            </button>
-                        </div>
+                        <p className="text-sm text-muted mt-1">Attributes</p>
                     </div>
-                    <button 
-                        onClick={() => openAddModal(detailView === 'features' ? 'feature' : 'attribute')} 
+                    <button
+                        onClick={() => openAddModal('attribute')}
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow"
                     >
-                        <Plus size={16} /> Add {detailView === 'features' ? 'Feature' : 'Attribute'}
+                        <Plus size={16} /> Add Attribute
                     </button>
                 </div>
 
-                {detailView === 'features' ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {features.filter(f => f.categoryId === selectedCategoryDetail).map(f => (
-                            <div key={f.id} className="p-4 bg-white border border-gray-200 rounded-xl shadow hover:shadow-md flex justify-between items-center group">
-                                <div>
-                                    <div className="font-bold text-gray-800">{f.name}</div>
-                                    <div className="text-xs text-gray-400 mt-1">ID: {f.id}</div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${f.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
-                                        {f.active ? 'Active' : 'Inactive'}
-                                    </span>
-                                    <button onClick={() => handleEditItem(f, 'feature')} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
-                                        <Edit2 size={16} />
-                                    </button>
-                                    <button onClick={() => handleDeleteFeature(f.id)} className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
-                                        <Trash2 size={16} />
-                                    </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {attributes.filter(a => a.categoryId === selectedCategoryDetail).map(a => (
+                        <div key={a.id} className="p-4 bg-white border border-gray-200 rounded-xl shadow hover:shadow-md flex justify-between items-center group">
+                            <div>
+                                <div className="font-bold text-gray-800">{a.name}</div>
+                                <div className="text-xs text-muted mt-1 capitalize badge bg-gray-100 inline-block px-2 py-0.5 rounded border border-gray-200">
+                                  {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''}{a.validationRules?.min !== undefined || a.validationRules?.max !== undefined ? ` [${a.validationRules?.min ?? ''}–${a.validationRules?.max ?? ''}]` : ''}
                                 </div>
                             </div>
-                        ))}
-                        {features.filter(f => f.categoryId === selectedCategoryDetail).length === 0 && (
-                            <div className="col-span-2 text-center py-10 text-gray-400 bg-light rounded-xl border border-dashed">
-                                No features defined. Features are boolean flags used for Compliance logic.
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => handleEditItem(a, 'attribute')} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
+                                    <Edit2 size={16} />
+                                </button>
+                                <button onClick={() => handleDeleteAttribute(a.id)} className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
+                                    <Trash2 size={16} />
+                                </button>
                             </div>
-                        )}
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {attributes.filter(a => a.categoryId === selectedCategoryDetail).map(a => (
-                            <div key={a.id} className="p-4 bg-white border border-gray-200 rounded-xl shadow hover:shadow-md flex justify-between items-center group">
-                                <div>
-                                    <div className="font-bold text-gray-800">{a.name}</div>
-                                    <div className="text-xs text-muted mt-1 capitalize badge bg-gray-100 inline-block px-2 py-0.5 rounded border border-gray-200">
-                                      {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''}{a.validationRules?.min !== undefined || a.validationRules?.max !== undefined ? ` [${a.validationRules?.min ?? ''}–${a.validationRules?.max ?? ''}]` : ''}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <button onClick={() => handleEditItem(a, 'attribute')} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
-                                        <Edit2 size={16} />
-                                    </button>
-                                    <button onClick={() => handleDeleteAttribute(a.id)} className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
-                                        <Trash2 size={16} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                        {attributes.filter(a => a.categoryId === selectedCategoryDetail).length === 0 && (
-                            <div className="col-span-2 text-center py-10 text-gray-400 bg-light rounded-xl border border-dashed">
-                                No attributes defined. Attributes are data fields (Text/Number) used for RFQs.
-                            </div>
-                        )}
-                    </div>
-                )}
+                        </div>
+                    ))}
+                    {attributes.filter(a => a.categoryId === selectedCategoryDetail).length === 0 && (
+                        <div className="col-span-2 text-center py-10 text-gray-400 bg-light rounded-xl border border-dashed">
+                            No attributes defined. Attributes are data fields (Text/Number) used for RFQs and Compliance.
+                        </div>
+                    )}
+                </div>
             </div>
         );
     }
@@ -405,7 +341,6 @@ const AdminDashboard: React.FC = () => {
             </div>
             <div className="divide-y divide-slate-100">
                 {categories.map(c => {
-                    const featCount = features.filter(f => f.categoryId === c.id).length;
                     const attrCount = attributes.filter(a => a.categoryId === c.id).length;
                     return (
                         <div key={c.id} className="p-4 hover:bg-light px-6 transition-colors">
@@ -420,17 +355,16 @@ const AdminDashboard: React.FC = () => {
                                         )}
                                     </div>
                                     <div className="flex gap-3 text-xs text-muted mt-1 items-center">
-                                        <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{featCount} Features</span>
                                         <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{attrCount} Attributes</span>
                                         <span className={`px-2 py-0.5 rounded font-medium ${c.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
                                             {c.active ? 'Active' : 'Inactive'}
                                         </span>
                                     </div>
                                 </div>
-                                
+
                                 <div className="flex items-center gap-3">
-                                    <button 
-                                        onClick={() => { setSelectedCategoryDetail(c.id); setDetailView('features'); }}
+                                    <button
+                                        onClick={() => setSelectedCategoryDetail(c.id)}
                                         className="text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded border border-transparent hover:border-indigo-100 flex items-center gap-1"
                                     >
                                         <SlidersHorizontal size={14} /> Configure
@@ -663,7 +597,7 @@ const AdminDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* Add/Edit Modal for Categories/Features/Attributes/Suppliers */}
+      {/* Add/Edit Modal for Categories/Attributes/Suppliers */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
@@ -682,7 +616,7 @@ const AdminDashboard: React.FC = () => {
                   className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
                   value={editingItem.name} 
                   onChange={e => setEditingItem({...editingItem, name: e.target.value})} 
-                  placeholder={`e.g. ${modalType === 'category' ? 'Home Audio' : modalType === 'feature' ? 'Bluetooth' : modalType === 'attribute' ? 'Power' : 'Supplier Name'}`}
+                  placeholder={`e.g. ${modalType === 'category' ? 'Home Audio' : modalType === 'attribute' ? 'Power' : 'Supplier Name'}`}
                 />
               </div>
 
@@ -693,7 +627,7 @@ const AdminDashboard: React.FC = () => {
                       <select
                         className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         value={editingItem.dataType}
-                        onChange={e => setEditingItem({ ...editingItem, dataType: e.target.value, validationRules: {} })}
+                        onChange={e => { setEditingItem({ ...editingItem, dataType: e.target.value, validationRules: {} }); setEnumOptionsDraft(''); }}
                       >
                         <option value="text">Text (free input)</option>
                         <option value="integer">Integer (whole number)</option>
@@ -786,10 +720,10 @@ const AdminDashboard: React.FC = () => {
                           rows={4}
                           className="w-full border border-gray-300 p-2 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
                           placeholder="One option per line, or comma-separated&#10;e.g. Red&#10;Green&#10;Blue"
-                          value={(editingItem.validationRules?.enumOptions ?? []).join('\n')}
-                          onChange={e => {
-                            const raw = e.target.value;
-                            const opts = raw.split(/[\n,]/).map((s: string) => s.trim()).filter(Boolean);
+                          value={enumOptionsDraft}
+                          onChange={e => setEnumOptionsDraft(e.target.value)}
+                          onBlur={e => {
+                            const opts = e.target.value.split(/[\n,]/).map((s: string) => s.trim()).filter(Boolean);
                             setEditingItem({ ...editingItem, validationRules: { ...editingItem.validationRules, enumOptions: opts } });
                           }}
                         />

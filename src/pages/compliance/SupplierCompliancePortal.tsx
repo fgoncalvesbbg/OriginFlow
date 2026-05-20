@@ -3,11 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   verifySupplierAccess, submitComplianceResponseSecure,
-  getComplianceRequirements, getProductFeatures, getCategories,
+  getComplianceRequirements, getCategories,
   COMPLIANCE_SECTIONS
 } from '../../services';
 import {
-  ComplianceRequest, ComplianceRequirement, ProductFeature,
+  ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
 import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle } from 'lucide-react';

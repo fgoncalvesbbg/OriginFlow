@@ -3,15 +3,15 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
 import Layout from '../../components/Layout';
-import { 
-  getComplianceRequestById, getComplianceRequirements, 
-  getProductFeatures, getCategories, submitComplianceResponse, deleteComplianceRequest,
+import {
+  getComplianceRequestById, getComplianceRequirements,
+  getCategories, submitComplianceResponse, deleteComplianceRequest,
   addDocument, uploadFile, getProjectDocs, COMPLIANCE_SECTIONS, getSupplierById,
   getProjectById
 } from '../../services';
 import { useAuth } from '../../context/AuthContext';
-import { 
-  ComplianceRequest, ComplianceRequirement, ProductFeature, 
+import {
+  ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
   DocStatus, ResponsibleParty, Supplier, Project
 } from '../../types';
@@ -46,7 +46,6 @@ const ComplianceRequestDetail: React.FC = () => {
   const [req, setReq] = useState<ComplianceRequest | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
-  const [features, setFeatures] = useState<ProductFeature[]>([]);
   const [category, setCategory] = useState<CategoryL3 | null>(null);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,17 +69,15 @@ const ComplianceRequestDetail: React.FC = () => {
   const loadData = async () => {
     if (!id) return;
     try {
-      const [r, allReqs, allFeats, allCats] = await Promise.all([
+      const [r, allReqs, allCats] = await Promise.all([
         getComplianceRequestById(id),
         getComplianceRequirements(),
-        getProductFeatures(),
         getCategories()
       ]);
 
       if (r) {
         setReq(r);
         setCategory(allCats.find(c => c.id === r.categoryId) || null);
-        setFeatures(allFeats);
 
         // Fetch supplier and project in parallel with error handling
         if (r.supplierId || r.projectId) {
