@@ -2,12 +2,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { 
-    getProjectById, getIMTemplateById, getIMSections, 
+import {
+    getProjectById, getIMTemplateById, getIMSections,
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
-    addDocument, uploadFile, getComplianceRequests, getProductFeatures
+    addDocument, uploadFile, getCategoryAttributes
 } from '../../services';
-import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, ProductFeature, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
+import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
 import { getIMThemeVariables } from './styles/im-theme';
@@ -81,8 +81,7 @@ const ProjectIMGenerator: React.FC = () => {
   const [conditions, setConditions] = useState<Record<string, boolean>>({});
   
   // Context Data
-  const [activeFeatures, setActiveFeatures] = useState<Set<string>>(new Set());
-  const [allFeatures, setAllFeatures] = useState<ProductFeature[]>([]);
+  const [allAttributes, setAllAttributes] = useState<CategoryAttribute[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -124,22 +123,8 @@ const ProjectIMGenerator: React.FC = () => {
         if (!proj) throw new Error("Project not found");
         setProject(proj);
 
-        // Load compliance data
-        const [reqs, feats] = await Promise.all([
-            getComplianceRequests(),
-            getProductFeatures()
-        ]);
-        setAllFeatures(feats);
-
-        // Determine active specs from approved/submitted requests
-        const projReqs = reqs.filter(r => r.projectId === proj.id);
-        const activeFeats = new Set<string>();
-        projReqs.forEach(r => {
-            r.features.forEach(f => {
-                if (f.value) activeFeats.add(f.featureId);
-            });
-        });
-        setActiveFeatures(activeFeats);
+        const attrs = await getCategoryAttributes();
+        setAllAttributes(attrs);
 
         const existingInstance = await getProjectIM(projectId!);
         
@@ -203,27 +188,16 @@ const ProjectIMGenerator: React.FC = () => {
           const parser = new DOMParser();
 
           sections.forEach(sec => {
-              // Check conditions in ALL languages to be safe, or just EN
               const html = sec.content['en'] || '';
               const doc = parser.parseFromString(html, 'text/html');
-              const conds = doc.querySelectorAll('.im-condition');
-              
-              conds.forEach((el) => {
+              doc.querySelectorAll('.im-condition').forEach((el) => {
                   const id = el.getAttribute('data-id');
-                  const featureId = el.getAttribute('data-feature-id');
-                  
-                  if (id) {
-                      if (featureId === 'manual') {
-                          defaults[id] = false; 
-                      } else if (featureId) {
-                          defaults[id] = activeFeatures.has(featureId);
-                      }
-                  }
+                  if (id) defaults[id] = false;
               });
           });
           setConditions(defaults);
       }
-  }, [sections, activeFeatures]);
+  }, [sections]);
 
   const handleTemplateSelect = async (e: React.ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
@@ -839,7 +813,7 @@ const ProjectIMGenerator: React.FC = () => {
                                    <div className="space-y-5">
                                        {items.map((item, idx) => {
                                            const isFilled = !!formData[item.id];
-                                           const featName = item.featureId !== 'manual' ? (allFeatures.find(f => f.id === item.featureId)?.name || 'Unknown Feature') : null;
+                                           const featName = item.featureId !== 'manual' ? (allAttributes.find(f => f.id === item.featureId)?.name || 'Unknown Attribute') : null;
                                            return (
                                                <div key={`${item.id}-${idx}`} className="group">
                                                    {item.kind === 'condition' ? (
@@ -849,7 +823,7 @@ const ProjectIMGenerator: React.FC = () => {
                                                                   {conditions[item.id] ? <CheckSquare size={18} /> : <Square size={18} className="text-gray-400" />}
                                                               </div>
                                                               <div>
-                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Feature Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}</div>
+                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Attribute Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}</div>
                                                                   <p className={`text-sm text-gray-700 select-none ${!conditions[item.id] && 'opacity-50 line-through'}`}>"{item.label}"</p>
                                                               </div>
                                                           </div>

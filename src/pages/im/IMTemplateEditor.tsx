@@ -2,8 +2,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getProductFeatures } from '../../services';
-import { IMTemplate, IMSection, CategoryL3, ProductFeature, IMTemplateMetadata, IMMasterLayoutName } from '../../types';
+import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes } from '../../services';
+import { IMTemplate, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName } from '../../types';
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleGenAI } from "@google/genai";
@@ -372,7 +372,7 @@ const IMTemplateEditor: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   
-  const [complianceFeatures, setComplianceFeatures] = useState<ProductFeature[]>([]);
+  const [categoryAttributes, setCategoryAttributes] = useState<CategoryAttribute[]>([]);
   const [isTranslating, setIsTranslating] = useState(false);
 
   const [activeSidebarTab, setActiveSidebarTab] = useState<'structure' | 'assets'>('structure');
@@ -409,13 +409,13 @@ const IMTemplateEditor: React.FC = () => {
 
   const loadData = async () => {
     if (!categoryId) return;
-    const [cats, temp, feats] = await Promise.all([
-        getCategories(), 
+    const [cats, temp, attrs] = await Promise.all([
+        getCategories(),
         getIMTemplateByCategoryId(categoryId),
-        getProductFeatures()
+        getCategoryAttributes()
     ]);
     setCategory(cats.find(c => c.id === categoryId) || null);
-    setComplianceFeatures(feats);
+    setCategoryAttributes(attrs);
     
     if (temp) {
       setTemplate(temp);
@@ -487,7 +487,7 @@ const IMTemplateEditor: React.FC = () => {
       let label = "Optional";
       let featureName = "";
       if (condFeatureId !== 'manual') {
-          const feat = complianceFeatures.find(f => f.id === condFeatureId);
+          const feat = categoryAttributes.find(f => f.id === condFeatureId);
           if (feat) { label = "Auto-Spec"; featureName = feat.name; }
       }
       const safeText = encodeURIComponent(condText);
@@ -721,7 +721,7 @@ const IMTemplateEditor: React.FC = () => {
   const currentSection = sections.find(s => s.id === selectedSectionId);
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
-  const categoryFeatures = complianceFeatures.filter(f => f.categoryId === categoryId);
+  const categoryFeatures = categoryAttributes.filter(f => f.categoryId === categoryId);
   const imThemeVars = getIMThemeVariables(metaSettings);
 
   return (
@@ -880,11 +880,11 @@ const IMTemplateEditor: React.FC = () => {
                         <label className="block text-sm font-medium text-gray-700 mb-1">Condition Trigger</label>
                         <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={condFeatureId} onChange={(e) => setCondFeatureId(e.target.value)}>
                             <option value="manual">Manual Selection (Optional Block)</option>
-                            <optgroup label="Auto-include based on Feature">
+                            <optgroup label="Auto-include based on Attribute">
                                 {categoryFeatures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                             </optgroup>
                         </select>
-                        <p className="text-xs text-muted mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : "Text is automatically included if the project has this feature active."}</p>
+                        <p className="text-xs text-muted mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : "Text is automatically included if this attribute is enabled for the project."}</p>
                       </div>
                       <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Content to Show</label>
