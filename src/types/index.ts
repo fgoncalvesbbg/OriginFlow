@@ -15,7 +15,8 @@ export type {
   ProjectStep,
   DocVersion,
   ProjectDocument,
-  DocumentComment
+  DocumentComment,
+  ProjectAttributeRequest
 } from './project.types';
 
 // Compliance types

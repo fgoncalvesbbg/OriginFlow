@@ -71,7 +71,7 @@ export const getProjectsBySupplierToken = async (token: string): Promise<Project
 /**
  * Create a new project with initial steps and documents
  */
-export const createProject = async (name: string, supplierId: string, projectId: string, pmId: string): Promise<Project> => {
+export const createProject = async (name: string, supplierId: string, projectId: string, pmId: string, categoryId?: string): Promise<Project> => {
     const { data: { user } } = await supabase.auth.getUser();
 
     const { data, error } = await supabase.from('projects').insert({
@@ -79,6 +79,7 @@ export const createProject = async (name: string, supplierId: string, projectId:
         supplier_id: supplierId,
         project_id_code: projectId,
         pm_id: pmId,
+        category_id: categoryId || null,
         created_by: user?.id,
         status: ProjectOverallStatus.IN_PROGRESS,
         current_step: 1,

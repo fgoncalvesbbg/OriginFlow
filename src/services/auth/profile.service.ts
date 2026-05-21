@@ -14,7 +14,10 @@ import { mapProfile } from '../../utils/mappers.utils';
 export const getProfiles = async (): Promise<User[]> => {
     if (!isLive) return [];
     const { data, error } = await supabase.from('profiles').select('*');
-    if (error) return [];
+    if (error) {
+        console.error('getProfiles failed', error);
+        return [];
+    }
     return (data || []).map(mapProfile);
 };
 

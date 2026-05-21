@@ -35,6 +35,7 @@ export const mapProject = (p: any): Project => {
     pmId: p.pm_id,
     currentStep: p.current_step,
     status: p.status,
+    categoryId: p.category_id ?? null,
     milestones: p.milestones,
     supplierLinkToken: p.supplier_link_token,
     createdAt: p.created_at

@@ -36,4 +36,4 @@ export {
   deleteCategoryAttribute
 } from './compliance-requirement.service';
 
-export { COMPLIANCE_SECTIONS } from '../../config/compliance.constants';
+export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';

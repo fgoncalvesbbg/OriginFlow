@@ -1,5 +1,14 @@
 import { CategoryAttribute } from '../types';
 
+/**
+ * Returns all attributes visible for a given category:
+ * - Attributes where categoryId matches (Category Specific)
+ * - Attributes where categoryId is null (global predefined groups, shared across all categories)
+ */
+export function getAttributesForCategory(all: CategoryAttribute[], categoryId: string): CategoryAttribute[] {
+  return all.filter(a => a.categoryId === categoryId || a.categoryId === null);
+}
+
 export function validateAttributeValue(
   attr: CategoryAttribute,
   value: string,

@@ -96,8 +96,9 @@ export interface AttributeValidationRules {
 
 export interface CategoryAttribute {
   id: string;
-  categoryId: string;
+  categoryId: string | null; // null = global (predefined groups, shared across all categories)
   name: string;
   dataType: AttributeDataType;
   validationRules?: AttributeValidationRules;
+  group?: string;
 }

@@ -41,7 +41,11 @@ export {
   deleteDocumentVersion,
   getDocumentComments,
   addDocumentComment,
-  getMissingDocumentsForSupplier
+  getMissingDocumentsForSupplier,
+  createAttributeRequest,
+  getAttributeRequestsByProject,
+  getAttributeRequestByToken,
+  submitAttributeRequest
 } from './project';
 
 // Supplier module
@@ -103,7 +107,9 @@ export {
   getCategoryAttributes,
   saveCategoryAttribute,
   deleteCategoryAttribute,
-  COMPLIANCE_SECTIONS
+  COMPLIANCE_SECTIONS,
+  ATTRIBUTE_GROUPS,
+  PREDEFINED_ATTRIBUTE_GROUPS
 } from './compliance';
 
 // IM module

@@ -3,15 +3,15 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
-import { 
-  getProjectById, 
-  getProjectSteps, 
-  getProjectDocs, 
+import {
+  getProjectById,
+  getProjectSteps,
+  getProjectDocs,
   getSupplierById,
   getSuppliers,
   getProfiles,
   updateProject,
-  saveProjectMilestones, 
+  saveProjectMilestones,
   updateStepStatus,
   updateDocStatus,
   uploadFile,
@@ -24,17 +24,21 @@ import {
   getCategories,
   getProjectIM,
   getProductionUpdates,
-  saveProductionUpdate
+  saveProductionUpdate,
+  createAttributeRequest,
+  getAttributeRequestsByProject
 } from '../services';
-import { 
-  Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty, 
-  ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason 
+import {
+  Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
+  ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason,
+  ProjectAttributeRequest
 } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
-  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw
+  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { ProjectAICopilot } from '../components/ProjectAICopilot';
 
 // --- Internal Components ---
@@ -108,6 +112,22 @@ const ProjectDetail: React.FC = () => {
       notes: ''
   });
   
+  // Attribute Requests
+  const [attrRequests, setAttrRequests] = useState<ProjectAttributeRequest[]>([]);
+  const [attrReqModal, setAttrReqModal] = useState(false);
+  const [attrReqStep, setAttrReqStep] = useState<2 | 3>(2);
+  const [attrReqCategoryId, setAttrReqCategoryId] = useState('');
+  const [attrReqSkuNumber, setAttrReqSkuNumber] = useState('');
+  const [attrReqSkuTitle, setAttrReqSkuTitle] = useState('');
+  const [attrReqSourceStep2, setAttrReqSourceStep2] = useState<ProjectAttributeRequest | null>(null);
+  const [attrReqNote, setAttrReqNote] = useState('');
+  const [attrReqSending, setAttrReqSending] = useState(false);
+  const [attrReqSendingAll, setAttrReqSendingAll] = useState(false);
+  const [attrLinkModal, setAttrLinkModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
+  const [attrLinkCopied, setAttrLinkCopied] = useState(false);
+  const [expandedAttrRequestId, setExpandedAttrRequestId] = useState<string | null>(null);
+  const [attrReqRefreshing, setAttrReqRefreshing] = useState(false);
+
   // Tabs
   const [activeTab, setActiveTab] = useState<'checklist' | 'compliance' | 'timeline' | 'im' | 'manufacturing'>('checklist');
   
@@ -212,6 +232,12 @@ const ProjectDetail: React.FC = () => {
         setCategories(cats);
         setProjectIM(imData || null);
         setProductionUpdates(prodUpdates);
+
+        // Load attribute requests
+        try {
+          const attrReqs = await getAttributeRequestsByProject(p.id);
+          setAttrRequests(attrReqs);
+        } catch (e) { console.error('Error loading attribute requests:', e); }
 
         // Init timeline form
         setTimelineForm({
@@ -341,6 +367,110 @@ const ProjectDetail: React.FC = () => {
     } catch (e: any) {
       showNotification(e.message, 'error');
     }
+  };
+
+  // --- Attribute Requests ---
+
+  const handleOpenAttrReqModal = (step: 2 | 3, step2Req?: ProjectAttributeRequest) => {
+    setAttrReqStep(step);
+    setAttrReqNote('');
+    setAttrReqSourceStep2(step2Req || null);
+    if (step === 3 && step2Req) {
+      setAttrReqSkuNumber(step2Req.skuNumber);
+      setAttrReqSkuTitle(step2Req.skuTitle);
+      setAttrReqCategoryId(step2Req.categoryId || project?.categoryId || complianceRequests[0]?.categoryId || '');
+    } else {
+      setAttrReqSkuNumber('');
+      setAttrReqSkuTitle('');
+      setAttrReqCategoryId(project?.categoryId || complianceRequests[0]?.categoryId || '');
+    }
+    setAttrReqModal(true);
+  };
+
+  const handleSendAttrRequest = async () => {
+    if (!project) return;
+    if (!attrReqSkuNumber.trim()) { showNotification('SKU number is required.', 'error'); return; }
+    setAttrReqSending(true);
+    try {
+      const cat = categories.find(c => c.id === attrReqCategoryId);
+      const prefill = attrReqStep === 3 && attrReqSourceStep2?.submittedData?.length
+        ? attrReqSourceStep2.submittedData
+        : undefined;
+      const req = await createAttributeRequest(
+        project.id, project.name, project.projectId,
+        attrReqCategoryId || null, cat?.name || '',
+        attrReqStep,
+        attrReqSkuNumber.trim(), attrReqSkuTitle.trim(),
+        attrReqNote.trim() || undefined,
+        prefill
+      );
+      const url = `${window.location.origin}/#/attribute-request/${req.token}`;
+      setAttrRequests(prev => [req, ...prev]);
+      setAttrReqModal(false);
+      setAttrLinkCopied(false);
+      setAttrLinkModal({ open: true, url });
+    } catch (e: any) {
+      showNotification('Failed to create request: ' + e.message, 'error');
+    } finally {
+      setAttrReqSending(false);
+    }
+  };
+
+  const handleSendAllProductionRequests = async () => {
+    if (!project) return;
+    const step2Reqs = attrRequests.filter(r => r.step === 2);
+    const existingStep3Skus = new Set(attrRequests.filter(r => r.step === 3).map(r => r.skuNumber));
+    const toCreate = step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber));
+    if (!toCreate.length) { showNotification('All SKUs already have production requests.', 'error'); return; }
+    setAttrReqSendingAll(true);
+    try {
+      const newReqs = await Promise.all(toCreate.map(s2 =>
+        createAttributeRequest(
+          project.id, project.name, project.projectId,
+          s2.categoryId, s2.categoryName,
+          3,
+          s2.skuNumber, s2.skuTitle,
+          undefined,
+          s2.status === 'submitted' && s2.submittedData?.length ? s2.submittedData : undefined
+        )
+      ));
+      setAttrRequests(prev => [...newReqs, ...prev]);
+      showNotification(`${newReqs.length} production request(s) created.`, 'success');
+    } catch (e: any) {
+      showNotification('Failed to create production requests: ' + e.message, 'error');
+    } finally {
+      setAttrReqSendingAll(false);
+    }
+  };
+
+  const handleCopyAttrLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setAttrLinkCopied(true);
+    setTimeout(() => setAttrLinkCopied(false), 2000);
+  };
+
+  const handleRefreshAttrRequests = async () => {
+    if (!project) return;
+    setAttrReqRefreshing(true);
+    try {
+      const reqs = await getAttributeRequestsByProject(project.id);
+      setAttrRequests(reqs);
+    } catch (e) { console.error('Error refreshing attribute requests:', e); }
+    finally { setAttrReqRefreshing(false); }
+  };
+
+  const handleExportAttrData = (req: ProjectAttributeRequest) => {
+    if (!req.submittedData?.length) return;
+    const rows = req.submittedData.map(d => ({
+      Attribute: d.name,
+      Value: d.value,
+      Type: d.type || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attributes');
+    const filename = `${project?.name || 'project'}_${req.categoryName || 'attributes'}_${new Date(req.submittedAt!).toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
   };
 
   // --- Timeline Edit ---
@@ -640,6 +770,167 @@ const ProjectDetail: React.FC = () => {
                 </div>
 
                 <div className="divide-y divide-slate-100">
+                  {/* Attribute Data Requests — Step 2 and Step 3, one row per SKU */}
+                  {(step.stepNumber === 2 || step.stepNumber === 3) && (() => {
+                    const stepNum = step.stepNumber as 2 | 3;
+                    const stepReqs = attrRequests.filter(r => r.step === stepNum);
+                    const step2Reqs = attrRequests.filter(r => r.step === 2);
+                    const existingStep3Skus = new Set(attrRequests.filter(r => r.step === 3).map(r => r.skuNumber));
+                    const unsentStep3Count = step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber)).length;
+                    const label = stepNum === 2 ? 'Product Attribute Data' : 'Final Attribute Verification';
+
+                    return (
+                      <div className="bg-indigo-50/30 border-b border-indigo-100">
+                        {/* Section header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-indigo-100/60">
+                          <div className="flex items-center gap-2">
+                            <ClipboardList size={15} className="text-indigo-500" />
+                            <span className="text-sm font-semibold text-gray-700">{label}</span>
+                            {stepReqs.length > 0 && (
+                              <span className="text-[10px] bg-indigo-100 text-indigo-600 font-bold px-1.5 py-0.5 rounded">{stepReqs.length} SKU{stepReqs.length > 1 ? 's' : ''}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleRefreshAttrRequests}
+                              disabled={attrReqRefreshing}
+                              title="Refresh"
+                              className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-lg disabled:opacity-50"
+                            >
+                              <RefreshCw size={12} className={attrReqRefreshing ? 'animate-spin' : ''} />
+                            </button>
+                            {stepNum === 2 && (
+                              <button
+                                onClick={() => handleOpenAttrReqModal(2)}
+                                className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium"
+                              >
+                                <Plus size={12} /> Add SKU
+                              </button>
+                            )}
+                            {stepNum === 3 && unsentStep3Count > 0 && (
+                              <button
+                                onClick={handleSendAllProductionRequests}
+                                disabled={attrReqSendingAll}
+                                className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50"
+                              >
+                                {attrReqSendingAll ? <><RefreshCw size={12} className="animate-spin"/> Sending...</> : <><Send size={12}/> Send All ({unsentStep3Count})</>}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Empty state */}
+                        {stepReqs.length === 0 && (
+                          <div className="px-4 py-4 text-xs text-gray-400 text-center">
+                            {stepNum === 2 ? 'No SKU requests sent yet. Click "Add SKU" to start.' : 'No production requests yet. Add SKUs in Step 2 first, then use "Send All".'}
+                          </div>
+                        )}
+
+                        {/* One row per SKU */}
+                        {stepReqs.map(req => {
+                          const isSubmitted = req.status === 'submitted';
+                          const isExpanded = expandedAttrRequestId === req.id;
+                          return (
+                            <div key={req.id} className="border-t border-indigo-100/60 first:border-t-0">
+                              <div className="flex items-center justify-between px-4 py-3 gap-3">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isSubmitted ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-sm font-semibold text-gray-800">{req.skuNumber || '—'}</span>
+                                      {req.skuTitle && <span className="text-xs text-gray-500 truncate">{req.skuTitle}</span>}
+                                      {isSubmitted
+                                        ? <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded flex-shrink-0">SUBMITTED</span>
+                                        : <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex-shrink-0">PENDING</span>
+                                      }
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 mt-0.5">
+                                      {isSubmitted ? `Submitted ${new Date(req.submittedAt!).toLocaleDateString()}` : `Sent ${new Date(req.createdAt).toLocaleDateString()}`}
+                                      {req.categoryName && ` · ${req.categoryName}`}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {isSubmitted && (
+                                    <button
+                                      onClick={() => setExpandedAttrRequestId(isExpanded ? null : req.id)}
+                                      className="text-xs text-emerald-700 font-medium hover:underline flex items-center gap-1"
+                                    >
+                                      {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>} Data
+                                    </button>
+                                  )}
+                                  <a
+                                    href={`${window.location.origin}/#/attribute-request/${req.token}`}
+                                    target="_blank" rel="noreferrer"
+                                    className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5"
+                                    title="Open portal link"
+                                  >
+                                    <LinkIcon size={11}/> Link
+                                  </a>
+                                  {stepNum === 3 && (
+                                    <button
+                                      onClick={() => {
+                                        const s2 = attrRequests.find(r => r.step === 2 && r.skuNumber === req.skuNumber);
+                                        handleOpenAttrReqModal(3, s2);
+                                      }}
+                                      className="text-xs text-gray-500 hover:text-indigo-600 flex items-center gap-0.5"
+                                      title="Resend"
+                                    >
+                                      <RefreshCw size={11}/> Resend
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              {/* Expanded submitted data */}
+                              {isExpanded && req.submittedData && req.submittedData.length > 0 && (
+                                <div className="px-4 pb-4">
+                                  <div className="flex justify-end mb-2">
+                                    <button
+                                      onClick={() => handleExportAttrData(req)}
+                                      className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium"
+                                    >
+                                      <Download size={12} /> Export to Excel
+                                    </button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {req.submittedData.map(d => (
+                                      <div key={d.attributeId} className="bg-white rounded border border-indigo-100 px-3 py-2">
+                                        <div className="text-xs text-gray-500">{d.name}</div>
+                                        <div className="text-sm font-medium text-gray-800">{d.value || '—'}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* Step 3: show which Step 2 SKUs are not yet sent */}
+                        {stepNum === 3 && step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber)).map(r => (
+                          <div key={r.id} className="border-t border-indigo-100/60 flex items-center justify-between px-4 py-3 gap-3">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className="w-2 h-2 rounded-full flex-shrink-0 bg-gray-300" />
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-gray-400">{r.skuNumber || '—'}</span>
+                                  {r.skuTitle && <span className="text-xs text-gray-400">{r.skuTitle}</span>}
+                                  <span className="text-[10px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded flex-shrink-0">NOT SENT</span>
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleOpenAttrReqModal(3, r)}
+                              className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                            >
+                              <Send size={11}/> Send
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   {allStepDocs.map(doc => {
                     const isRejected = doc.status === DocStatus.REJECTED;
                     const hasFile = !!doc.fileUrl;
@@ -1101,6 +1392,125 @@ const ProjectDetail: React.FC = () => {
                   </div>
               </div>
           </div>
+      )}
+
+      {/* Send Attribute Request Modal */}
+      {attrReqModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <ClipboardList size={18} className="text-indigo-600"/>
+                {attrReqStep === 2 ? 'Send Attribute Data Request' : 'Send Production Validation Request'}
+              </h3>
+              <button onClick={() => setAttrReqModal(false)}><X size={18} className="text-gray-400"/></button>
+            </div>
+            {attrReqStep === 3 && attrReqSourceStep2?.status === 'submitted' && (
+              <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                Pre-filled with Step 2 data — supplier will validate and resubmit for production.
+              </div>
+            )}
+
+            {/* SKU fields */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  SKU Number <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className={`w-full border rounded-lg p-2 text-sm outline-none ${attrReqStep === 3 ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 focus:ring-2 focus:ring-indigo-500'}`}
+                  placeholder="e.g. SKU-001"
+                  value={attrReqSkuNumber}
+                  onChange={e => setAttrReqSkuNumber(e.target.value)}
+                  disabled={attrReqStep === 3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  SKU Title
+                </label>
+                <input
+                  type="text"
+                  className={`w-full border rounded-lg p-2 text-sm outline-none ${attrReqStep === 3 ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 focus:ring-2 focus:ring-indigo-500'}`}
+                  placeholder="e.g. Wireless Charger 10W"
+                  value={attrReqSkuTitle}
+                  onChange={e => setAttrReqSkuTitle(e.target.value)}
+                  disabled={attrReqStep === 3}
+                />
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category
+                {attrReqStep === 3
+                  ? <span className="ml-2 text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded uppercase">Locked</span>
+                  : attrReqCategoryId && <span className="ml-2 text-[10px] font-bold bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded uppercase">From Project</span>}
+              </label>
+              <select
+                className={`w-full border rounded-lg p-2 text-sm outline-none ${attrReqStep === 3 ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 bg-white focus:ring-2 focus:ring-indigo-500'}`}
+                value={attrReqCategoryId}
+                onChange={e => setAttrReqCategoryId(e.target.value)}
+                disabled={attrReqStep === 3}
+              >
+                <option value="">— No category (predefined attributes only) —</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Message to Supplier (optional)</label>
+              <textarea
+                className="w-full border border-gray-300 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                rows={2}
+                placeholder="e.g. Please fill in the technical specifications for this SKU..."
+                value={attrReqNote}
+                onChange={e => setAttrReqNote(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setAttrReqModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+              <button
+                onClick={handleSendAttrRequest}
+                disabled={attrReqSending}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {attrReqSending ? <><span className="animate-spin">⏳</span> Creating...</> : <><Send size={14}/> Create Request</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Attribute Request Link Modal */}
+      {attrLinkModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg flex items-center gap-2"><CheckCircle2 size={18} className="text-emerald-600"/> Request Created!</h3>
+              <button onClick={() => setAttrLinkModal({ open: false, url: '' })}><X size={18} className="text-gray-400"/></button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">Share this link with the supplier. They will see the attribute form and submit their data directly.</p>
+            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+              <span className="text-xs text-gray-700 font-mono truncate flex-1 select-all">{attrLinkModal.url}</span>
+              <button
+                onClick={() => handleCopyAttrLink(attrLinkModal.url)}
+                className={`flex items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors ${attrLinkCopied ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'}`}
+              >
+                {attrLinkCopied ? <><Check size={12}/> Copied!</> : <><Copy size={12}/> Copy</>}
+              </button>
+            </div>
+            <a
+              href={attrLinkModal.url}
+              target="_blank" rel="noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            >
+              <ExternalLink size={14}/> Open Supplier Form
+            </a>
+            <button onClick={() => setAttrLinkModal({ open: false, url: '' })} className="mt-3 w-full py-2 text-sm text-gray-400 hover:text-gray-600">Close</button>
+          </div>
+        </div>
       )}
 
     </Layout>

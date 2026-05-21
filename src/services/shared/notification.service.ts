@@ -72,6 +72,7 @@ export const upsertSupplierNotification = async (payload: {
         .select('id')
         .eq('supplier_id', payload.supplierId)
         .eq('link', payload.link)
+        .limit(1)
         .maybeSingle();
 
     if (findError) {
@@ -93,7 +94,6 @@ export const upsertSupplierNotification = async (payload: {
     }
 
     const { error: insertError } = await supabase.from('notifications').insert({
-        user_id: payload.supplierId,
         supplier_id: payload.supplierId,
         message: payload.message,
         link: payload.link,

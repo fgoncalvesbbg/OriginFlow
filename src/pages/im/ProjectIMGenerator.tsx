@@ -404,8 +404,13 @@ const ProjectIMGenerator: React.FC = () => {
           const el = node as HTMLElement;
           const id = el.getAttribute('data-id');
           const contentEncoded = el.getAttribute('data-content');
-          
-          if (id && conditions[id] && contentEncoded) {
+          const always = el.getAttribute('data-always') === 'true';
+
+          if (always && id) {
+              const value = formData[id] || '';
+              const textNode = document.createTextNode(value);
+              el.replaceWith(textNode);
+          } else if (id && conditions[id] && contentEncoded) {
               try {
                   const content = decodeURIComponent(contentEncoded);
                   const textNode = document.createTextNode(content);
@@ -524,8 +529,13 @@ const ProjectIMGenerator: React.FC = () => {
           const el = node as HTMLElement;
           const id = el.getAttribute('data-id');
           const contentEncoded = el.getAttribute('data-content');
-          
-          if (id && conditions[id] && contentEncoded) {
+          const always = el.getAttribute('data-always') === 'true';
+
+          if (always && id) {
+              const value = formData[id] || '';
+              const textNode = document.createTextNode(value);
+              el.replaceWith(textNode);
+          } else if (id && conditions[id] && contentEncoded) {
               try {
                   const content = decodeURIComponent(contentEncoded);
                   const textNode = document.createTextNode(content);
@@ -594,7 +604,7 @@ const ProjectIMGenerator: React.FC = () => {
   const getItemsInSection = (html: string) => {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
-      const items: { id: string; kind: 'placeholder' | 'condition'; type?: 'text' | 'image'; featureId?: string; label?: string }[] = [];
+      const items: { id: string; kind: 'placeholder' | 'condition'; type?: 'text' | 'image'; featureId?: string; label?: string; conditionValue?: string; always?: boolean }[] = [];
 
       const placeholders = doc.querySelectorAll('.im-placeholder');
       placeholders.forEach((el) => {
@@ -623,13 +633,26 @@ const ProjectIMGenerator: React.FC = () => {
           const id = el.getAttribute('data-id');
           const featureId = el.getAttribute('data-feature-id');
           const contentEncoded = el.getAttribute('data-content');
-          if (id && featureId && contentEncoded) {
+          if (id && featureId) {
+              const always = el.getAttribute('data-always') === 'true';
               let snippet = '';
+              let conditionValue = '';
+              if (contentEncoded) {
+                  try {
+                      const content = decodeURIComponent(contentEncoded);
+                      snippet = content.length > 40 ? content.substring(0, 40) + '...' : content;
+                  } catch (e) { snippet = 'Error decoding content'; }
+              }
               try {
-                  const content = decodeURIComponent(contentEncoded);
-                  snippet = content.length > 40 ? content.substring(0, 40) + '...' : content;
-              } catch (e) { snippet = 'Error decoding content'; }
-              items.push({ id, kind: 'condition', featureId, label: snippet });
+                  const cv = el.getAttribute('data-condition-value');
+                  if (cv && cv !== '*') conditionValue = decodeURIComponent(cv);
+              } catch (e) {}
+              const featureName = el.getAttribute('data-feature-name') || '';
+              if (always) {
+                  items.push({ id, kind: 'condition', featureId, label: featureName, conditionValue: '', always: true });
+              } else if (contentEncoded) {
+                  items.push({ id, kind: 'condition', featureId, label: snippet, conditionValue });
+              }
           }
       });
       return items;
@@ -643,7 +666,7 @@ const ProjectIMGenerator: React.FC = () => {
           const content = s.content[lang] || '';
           const items = getItemsInSection(content);
           items.forEach(i => {
-              if (i.kind === 'placeholder') {
+              if (i.kind === 'placeholder' || (i.kind === 'condition' && i.always)) {
                   total++;
                   if (formData[i.id]) filled++;
               }
@@ -816,14 +839,30 @@ const ProjectIMGenerator: React.FC = () => {
                                            const featName = item.featureId !== 'manual' ? (allAttributes.find(f => f.id === item.featureId)?.name || 'Unknown Attribute') : null;
                                            return (
                                                <div key={`${item.id}-${idx}`} className="group">
-                                                   {item.kind === 'condition' ? (
+                                                   {item.kind === 'condition' && item.always ? (
+                                                       <div>
+                                                           <div className="flex justify-between items-center mb-1.5">
+                                                               <label className="block text-xs font-bold text-amber-700 uppercase tracking-wide flex items-center gap-1">
+                                                                   <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">VALUE</span>
+                                                                   {featName || item.label}
+                                                               </label>
+                                                               {formData[item.id] ? <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded"><CheckCircle size={10}/> Filled</span> : <span className="text-[10px] font-bold text-amber-600 flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded"><AlertCircle size={10}/> Enter value</span>}
+                                                           </div>
+                                                           <input
+                                                               className={`w-full border rounded p-2 text-sm focus:ring-2 focus:ring-amber-400 outline-none ${formData[item.id] ? 'border-gray-300 bg-light' : 'border-amber-200 bg-white'}`}
+                                                               placeholder={`Enter ${featName || item.label}...`}
+                                                               value={formData[item.id] || ''}
+                                                               onChange={(e) => handleInputChange(item.id, e.target.value)}
+                                                           />
+                                                       </div>
+                                                   ) : item.kind === 'condition' ? (
                                                        <div onClick={() => handleConditionToggle(item.id)} className={`p-3 rounded border cursor-pointer transition-all ${conditions[item.id] ? 'bg-purple-50 border-purple-200 shadow' : 'bg-white border-gray-200 hover:bg-light'}`}>
                                                           <div className="flex items-start gap-3">
                                                               <div className="mt-0.5 text-indigo-600">
                                                                   {conditions[item.id] ? <CheckSquare size={18} /> : <Square size={18} className="text-gray-400" />}
                                                               </div>
                                                               <div>
-                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Attribute Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}</div>
+                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none flex-wrap"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Attribute Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}{item.conditionValue && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] ml-1">= {item.conditionValue}</span>}</div>
                                                                   <p className={`text-sm text-gray-700 select-none ${!conditions[item.id] && 'opacity-50 line-through'}`}>"{item.label}"</p>
                                                               </div>
                                                           </div>

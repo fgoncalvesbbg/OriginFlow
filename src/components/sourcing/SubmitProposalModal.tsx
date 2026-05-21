@@ -4,7 +4,7 @@ import { createEnhancedSupplierProposal, getCategories, getCategoryAttributes } 
 import { CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachment } from '../../types';
 import { useToast } from '../../hooks';
 import AttributeInput from '../common/AttributeInput';
-import { validateAttributeValue } from '../../utils';
+import { validateAttributeValue, getAttributesForCategory } from '../../utils';
 
 interface SubmitProposalModalProps {
   isOpen: boolean;
@@ -51,7 +51,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
 
   const handleCategoryChange = (catId: string) => {
     setSelectedCategory(catId);
-    const catAttrs = allAttributes.filter(a => a.categoryId === catId);
+    const catAttrs = getAttributesForCategory(allAttributes, catId);
     const initialTypes: Record<string, 'fixed' | 'range' | 'text'> = {};
     const initialValues: Record<string, string> = {};
     catAttrs.forEach(attr => {
@@ -116,7 +116,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
       return;
     }
 
-    const currentCatAttributes = allAttributes.filter(a => a.categoryId === selectedCategory);
+    const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
 
     // Validate attributes before submit
     const newErrors: Record<string, string> = {};
@@ -182,7 +182,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
     setAttributeErrors({});
   };
 
-  const currentCatAttributes = allAttributes.filter(a => a.categoryId === selectedCategory);
+  const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
 
   if (!isOpen) return null;
 

@@ -26,6 +26,7 @@ export interface Project {
   createdBy?: string;
   currentStep: number;
   status: ProjectOverallStatus;
+  categoryId?: string | null;
   milestones?: ProjectMilestones;
   supplierLinkToken?: string;
   createdAt: string;
@@ -83,6 +84,24 @@ export interface ProjectDocument {
   uploadedAt?: string;
   versions?: DocVersion[];
   supplierComment?: string;
+}
+
+export interface ProjectAttributeRequest {
+  id: string;
+  projectId: string;
+  projectIdCode: string;
+  categoryId: string | null;
+  projectName: string;
+  categoryName: string;
+  token: string;
+  step: 2 | 3;
+  skuNumber: string;
+  skuTitle: string;
+  status: 'pending' | 'submitted';
+  submittedData?: Array<{ attributeId: string; name: string; value: string; type?: string }> | null;
+  note?: string | null;
+  createdAt: string;
+  submittedAt?: string | null;
 }
 
 export interface DocumentComment {

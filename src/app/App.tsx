@@ -42,6 +42,7 @@ import SourcingDashboard from '../pages/sourcing/SourcingDashboard';
 import CreateRFQ from '../pages/sourcing/CreateRFQ';
 import RFQDetail from '../pages/sourcing/RFQDetail';
 import SupplierRFQPortal from '../pages/sourcing/SupplierRFQPortal';
+import SupplierAttributePortal from '../pages/SupplierAttributePortal';
 
 const AppContent: React.FC = () => {
   // Trigger background checks for deadlines on app mount
@@ -64,6 +65,7 @@ const AppContent: React.FC = () => {
           <Route path="/compliance/supplier-portal" element={<SupplierCompliancePortalList />} />
           <Route path="/sourcing/supplier/:token" element={<SupplierRFQPortal />} />
           <Route path="/im/preview/:templateId" element={<IMPreview />} />
+          <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
 
           {/* Protected PM Routes */}
           <Route path="/" element={

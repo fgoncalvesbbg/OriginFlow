@@ -6,6 +6,7 @@ import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSectio
 import { IMTemplate, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName } from '../../types';
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getAttributesForCategory } from '../../utils';
 import { GoogleGenAI } from "@google/genai";
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
@@ -62,7 +63,7 @@ type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric';
 type InlineNode =
   | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
   | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string }
-  | { type: 'condition'; id: string; featureId: string; featureName?: string; content: string };
+  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionValue?: string; content: string };
 
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
@@ -89,6 +90,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const initializingRef = useRef(false);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
   const parseInlineNodes = useCallback((container: HTMLElement): InlineNode[] => {
     const inlines: InlineNode[] = [];
@@ -118,6 +122,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           id: el.dataset.id || createId(),
           featureId: el.dataset.featureId || 'manual',
           featureName: el.dataset.featureName || '',
+          conditionValue: decodeURIComponent(el.dataset.conditionValue || ''),
           content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || ''
         });
         return;
@@ -147,7 +152,10 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
 
     if (inline.type === 'condition') {
-      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" title="Condition: ${inline.featureName || 'Manual'}"><span class="font-bold text-xs uppercase mr-1">[${inline.featureId === 'manual' ? 'Optional' : 'Auto-Spec'}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
+      const displayLabel = inline.featureId === 'manual'
+          ? 'Optional'
+          : inline.conditionValue ? `${inline.featureName}: ${inline.conditionValue}` : (inline.featureName || 'Auto-Spec');
+      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionValue || '')}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
     }
 
     let textHtml = inline.text
@@ -216,10 +224,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (block.type === 'paragraph') return `<p>${serializeInline(block.content)}</p>`;
       if (block.type === 'heading') return `<h${block.level}>${serializeInline(block.content)}</h${block.level}>`;
       if (block.type === 'callout') {
-        const warningIcon = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:100%;"><path d="M12 2L2 22h20L12 2z" fill="#FACC15" stroke="black" stroke-width="2" stroke-linejoin="round"/><path d="M12 8v6M12 17v.5" stroke="black" stroke-width="2.5" stroke-linecap="round"/></svg>`;
-        const electricIcon = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:100%;"><path d="M12 2L2 22h20L12 2z" fill="#FACC15" stroke="black" stroke-width="2" stroke-linejoin="round"/><path d="M13 7l-3 6h2.5l-2 5 4-7h-2.5l1-4z" fill="black"/></svg>`;
+        // ISO 7010 W001 — General Warning (equilateral triangle, exclamation mark)
+        const w001 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="display:block;width:100%;height:100%;"><polygon points="50,6 94,87 6,87" fill="#FFDA00" stroke="#231F20" stroke-width="4.5" stroke-linejoin="round"/><rect x="46.5" y="30" width="7" height="31" rx="2.5" fill="#231F20"/><circle cx="50" cy="73" r="5.5" fill="#231F20"/></svg>`;
+        // ISO 7010 W012 — Electrical Hazard (triangle, lightning bolt)
+        const w012 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="display:block;width:100%;height:100%;"><polygon points="50,6 94,87 6,87" fill="#FFDA00" stroke="#231F20" stroke-width="4.5" stroke-linejoin="round"/><path d="M57,24 L39,55 L51,55 L44,78 L62,47 L50,47 Z" fill="#231F20"/></svg>`;
+        // ISO 7000-0190 / M002 — Information (blue circle, white i)
+        const m002 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="display:block;width:100%;height:100%;"><circle cx="50" cy="50" r="46" fill="#0066B2"/><circle cx="50" cy="26" r="7" fill="white"/><rect x="43" y="40" width="14" height="36" rx="4" fill="white"/></svg>`;
+        const isoIcons: Record<string, string> = { warning: w001, caution: w001, electric: w012, info: m002 };
         const title = block.variant === 'electric' ? 'ELECTRIC HAZARD' : block.variant.toUpperCase();
-        const icon = block.variant === 'info' ? '' : `<div class="im-block-icon">${block.variant === 'electric' ? electricIcon : warningIcon}</div>`;
+        const icon = `<div class="im-block-icon">${isoIcons[block.variant]}</div>`;
         return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
       }
       if (block.type === 'image') return `<img src="${block.src}" alt="${block.alt || ''}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" />`;
@@ -237,14 +250,19 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   }, [serializeInline]);
 
   useEffect(() => {
+    initializingRef.current = true;
     const next = deserializeHtmlToBlocks(initialContent || '');
     setBlocks(next);
     if (!selectedBlockId && next.length) setSelectedBlockId(next[0].id);
   }, [deserializeHtmlToBlocks, initialContent]);
 
   useEffect(() => {
-    onChange(serializeBlocksToHtml(blocks));
-  }, [blocks, onChange, serializeBlocksToHtml]);
+    if (initializingRef.current) {
+      initializingRef.current = false;
+      return;
+    }
+    onChangeRef.current(serializeBlocksToHtml(blocks));
+  }, [blocks, serializeBlocksToHtml]);
 
   const updateTextualBlock = (id: string, htmlValue: string) => {
     const doc = new DOMParser().parseFromString(`<div>${htmlValue}</div>`, 'text/html');
@@ -388,7 +406,15 @@ const IMTemplateEditor: React.FC = () => {
 
   const [condText, setCondText] = useState('');
   const [condFeatureId, setCondFeatureId] = useState('');
+  const [condEnumSelected, setCondEnumSelected] = useState<string[]>([]);
+  const [condNumMin, setCondNumMin] = useState('');
+  const [condNumMax, setCondNumMax] = useState('');
+  const [condBoolValue, setCondBoolValue] = useState('true');
+  const [condTextValue, setCondTextValue] = useState('');
+  const [condUseAttrValue, setCondUseAttrValue] = useState(false);
+  const [condAnyValue, setCondAnyValue] = useState(false);
   const [placeholderConfig, setPlaceholderConfig] = useState<{type: 'text' | 'image', label: string}>({ type: 'text', label: '' });
+  const [placeholderAttrId, setPlaceholderAttrId] = useState<string>('');
 
   const [metaSettings, setMetaSettings] = useState<IMTemplateMetadata>({
      pageSize: 'a4',
@@ -445,6 +471,7 @@ const IMTemplateEditor: React.FC = () => {
 
   const handleInsertPlaceholder = (type: 'text' | 'image') => {
     setPlaceholderConfig({ type, label: '' });
+    setPlaceholderAttrId('');
     setIsPlaceholderModalOpen(true);
   };
 
@@ -475,23 +502,67 @@ const IMTemplateEditor: React.FC = () => {
       insertHtmlToCurrentEditor(html);
   };
 
+  const resetCondValue = () => {
+      setCondEnumSelected([]);
+      setCondNumMin('');
+      setCondNumMax('');
+      setCondBoolValue('true');
+      setCondTextValue('');
+      setCondUseAttrValue(false);
+      setCondAnyValue(false);
+  };
+
   const handleOpenConditionModal = () => {
       setCondText('');
       setCondFeatureId('manual');
+      resetCondValue();
       setIsConditionModalOpen(true);
   };
 
+  const buildConditionValue = (): string => {
+      const attr = categoryFeatures.find(f => f.id === condFeatureId);
+      if (!attr) return '';
+      switch (attr.dataType) {
+          case 'enum':    return condEnumSelected.join(', ');
+          case 'integer':
+          case 'decimal': {
+              const unit = attr.validationRules?.unit ? ` ${attr.validationRules.unit}` : '';
+              if (condNumMin && condNumMax) return `${condNumMin}–${condNumMax}${unit}`;
+              return `${condNumMin || condNumMax}${unit}`;
+          }
+          case 'boolean': return condBoolValue === 'true' ? 'Yes' : 'No';
+          case 'text':    return condTextValue;
+          default:        return '';
+      }
+  };
+
   const handleInsertCondition = () => {
-      if (!condText.trim()) return;
       const id = Math.random().toString(36).substr(2, 9);
-      let label = "Optional";
       let featureName = "";
+      let conditionValue = "";
       if (condFeatureId !== 'manual') {
           const feat = categoryAttributes.find(f => f.id === condFeatureId);
-          if (feat) { label = "Auto-Spec"; featureName = feat.name; }
+          if (feat) { featureName = feat.name; }
+          if (!condAnyValue) conditionValue = buildConditionValue();
       }
-      const safeText = encodeURIComponent(condText);
-      const html = `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${condFeatureId}" data-content="${safeText}" data-feature-name="${featureName}" title="Condition: ${featureName || 'Manual'}"><span class="font-bold text-xs uppercase mr-1">[${label}]</span> ${condText.substring(0, 20)}${condText.length > 20 ? '...' : ''}</span>&nbsp;`;
+
+      // "Any value" mode: inserts an always-visible value placeholder
+      if (condAnyValue && condFeatureId !== 'manual') {
+          const safeFeatureName = encodeURIComponent(featureName);
+          const html = `&nbsp;<span class="im-condition bg-amber-50 border-amber-300 text-amber-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${condFeatureId}" data-feature-name="${featureName}" data-content="${safeFeatureName}" data-condition-value="*" data-always="true" title="Value: ${featureName}"><span class="font-bold text-xs uppercase mr-1">[${featureName}]</span></span>&nbsp;`;
+          insertHtmlToCurrentEditor(html);
+          setIsConditionModalOpen(false);
+          return;
+      }
+
+      const effectiveContent = condUseAttrValue && conditionValue ? conditionValue : condText;
+      if (!effectiveContent.trim()) return;
+      const displayLabel = condFeatureId === 'manual'
+          ? 'Optional'
+          : conditionValue ? `${featureName}: ${conditionValue}` : featureName;
+      const safeText = encodeURIComponent(effectiveContent);
+      const safeCondVal = encodeURIComponent(conditionValue);
+      const html = `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${condFeatureId}" data-content="${safeText}" data-feature-name="${featureName}" data-condition-value="${safeCondVal}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${effectiveContent.substring(0, 20)}${effectiveContent.length > 20 ? '...' : ''}</span>&nbsp;`;
       insertHtmlToCurrentEditor(html);
       setIsConditionModalOpen(false);
   };
@@ -721,7 +792,7 @@ const IMTemplateEditor: React.FC = () => {
   const currentSection = sections.find(s => s.id === selectedSectionId);
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
-  const categoryFeatures = categoryAttributes.filter(f => f.categoryId === categoryId);
+  const categoryFeatures = categoryId ? getAttributesForCategory(categoryAttributes, categoryId) : [];
   const imThemeVars = getIMThemeVariables(metaSettings);
 
   return (
@@ -878,18 +949,143 @@ const IMTemplateEditor: React.FC = () => {
                       <h3 className="font-bold text-lg mb-4">Add Condition</h3>
                       <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Condition Trigger</label>
-                        <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={condFeatureId} onChange={(e) => setCondFeatureId(e.target.value)}>
+                        <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={condFeatureId} onChange={(e) => { setCondFeatureId(e.target.value); resetCondValue(); }}>
                             <option value="manual">Manual Selection (Optional Block)</option>
                             <optgroup label="Auto-include based on Attribute">
-                                {categoryFeatures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                                {categoryFeatures.map(f => <option key={f.id} value={f.id}>{f.name} ({f.dataType})</option>)}
                             </optgroup>
                         </select>
-                        <p className="text-xs text-muted mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : "Text is automatically included if this attribute is enabled for the project."}</p>
+                        <p className="text-xs text-muted mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : condAnyValue ? "The attribute's value will be injected inline — always visible, no condition needed." : "Text is automatically included if this attribute matches the selected value."}</p>
                       </div>
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Content to Show</label>
-                        <textarea className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-indigo-500" rows={3} value={condText} onChange={(e) => setCondText(e.target.value)} placeholder="Text to show if condition matches..." />
-                      </div>
+
+                      {condFeatureId !== 'manual' && (
+                        <div className="mb-4 flex items-center gap-2 p-3 rounded border border-amber-200 bg-amber-50">
+                          <input
+                            id="condAnyValue"
+                            type="checkbox"
+                            className="rounded accent-amber-600"
+                            checked={condAnyValue}
+                            onChange={e => { setCondAnyValue(e.target.checked); if (e.target.checked) setCondUseAttrValue(false); }}
+                          />
+                          <label htmlFor="condAnyValue" className="text-sm text-amber-800 cursor-pointer select-none">
+                            <span className="font-medium">Any value — always show</span>
+                            <span className="text-amber-700 ml-1">Injects the live attribute value directly into the document, no condition match required.</span>
+                          </label>
+                        </div>
+                      )}
+
+                      {/* Type-adaptive condition value input */}
+                      {!condAnyValue && condFeatureId !== 'manual' && (() => {
+                        const attr = categoryFeatures.find(f => f.id === condFeatureId);
+                        if (!attr) return null;
+                        const enumOptions = attr.validationRules?.enumOptions || [];
+                        const unit = attr.validationRules?.unit ? ` (${attr.validationRules.unit})` : '';
+                        if (attr.dataType === 'enum') {
+                          return (
+                            <div className="mb-4 p-3 bg-indigo-50 rounded border border-indigo-200">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Match Values (select one or more)</label>
+                              {enumOptions.length === 0 ? (
+                                <p className="text-xs text-gray-400 italic">No options defined for this attribute.</p>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
+                                  {enumOptions.map(opt => (
+                                    <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-indigo-100">
+                                      <input
+                                        type="checkbox"
+                                        className="rounded accent-indigo-600"
+                                        checked={condEnumSelected.includes(opt)}
+                                        onChange={e => setCondEnumSelected(prev => e.target.checked ? [...prev, opt] : prev.filter(v => v !== opt))}
+                                      />
+                                      <span>{opt}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                              {condEnumSelected.length > 0 && (
+                                <p className="text-xs text-indigo-600 mt-2">Selected: {condEnumSelected.join(', ')}</p>
+                              )}
+                            </div>
+                          );
+                        }
+                        if (attr.dataType === 'integer' || attr.dataType === 'decimal') {
+                          return (
+                            <div className="mb-4 p-3 bg-indigo-50 rounded border border-indigo-200">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Match Range{unit}</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  className="flex-1 border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                  placeholder="Min"
+                                  value={condNumMin}
+                                  onChange={e => setCondNumMin(e.target.value)}
+                                />
+                                <span className="text-gray-400 text-sm">–</span>
+                                <input
+                                  type="number"
+                                  className="flex-1 border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                  placeholder="Max"
+                                  value={condNumMax}
+                                  onChange={e => setCondNumMax(e.target.value)}
+                                />
+                              </div>
+                              <p className="text-xs text-gray-400 mt-1">Leave max empty for "greater than min" or min empty for "less than max".</p>
+                            </div>
+                          );
+                        }
+                        if (attr.dataType === 'boolean') {
+                          return (
+                            <div className="mb-4 p-3 bg-indigo-50 rounded border border-indigo-200">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Match Value</label>
+                              <div className="flex gap-3">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="radio" name="condBool" value="true" checked={condBoolValue === 'true'} onChange={() => setCondBoolValue('true')} className="accent-indigo-600" />
+                                  <span className="text-sm font-medium text-green-700">Yes</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input type="radio" name="condBool" value="false" checked={condBoolValue === 'false'} onChange={() => setCondBoolValue('false')} className="accent-indigo-600" />
+                                  <span className="text-sm font-medium text-rose-700">No</span>
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="mb-4 p-3 bg-indigo-50 rounded border border-indigo-200">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Match Text</label>
+                            <input
+                              type="text"
+                              className="w-full border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                              placeholder="Value to match..."
+                              value={condTextValue}
+                              onChange={e => setCondTextValue(e.target.value)}
+                            />
+                          </div>
+                        );
+                      })()}
+
+                      {!condAnyValue && <div className="mb-4">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-sm font-medium text-gray-700">Content to Show</label>
+                          {condFeatureId !== 'manual' && (
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                className="rounded accent-indigo-600"
+                                checked={condUseAttrValue}
+                                onChange={e => setCondUseAttrValue(e.target.checked)}
+                              />
+                              <span className="text-xs text-indigo-600 font-medium">Use attribute value</span>
+                            </label>
+                          )}
+                        </div>
+                        {condUseAttrValue && condFeatureId !== 'manual' ? (
+                          <div className="w-full border border-indigo-300 bg-indigo-50 p-2 rounded text-sm text-indigo-800 min-h-[72px] flex items-center">
+                            {buildConditionValue() || <span className="text-gray-400 italic">Set a condition value above to preview...</span>}
+                          </div>
+                        ) : (
+                          <textarea className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-indigo-500" rows={3} value={condText} onChange={(e) => setCondText(e.target.value)} placeholder="Text to show if condition matches..." />
+                        )}
+                      </div>}
                       <div className="flex justify-end gap-3">
                         <button onClick={() => setIsConditionModalOpen(false)} className="text-gray-600">Cancel</button>
                         <button onClick={handleInsertCondition} className="bg-indigo-600 text-white px-4 py-2 rounded">Insert</button>
@@ -901,10 +1097,37 @@ const IMTemplateEditor: React.FC = () => {
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 animate-in fade-in zoom-in duration-200">
                     <h3 className="font-bold text-lg mb-4">Add {placeholderConfig.type === 'text' ? 'Text' : 'Image'} Placeholder</h3>
+                    {categoryFeatures.length > 0 && (
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">From Attribute (optional)</label>
+                        <select
+                          className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          value={placeholderAttrId}
+                          onChange={e => {
+                            const id = e.target.value;
+                            setPlaceholderAttrId(id);
+                            if (id) {
+                              const attr = categoryFeatures.find(f => f.id === id);
+                              if (attr) setPlaceholderConfig(prev => ({ ...prev, label: attr.name }));
+                            } else {
+                              setPlaceholderConfig(prev => ({ ...prev, label: '' }));
+                            }
+                          }}
+                        >
+                          <option value="">— Custom label —</option>
+                          <optgroup label="Category Attributes">
+                            {categoryFeatures.map(f => (
+                              <option key={f.id} value={f.id}>{f.name} ({f.dataType})</option>
+                            ))}
+                          </optgroup>
+                        </select>
+                        <p className="text-xs text-muted mt-1">Select an attribute to pre-fill the label, or enter a custom one below.</p>
+                      </div>
+                    )}
                     <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Description / Label</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
                         <input className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-indigo-500" placeholder={placeholderConfig.type === 'text' ? "e.g. Product Name" : "e.g. Front View"} value={placeholderConfig.label} onChange={(e) => setPlaceholderConfig({...placeholderConfig, label: e.target.value})} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleConfirmPlaceholder()} />
-                        <p className="text-xs text-muted mt-1">This label will be shown to the user when they fill out the manual.</p>
+                        <p className="text-xs text-muted mt-1">This label will be shown when filling out the manual.</p>
                     </div>
                     <div className="flex justify-end gap-3">
                         <button onClick={() => setIsPlaceholderModalOpen(false)} className="text-gray-600 hover:bg-gray-100 px-4 py-2 rounded">Cancel</button>

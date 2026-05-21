@@ -79,10 +79,11 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
     if (error) return [];
     return (data || []).map((a: any) => ({
         id: a.id,
-        categoryId: a.category_id,
+        categoryId: a.category_id ?? null,
         name: a.name,
         dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
         validationRules: a.validation_rules ?? undefined,
+        group: a.group ?? 'Category Specific',
     }));
 };
 
@@ -90,12 +91,14 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
  * Save/update a category attribute
  */
 export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<void> => {
+    const isPredefinedGroup = attr.group && attr.group !== 'Category Specific';
     const payload = {
         id: attr.id,
-        category_id: attr.categoryId,
+        category_id: isPredefinedGroup ? null : (attr.categoryId ?? null),
         name: attr.name,
         data_type: attr.dataType,
         validation_rules: attr.validationRules ?? null,
+        group: attr.group ?? 'Category Specific',
     };
     const { error } = await supabase.from('category_attributes').upsert(payload);
     if (error) handleError(error, 'saveCategoryAttribute');

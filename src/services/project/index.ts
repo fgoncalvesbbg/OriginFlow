@@ -35,3 +35,10 @@ export {
 } from './project-document.service';
 
 export { saveProjectMilestones as saveProjectMilestonesDirect } from './project-milestone.service';
+
+export {
+  createAttributeRequest,
+  getAttributeRequestsByProject,
+  getAttributeRequestByToken,
+  submitAttributeRequest
+} from './project-attribute-request.service';

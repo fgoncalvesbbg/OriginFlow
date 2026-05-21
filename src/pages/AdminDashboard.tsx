@@ -7,9 +7,10 @@ import {
   deleteCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   assignSupplierToPMs, getSupplierPMs,
-  reassignProjectPM, getProjects
+  reassignProjectPM, getProjects,
+  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS
 } from '../services';
-import { generateUUID } from '../utils';
+import { generateUUID, getAttributesForCategory } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -189,13 +190,14 @@ const AdminDashboard: React.FC = () => {
   };
 
   // --- CATEGORY & ATTRIBUTE ACTIONS ---
-  const openAddModal = (type: 'category' | 'attribute') => {
+  const openAddModal = (type: 'category' | 'attribute', group?: string) => {
     setModalType(type);
     if (type === 'category') {
       setEditingItem({ name: '', active: true, isFinalized: false });
     } else {
         if (!selectedCategoryDetail) return;
-        setEditingItem({ name: '', categoryId: selectedCategoryDetail, dataType: 'text', validationRules: {} });
+        const isPredefined = group && group !== 'Category Specific';
+        setEditingItem({ name: '', categoryId: isPredefined ? null : selectedCategoryDetail, dataType: 'text', validationRules: {}, group: group ?? 'Category Specific' });
         setEnumOptionsDraft('');
     }
     setIsModalOpen(true);
@@ -293,38 +295,60 @@ const AdminDashboard: React.FC = () => {
                         <h3 className="text-xl font-bold text-primary">{category?.name}</h3>
                         <p className="text-sm text-muted mt-1">Attributes</p>
                     </div>
-                    <button
-                        onClick={() => openAddModal('attribute')}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow"
-                    >
-                        <Plus size={16} /> Add Attribute
-                    </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {attributes.filter(a => a.categoryId === selectedCategoryDetail).map(a => (
-                        <div key={a.id} className="p-4 bg-white border border-gray-200 rounded-xl shadow hover:shadow-md flex justify-between items-center group">
-                            <div>
-                                <div className="font-bold text-gray-800">{a.name}</div>
-                                <div className="text-xs text-muted mt-1 capitalize badge bg-gray-100 inline-block px-2 py-0.5 rounded border border-gray-200">
-                                  {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''}{a.validationRules?.min !== undefined || a.validationRules?.max !== undefined ? ` [${a.validationRules?.min ?? ''}–${a.validationRules?.max ?? ''}]` : ''}
+                <div className="space-y-4">
+                    {ATTRIBUTE_GROUPS.map(group => {
+                        const isPredefined = PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
+                        const groupAttrs = isPredefined
+                            ? attributes.filter(a => a.categoryId === null && (a.group ?? 'Category Specific') === group)
+                            : attributes.filter(a => a.categoryId === selectedCategoryDetail && (a.group ?? 'Category Specific') === group);
+                        return (
+                            <div key={group} className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                                <div className="flex items-center justify-between px-4 py-3 bg-light border-b border-gray-200">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-sm text-gray-800">{group}</span>
+                                        {isPredefined && (
+                                            <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded uppercase tracking-wide">Standard</span>
+                                        )}
+                                        <span className="text-xs text-gray-400">({groupAttrs.length})</span>
+                                    </div>
+                                    <button
+                                        onClick={() => openAddModal('attribute', group)}
+                                        className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded border border-transparent hover:border-indigo-100 transition-colors"
+                                    >
+                                        <Plus size={13} /> Add
+                                    </button>
                                 </div>
+                                {groupAttrs.length > 0 ? (
+                                    <div className="divide-y divide-slate-100">
+                                        {groupAttrs.map(a => (
+                                            <div key={a.id} className="flex items-center justify-between px-4 py-3 hover:bg-light transition-colors group">
+                                                <div>
+                                                    <div className="font-medium text-gray-800 text-sm">{a.name}</div>
+                                                    <div className="text-xs text-muted mt-0.5 capitalize">
+                                                        {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''}{a.validationRules?.min !== undefined || a.validationRules?.max !== undefined ? ` [${a.validationRules?.min ?? ''}–${a.validationRules?.max ?? ''}]` : ''}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => handleEditItem(a, 'attribute')} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
+                                                        <Edit2 size={15} />
+                                                    </button>
+                                                    <button onClick={() => handleDeleteAttribute(a.id)} className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
+                                                        <Trash2 size={15} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="px-4 py-6 text-center text-xs text-gray-400 italic">
+                                        No attributes yet. Click <strong>Add</strong> to create one.
+                                    </div>
+                                )}
                             </div>
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => handleEditItem(a, 'attribute')} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
-                                    <Edit2 size={16} />
-                                </button>
-                                <button onClick={() => handleDeleteAttribute(a.id)} className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
-                                    <Trash2 size={16} />
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                    {attributes.filter(a => a.categoryId === selectedCategoryDetail).length === 0 && (
-                        <div className="col-span-2 text-center py-10 text-gray-400 bg-light rounded-xl border border-dashed">
-                            No attributes defined. Attributes are data fields (Text/Number) used for RFQs and Compliance.
-                        </div>
-                    )}
+                        );
+                    })}
                 </div>
             </div>
         );
@@ -341,7 +365,7 @@ const AdminDashboard: React.FC = () => {
             </div>
             <div className="divide-y divide-slate-100">
                 {categories.map(c => {
-                    const attrCount = attributes.filter(a => a.categoryId === c.id).length;
+                    const attrCount = getAttributesForCategory(attributes, c.id).length;
                     return (
                         <div key={c.id} className="p-4 hover:bg-light px-6 transition-colors">
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -622,6 +646,18 @@ const AdminDashboard: React.FC = () => {
 
               {modalType === 'attribute' && (
                   <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Group</label>
+                      <select
+                        className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editingItem.group ?? 'Category Specific'}
+                        onChange={e => setEditingItem({ ...editingItem, group: e.target.value })}
+                      >
+                        {ATTRIBUTE_GROUPS.map(g => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
+                      </select>
+                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Data Type</label>
                       <select
