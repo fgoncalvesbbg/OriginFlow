@@ -2,8 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getRFQEntryByToken, submitRFQEntry } from '../../services';
-import { RFQ, RFQEntry, RFQStatus, RFQEntryStatus } from '../../types';
-import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, List, Upload, Paperclip } from 'lucide-react';
+import { RFQ, RFQEntry, RFQStatus, RFQEntryStatus, RFQAttributeResponse } from '../../types';
+import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, List, Upload, Paperclip, Sliders } from 'lucide-react';
 
 const SupplierRFQPortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -23,6 +23,9 @@ const SupplierRFQPortal: React.FC = () => {
       supplierNotes: '',
       quoteFileUrl: ''
   });
+
+  // Per-attribute responses: keyed by attributeId
+  const [attrResponses, setAttrResponses] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!token) { setError('Invalid link'); setLoading(false); return; }
@@ -84,13 +87,23 @@ const SupplierRFQPortal: React.FC = () => {
       if (!entry) return;
       setSubmitting(true);
       try {
+          // Build attribute responses from per-attribute inputs
+          const attributeResponses: RFQAttributeResponse[] = (rfq?.attributes ?? [])
+              .map(attr => ({
+                  attributeId: attr.attributeId,
+                  name: attr.name,
+                  proposedValue: attrResponses[attr.attributeId] ?? ''
+              }))
+              .filter(r => r.proposedValue !== '');
+
           await submitRFQEntry(entry.id, {
               unitPrice: parseFloat(formData.unitPrice),
               moq: parseInt(formData.moq),
               leadTimeWeeks: parseInt(formData.leadTimeWeeks),
               toolingCost: formData.toolingCost ? parseFloat(formData.toolingCost) : 0,
               supplierNotes: formData.supplierNotes,
-              quoteFileUrl: formData.quoteFileUrl
+              quoteFileUrl: formData.quoteFileUrl,
+              attributeResponses
           });
           setSuccess(true);
       } catch (e: any) {
@@ -181,12 +194,22 @@ const SupplierRFQPortal: React.FC = () => {
                             </h3>
                             <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {rfq.attributes.map((attr, idx) => (
-                                    <div key={idx} className="flex flex-col">
+                                    <div key={idx} className="flex flex-col gap-1">
                                         <span className="text-xs text-indigo-600 font-medium uppercase">{attr.name}</span>
-                                        <span className="text-gray-800 font-semibold">
-                                            {attr.value}
-                                            {attr.type === 'range' && <span className="text-xs text-gray-400 font-normal ml-1">(Range)</span>}
-                                        </span>
+                                        {attr.type === 'multi-select' && attr.values?.length ? (
+                                            <div className="flex flex-wrap gap-1">
+                                                {attr.values.map(v => (
+                                                    <span key={v} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-200">{v}</span>
+                                                ))}
+                                            </div>
+                                        ) : attr.type === 'range' ? (
+                                            <span className="text-gray-800 font-semibold">
+                                                {attr.value.replace('-', ' – ')}
+                                                <span className="text-xs text-gray-400 font-normal ml-1">(range)</span>
+                                            </span>
+                                        ) : (
+                                            <span className="text-gray-800 font-semibold">{attr.value}</span>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -257,6 +280,65 @@ const SupplierRFQPortal: React.FC = () => {
                             onChange={e => setFormData({...formData, supplierNotes: e.target.value})}
                         />
                     </div>
+
+                    {/* Per-attribute proposed values */}
+                    {rfq.attributes && rfq.attributes.length > 0 && (
+                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                            <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                                <Sliders size={16} /> Your Proposed Specifications
+                            </h4>
+                            <p className="text-xs text-gray-500 mb-4">
+                                Provide your proposed value for each specification. Values must fall within the buyer's accepted range or options.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {rfq.attributes.map(attr => (
+                                    <div key={attr.attributeId}>
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                            {attr.name}
+                                        </label>
+
+                                        {/* Multi-select: supplier picks ONE of the PM-accepted options */}
+                                        {attr.type === 'multi-select' && attr.values?.length ? (
+                                            <select
+                                                className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                                value={attrResponses[attr.attributeId] ?? ''}
+                                                onChange={e => setAttrResponses(prev => ({ ...prev, [attr.attributeId]: e.target.value }))}
+                                            >
+                                                <option value="">-- Select your option --</option>
+                                                {attr.values.map(v => (
+                                                    <option key={v} value={v}>{v}</option>
+                                                ))}
+                                            </select>
+                                        ) : attr.type === 'range' ? (
+                                            /* Numeric range: supplier proposes a value within the specified range */
+                                            <div>
+                                                <input
+                                                    type="number"
+                                                    step="any"
+                                                    className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    placeholder={`e.g. ${attr.value.replace('-', ' to ')}`}
+                                                    value={attrResponses[attr.attributeId] ?? ''}
+                                                    onChange={e => setAttrResponses(prev => ({ ...prev, [attr.attributeId]: e.target.value }))}
+                                                />
+                                                <p className="text-xs text-gray-400 mt-0.5">
+                                                    Accepted range: {attr.value.replace('-', ' – ')}
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            /* Fixed / text: supplier confirms or notes their equivalent */
+                                            <input
+                                                type="text"
+                                                className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                placeholder={attr.value || 'Enter your value'}
+                                                value={attrResponses[attr.attributeId] ?? ''}
+                                                onChange={e => setAttrResponses(prev => ({ ...prev, [attr.attributeId]: e.target.value }))}
+                                            />
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                         <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">

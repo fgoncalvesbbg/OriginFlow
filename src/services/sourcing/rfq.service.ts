@@ -47,7 +47,8 @@ export const getRFQById = async (id: string): Promise<RFQ | undefined> => {
           createdAt: e.created_at,
           supplierName: e.supplier?.name,
           rfqTitle: e.rfqs?.title,
-          rfqIdentifier: e.rfqs?.rfq_id
+          rfqIdentifier: e.rfqs?.rfq_id,
+          attributeResponses: e.attribute_responses ?? []
         }));
     }
     return rfq;
@@ -81,7 +82,8 @@ export const getRFQEntryByToken = async (token: string): Promise<{ rfq: RFQ, ent
       createdAt: entryData.created_at,
       supplierName: entryData.supplier?.name,
       rfqTitle: entryData.rfqs?.title,
-      rfqIdentifier: entryData.rfqs?.rfq_id
+      rfqIdentifier: entryData.rfqs?.rfq_id,
+      attributeResponses: entryData.attribute_responses ?? []
     };
 
     let { data: rfqData, error: rfqError } = await portalClient.from('rfqs').select('*, category_l3:categories_l3(name)').eq('id', entry.rfqId).maybeSingle();

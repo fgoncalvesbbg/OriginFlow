@@ -47,6 +47,7 @@ export type {
 export { RFQStatus, RFQEntryStatus } from './sourcing.types';
 export type {
   RFQAttributeValue,
+  RFQAttributeResponse,
   RFQAttachment,
   RFQEntry,
   RFQ,

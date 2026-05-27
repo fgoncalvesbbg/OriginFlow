@@ -17,8 +17,15 @@ export enum RFQEntryStatus {
 export interface RFQAttributeValue {
   attributeId: string;
   name: string;
-  value: string;
-  type: 'fixed' | 'range' | 'text';
+  value: string;          // used for text, fixed, and range ("min-max" string)
+  values?: string[];      // used for multi-select enum — PM-accepted options
+  type: 'fixed' | 'range' | 'text' | 'multi-select';
+}
+
+export interface RFQAttributeResponse {
+  attributeId: string;
+  name: string;
+  proposedValue: string;  // value the supplier commits to
 }
 
 export interface RFQAttachment {
@@ -45,6 +52,7 @@ export interface RFQEntry {
   supplierName?: string;
   rfqTitle?: string;
   rfqIdentifier?: string;
+  attributeResponses?: RFQAttributeResponse[];  // supplier's proposed values per attribute
 }
 
 export interface RFQ {

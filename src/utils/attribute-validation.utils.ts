@@ -16,10 +16,23 @@ export function getAttributesForCategory(all: CategoryAttribute[], categoryId: s
 export function validateAttributeValue(
   attr: CategoryAttribute,
   value: string,
-  mode: 'fixed' | 'range' | 'text'
+  mode: 'fixed' | 'range' | 'text' | 'multi-select',
+  values?: string[]  // for multi-select enum
 ): string | null {
   const rules = attr.validationRules;
   const trimmed = value.trim();
+
+  // ── Multi-select enum validation ──────────────────────────────────────────
+  if (attr.dataType === 'enum' && mode === 'multi-select') {
+    if (rules?.required && (!values || values.length === 0)) {
+      return 'Please select at least one option';
+    }
+    const options = rules?.enumOptions ?? [];
+    if (values && options.length > 0 && values.some(v => !options.includes(v))) {
+      return 'One or more selected options are invalid';
+    }
+    return null;
+  }
 
   if (rules?.required && !trimmed) return 'Required';
   if (!trimmed) return null;

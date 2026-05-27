@@ -31,7 +31,8 @@ const CreateRFQ: React.FC = () => {
 
   // Dynamic Attributes State
   const [attributeValues, setAttributeValues] = useState<Record<string, string>>({});
-  const [attributeTypes, setAttributeTypes] = useState<Record<string, 'fixed' | 'range' | 'text'>>({});
+  const [attributeTypes, setAttributeTypes] = useState<Record<string, 'fixed' | 'range' | 'text' | 'multi-select'>>({});
+  const [attributeMultiValues, setAttributeMultiValues] = useState<Record<string, string[]>>({});
   const [attributeErrors, setAttributeErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -55,15 +56,23 @@ const CreateRFQ: React.FC = () => {
   const handleCategoryChange = (catId: string) => {
       setSelectedCategory(catId);
       const catAttrs = getAttributesForCategory(allAttributes, catId);
-      const initialTypes: Record<string, 'fixed' | 'range' | 'text'> = {};
+      const initialTypes: Record<string, 'fixed' | 'range' | 'text' | 'multi-select'> = {};
       const initialValues: Record<string, string> = {};
+      const initialMultiValues: Record<string, string[]> = {};
       catAttrs.forEach(attr => {
           const isNumeric = attr.dataType === 'integer' || attr.dataType === 'decimal' || attr.dataType === 'number' as any;
-          initialTypes[attr.id] = isNumeric ? 'fixed' : 'text';
+          if (attr.dataType === 'enum') {
+              initialTypes[attr.id] = 'multi-select';
+              initialMultiValues[attr.id] = [];
+          } else {
+              // In RFQ context numeric attributes always default to range mode
+              initialTypes[attr.id] = isNumeric ? 'range' : 'text';
+          }
           initialValues[attr.id] = '';
       });
       setAttributeTypes(initialTypes);
       setAttributeValues(initialValues);
+      setAttributeMultiValues(initialMultiValues);
       setAttributeErrors({});
   };
 
@@ -118,7 +127,9 @@ const CreateRFQ: React.FC = () => {
       // Validate attributes before submit
       const newErrors: Record<string, string> = {};
       currentCatAttributes.forEach(attr => {
-          const err = validateAttributeValue(attr, attributeValues[attr.id] || '', attributeTypes[attr.id] as any || 'text');
+          const mode = attributeTypes[attr.id] as any || 'text';
+          const multiVals = attr.dataType === 'enum' ? attributeMultiValues[attr.id] : undefined;
+          const err = validateAttributeValue(attr, attributeValues[attr.id] || '', mode, multiVals);
           if (err) newErrors[attr.id] = err;
       });
       if (Object.keys(newErrors).length > 0) {
@@ -132,14 +143,28 @@ const CreateRFQ: React.FC = () => {
       const attributesPayload: RFQAttributeValue[] = [];
 
       currentCatAttributes.forEach(attr => {
-          const val = attributeValues[attr.id];
-          if (val) {
-              attributesPayload.push({
-                  attributeId: attr.id,
-                  name: attr.name,
-                  value: val,
-                  type: attributeTypes[attr.id]
-              });
+          if (attr.dataType === 'enum') {
+              // Multi-select enum: store selected options array
+              const vals = attributeMultiValues[attr.id] ?? [];
+              if (vals.length > 0) {
+                  attributesPayload.push({
+                      attributeId: attr.id,
+                      name: attr.name,
+                      value: vals[0],       // first item for backward-compat display
+                      values: vals,         // full accepted list
+                      type: 'multi-select'
+                  });
+              }
+          } else {
+              const val = attributeValues[attr.id];
+              if (val) {
+                  attributesPayload.push({
+                      attributeId: attr.id,
+                      name: attr.name,
+                      value: val,
+                      type: attributeTypes[attr.id] as 'fixed' | 'range' | 'text'
+                  });
+              }
           }
       });
 
@@ -280,6 +305,16 @@ const CreateRFQ: React.FC = () => {
                                     mode={attributeTypes[attr.id] as 'fixed' | 'range' | 'text' || 'text'}
                                     onModeChange={type => handleAttributeTypeChange(attr.id, type)}
                                     error={attributeErrors[attr.id]}
+                                    // Multi-select for enum attributes
+                                    values={attr.dataType === 'enum' ? (attributeMultiValues[attr.id] ?? []) : undefined}
+                                    onValuesChange={attr.dataType === 'enum'
+                                        ? (vals) => {
+                                            setAttributeMultiValues(prev => ({ ...prev, [attr.id]: vals }));
+                                            setAttributeErrors(prev => ({ ...prev, [attr.id]: '' }));
+                                          }
+                                        : undefined}
+                                    // Numeric attributes always use range mode in RFQ context
+                                    forceRange={attr.dataType === 'integer' || attr.dataType === 'decimal'}
                                 />
                             </div>
                         ))}

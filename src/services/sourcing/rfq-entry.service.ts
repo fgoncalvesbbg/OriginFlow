@@ -37,7 +37,8 @@ export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]
       createdAt: e.created_at,
       supplierName: e.supplier?.name,
       rfqTitle: e.rfqs?.title,
-      rfqIdentifier: e.rfqs?.rfq_id
+      rfqIdentifier: e.rfqs?.rfq_id,
+      attributeResponses: e.attribute_responses ?? []
     }));
 };
 
@@ -53,7 +54,8 @@ export const submitRFQEntry = async (entryId: string, data: Partial<RFQEntry>): 
         lead_time_weeks: data.leadTimeWeeks,
         tooling_cost: data.toolingCost,
         supplier_notes: data.supplierNotes,
-        quote_file_url: data.quoteFileUrl
+        quote_file_url: data.quoteFileUrl,
+        attribute_responses: data.attributeResponses ?? []
     };
 
     const { error } = await portalClient.from('rfq_entries').update(payload).eq('id', entryId);

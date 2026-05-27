@@ -173,12 +173,22 @@ const RFQDetail: React.FC = () => {
                       </h3>
                       <div className="space-y-3">
                           {rfq.attributes.map((attr, idx) => (
-                              <div key={idx} className="flex justify-between text-sm border-b border-slate-50 pb-2 last:border-0">
-                                  <span className="text-muted">{attr.name}</span>
-                                  <span className="font-medium text-gray-800">
-                                      {attr.value}
-                                      {attr.type === 'range' && <span className="text-xs text-gray-400 ml-1">(Range)</span>}
-                                  </span>
+                              <div key={idx} className="flex justify-between items-start text-sm border-b border-slate-50 pb-2 last:border-0 flex-wrap gap-2">
+                                  <span className="text-muted shrink-0">{attr.name}</span>
+                                  {attr.type === 'multi-select' && attr.values?.length ? (
+                                      <div className="flex flex-wrap gap-1 justify-end">
+                                          {attr.values.map(v => (
+                                              <span key={v} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-200">{v}</span>
+                                          ))}
+                                      </div>
+                                  ) : attr.type === 'range' ? (
+                                      <span className="font-medium text-gray-800">
+                                          {attr.value.replace('-', ' – ')}
+                                          <span className="text-xs text-gray-400 font-normal ml-1">(range)</span>
+                                      </span>
+                                  ) : (
+                                      <span className="font-medium text-gray-800">{attr.value}</span>
+                                  )}
                               </div>
                           ))}
                       </div>
