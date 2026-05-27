@@ -6,7 +6,11 @@ import { CategoryAttribute } from '../types';
  * - Attributes where categoryId is null (global predefined groups, shared across all categories)
  */
 export function getAttributesForCategory(all: CategoryAttribute[], categoryId: string): CategoryAttribute[] {
-  return all.filter(a => a.categoryId === categoryId || a.categoryId === null);
+  return all.filter(a =>
+    a.categoryId === categoryId ||
+    a.categoryId === null ||
+    (a.assignedCategoryIds ?? []).includes(categoryId)
+  );
 }
 
 export function validateAttributeValue(

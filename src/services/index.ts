@@ -44,8 +44,10 @@ export {
   getMissingDocumentsForSupplier,
   createAttributeRequest,
   getAttributeRequestsByProject,
+  getAttributeRequestsByProjectPublic,
   getAttributeRequestByToken,
-  submitAttributeRequest
+  submitAttributeRequest,
+  deleteAttributeRequest
 } from './project';
 
 // Supplier module
@@ -107,6 +109,8 @@ export {
   getCategoryAttributes,
   saveCategoryAttribute,
   deleteCategoryAttribute,
+  assignAttributeToCategory,
+  unassignAttributeFromCategory,
   COMPLIANCE_SECTIONS,
   ATTRIBUTE_GROUPS,
   PREDEFINED_ATTRIBUTE_GROUPS

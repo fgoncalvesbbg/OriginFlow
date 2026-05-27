@@ -39,6 +39,8 @@ export { saveProjectMilestones as saveProjectMilestonesDirect } from './project-
 export {
   createAttributeRequest,
   getAttributeRequestsByProject,
+  getAttributeRequestsByProjectPublic,
   getAttributeRequestByToken,
-  submitAttributeRequest
+  submitAttributeRequest,
+  deleteAttributeRequest
 } from './project-attribute-request.service';

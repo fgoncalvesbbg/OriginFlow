@@ -23,7 +23,9 @@ export const getIMSections = async (templateId: string): Promise<IMSection[]> =>
       title: s.title,
       order: s.order,
       isPlaceholder: s.is_placeholder,
-      content: s.content
+      content: s.content,
+      conditionAttributeId: s.condition_attribute_id ?? null,
+      conditionValue: s.condition_value ?? null,
     }));
 };
 
@@ -43,6 +45,8 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
     if (section.templateId) payload.template_id = section.templateId;
     if (section.parentId) payload.parent_id = section.parentId;
     if (section.isPlaceholder !== undefined) payload.is_placeholder = section.isPlaceholder;
+    if ('conditionAttributeId' in section) payload.condition_attribute_id = section.conditionAttributeId ?? null;
+    if ('conditionValue' in section) payload.condition_value = section.conditionValue ?? null;
 
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
@@ -55,7 +59,9 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
       title: data.title,
       order: data.order,
       isPlaceholder: data.is_placeholder,
-      content: data.content
+      content: data.content,
+      conditionAttributeId: data.condition_attribute_id ?? null,
+      conditionValue: data.condition_value ?? null,
     };
 };
 

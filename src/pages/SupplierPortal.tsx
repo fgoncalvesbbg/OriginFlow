@@ -1,16 +1,17 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile } from '../services';
-import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty } from '../types';
+import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic } from '../services';
+import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload, ClipboardList, ExternalLink } from 'lucide-react';
 
 const SupplierPortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [steps, setSteps] = useState<ProjectStep[]>([]);
   const [docs, setDocs] = useState<ProjectDocument[]>([]);
+  const [attrRequests, setAttrRequests] = useState<ProjectAttributeRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
@@ -42,9 +43,10 @@ const SupplierPortal: React.FC = () => {
           return;
         }
 
-        const [stepsData, docsData] = await Promise.all([
+        const [stepsData, docsData, attrReqsData] = await Promise.all([
           getProjectSteps(p.id),
-          getProjectDocs(p.id)
+          getProjectDocs(p.id),
+          getAttributeRequestsByProjectPublic(p.id)
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -55,6 +57,7 @@ const SupplierPortal: React.FC = () => {
         setProject(p);
         setSteps(stepsData);
         setDocs(visibleDocs);
+        setAttrRequests(attrReqsData);
         setLoading(false);
       } catch (err: any) {
         if (!mounted || controller.signal.aborted) return;
@@ -272,6 +275,63 @@ const SupplierPortal: React.FC = () => {
                                 <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-indigo-600 hover:underline">Download</a>
                               )}
                             </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Attribute Data Requests for this step */}
+                  {attrRequests.filter(r => r.step === step.stepNumber).map(req => {
+                    const isSubmitted = req.status === 'submitted';
+                    const portalUrl = `${window.location.origin}/#/attribute-request/${req.token}`;
+                    return (
+                      <div key={req.id} className={`p-6 flex flex-col md:flex-row gap-6 ${isSubmitted ? 'bg-emerald-50/30' : 'bg-indigo-50/20'}`}>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            {isSubmitted
+                              ? <span className="text-[11px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">SUBMITTED</span>
+                              : <span className="text-[11px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded">ACTION REQUIRED</span>
+                            }
+                          </div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <ClipboardList size={18} className={isSubmitted ? 'text-emerald-600' : 'text-indigo-500'} />
+                            <h3 className="font-semibold text-lg text-primary">
+                              {req.skuNumber ? `${req.skuNumber}${req.skuTitle ? ` — ${req.skuTitle}` : ''}` : 'Product Attribute Data'}
+                            </h3>
+                            {isSubmitted && <Lock size={14} className="text-emerald-600" />}
+                          </div>
+                          <p className="text-sm text-muted mb-1">
+                            {step.stepNumber === 3 ? 'Production validation — please confirm or update the product attribute data.' : 'Please fill in the technical attributes for this product/SKU.'}
+                          </p>
+                          {req.categoryName && <p className="text-xs text-gray-400">Category: {req.categoryName}</p>}
+                          {req.note && (
+                            <div className="mt-3 bg-indigo-50 border border-indigo-100 rounded p-3 text-sm text-indigo-800">
+                              <strong>Note from PM:</strong> {req.note}
+                            </div>
+                          )}
+                        </div>
+                        <div className="w-full md:w-72 shrink-0 flex flex-col justify-center bg-light rounded-xl border border-gray-100 p-4">
+                          {isSubmitted ? (
+                            <div className="text-center py-4 text-emerald-700 bg-emerald-50 rounded border border-emerald-100">
+                              <CheckCircle className="mx-auto mb-2" size={32} />
+                              <p className="text-sm font-bold">Data Submitted</p>
+                              <p className="text-xs opacity-80 mt-1">Submitted on {new Date(req.submittedAt!).toLocaleDateString()}</p>
+                              <a href={portalUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-emerald-700 underline">
+                                <ExternalLink size={11}/> View submission
+                              </a>
+                            </div>
+                          ) : (
+                            <a
+                              href={portalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-indigo-300 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-xl transition-colors"
+                            >
+                              <ClipboardList className="text-indigo-400 mb-2" size={28} />
+                              <p className="text-sm text-indigo-700 font-medium">Fill Attribute Form</p>
+                              <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><ExternalLink size={10}/> Opens in new tab</p>
+                            </a>
                           )}
                         </div>
                       </div>

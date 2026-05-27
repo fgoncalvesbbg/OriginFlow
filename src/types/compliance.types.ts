@@ -97,6 +97,7 @@ export interface AttributeValidationRules {
 export interface CategoryAttribute {
   id: string;
   categoryId: string | null; // null = global (predefined groups, shared across all categories)
+  assignedCategoryIds?: string[]; // additional categories this attribute is shared into
   name: string;
   dataType: AttributeDataType;
   validationRules?: AttributeValidationRules;

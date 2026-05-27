@@ -80,6 +80,7 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
     return (data || []).map((a: any) => ({
         id: a.id,
         categoryId: a.category_id ?? null,
+        assignedCategoryIds: a.assigned_category_ids ?? [],
         name: a.name,
         dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
         validationRules: a.validation_rules ?? undefined,
@@ -95,6 +96,7 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
     const payload = {
         id: attr.id,
         category_id: isPredefinedGroup ? null : (attr.categoryId ?? null),
+        assigned_category_ids: attr.assignedCategoryIds ?? [],
         name: attr.name,
         data_type: attr.dataType,
         validation_rules: attr.validationRules ?? null,
@@ -109,4 +111,41 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
  */
 export const deleteCategoryAttribute = async (id: string): Promise<void> => {
     await supabase.from('category_attributes').delete().eq('id', id);
+};
+
+/**
+ * Assign an existing attribute to an additional category (shared assignment)
+ */
+export const assignAttributeToCategory = async (attributeId: string, categoryId: string): Promise<void> => {
+    const { data, error: fetchError } = await supabase
+        .from('category_attributes')
+        .select('assigned_category_ids')
+        .eq('id', attributeId)
+        .single();
+    if (fetchError) handleError(fetchError, 'assignAttributeToCategory');
+    const current: string[] = data?.assigned_category_ids ?? [];
+    if (current.includes(categoryId)) return;
+    const { error } = await supabase
+        .from('category_attributes')
+        .update({ assigned_category_ids: [...current, categoryId] })
+        .eq('id', attributeId);
+    if (error) handleError(error, 'assignAttributeToCategory');
+};
+
+/**
+ * Remove a shared assignment of an attribute from a category
+ */
+export const unassignAttributeFromCategory = async (attributeId: string, categoryId: string): Promise<void> => {
+    const { data, error: fetchError } = await supabase
+        .from('category_attributes')
+        .select('assigned_category_ids')
+        .eq('id', attributeId)
+        .single();
+    if (fetchError) handleError(fetchError, 'unassignAttributeFromCategory');
+    const current: string[] = data?.assigned_category_ids ?? [];
+    const { error } = await supabase
+        .from('category_attributes')
+        .update({ assigned_category_ids: current.filter(id => id !== categoryId) })
+        .eq('id', attributeId);
+    if (error) handleError(error, 'unassignAttributeFromCategory');
 };

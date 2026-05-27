@@ -33,7 +33,9 @@ export {
   addStandardRequirements,
   getCategoryAttributes,
   saveCategoryAttribute,
-  deleteCategoryAttribute
+  deleteCategoryAttribute,
+  assignAttributeToCategory,
+  unassignAttributeFromCategory
 } from './compliance-requirement.service';
 
 export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';

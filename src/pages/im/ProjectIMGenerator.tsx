@@ -5,7 +5,7 @@ import Layout from '../../components/Layout';
 import {
     getProjectById, getIMTemplateById, getIMSections,
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
-    addDocument, uploadFile, getCategoryAttributes
+    addDocument, uploadFile, getCategoryAttributes, getAttributeRequestsByProject
 } from '../../services';
 import { Project, IMTemplate, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw } from 'lucide-react';
@@ -79,9 +79,11 @@ const ProjectIMGenerator: React.FC = () => {
   // Form Data
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [conditions, setConditions] = useState<Record<string, boolean>>({});
-  
+  const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({});
+
   // Context Data
   const [allAttributes, setAllAttributes] = useState<CategoryAttribute[]>([]);
+  const [submittedAttrValues, setSubmittedAttrValues] = useState<Record<string, string>>({}); // attributeId -> value
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -126,6 +128,16 @@ const ProjectIMGenerator: React.FC = () => {
         const attrs = await getCategoryAttributes();
         setAllAttributes(attrs);
 
+        // Build a flat map of attributeId -> submitted value from all attribute requests
+        const attrRequests = await getAttributeRequestsByProject(projectId!);
+        const attrVals: Record<string, string> = {};
+        attrRequests.forEach(req => {
+            (req.submittedData ?? []).forEach(item => {
+                if (item.attributeId && item.value) attrVals[item.attributeId] = item.value;
+            });
+        });
+        setSubmittedAttrValues(attrVals);
+
         const existingInstance = await getProjectIM(projectId!);
         
         if (existingInstance) {
@@ -135,12 +147,16 @@ const ProjectIMGenerator: React.FC = () => {
             
             // Restore conditions from saved data
             const loadedConds: Record<string, boolean> = {};
+            const loadedSecVis: Record<string, boolean> = {};
             Object.keys(safeData).forEach(key => {
                 if (key.startsWith('cond_')) {
                     loadedConds[key.replace('cond_', '')] = safeData[key] === 'true';
+                } else if (key.startsWith('secvis_')) {
+                    loadedSecVis[key.replace('secvis_', '')] = safeData[key] === 'true';
                 }
             });
             setConditions(loadedConds);
+            setSectionVisibility(loadedSecVis);
             
             // Restore language if saved
             if (safeData['__meta_language']) {
@@ -266,7 +282,10 @@ const ProjectIMGenerator: React.FC = () => {
       Object.entries(conditions).forEach(([k, v]) => {
           dataToSave[`cond_${k}`] = String(v);
       });
-      
+      Object.entries(sectionVisibility).forEach(([k, v]) => {
+          dataToSave[`secvis_${k}`] = String(v);
+      });
+
       // Save current language
       dataToSave['__meta_language'] = activeLang;
 
@@ -335,7 +354,7 @@ const ProjectIMGenerator: React.FC = () => {
               projectName: project.name,
               language: activeLang,
               template,
-              sections,
+              sections: sections.filter(s => isSectionVisible(s)),
               formData,
               conditions,
               useLegacyHtml2Canvas: shouldUseLegacyRenderer,
@@ -361,6 +380,9 @@ const ProjectIMGenerator: React.FC = () => {
           const dataToSave = { ...formData };
           Object.entries(conditions).forEach(([k, v]) => {
              dataToSave[`cond_${k}`] = String(v);
+          });
+          Object.entries(sectionVisibility).forEach(([k, v]) => {
+             dataToSave[`secvis_${k}`] = String(v);
           });
           dataToSave['__meta_language'] = activeLang;
           
@@ -699,6 +721,40 @@ const ProjectIMGenerator: React.FC = () => {
       );
   }
 
+  const matchesConditionValue = (value: string, conditionValue: string, attr: CategoryAttribute): boolean => {
+    const v = value.trim();
+    const cv = conditionValue.trim();
+    switch (attr.dataType) {
+      case 'boolean':
+        return (v === 'true' && cv === 'Yes') || (v === 'false' && cv === 'No');
+      case 'enum':
+        return cv.split(',').map(s => s.trim()).includes(v);
+      case 'integer':
+      case 'decimal': {
+        const num = parseFloat(v);
+        if (isNaN(num)) return false;
+        const rangeMatch = cv.match(/^([\d.]+)\s*[–\-]\s*([\d.]+)/);
+        if (rangeMatch) return num >= parseFloat(rangeMatch[1]) && num <= parseFloat(rangeMatch[2]);
+        return parseFloat(cv.replace(/[^\d.]/g, '')) === num;
+      }
+      case 'text':
+        return v.toLowerCase() === cv.toLowerCase();
+      default:
+        return true;
+    }
+  };
+
+  const isSectionVisible = (section: IMSection): boolean => {
+    const override = sectionVisibility[section.id];
+    if (override !== undefined) return override;
+    if (!section.conditionAttributeId || !section.conditionValue) return true;
+    const value = submittedAttrValues[section.conditionAttributeId];
+    if (!value) return true; // no submitted data → include by default
+    const attr = allAttributes.find(a => a.id === section.conditionAttributeId);
+    if (!attr) return true;
+    return matchesConditionValue(value, section.conditionValue, attr);
+  };
+
   const orderedSections = sections.sort((a, b) => a.order - b.order);
   const imThemeVars = getIMThemeVariables(template?.metadata);
   const masterPages = {
@@ -816,6 +872,57 @@ const ProjectIMGenerator: React.FC = () => {
                                 </div>
                             </div>
                        </div>
+
+                       {/* CHAPTER CONDITIONS */}
+                       {orderedSections.some(s => s.conditionAttributeId) && (
+                         <div className="border-b border-gray-100 pb-6">
+                           <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                             <span className="bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded text-xs font-bold">COND</span> Chapter Conditions
+                           </h4>
+                           <div className="space-y-2">
+                             {orderedSections.filter(s => s.conditionAttributeId).map(s => {
+                               const attr = allAttributes.find(a => a.id === s.conditionAttributeId);
+                               const visible = isSectionVisible(s);
+                               const hasOverride = sectionVisibility[s.id] !== undefined;
+                               const autoResult = (() => {
+                                 if (!s.conditionAttributeId || !s.conditionValue) return true;
+                                 const val = submittedAttrValues[s.conditionAttributeId];
+                                 if (!val) return null; // no data
+                                 return attr ? matchesConditionValue(val, s.conditionValue, attr) : true;
+                               })();
+                               return (
+                                 <div key={s.id} className={`p-3 rounded-lg border text-xs transition-colors ${visible ? 'bg-violet-50 border-violet-200' : 'bg-gray-50 border-gray-200 opacity-70'}`}>
+                                   <div className="flex items-start justify-between gap-2">
+                                     <div className="flex-1 min-w-0">
+                                       <div className="font-semibold text-gray-800 truncate">{s.title}</div>
+                                       <div className="text-muted mt-0.5">
+                                         {attr?.name ?? '?'}: <span className="text-violet-600 font-medium">{s.conditionValue}</span>
+                                         {autoResult === null
+                                           ? <span className="ml-1 text-amber-500">(no data yet)</span>
+                                           : autoResult
+                                             ? <span className="ml-1 text-emerald-600">✓ matches</span>
+                                             : <span className="ml-1 text-rose-500">✗ no match</span>}
+                                       </div>
+                                     </div>
+                                     <div className="flex items-center gap-1 shrink-0">
+                                       {hasOverride && (
+                                         <button onClick={() => setSectionVisibility(prev => { const next = {...prev}; delete next[s.id]; return next; })}
+                                           className="text-[10px] text-amber-600 hover:underline">reset</button>
+                                       )}
+                                       <button
+                                         onClick={() => setSectionVisibility(prev => ({ ...prev, [s.id]: !visible }))}
+                                         className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${visible ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'}`}
+                                       >
+                                         {visible ? 'Include' : 'Exclude'}
+                                       </button>
+                                     </div>
+                                   </div>
+                                 </div>
+                               );
+                             })}
+                           </div>
+                         </div>
+                       )}
 
                        {orderedSections.map(section => {
                            // Get items for the ACTIVE language
@@ -944,12 +1051,20 @@ const ProjectIMGenerator: React.FC = () => {
                           {/* CONTENT */}
                           <div className="p-[20mm] pb-[30mm] min-h-[297mm] bg-white relative">
                               <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
-                                  {orderedSections.map(section => (
-                                      <div key={section.id} className="mb-8">
+                                  {orderedSections.map(section => {
+                                      const visible = isSectionVisible(section);
+                                      return (
+                                        <div key={section.id} className={`mb-8 transition-opacity ${!visible ? 'opacity-25 pointer-events-none select-none' : ''}`}>
+                                          {!visible && (
+                                            <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wide mb-1 flex items-center gap-1">
+                                              <span>⊘ Chapter excluded by condition</span>
+                                            </div>
+                                          )}
                                           <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)' }}>{section.title}</h3>
                                           <div className="im-content" dangerouslySetInnerHTML={{ __html: processContent(section.content[activeLang] || '') }} />
-                                      </div>
-                                  ))}
+                                        </div>
+                                      );
+                                  })}
                               </div>
                               
                               {/* FOOTER */}

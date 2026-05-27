@@ -78,6 +78,21 @@ export const getAttributeRequestsByProject = async (projectId: string): Promise<
   return (data || []).map(map);
 };
 
+export const getAttributeRequestsByProjectPublic = async (projectId: string): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive) return [];
+  const { data, error } = await portalClient
+    .from('project_attribute_requests')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('step', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('getAttributeRequestsByProjectPublic error:', error);
+    return [];
+  }
+  return (data || []).map(map);
+};
+
 export const getAttributeRequestByToken = async (token: string): Promise<ProjectAttributeRequest | null> => {
   if (!isLive) return null;
   const { data, error } = await portalClient
@@ -87,6 +102,18 @@ export const getAttributeRequestByToken = async (token: string): Promise<Project
     .single();
   if (error || !data) return null;
   return map(data);
+};
+
+export const deleteAttributeRequest = async (id: string): Promise<void> => {
+  if (!isLive) throw new Error('Database not configured.');
+  const { error } = await supabase
+    .from('project_attribute_requests')
+    .delete()
+    .eq('id', id);
+  if (error) {
+    console.error('deleteAttributeRequest error:', error);
+    throw new Error(error.message || 'Failed to delete request');
+  }
 };
 
 export const submitAttributeRequest = async (token: string, submittedData: SubmittedValue[]): Promise<void> => {

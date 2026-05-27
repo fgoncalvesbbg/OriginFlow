@@ -91,6 +91,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [isFocused, setIsFocused] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const initializingRef = useRef(false);
+  const isUserEditingRef = useRef(false);
+  const lastEmittedHtmlRef = useRef<string>('');
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
@@ -197,7 +199,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (el.classList.contains('im-block-wrapper')) {
         const contentEl = el.querySelector('.im-block-content') as HTMLElement | null;
         const variant = (['warning', 'caution', 'electric', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as 'warning' | 'caution' | 'electric' | 'info';
-        parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(contentEl || el) });
+        // Use only the <p> body — the .im-block-title strong is re-generated on serialize, exclude it
+        const bodyEl = contentEl?.querySelector('p') as HTMLElement | null;
+        parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(bodyEl || contentEl || el) });
         return;
       }
       if (el.tagName === 'IMG') {
@@ -250,6 +254,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   }, [serializeInline]);
 
   useEffect(() => {
+    // Skip re-init when initialContent is just our own update echoed back from the parent
+    if (initialContent === lastEmittedHtmlRef.current) return;
     initializingRef.current = true;
     const next = deserializeHtmlToBlocks(initialContent || '');
     setBlocks(next);
@@ -261,42 +267,29 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       initializingRef.current = false;
       return;
     }
-    onChangeRef.current(serializeBlocksToHtml(blocks));
+    const html = serializeBlocksToHtml(blocks);
+    lastEmittedHtmlRef.current = html;
+    onChangeRef.current(html);
   }, [blocks, serializeBlocksToHtml]);
-
-  const updateTextualBlock = (id: string, htmlValue: string) => {
-    const doc = new DOMParser().parseFromString(`<div>${htmlValue}</div>`, 'text/html');
-    const container = doc.body.firstElementChild as HTMLElement;
-    const parsed = parseInlineNodes(container);
-    setBlocks((prev) => prev.map((block) => {
-      if (block.id !== id) return block;
-      if (block.type === 'paragraph' || block.type === 'heading' || block.type === 'callout' || block.type === 'conditional') {
-        return { ...block, content: parsed } as EditorBlock;
-      }
-      return block;
-    }));
-  };
 
   const saveSelection = useCallback(() => {
     // Selection persistence is handled by the browser for this editor implementation.
   }, []);
 
   const handleChange = useCallback((event: React.FormEvent<HTMLDivElement>) => {
-    if (!selectedBlockId) return;
-    updateTextualBlock(selectedBlockId, event.currentTarget.innerHTML);
-  }, [selectedBlockId]);
+    isUserEditingRef.current = true;
+    const next = deserializeHtmlToBlocks(event.currentTarget.innerHTML);
+    setBlocks(next);
+  }, [deserializeHtmlToBlocks]);
 
   useEffect(() => {
-    if (!contentRef.current || !selectedBlockId) return;
-    const selected = blocks.find((block) => block.id === selectedBlockId);
-    if (!selected) return;
-
-    if (selected.type === 'paragraph' || selected.type === 'heading' || selected.type === 'callout' || selected.type === 'conditional') {
-      contentRef.current.innerHTML = serializeInline(selected.content);
-    } else {
-      contentRef.current.innerHTML = '';
+    if (isUserEditingRef.current) {
+      isUserEditingRef.current = false;
+      return;
     }
-  }, [blocks, selectedBlockId, serializeInline]);
+    if (!contentRef.current) return;
+    contentRef.current.innerHTML = serializeBlocksToHtml(blocks);
+  }, [blocks, serializeBlocksToHtml]);
 
   const insertBlock = (type: BlockInsertType) => {
     const newBlock: EditorBlock = type === 'table'
@@ -308,27 +301,14 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
 
   useEffect(() => {
     (window as any).currentEditorInsertHtml = (htmlString: string) => {
-      const doc = new DOMParser().parseFromString(`<div>${htmlString}</div>`, 'text/html');
-      const container = doc.body.firstElementChild as HTMLElement;
-      const inlineNodes = parseInlineNodes(container);
-      if (!inlineNodes.length) return;
-
-      setBlocks((prev) => {
-        const idx = prev.findIndex((b) => b.id === selectedBlockId && (b.type === 'paragraph' || b.type === 'heading' || b.type === 'callout' || b.type === 'conditional'));
-        if (idx === -1) {
-          const block: EditorBlock = { id: createId(), type: 'paragraph', content: inlineNodes };
-          setSelectedBlockId(block.id);
-          return [...prev, block];
-        }
-        const next = [...prev];
-        const selected = next[idx] as any;
-        selected.content = [...(selected.content || []), ...inlineNodes];
-        return next;
-      });
+      if (!contentRef.current) return;
+      contentRef.current.focus();
+      // Insert at the current cursor position within the full-document editor
+      document.execCommand('insertHTML', false, htmlString);
     };
 
     return () => { (window as any).currentEditorInsertHtml = undefined; };
-  }, [parseInlineNodes, selectedBlockId]);
+  }, []);
 
   return (
     <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
@@ -400,6 +380,13 @@ const IMTemplateEditor: React.FC = () => {
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isPlaceholderModalOpen, setIsPlaceholderModalOpen] = useState(false);
+  const [isSectionCondModalOpen, setIsSectionCondModalOpen] = useState(false);
+  const [secCondAttrId, setSecCondAttrId] = useState('');
+  const [secCondEnumSelected, setSecCondEnumSelected] = useState<string[]>([]);
+  const [secCondNumMin, setSecCondNumMin] = useState('');
+  const [secCondNumMax, setSecCondNumMax] = useState('');
+  const [secCondBoolValue, setSecCondBoolValue] = useState('true');
+  const [secCondTextValue, setSecCondTextValue] = useState('');
   
   // Use the Delete Modal state to trigger the custom modal instead of window.confirm
   const [deleteModal, setDeleteModal] = useState<{isOpen: boolean, sectionId: string | null}>({ isOpen: false, sectionId: null });
@@ -510,6 +497,61 @@ const IMTemplateEditor: React.FC = () => {
       setCondTextValue('');
       setCondUseAttrValue(false);
       setCondAnyValue(false);
+  };
+
+  const buildSectionConditionValue = (): string => {
+      const attr = categoryFeatures.find(f => f.id === secCondAttrId);
+      if (!attr) return '';
+      switch (attr.dataType) {
+          case 'enum':    return secCondEnumSelected.join(', ');
+          case 'integer':
+          case 'decimal': {
+              const unit = attr.validationRules?.unit ? ` ${attr.validationRules.unit}` : '';
+              if (secCondNumMin && secCondNumMax) return `${secCondNumMin}–${secCondNumMax}${unit}`;
+              return `${secCondNumMin || secCondNumMax}${unit}`;
+          }
+          case 'boolean': return secCondBoolValue === 'true' ? 'Yes' : 'No';
+          case 'text':    return secCondTextValue;
+          default:        return '';
+      }
+  };
+
+  const openSectionCondModal = () => {
+      const section = sections.find(s => s.id === selectedSectionId);
+      if (!section) return;
+      setSecCondAttrId(section.conditionAttributeId || '');
+      setSecCondEnumSelected([]);
+      setSecCondNumMin('');
+      setSecCondNumMax('');
+      setSecCondBoolValue('true');
+      setSecCondTextValue('');
+      // Prepopulate if already has a condition
+      if (section.conditionAttributeId && section.conditionValue) {
+          const attr = categoryFeatures.find(f => f.id === section.conditionAttributeId);
+          if (attr) {
+              const cv = section.conditionValue;
+              if (attr.dataType === 'enum') setSecCondEnumSelected(cv.split(',').map(s => s.trim()).filter(Boolean));
+              else if (attr.dataType === 'boolean') setSecCondBoolValue(cv === 'Yes' ? 'true' : 'false');
+              else if (attr.dataType === 'integer' || attr.dataType === 'decimal') {
+                  const rangeMatch = cv.match(/^([\d.]+)\s*[–-]\s*([\d.]+)/);
+                  if (rangeMatch) { setSecCondNumMin(rangeMatch[1]); setSecCondNumMax(rangeMatch[2]); }
+                  else setSecCondNumMin(cv.replace(/[^\d.]/g, ''));
+              } else setSecCondTextValue(cv);
+          }
+      }
+      setIsSectionCondModalOpen(true);
+  };
+
+  const handleSaveSectionCondition = () => {
+      if (!secCondAttrId) return;
+      const cv = buildSectionConditionValue();
+      if (!cv) return;
+      updateCurrentSection({ conditionAttributeId: secCondAttrId, conditionValue: cv });
+      setIsSectionCondModalOpen(false);
+  };
+
+  const handleClearSectionCondition = () => {
+      updateCurrentSection({ conditionAttributeId: null, conditionValue: null });
   };
 
   const handleOpenConditionModal = () => {
@@ -780,6 +822,7 @@ const IMTemplateEditor: React.FC = () => {
                   </select>
               </div>
               {s.isPlaceholder && <LayoutTemplate size={12} className="text-gray-400 shrink-0" />}
+              {s.conditionAttributeId && <span title="Conditional chapter"><GitBranch size={12} className="text-violet-400 shrink-0" /></span>}
            </div>
            {children.map((child, idx) => renderSidebarItem(child, `${indexPrefix}${idx + 1}.`, level + 1))}
        </div>
@@ -875,6 +918,25 @@ const IMTemplateEditor: React.FC = () => {
                            </label>
                            <button onClick={() => handleDeleteSection(currentSection.id)} className="text-gray-400 hover:text-rose-600 p-2"><Trash2 size={16} /></button>
                         </div>
+                     </div>
+                     {/* Chapter condition row */}
+                     <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-100 bg-light/40 text-xs">
+                        <GitBranch size={13} className="text-gray-400 shrink-0" />
+                        <span className="text-muted font-medium">Chapter condition:</span>
+                        {currentSection.conditionAttributeId ? (() => {
+                          const attr = categoryFeatures.find(a => a.id === currentSection.conditionAttributeId);
+                          return (
+                            <>
+                              <span className="bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded font-medium">
+                                {attr?.name ?? 'Unknown'}: {currentSection.conditionValue}
+                              </span>
+                              <button onClick={openSectionCondModal} className="text-indigo-500 hover:text-indigo-700 hover:underline">Edit</button>
+                              <button onClick={handleClearSectionCondition} className="text-rose-400 hover:text-rose-600 hover:underline">Remove</button>
+                            </>
+                          );
+                        })() : (
+                          <button onClick={openSectionCondModal} className="text-indigo-500 hover:text-indigo-700 hover:underline">Add condition…</button>
+                        )}
                      </div>
 
                      <div className="flex items-center justify-between border-b border-gray-200 bg-light pr-2">
@@ -1137,8 +1199,92 @@ const IMTemplateEditor: React.FC = () => {
             </div>
           )}
 
+          {/* Section Condition Modal */}
+          {isSectionCondModalOpen && (() => {
+            const attr = categoryFeatures.find(f => f.id === secCondAttrId);
+            return (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg flex items-center gap-2"><GitBranch size={18} className="text-violet-500" /> Chapter Condition</h3>
+                    <button onClick={() => setIsSectionCondModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                  </div>
+                  <p className="text-xs text-muted mb-4">This chapter will only appear in the generated manual when the selected attribute matches the specified value.</p>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Attribute</label>
+                      <select
+                        className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                        value={secCondAttrId}
+                        onChange={e => { setSecCondAttrId(e.target.value); setSecCondEnumSelected([]); setSecCondNumMin(''); setSecCondNumMax(''); setSecCondBoolValue('true'); setSecCondTextValue(''); }}
+                      >
+                        <option value="">— Select attribute —</option>
+                        {categoryFeatures.map(f => (
+                          <option key={f.id} value={f.id}>{f.name} ({f.dataType})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {attr && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Show chapter when value is…</label>
+                        {attr.dataType === 'enum' && (
+                          <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
+                            {(attr.validationRules?.enumOptions ?? []).map(opt => (
+                              <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input type="checkbox" className="rounded text-violet-600" checked={secCondEnumSelected.includes(opt)}
+                                  onChange={e => setSecCondEnumSelected(prev => e.target.checked ? [...prev, opt] : prev.filter(o => o !== opt))} />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        {(attr.dataType === 'integer' || attr.dataType === 'decimal') && (
+                          <div className="flex gap-2 items-center">
+                            <input type="number" placeholder="Min" value={secCondNumMin} onChange={e => setSecCondNumMin(e.target.value)}
+                              className="flex-1 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                            <span className="text-muted text-sm">–</span>
+                            <input type="number" placeholder="Max" value={secCondNumMax} onChange={e => setSecCondNumMax(e.target.value)}
+                              className="flex-1 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                            {attr.validationRules?.unit && <span className="text-xs text-muted">{attr.validationRules.unit}</span>}
+                          </div>
+                        )}
+                        {attr.dataType === 'boolean' && (
+                          <div className="flex gap-4">
+                            {['true', 'false'].map(v => (
+                              <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input type="radio" name="secCondBool" value={v} checked={secCondBoolValue === v} onChange={() => setSecCondBoolValue(v)} className="text-violet-600" />
+                                {v === 'true' ? 'Yes' : 'No'}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        {attr.dataType === 'text' && (
+                          <input type="text" placeholder="Exact value to match…" value={secCondTextValue} onChange={e => setSecCondTextValue(e.target.value)}
+                            className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-4">
+                    <button onClick={() => setIsSectionCondModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+                    <button
+                      onClick={handleSaveSectionCondition}
+                      disabled={!secCondAttrId || !buildSectionConditionValue()}
+                      className="px-4 py-2 bg-violet-600 text-white rounded text-sm font-medium hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Save Condition
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Delete Confirmation Modal */}
-          <ConfirmationModal 
+          <ConfirmationModal
             isOpen={deleteModal.isOpen}
             title="Delete Section?"
             message="Are you sure you want to delete this section? All content within it will be lost."

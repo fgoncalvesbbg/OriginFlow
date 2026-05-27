@@ -42,6 +42,8 @@ export interface IMSection {
   order: number;
   isPlaceholder: boolean;
   content: Record<string, string>; // langCode -> html
+  conditionAttributeId?: string | null;
+  conditionValue?: string | null;
 }
 
 export interface ProjectIM {

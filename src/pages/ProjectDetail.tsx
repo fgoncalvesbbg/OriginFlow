@@ -26,7 +26,8 @@ import {
   getProductionUpdates,
   saveProductionUpdate,
   createAttributeRequest,
-  getAttributeRequestsByProject
+  getAttributeRequestsByProject,
+  deleteAttributeRequest
 } from '../services';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
@@ -447,6 +448,17 @@ const ProjectDetail: React.FC = () => {
     navigator.clipboard.writeText(url);
     setAttrLinkCopied(true);
     setTimeout(() => setAttrLinkCopied(false), 2000);
+  };
+
+  const handleDeleteAttrRequest = async (req: ProjectAttributeRequest) => {
+    if (!window.confirm(`Delete request for SKU "${req.skuNumber || '—'}"? This cannot be undone.`)) return;
+    try {
+      await deleteAttributeRequest(req.id);
+      setAttrRequests(prev => prev.filter(r => r.id !== req.id));
+      if (expandedAttrRequestId === req.id) setExpandedAttrRequestId(null);
+    } catch (e: any) {
+      showNotification('Failed to delete: ' + e.message, 'error');
+    }
   };
 
   const handleRefreshAttrRequests = async () => {
@@ -879,6 +891,13 @@ const ProjectDetail: React.FC = () => {
                                       <RefreshCw size={11}/> Resend
                                     </button>
                                   )}
+                                  <button
+                                    onClick={() => handleDeleteAttrRequest(req)}
+                                    className="p-1 text-gray-300 hover:text-rose-500 rounded"
+                                    title="Delete request"
+                                  >
+                                    <Trash2 size={12}/>
+                                  </button>
                                 </div>
                               </div>
                               {/* Expanded submitted data */}

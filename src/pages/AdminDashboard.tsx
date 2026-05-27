@@ -6,13 +6,14 @@ import {
   getCategories, saveCategory,
   deleteCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
+  assignAttributeToCategory, unassignAttributeFromCategory,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects,
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS
 } from '../services';
 import { generateUUID, getAttributesForCategory } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const ConfirmationModal: React.FC<{
@@ -80,6 +81,11 @@ const AdminDashboard: React.FC = () => {
     message: '',
     onConfirm: () => {}
   });
+
+  // Assign Attribute Modal State
+  const [assignAttrModal, setAssignAttrModal] = useState(false);
+  const [assignAttrSearch, setAssignAttrSearch] = useState('');
+  const [assigningAttrId, setAssigningAttrId] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -230,20 +236,72 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDeleteAttribute = (id: string) => {
-    setDeleteModal({
-      isOpen: true,
-      title: 'Delete Attribute',
-      message: 'Are you sure you want to delete this attribute?',
-      onConfirm: async () => {
-        try {
-          await deleteCategoryAttribute(id);
-          loadData();
-        } catch (e: any) {
-          alert(`Failed to delete attribute: ${e.message}`);
+    const attr = attributes.find(a => a.id === id);
+    const sharedWith = (attr?.assignedCategoryIds ?? [])
+      .map(catId => categories.find(c => c.id === catId)?.name)
+      .filter(Boolean) as string[];
+
+    if (sharedWith.length > 0) {
+      setDeleteModal({
+        isOpen: true,
+        title: 'Remove Attribute',
+        message: `This attribute is also used in: ${sharedWith.join(', ')}. It will be removed from this category but kept in the others.`,
+        onConfirm: async () => {
+          try {
+            const [newHomeId, ...remaining] = attr!.assignedCategoryIds!;
+            await saveCategoryAttribute({ ...attr!, categoryId: newHomeId, assignedCategoryIds: remaining });
+            loadData();
+          } catch (e: any) {
+            alert(`Failed to remove attribute: ${e.message}`);
+          }
+          setDeleteModal(prev => ({ ...prev, isOpen: false }));
         }
-        setDeleteModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+      });
+    } else {
+      setDeleteModal({
+        isOpen: true,
+        title: 'Delete Attribute',
+        message: 'Are you sure you want to delete this attribute?',
+        onConfirm: async () => {
+          try {
+            await deleteCategoryAttribute(id);
+            loadData();
+          } catch (e: any) {
+            alert(`Failed to delete attribute: ${e.message}`);
+          }
+          setDeleteModal(prev => ({ ...prev, isOpen: false }));
+        }
+      });
+    }
+  };
+
+  const openAssignModal = () => {
+    setAssignAttrSearch('');
+    setAssigningAttrId(null);
+    setAssignAttrModal(true);
+  };
+
+  const handleAssignAttribute = async (attributeId: string) => {
+    if (!selectedCategoryDetail) return;
+    setAssigningAttrId(attributeId);
+    try {
+      await assignAttributeToCategory(attributeId, selectedCategoryDetail);
+      await loadData();
+      setAssignAttrModal(false);
+    } catch (e: any) {
+      alert(`Failed to assign attribute: ${e.message}`);
+    }
+    setAssigningAttrId(null);
+  };
+
+  const handleUnassignAttribute = async (attributeId: string) => {
+    if (!selectedCategoryDetail) return;
+    try {
+      await unassignAttributeFromCategory(attributeId, selectedCategoryDetail);
+      loadData();
+    } catch (e: any) {
+      alert(`Failed to unlink attribute: ${e.message}`);
+    }
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
@@ -302,7 +360,10 @@ const AdminDashboard: React.FC = () => {
                         const isPredefined = PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
                         const groupAttrs = isPredefined
                             ? attributes.filter(a => a.categoryId === null && (a.group ?? 'Category Specific') === group)
-                            : attributes.filter(a => a.categoryId === selectedCategoryDetail && (a.group ?? 'Category Specific') === group);
+                            : attributes.filter(a =>
+                                (a.group ?? 'Category Specific') === group &&
+                                (a.categoryId === selectedCategoryDetail || (a.assignedCategoryIds ?? []).includes(selectedCategoryDetail!))
+                              );
                         return (
                             <div key={group} className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
                                 <div className="flex items-center justify-between px-4 py-3 bg-light border-b border-gray-200">
@@ -313,33 +374,67 @@ const AdminDashboard: React.FC = () => {
                                         )}
                                         <span className="text-xs text-gray-400">({groupAttrs.length})</span>
                                     </div>
-                                    <button
-                                        onClick={() => openAddModal('attribute', group)}
-                                        className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded border border-transparent hover:border-indigo-100 transition-colors"
-                                    >
-                                        <Plus size={13} /> Add
-                                    </button>
+                                    <div className="flex items-center gap-1.5">
+                                        {!isPredefined && (
+                                            <button
+                                                onClick={openAssignModal}
+                                                className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded border border-transparent hover:border-violet-100 transition-colors"
+                                            >
+                                                <LinkIcon size={13} /> Assign Existing
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => openAddModal('attribute', group)}
+                                            className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded border border-transparent hover:border-indigo-100 transition-colors"
+                                        >
+                                            <Plus size={13} /> Add
+                                        </button>
+                                    </div>
                                 </div>
                                 {groupAttrs.length > 0 ? (
                                     <div className="divide-y divide-slate-100">
-                                        {groupAttrs.map(a => (
+                                        {groupAttrs.map(a => {
+                                            const isShared = !isPredefined &&
+                                                a.categoryId !== selectedCategoryDetail &&
+                                                (a.assignedCategoryIds ?? []).includes(selectedCategoryDetail!);
+                                            const originCategory = isShared ? categories.find(c => c.id === a.categoryId) : null;
+                                            return (
                                             <div key={a.id} className="flex items-center justify-between px-4 py-3 hover:bg-light transition-colors group">
                                                 <div>
-                                                    <div className="font-medium text-gray-800 text-sm">{a.name}</div>
+                                                    <div className="font-medium text-gray-800 text-sm flex items-center gap-2">
+                                                        {a.name}
+                                                        {isShared && (
+                                                            <span className="text-[10px] font-bold text-violet-500 bg-violet-50 border border-violet-100 px-1.5 py-0.5 rounded uppercase tracking-wide">Shared</span>
+                                                        )}
+                                                    </div>
                                                     <div className="text-xs text-muted mt-0.5 capitalize">
                                                         {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''}{a.validationRules?.min !== undefined || a.validationRules?.max !== undefined ? ` [${a.validationRules?.min ?? ''}–${a.validationRules?.max ?? ''}]` : ''}
+                                                        {isShared && originCategory && <span className="ml-1 text-violet-400 normal-case">· from {originCategory.name}</span>}
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button onClick={() => handleEditItem(a, 'attribute')} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
-                                                        <Edit2 size={15} />
-                                                    </button>
-                                                    <button onClick={() => handleDeleteAttribute(a.id)} className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
-                                                        <Trash2 size={15} />
-                                                    </button>
+                                                    {isShared ? (
+                                                        <button
+                                                            onClick={() => handleUnassignAttribute(a.id)}
+                                                            className="flex items-center gap-1 px-2 py-1 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded border border-transparent hover:border-rose-100 transition-colors"
+                                                            title="Remove from this category"
+                                                        >
+                                                            <X size={13} /> Unlink
+                                                        </button>
+                                                    ) : (
+                                                        <>
+                                                            <button onClick={() => handleEditItem(a, 'attribute')} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors">
+                                                                <Edit2 size={15} />
+                                                            </button>
+                                                            <button onClick={() => handleDeleteAttribute(a.id)} className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors">
+                                                                <Trash2 size={15} />
+                                                            </button>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 ) : (
                                     <div className="px-4 py-6 text-center text-xs text-gray-400 italic">
@@ -972,6 +1067,84 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Assign Existing Attribute Modal */}
+      {assignAttrModal && selectedCategoryDetail && (() => {
+        const currentCategoryName = categories.find(c => c.id === selectedCategoryDetail)?.name ?? '';
+        const assignable = attributes.filter(a =>
+          (a.group === 'Category Specific' || !a.group) &&
+          a.categoryId !== null &&
+          a.categoryId !== selectedCategoryDetail &&
+          !(a.assignedCategoryIds ?? []).includes(selectedCategoryDetail)
+        );
+        const filtered = assignable.filter(a =>
+          a.name.toLowerCase().includes(assignAttrSearch.toLowerCase()) ||
+          (categories.find(c => c.id === a.categoryId)?.name ?? '').toLowerCase().includes(assignAttrSearch.toLowerCase())
+        );
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[80vh]">
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="font-bold text-lg text-gray-800">Assign Existing Attribute</h3>
+                <button onClick={() => setAssignAttrModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+              </div>
+              <p className="text-xs text-muted mb-4">
+                Adding to: <span className="font-semibold text-gray-700">{currentCategoryName}</span>. The attribute stays in its original category and is also shared here.
+              </p>
+
+              <div className="relative mb-3">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search by name or category…"
+                  value={assignAttrSearch}
+                  onChange={e => setAssignAttrSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+                />
+              </div>
+
+              <div className="overflow-y-auto flex-1 border border-gray-200 rounded-lg divide-y divide-slate-100">
+                {filtered.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-gray-400 italic">
+                    {assignable.length === 0
+                      ? 'No attributes from other categories to assign.'
+                      : 'No attributes match your search.'}
+                  </div>
+                ) : filtered.map(a => {
+                  const originName = categories.find(c => c.id === a.categoryId)?.name ?? 'Unknown';
+                  return (
+                    <div key={a.id} className="flex items-center justify-between px-4 py-3 hover:bg-light transition-colors">
+                      <div>
+                        <div className="font-medium text-sm text-gray-800">{a.name}</div>
+                        <div className="text-xs text-muted mt-0.5 capitalize">
+                          {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''} · from <span className="text-violet-500">{originName}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleAssignAttribute(a.id)}
+                        disabled={assigningAttrId === a.id}
+                        className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded border border-violet-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <LinkIcon size={12} /> {assigningAttrId === a.id ? 'Assigning…' : 'Assign'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-gray-100 mt-3">
+                <button
+                  onClick={() => setAssignAttrModal(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Layout>
   );
 };
