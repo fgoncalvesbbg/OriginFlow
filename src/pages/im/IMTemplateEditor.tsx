@@ -422,32 +422,37 @@ const IMTemplateEditor: React.FC = () => {
 
   const loadData = async () => {
     if (!categoryId) return;
-    const [cats, temp, attrs] = await Promise.all([
-        getCategories(),
-        getIMTemplateByCategoryId(categoryId),
-        getCategoryAttributes()
-    ]);
-    setCategory(cats.find(c => c.id === categoryId) || null);
-    setCategoryAttributes(attrs);
-    
-    if (temp) {
-      setTemplate(temp);
-      setTemplateLanguages(temp.languages || ['en', 'de', 'fr', 'es', 'it']);
-      if (temp.metadata) {
-        setMetaSettings({
-          ...temp.metadata,
-          masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {}, ...(temp.metadata.masterPages || {}) },
-          sectionLayoutMap: temp.metadata.sectionLayoutMap || {}
-        });
+    try {
+      const [cats, temp, attrs] = await Promise.all([
+          getCategories(),
+          getIMTemplateByCategoryId(categoryId),
+          getCategoryAttributes()
+      ]);
+      setCategory(cats.find(c => c.id === categoryId) || null);
+      setCategoryAttributes(attrs);
+
+      if (temp) {
+        setTemplate(temp);
+        setTemplateLanguages(temp.languages || ['en', 'de', 'fr', 'es', 'it']);
+        if (temp.metadata) {
+          setMetaSettings({
+            ...temp.metadata,
+            masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {}, ...(temp.metadata.masterPages || {}) },
+            sectionLayoutMap: temp.metadata.sectionLayoutMap || {}
+          });
+        }
+
+        const secs = await getIMSections(temp.id);
+        setSections(secs);
+        if (secs.length > 0 && !selectedSectionId) {
+           setSelectedSectionId(secs[0].id);
+        }
       }
-      
-      const secs = await getIMSections(temp.id);
-      setSections(secs);
-      if (secs.length > 0 && !selectedSectionId) {
-         setSelectedSectionId(secs[0].id);
-      }
+    } catch (e) {
+      console.error('Failed to load template data', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const insertHtmlToCurrentEditor = (html: string) => {

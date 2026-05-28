@@ -111,17 +111,16 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) {
-      showError('Please enter a proposal title.');
-      return;
-    }
-
     const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
 
-    // Validate attributes before submit
+    // Validate attributes — all optional in a free proposal
     const newErrors: Record<string, string> = {};
     currentCatAttributes.forEach(attr => {
-      const err = validateAttributeValue(attr, attributeValues[attr.id] || '', attributeTypes[attr.id] as any || 'text');
+      const attrForValidation = {
+        ...attr,
+        validationRules: attr.validationRules ? { ...attr.validationRules, required: false } : attr.validationRules
+      };
+      const err = validateAttributeValue(attrForValidation, attributeValues[attr.id] || '', attributeTypes[attr.id] as any || 'text');
       if (err) newErrors[attr.id] = err;
     });
     if (Object.keys(newErrors).length > 0) {
@@ -204,10 +203,9 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
           {/* Basic Info */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Proposal Title <span className="text-rose-600">*</span>
+              Proposal Title
             </label>
             <input
-              required
               type="text"
               className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 outline-none"
               placeholder="e.g., New Ultra-Fast Wireless Charger"
@@ -286,7 +284,6 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
                   <div key={attr.id}>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       {attr.name}
-                      {attr.validationRules?.required && <span className="text-rose-500 ml-1">*</span>}
                     </label>
                     <AttributeInput
                       attribute={attr}

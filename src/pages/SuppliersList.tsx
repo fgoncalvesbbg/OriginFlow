@@ -26,10 +26,15 @@ const SuppliersList: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
-      const [sData, pData] = await Promise.all([getSuppliers(), getProjects()]);
-      setSuppliers(sData);
-      setProjects(pData);
-      setLoading(false);
+      try {
+        const [sData, pData] = await Promise.all([getSuppliers(), getProjects()]);
+        setSuppliers(sData);
+        setProjects(pData);
+      } catch (e) {
+        console.error('Failed to load suppliers data', e);
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, []);

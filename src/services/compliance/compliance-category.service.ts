@@ -9,18 +9,22 @@ import { CategoryL3, ProductFeature } from '../../types';
 import { handleError, generateUUID } from '../../utils';
 
 /**
- * Get all compliance categories
+ * Get all compliance categories, joined with the assigned PM's name
  */
 export const getCategories = async (): Promise<CategoryL3[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('categories_l3').select('*');
+    const { data, error } = await portalClient
+        .from('categories_l3')
+        .select('*, pm:profiles!pm_id(id, name)');
     if (error) return [];
     return (data || []).map((c: any) => ({
         id: c.id,
         name: c.name,
         active: c.active,
         isFinalized: c.is_finalized,
-        finalizedAt: c.finalized_at
+        finalizedAt: c.finalized_at,
+        pmId: c.pm_id ?? null,
+        pmName: c.pm?.name ?? null
     }));
 };
 
@@ -28,24 +32,36 @@ export const getCategories = async (): Promise<CategoryL3[]> => {
  * Create a new compliance category
  */
 export const createCategory = async (name: string): Promise<CategoryL3> => {
-    const newCat = { id: generateUUID(), name, active: true, isFinalized: false };
+    const newCat: CategoryL3 = { id: generateUUID(), name, active: true, isFinalized: false };
     await saveCategory(newCat);
     return newCat;
 };
 
 /**
- * Save/update a compliance category
+ * Save/update a compliance category (supports pm_id assignment)
  */
 export const saveCategory = async (cat: CategoryL3): Promise<void> => {
-    const payload = {
+    const payload: any = {
         id: cat.id,
         name: cat.name,
         active: cat.active,
         is_finalized: cat.isFinalized,
-        finalized_at: cat.finalizedAt
+        finalized_at: cat.finalizedAt,
+        pm_id: cat.pmId ?? null
     };
     const { error } = await supabase.from('categories_l3').upsert(payload);
     if (error) handleError(error, 'saveCategory');
+};
+
+/**
+ * Assign (or unassign) a PM to a category
+ */
+export const assignPMToCategory = async (categoryId: string, pmId: string | null): Promise<void> => {
+    const { error } = await supabase
+        .from('categories_l3')
+        .update({ pm_id: pmId })
+        .eq('id', categoryId);
+    if (error) handleError(error, 'assignPMToCategory');
 };
 
 /**

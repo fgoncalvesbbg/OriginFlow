@@ -22,6 +22,8 @@ export interface CategoryL3 {
   active: boolean;
   isFinalized: boolean;
   finalizedAt?: string | null;
+  pmId?: string | null;    // PM assigned to own this category
+  pmName?: string | null;  // Denormalised for display
 }
 
 export interface ProductFeature {

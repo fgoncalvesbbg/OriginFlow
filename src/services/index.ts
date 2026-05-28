@@ -99,6 +99,7 @@ export {
   createCategory,
   saveCategory,
   deleteCategory,
+  assignPMToCategory,
   getProductFeatures,
   saveProductFeature,
   deleteProductFeature,

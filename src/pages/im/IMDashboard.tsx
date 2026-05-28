@@ -20,10 +20,15 @@ const IMDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const [cats, temps] = await Promise.all([getCategories(), getIMTemplates()]);
-    setCategories(cats);
-    setTemplates(temps);
-    setLoading(false);
+    try {
+      const [cats, temps] = await Promise.all([getCategories(), getIMTemplates()]);
+      setCategories(cats);
+      setTemplates(temps);
+    } catch (e) {
+      console.error('Failed to load IM data', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreate = async (cat: CategoryL3) => {

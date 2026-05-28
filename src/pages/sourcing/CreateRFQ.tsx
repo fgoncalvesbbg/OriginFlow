@@ -37,11 +37,16 @@ const CreateRFQ: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
+      try {
         const [s, c, a] = await Promise.all([getSuppliers(), getCategories(), getCategoryAttributes()]);
         setSuppliers(s);
         setCategories(c);
         setAllAttributes(a);
+      } catch (e) {
+        console.error('Failed to load RFQ form data', e);
+      } finally {
         setLoading(false);
+      }
     };
     load();
   }, []);
@@ -124,12 +129,17 @@ const CreateRFQ: React.FC = () => {
 
       const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
 
-      // Validate attributes before submit
+      // Validate attributes before submit — all attributes are optional in RFQ context
       const newErrors: Record<string, string> = {};
       currentCatAttributes.forEach(attr => {
           const mode = attributeTypes[attr.id] as any || 'text';
           const multiVals = attr.dataType === 'enum' ? attributeMultiValues[attr.id] : undefined;
-          const err = validateAttributeValue(attr, attributeValues[attr.id] || '', mode, multiVals);
+          // Override required:false so no attribute is mandatory in an RFQ
+          const attrForValidation = {
+              ...attr,
+              validationRules: attr.validationRules ? { ...attr.validationRules, required: false } : attr.validationRules
+          };
+          const err = validateAttributeValue(attrForValidation, attributeValues[attr.id] || '', mode, multiVals);
           if (err) newErrors[attr.id] = err;
       });
       if (Object.keys(newErrors).length > 0) {
@@ -296,7 +306,6 @@ const CreateRFQ: React.FC = () => {
                             <div key={attr.id} className="bg-white p-4 rounded border border-gray-200 shadow">
                                 <label className="block text-sm font-bold text-gray-800 mb-2">
                                     {attr.name}
-                                    {attr.validationRules?.required && <span className="text-rose-500 ml-1">*</span>}
                                 </label>
                                 <AttributeInput
                                     attribute={attr}

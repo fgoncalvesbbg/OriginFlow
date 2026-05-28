@@ -4,7 +4,7 @@ import {
   getProfiles, updateUserRole,
   getSuppliers, createSupplier, ensureSupplierToken, updateSupplier,
   getCategories, saveCategory,
-  deleteCategory,
+  deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   assignAttributeToCategory, unassignAttributeFromCategory,
   assignSupplierToPMs, getSupplierPMs,
@@ -15,6 +15,7 @@ import { generateUUID, getAttributesForCategory } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useRefetchOnFocus } from '../hooks';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -105,6 +106,8 @@ const AdminDashboard: React.FC = () => {
     setAttributes(a);
     setProjects(p);
   };
+
+  useRefetchOnFocus(loadData);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -461,6 +464,7 @@ const AdminDashboard: React.FC = () => {
             <div className="divide-y divide-slate-100">
                 {categories.map(c => {
                     const attrCount = getAttributesForCategory(attributes, c.id).length;
+                    const pmUsers = users.filter(u => u.role === UserRole.PM);
                     return (
                         <div key={c.id} className="p-4 hover:bg-light px-6 transition-colors">
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -473,15 +477,39 @@ const AdminDashboard: React.FC = () => {
                                             </span>
                                         )}
                                     </div>
-                                    <div className="flex gap-3 text-xs text-muted mt-1 items-center">
+                                    <div className="flex gap-3 text-xs text-muted mt-1 items-center flex-wrap">
                                         <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{attrCount} Attributes</span>
                                         <span className={`px-2 py-0.5 rounded font-medium ${c.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
                                             {c.active ? 'Active' : 'Inactive'}
                                         </span>
+                                        {c.pmName && (
+                                            <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded flex items-center gap-1">
+                                                <Users size={10} /> {c.pmName}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {/* Inline PM assignment */}
+                                    <select
+                                        value={c.pmId ?? ''}
+                                        onChange={async (e) => {
+                                            const pmId = e.target.value || null;
+                                            await assignPMToCategory(c.id, pmId);
+                                            loadData();
+                                        }}
+                                        className="text-xs border border-gray-200 rounded px-2 py-1.5 text-gray-700 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        title="Assign PM to this category"
+                                    >
+                                        <option value="">— No PM —</option>
+                                        {pmUsers.map(pm => (
+                                            <option key={pm.id} value={pm.id}>{pm.name}</option>
+                                        ))}
+                                    </select>
+
+                                    <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
                                     <button
                                         onClick={() => setSelectedCategoryDetail(c.id)}
                                         className="text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded border border-transparent hover:border-indigo-100 flex items-center gap-1"
@@ -489,28 +517,26 @@ const AdminDashboard: React.FC = () => {
                                         <SlidersHorizontal size={14} /> Configure
                                     </button>
 
-                                    <div className="h-6 w-px bg-gray-200 mx-1"></div>
-
-                                    <button 
+                                    <button
                                         onClick={() => toggleCategoryFinalized(c)}
                                         className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border transition-colors ${
-                                            c.isFinalized 
-                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' 
+                                            c.isFinalized
+                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
                                             : 'bg-white text-muted border-gray-200 hover:bg-light hover:text-gray-700'
                                         }`}
                                         title="Finalizing signals that requirements are complete"
                                     >
                                         {c.isFinalized ? 'Finalized' : 'Mark Final'}
                                     </button>
-                                    
-                                    <button 
+
+                                    <button
                                         onClick={() => handleEditItem(c, 'category')}
                                         className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full"
                                     >
                                         <Edit2 size={16} />
                                     </button>
 
-                                    <button 
+                                    <button
                                         onClick={() => handleDeleteCategory(c.id)}
                                         className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full"
                                         title="Delete Category"

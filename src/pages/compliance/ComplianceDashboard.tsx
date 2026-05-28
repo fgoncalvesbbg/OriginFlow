@@ -47,17 +47,22 @@ const ComplianceDashboard: React.FC = () => {
 
   const load = async () => {
     setLoading(true);
-    const [reqs, supps, cats, projs] = await Promise.all([
-      getComplianceRequests(),
-      getSuppliers(),
-      getCategories(),
-      getProjects()
-    ]);
-    setRequests(reqs);
-    setSuppliers(supps);
-    setCategories(cats);
-    setProjects(projs);
-    setLoading(false);
+    try {
+      const [reqs, supps, cats, projs] = await Promise.all([
+        getComplianceRequests(),
+        getSuppliers(),
+        getCategories(),
+        getProjects()
+      ]);
+      setRequests(reqs);
+      setSuppliers(supps);
+      setCategories(cats);
+      setProjects(projs);
+    } catch (e) {
+      console.error('Failed to load compliance data', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';
