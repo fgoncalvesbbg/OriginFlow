@@ -20,8 +20,14 @@ const IMDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('IM data load timed out')), 10000)
+    );
     try {
-      const [cats, temps] = await Promise.all([getCategories(), getIMTemplates()]);
+      const [cats, temps] = await Promise.race([
+        Promise.all([getCategories(), getIMTemplates()]),
+        timeout,
+      ]) as [CategoryL3[], IMTemplate[]];
       setCategories(cats);
       setTemplates(temps);
     } catch (e) {

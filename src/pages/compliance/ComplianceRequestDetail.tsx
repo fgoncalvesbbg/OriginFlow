@@ -10,6 +10,7 @@ import {
   getProjectById
 } from '../../services';
 import { useAuth } from '../../context/AuthContext';
+import { useRefetchOnFocus } from '../../hooks';
 import {
   ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
@@ -63,7 +64,9 @@ const ComplianceRequestDetail: React.FC = () => {
 
   useEffect(() => {
     if (!id) return;
-    loadData();
+    const fallback = setTimeout(() => setLoading(false), 15_000);
+    loadData().finally(() => clearTimeout(fallback));
+    return () => clearTimeout(fallback);
   }, [id]);
 
   const loadData = async () => {
@@ -117,9 +120,12 @@ const ComplianceRequestDetail: React.FC = () => {
     }
     } catch (err: any) {
       console.error('Error loading compliance request:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
+
+  useRefetchOnFocus(loadData);
 
   const handleRefresh = async () => {
     if (!id) return;

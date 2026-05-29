@@ -15,6 +15,25 @@ interface RenderProjectIMPdfParams {
 
 const MM_TO_PX = 3.7795275591;
 
+const GOOGLE_FONT_IMPORTS: Record<string, string> = {
+  Roboto: 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap',
+  'Open Sans': 'https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap',
+  Lato: 'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap',
+  Montserrat: 'https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap',
+  'Source Serif 4': 'https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&display=swap',
+  'Noto Sans': 'https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap',
+};
+
+const getFontImport = (fontFamily?: string): string => {
+  if (!fontFamily || !GOOGLE_FONT_IMPORTS[fontFamily]) return '';
+  return `@import url('${GOOGLE_FONT_IMPORTS[fontFamily]}');`;
+};
+
+const getFontStack = (fontFamily?: string): string => {
+  if (!fontFamily || fontFamily === 'Inter') return 'Inter, Arial, sans-serif';
+  return `'${fontFamily}', Arial, sans-serif`;
+};
+
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, '&amp;')
@@ -82,6 +101,39 @@ const processSectionHtml = (
   return doc.body.innerHTML;
 };
 
+const buildTOCPage = (
+  orderedSections: IMSection[],
+  primaryColor: string,
+  projectName: string,
+  language: string,
+  displayFooter: string
+): string => {
+  // cover=page 1, toc=page 2, so section[i] → page i+3
+  const rows = orderedSections.map((section, i) => {
+    const isChild = !!section.parentId;
+    const pageNum = i + 3;
+    return `
+      <tr class="im-toc-row${isChild ? ' im-toc-sub' : ''}">
+        <td class="im-toc-cell-title">${escapeHtml(section.title)}</td>
+        <td class="im-toc-cell-dots"></td>
+        <td class="im-toc-cell-page">${pageNum}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <section class="im-page-section im-page-toc">
+      <div class="im-running-header">${escapeHtml(projectName)} · ${language.toUpperCase()}</div>
+      <div class="im-page-inner">
+        <h2 class="im-toc-title">Contents</h2>
+        <table class="im-toc-table"><tbody>${rows}</tbody></table>
+      </div>
+      <div class="im-running-footer">${escapeHtml(displayFooter)}</div>
+      <div class="im-page-number"></div>
+    </section>
+  `;
+};
+
 export const buildIMPrintDocument = ({
   projectName,
   language,
@@ -92,6 +144,9 @@ export const buildIMPrintDocument = ({
 }: Omit<RenderProjectIMPdfParams, 'previewElement' | 'useLegacyHtml2Canvas'>) => {
   const orderedSections = [...sections].sort((a, b) => a.order - b.order);
   const primaryColor = template?.metadata?.primaryColor || '#0f172a';
+  const fontFamily = template?.metadata?.fontFamily;
+  const fontImport = getFontImport(fontFamily);
+  const fontStack = getFontStack(fontFamily);
 
   const displayTitle =
     formData.__cover_title !== undefined ? formData.__cover_title : projectName;
@@ -156,10 +211,11 @@ export const buildIMPrintDocument = ({
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <style>
+          ${fontImport}
           :root { color-scheme: light only; }
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; background: #ffffff; }
-          body { font-family: Inter, Arial, sans-serif; }
+          body { font-family: ${fontStack}; }
 
           @page {
             size: A4;
@@ -251,6 +307,51 @@ export const buildIMPrintDocument = ({
           .im-section-content ol { list-style: decimal; margin: 0 0 4mm 6mm; padding-left: 0; }
           .im-section-content p { margin: 0 0 4mm; }
           .im-section-content img, .im-inline-image { max-width: 100%; height: auto; }
+          .im-section-content h1, .im-section-content h2, .im-section-content h3 {
+            color: ${primaryColor};
+            margin: 4mm 0 2mm;
+            page-break-after: avoid;
+          }
+          .im-section-content h1 { font-size: 5.5mm; }
+          .im-section-content h2 { font-size: 5mm; }
+          .im-section-content h3 { font-size: 4.5mm; }
+
+          .im-page-toc .im-toc-title {
+            color: ${primaryColor};
+            font-size: 7mm;
+            border-bottom: 0.6mm solid ${primaryColor};
+            margin: 0 0 6mm;
+            padding-bottom: 2mm;
+          }
+          .im-toc-table { width: 100%; border-collapse: collapse; border-spacing: 0; }
+          .im-toc-row { vertical-align: bottom; }
+          .im-toc-row.im-toc-sub .im-toc-cell-title {
+            padding-left: 6mm;
+            font-size: 3.5mm;
+            color: #475569;
+          }
+          .im-toc-cell-title {
+            font-size: 3.8mm;
+            padding: 2mm 2mm 2mm 0;
+            vertical-align: bottom;
+            word-break: break-word;
+            max-width: 120mm;
+          }
+          .im-toc-cell-dots {
+            width: 100%;
+            border-bottom: 1px dotted #cbd5e1;
+            padding: 0 3mm 1.5mm;
+            vertical-align: bottom;
+          }
+          .im-toc-cell-page {
+            font-size: 3.5mm;
+            color: #64748b;
+            text-align: right;
+            white-space: nowrap;
+            padding: 2mm 0 2mm 3mm;
+            vertical-align: bottom;
+            width: 12mm;
+          }
 
           .im-page-end {
             background: #f8fafc;
@@ -277,6 +378,7 @@ export const buildIMPrintDocument = ({
           </div>
         </section>
 
+        ${buildTOCPage(orderedSections, primaryColor, projectName, language, displayFooter)}
         ${sectionPages}
         ${endPage}
       </body>
@@ -407,7 +509,8 @@ export const renderProjectIMPdf = async ({
     if (!doc) throw new Error('Unable to access print frame document.');
 
     await waitForImages(doc);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (doc.fonts?.ready) await doc.fonts.ready;
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     const pages = Array.from(doc.querySelectorAll<HTMLElement>('.im-page-section'));
     if (pages.length === 0) {

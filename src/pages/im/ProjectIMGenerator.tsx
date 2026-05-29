@@ -626,7 +626,7 @@ const ProjectIMGenerator: React.FC = () => {
   const getItemsInSection = (html: string) => {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
-      const items: { id: string; kind: 'placeholder' | 'condition'; type?: 'text' | 'image'; featureId?: string; label?: string; conditionValue?: string; always?: boolean }[] = [];
+      const items: { id: string; kind: 'placeholder' | 'condition'; type?: 'text' | 'image'; featureId?: string; label?: string; conditionLabel?: string; always?: boolean }[] = [];
 
       const placeholders = doc.querySelectorAll('.im-placeholder');
       placeholders.forEach((el) => {
@@ -658,7 +658,7 @@ const ProjectIMGenerator: React.FC = () => {
           if (id && featureId) {
               const always = el.getAttribute('data-always') === 'true';
               let snippet = '';
-              let conditionValue = '';
+              let conditionLabel = '';
               if (contentEncoded) {
                   try {
                       const content = decodeURIComponent(contentEncoded);
@@ -667,13 +667,13 @@ const ProjectIMGenerator: React.FC = () => {
               }
               try {
                   const cv = el.getAttribute('data-condition-value');
-                  if (cv && cv !== '*') conditionValue = decodeURIComponent(cv);
+                  if (cv && cv !== '*') conditionLabel = decodeURIComponent(cv);
               } catch (e) {}
               const featureName = el.getAttribute('data-feature-name') || '';
               if (always) {
-                  items.push({ id, kind: 'condition', featureId, label: featureName, conditionValue: '', always: true });
+                  items.push({ id, kind: 'condition', featureId, label: featureName, conditionLabel: '', always: true });
               } else if (contentEncoded) {
-                  items.push({ id, kind: 'condition', featureId, label: snippet, conditionValue });
+                  items.push({ id, kind: 'condition', featureId, label: snippet, conditionLabel });
               }
           }
       });
@@ -721,9 +721,9 @@ const ProjectIMGenerator: React.FC = () => {
       );
   }
 
-  const matchesConditionValue = (value: string, conditionValue: string, attr: CategoryAttribute): boolean => {
+  const matchesConditionValue = (value: string, conditionLabel: string, attr: CategoryAttribute): boolean => {
     const v = value.trim();
-    const cv = conditionValue.trim();
+    const cv = conditionLabel.trim();
     switch (attr.dataType) {
       case 'boolean':
         return (v === 'true' && cv === 'Yes') || (v === 'false' && cv === 'No');
@@ -747,12 +747,12 @@ const ProjectIMGenerator: React.FC = () => {
   const isSectionVisible = (section: IMSection): boolean => {
     const override = sectionVisibility[section.id];
     if (override !== undefined) return override;
-    if (!section.conditionAttributeId || !section.conditionValue) return true;
-    const value = submittedAttrValues[section.conditionAttributeId];
+    if (!section.conditionFeatureId || !section.conditionLabel) return true;
+    const value = submittedAttrValues[section.conditionFeatureId];
     if (!value) return true; // no submitted data → include by default
-    const attr = allAttributes.find(a => a.id === section.conditionAttributeId);
+    const attr = allAttributes.find(a => a.id === section.conditionFeatureId);
     if (!attr) return true;
-    return matchesConditionValue(value, section.conditionValue, attr);
+    return matchesConditionValue(value, section.conditionLabel, attr);
   };
 
   const orderedSections = sections.sort((a, b) => a.order - b.order);
@@ -874,21 +874,21 @@ const ProjectIMGenerator: React.FC = () => {
                        </div>
 
                        {/* CHAPTER CONDITIONS */}
-                       {orderedSections.some(s => s.conditionAttributeId) && (
+                       {orderedSections.some(s => s.conditionFeatureId) && (
                          <div className="border-b border-gray-100 pb-6">
                            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
                              <span className="bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded text-xs font-bold">COND</span> Chapter Conditions
                            </h4>
                            <div className="space-y-2">
-                             {orderedSections.filter(s => s.conditionAttributeId).map(s => {
-                               const attr = allAttributes.find(a => a.id === s.conditionAttributeId);
+                             {orderedSections.filter(s => s.conditionFeatureId).map(s => {
+                               const attr = allAttributes.find(a => a.id === s.conditionFeatureId);
                                const visible = isSectionVisible(s);
                                const hasOverride = sectionVisibility[s.id] !== undefined;
                                const autoResult = (() => {
-                                 if (!s.conditionAttributeId || !s.conditionValue) return true;
-                                 const val = submittedAttrValues[s.conditionAttributeId];
+                                 if (!s.conditionFeatureId || !s.conditionLabel) return true;
+                                 const val = submittedAttrValues[s.conditionFeatureId];
                                  if (!val) return null; // no data
-                                 return attr ? matchesConditionValue(val, s.conditionValue, attr) : true;
+                                 return attr ? matchesConditionValue(val, s.conditionLabel, attr) : true;
                                })();
                                return (
                                  <div key={s.id} className={`p-3 rounded-lg border text-xs transition-colors ${visible ? 'bg-violet-50 border-violet-200' : 'bg-gray-50 border-gray-200 opacity-70'}`}>
@@ -896,7 +896,7 @@ const ProjectIMGenerator: React.FC = () => {
                                      <div className="flex-1 min-w-0">
                                        <div className="font-semibold text-gray-800 truncate">{s.title}</div>
                                        <div className="text-muted mt-0.5">
-                                         {attr?.name ?? '?'}: <span className="text-violet-600 font-medium">{s.conditionValue}</span>
+                                         {attr?.name ?? '?'}: <span className="text-violet-600 font-medium">{s.conditionLabel}</span>
                                          {autoResult === null
                                            ? <span className="ml-1 text-amber-500">(no data yet)</span>
                                            : autoResult
@@ -969,7 +969,7 @@ const ProjectIMGenerator: React.FC = () => {
                                                                   {conditions[item.id] ? <CheckSquare size={18} /> : <Square size={18} className="text-gray-400" />}
                                                               </div>
                                                               <div>
-                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none flex-wrap"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Attribute Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}{item.conditionValue && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] ml-1">= {item.conditionValue}</span>}</div>
+                                                                  <div className="text-xs font-bold uppercase text-muted mb-1 flex items-center gap-1 select-none flex-wrap"><GitBranch size={12}/> {item.featureId === 'manual' ? 'Optional Block' : 'Attribute Block'} {featName && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] ml-1 truncate max-w-[120px]">{featName}</span>}{item.conditionLabel && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] ml-1">= {item.conditionLabel}</span>}</div>
                                                                   <p className={`text-sm text-gray-700 select-none ${!conditions[item.id] && 'opacity-50 line-through'}`}>"{item.label}"</p>
                                                               </div>
                                                           </div>

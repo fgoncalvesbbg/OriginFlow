@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import { getProjects, getAllProductionUpdates, getSuppliers } from '../services';
 import { Project, ProductionUpdate, Supplier } from '../types';
 import { CalendarClock, ChevronRight, AlertTriangle, Truck, Factory, Flag, FileText, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
+import { useRefetchOnFocus } from '../hooks';
 
 const TimelineDashboard: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -71,6 +72,8 @@ const TimelineDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(loadData);
 
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';
 

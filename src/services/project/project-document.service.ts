@@ -81,13 +81,23 @@ export const removeDocument = async (id: string): Promise<void> => {
  * Upload/update file for a document and create version history
  */
 export const uploadFile = async (docId: string, file: File, isSupplier: boolean): Promise<ProjectDocument> => {
-    const mockUrl = `https://fake-storage.com/${file.name}`;
-    const updates = {
-        file_url: mockUrl,
+    const ext = file.name.split('.').pop() || 'bin';
+    const storagePath = `project-documents/${docId}/${Date.now()}.${ext}`;
+
+    const { error: storageError } = await supabase.storage
+        .from('documents')
+        .upload(storagePath, file, { upsert: true, contentType: file.type });
+    if (storageError) throw new Error(`Storage upload failed: ${storageError.message}`);
+
+    const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(storagePath);
+
+    const updates: Record<string, unknown> = {
+        file_url: publicUrl,
         status: isSupplier ? DocStatus.UPLOADED : DocStatus.APPROVED,
         uploaded_at: new Date().toISOString(),
-        uploaded_by_supplier: isSupplier
     };
+    // uploaded_by_supplier column has a DB default of false; only set explicitly when true
+    if (isSupplier) updates.uploaded_by_supplier = true;
 
     const client = isSupplier ? portalClient : supabase;
     const { data, error } = await client.from('project_documents').update(updates).eq('id', docId).select().single();
@@ -95,7 +105,7 @@ export const uploadFile = async (docId: string, file: File, isSupplier: boolean)
     if (data) {
         await client.from('document_versions').insert({
             document_id: docId,
-            file_url: mockUrl,
+            file_url: publicUrl,
             version_number: (data.versions?.length || 0) + 1,
             uploaded_by_supplier: isSupplier,
             uploaded_at: new Date().toISOString()

@@ -5,6 +5,7 @@ import { getComplianceRequests, getSuppliers, getCategories, getProjects, delete
 import { ComplianceRequest, Supplier, CategoryL3, ComplianceRequestStatus, Project, UserRole } from '../../types';
 import { Plus, Search, Filter, ShieldCheck, ChevronRight, Calendar, BookOpen, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useRefetchOnFocus } from '../../hooks';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -64,6 +65,8 @@ const ComplianceDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(load);
 
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';
   const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || 'Unknown';

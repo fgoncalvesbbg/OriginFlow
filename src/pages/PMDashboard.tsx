@@ -7,6 +7,7 @@ import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
 import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useRefetchOnFocus } from '../hooks';
 
 const PMDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -43,6 +44,8 @@ const PMDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(loadData);
 
   const filteredProjects = projects.filter(p => {
     if (!showArchived && p.status === ProjectOverallStatus.ARCHIVED) return false;

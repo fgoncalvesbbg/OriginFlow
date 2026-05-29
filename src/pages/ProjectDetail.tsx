@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
+import { useRefetchOnFocus } from '../hooks';
 import {
   getProjectById,
   getProjectSteps,
@@ -27,7 +28,8 @@ import {
   saveProductionUpdate,
   createAttributeRequest,
   getAttributeRequestsByProject,
-  deleteAttributeRequest
+  deleteAttributeRequest,
+  getCategoryAttributes
 } from '../services';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
@@ -115,6 +117,7 @@ const ProjectDetail: React.FC = () => {
   
   // Attribute Requests
   const [attrRequests, setAttrRequests] = useState<ProjectAttributeRequest[]>([]);
+  const [categoryAttributeDefs, setCategoryAttributeDefs] = useState<import('../types').CategoryAttribute[]>([]);
   const [attrReqModal, setAttrReqModal] = useState(false);
   const [attrReqStep, setAttrReqStep] = useState<2 | 3>(2);
   const [attrReqCategoryId, setAttrReqCategoryId] = useState('');
@@ -198,7 +201,9 @@ const ProjectDetail: React.FC = () => {
 
   useEffect(() => {
     if (!id) return;
-    loadProjectData();
+    const fallback = setTimeout(() => setLoading(false), 15_000);
+    loadProjectData().finally(() => clearTimeout(fallback));
+    return () => clearTimeout(fallback);
   }, [id]);
 
   const loadProjectData = async () => {
@@ -236,8 +241,12 @@ const ProjectDetail: React.FC = () => {
 
         // Load attribute requests
         try {
-          const attrReqs = await getAttributeRequestsByProject(p.id);
+          const [attrReqs, attrDefs] = await Promise.all([
+            getAttributeRequestsByProject(p.id),
+            getCategoryAttributes(),
+          ]);
           setAttrRequests(attrReqs);
+          setCategoryAttributeDefs(attrDefs);
         } catch (e) { console.error('Error loading attribute requests:', e); }
 
         // Init timeline form
@@ -254,6 +263,8 @@ const ProjectDetail: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(loadProjectData);
 
   const handleCopyLink = () => {
     if (!project) return;
@@ -473,8 +484,10 @@ const ProjectDetail: React.FC = () => {
 
   const handleExportAttrData = (req: ProjectAttributeRequest) => {
     if (!req.submittedData?.length) return;
+    const akeneoMap = new Map(categoryAttributeDefs.map(a => [a.id, a.akeneoId ?? '']));
     const rows = req.submittedData.map(d => ({
       Attribute: d.name,
+      'Akeneo ID': akeneoMap.get(d.attributeId) ?? '',
       Value: d.value,
       Type: d.type || '',
     }));

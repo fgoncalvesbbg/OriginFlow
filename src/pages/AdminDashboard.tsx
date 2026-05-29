@@ -805,6 +805,17 @@ const AdminDashboard: React.FC = () => {
                       />
                     </div>
 
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Akeneo Attribute ID (optional)</label>
+                      <input
+                        type="text"
+                        className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editingItem.akeneoId || ''}
+                        onChange={e => setEditingItem({ ...editingItem, akeneoId: e.target.value || undefined })}
+                        placeholder="e.g. power_watt"
+                      />
+                    </div>
+
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"

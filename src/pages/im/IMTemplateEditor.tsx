@@ -63,7 +63,7 @@ type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric';
 type InlineNode =
   | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
   | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string }
-  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionValue?: string; content: string };
+  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string };
 
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
@@ -124,7 +124,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           id: el.dataset.id || createId(),
           featureId: el.dataset.featureId || 'manual',
           featureName: el.dataset.featureName || '',
-          conditionValue: decodeURIComponent(el.dataset.conditionValue || ''),
+          conditionLabel: decodeURIComponent(el.dataset.conditionLabel || ''),
           content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || ''
         });
         return;
@@ -156,8 +156,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     if (inline.type === 'condition') {
       const displayLabel = inline.featureId === 'manual'
           ? 'Optional'
-          : inline.conditionValue ? `${inline.featureName}: ${inline.conditionValue}` : (inline.featureName || 'Auto-Spec');
-      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionValue || '')}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
+          : inline.conditionLabel ? `${inline.featureName}: ${inline.conditionLabel}` : (inline.featureName || 'Auto-Spec');
+      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionLabel || '')}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
     }
 
     let textHtml = inline.text
@@ -411,6 +411,7 @@ const IMTemplateEditor: React.FC = () => {
      companyName: '',
      backPageContent: '',
      footerText: '',
+     fontFamily: 'Inter',
      masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {} },
      sectionLayoutMap: {}
   });
@@ -436,7 +437,14 @@ const IMTemplateEditor: React.FC = () => {
         setTemplateLanguages(temp.languages || ['en', 'de', 'fr', 'es', 'it']);
         if (temp.metadata) {
           setMetaSettings({
-            ...temp.metadata,
+            pageSize: temp.metadata.pageSize || 'a4',
+            primaryColor: temp.metadata.primaryColor || '#0f172a',
+            coverImageUrl: temp.metadata.coverImageUrl || '',
+            companyLogoUrl: temp.metadata.companyLogoUrl || '',
+            companyName: temp.metadata.companyName || '',
+            backPageContent: temp.metadata.backPageContent || '',
+            footerText: temp.metadata.footerText || '',
+            fontFamily: temp.metadata.fontFamily || 'Inter',
             masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {}, ...(temp.metadata.masterPages || {}) },
             sectionLayoutMap: temp.metadata.sectionLayoutMap || {}
           });
@@ -524,17 +532,17 @@ const IMTemplateEditor: React.FC = () => {
   const openSectionCondModal = () => {
       const section = sections.find(s => s.id === selectedSectionId);
       if (!section) return;
-      setSecCondAttrId(section.conditionAttributeId || '');
+      setSecCondAttrId(section.conditionFeatureId || '');
       setSecCondEnumSelected([]);
       setSecCondNumMin('');
       setSecCondNumMax('');
       setSecCondBoolValue('true');
       setSecCondTextValue('');
       // Prepopulate if already has a condition
-      if (section.conditionAttributeId && section.conditionValue) {
-          const attr = categoryFeatures.find(f => f.id === section.conditionAttributeId);
+      if (section.conditionFeatureId && section.conditionLabel) {
+          const attr = categoryFeatures.find(f => f.id === section.conditionFeatureId);
           if (attr) {
-              const cv = section.conditionValue;
+              const cv = section.conditionLabel;
               if (attr.dataType === 'enum') setSecCondEnumSelected(cv.split(',').map(s => s.trim()).filter(Boolean));
               else if (attr.dataType === 'boolean') setSecCondBoolValue(cv === 'Yes' ? 'true' : 'false');
               else if (attr.dataType === 'integer' || attr.dataType === 'decimal') {
@@ -551,12 +559,12 @@ const IMTemplateEditor: React.FC = () => {
       if (!secCondAttrId) return;
       const cv = buildSectionConditionValue();
       if (!cv) return;
-      updateCurrentSection({ conditionAttributeId: secCondAttrId, conditionValue: cv });
+      updateCurrentSection({ conditionFeatureId: secCondAttrId, conditionLabel: cv });
       setIsSectionCondModalOpen(false);
   };
 
   const handleClearSectionCondition = () => {
-      updateCurrentSection({ conditionAttributeId: null, conditionValue: null });
+      updateCurrentSection({ conditionFeatureId: null, conditionLabel: null });
   };
 
   const handleOpenConditionModal = () => {
@@ -586,11 +594,11 @@ const IMTemplateEditor: React.FC = () => {
   const handleInsertCondition = () => {
       const id = Math.random().toString(36).substr(2, 9);
       let featureName = "";
-      let conditionValue = "";
+      let conditionLabel = "";
       if (condFeatureId !== 'manual') {
           const feat = categoryAttributes.find(f => f.id === condFeatureId);
           if (feat) { featureName = feat.name; }
-          if (!condAnyValue) conditionValue = buildConditionValue();
+          if (!condAnyValue) conditionLabel = buildConditionValue();
       }
 
       // "Any value" mode: inserts an always-visible value placeholder
@@ -602,13 +610,13 @@ const IMTemplateEditor: React.FC = () => {
           return;
       }
 
-      const effectiveContent = condUseAttrValue && conditionValue ? conditionValue : condText;
+      const effectiveContent = condUseAttrValue && conditionLabel ? conditionLabel : condText;
       if (!effectiveContent.trim()) return;
       const displayLabel = condFeatureId === 'manual'
           ? 'Optional'
-          : conditionValue ? `${featureName}: ${conditionValue}` : featureName;
+          : conditionLabel ? `${featureName}: ${conditionLabel}` : featureName;
       const safeText = encodeURIComponent(effectiveContent);
-      const safeCondVal = encodeURIComponent(conditionValue);
+      const safeCondVal = encodeURIComponent(conditionLabel);
       const html = `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${condFeatureId}" data-content="${safeText}" data-feature-name="${featureName}" data-condition-value="${safeCondVal}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${effectiveContent.substring(0, 20)}${effectiveContent.length > 20 ? '...' : ''}</span>&nbsp;`;
       insertHtmlToCurrentEditor(html);
       setIsConditionModalOpen(false);
@@ -827,7 +835,7 @@ const IMTemplateEditor: React.FC = () => {
                   </select>
               </div>
               {s.isPlaceholder && <LayoutTemplate size={12} className="text-gray-400 shrink-0" />}
-              {s.conditionAttributeId && <span title="Conditional chapter"><GitBranch size={12} className="text-violet-400 shrink-0" /></span>}
+              {s.conditionFeatureId && <span title="Conditional chapter"><GitBranch size={12} className="text-violet-400 shrink-0" /></span>}
            </div>
            {children.map((child, idx) => renderSidebarItem(child, `${indexPrefix}${idx + 1}.`, level + 1))}
        </div>
@@ -928,12 +936,12 @@ const IMTemplateEditor: React.FC = () => {
                      <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-100 bg-light/40 text-xs">
                         <GitBranch size={13} className="text-gray-400 shrink-0" />
                         <span className="text-muted font-medium">Chapter condition:</span>
-                        {currentSection.conditionAttributeId ? (() => {
-                          const attr = categoryFeatures.find(a => a.id === currentSection.conditionAttributeId);
+                        {currentSection.conditionFeatureId ? (() => {
+                          const attr = categoryFeatures.find(a => a.id === currentSection.conditionFeatureId);
                           return (
                             <>
                               <span className="bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded font-medium">
-                                {attr?.name ?? 'Unknown'}: {currentSection.conditionValue}
+                                {attr?.name ?? 'Unknown'}: {currentSection.conditionLabel}
                               </span>
                               <button onClick={openSectionCondModal} className="text-indigo-500 hover:text-indigo-700 hover:underline">Edit</button>
                               <button onClick={handleClearSectionCondition} className="text-rose-400 hover:text-rose-600 hover:underline">Remove</button>
@@ -980,30 +988,70 @@ const IMTemplateEditor: React.FC = () => {
           {/* Modals */}
           {isSettingsModalOpen && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-                    <div className="flex justify-between mb-4">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
+                    <div className="flex justify-between mb-5">
                         <h3 className="font-bold text-lg">Template Settings</h3>
                         <button onClick={() => setIsSettingsModalOpen(false)}><X size={20} /></button>
                     </div>
+
+                    {/* Branding */}
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Branding</h4>
                     <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                            <input className="w-full border rounded p-2 text-sm" value={metaSettings.companyName || ''} onChange={(e) => setMetaSettings({...metaSettings, companyName: e.target.value})} placeholder="e.g. Acme GmbH" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Company Logo URL</label>
+                            <input className="w-full border rounded p-2 text-sm" value={metaSettings.companyLogoUrl || ''} onChange={(e) => setMetaSettings({...metaSettings, companyLogoUrl: e.target.value})} placeholder="https://…/logo.png" />
+                        </div>
+                        <div className="col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Cover Image URL</label>
+                            <input className="w-full border rounded p-2 text-sm" value={metaSettings.coverImageUrl || ''} onChange={(e) => setMetaSettings({...metaSettings, coverImageUrl: e.target.value})} placeholder="https://…/cover.jpg" />
+                        </div>
+                    </div>
+
+                    {/* Appearance */}
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3 mt-5">Appearance</h4>
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
-                            <input type="color" className="w-full h-10 rounded cursor-pointer" value={metaSettings.primaryColor} onChange={(e) => setMetaSettings({...metaSettings, primaryColor: e.target.value})} />
+                            <input type="color" className="w-full h-10 rounded cursor-pointer" value={metaSettings.primaryColor || '#0f172a'} onChange={(e) => setMetaSettings({...metaSettings, primaryColor: e.target.value})} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Body Font</label>
+                            <select className="w-full border rounded p-2 text-sm" value={metaSettings.fontFamily || 'Inter'} onChange={(e) => setMetaSettings({...metaSettings, fontFamily: e.target.value})}>
+                                <option value="Inter">Inter (Default)</option>
+                                <option value="Roboto">Roboto</option>
+                                <option value="Open Sans">Open Sans</option>
+                                <option value="Lato">Lato</option>
+                                <option value="Montserrat">Montserrat</option>
+                                <option value="Source Serif 4">Source Serif 4</option>
+                                <option value="Noto Sans">Noto Sans</option>
+                            </select>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Page Size</label>
-                            <select className="w-full border rounded p-2 text-sm" value={metaSettings.pageSize} onChange={(e) => setMetaSettings({...metaSettings, pageSize: e.target.value as any})}>
+                            <select className="w-full border rounded p-2 text-sm" value={metaSettings.pageSize || 'a4'} onChange={(e) => setMetaSettings({...metaSettings, pageSize: e.target.value as any})}>
                                 <option value="a4">A4</option>
                                 <option value="letter">US Letter</option>
                                 <option value="a5">A5</option>
                             </select>
                         </div>
                     </div>
+
+                    {/* Document */}
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3 mt-5">Document</h4>
                     <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Footer Text (Global)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Footer Text</label>
                         <input className="w-full border rounded p-2 text-sm" value={metaSettings.footerText || ''} onChange={(e) => setMetaSettings({...metaSettings, footerText: e.target.value})} placeholder="e.g. Copyright 2025 Company Name" />
                     </div>
-                    <div className="flex justify-end gap-2 mt-6">
+                    <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Back Page Content</label>
+                        <textarea className="w-full border rounded p-2 text-sm font-mono" rows={4} value={metaSettings.backPageContent || ''} onChange={(e) => setMetaSettings({...metaSettings, backPageContent: e.target.value})} placeholder="HTML content for the back/last page (optional)" />
+                    </div>
+
+                    <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
                         <button onClick={() => setIsSettingsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
                         <button onClick={handleSaveMetadata} className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Save Settings</button>
                     </div>

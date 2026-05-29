@@ -3,7 +3,7 @@
  * Manages instruction manual templates
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { IMTemplate } from '../../types';
 import { handleError, generateUUID } from '../../utils';
@@ -33,7 +33,7 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
  */
 export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await portalClient.from('im_templates').select('*').eq('id', id).single();
+    const { data, error } = await supabase.from('im_templates').select('*').eq('id', id).single();
     if (error || !data) return undefined;
     return {
       id: data.id,

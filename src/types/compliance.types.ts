@@ -104,4 +104,5 @@ export interface CategoryAttribute {
   dataType: AttributeDataType;
   validationRules?: AttributeValidationRules;
   group?: string;
+  akeneoId?: string;
 }

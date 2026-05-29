@@ -85,6 +85,7 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
         dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
         validationRules: a.validation_rules ?? undefined,
         group: a.group ?? 'Category Specific',
+        akeneoId: a.akeneo_id ?? undefined,
     }));
 };
 
@@ -101,6 +102,7 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         data_type: attr.dataType,
         validation_rules: attr.validationRules ?? null,
         group: attr.group ?? 'Category Specific',
+        akeneo_id: attr.akeneoId ?? null,
     };
     const { error } = await supabase.from('category_attributes').upsert(payload);
     if (error) handleError(error, 'saveCategoryAttribute');

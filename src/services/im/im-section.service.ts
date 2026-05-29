@@ -7,14 +7,13 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { IMSection } from '../../types';
 import { handleError, generateUUID } from '../../utils';
-import { portalClient } from '../core/supabase.client';
 
 /**
  * Get all sections for an IM template
  */
 export const getIMSections = async (templateId: string): Promise<IMSection[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('im_sections').select('*').eq('template_id', templateId);
+    const { data, error } = await supabase.from('im_sections').select('*').eq('template_id', templateId);
     if (error) return [];
     return (data || []).map((s: any) => ({
       id: s.id,
@@ -24,8 +23,10 @@ export const getIMSections = async (templateId: string): Promise<IMSection[]> =>
       order: s.order,
       isPlaceholder: s.is_placeholder,
       content: s.content,
-      conditionAttributeId: s.condition_attribute_id ?? null,
-      conditionValue: s.condition_value ?? null,
+      conditionFeatureId: s.condition_feature_id ?? null,
+      conditionLabel: s.condition_label ?? null,
+      isFinal: s.is_final ?? false,
+      completedLanguages: s.completed_languages ?? [],
     }));
 };
 
@@ -45,8 +46,10 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
     if (section.templateId) payload.template_id = section.templateId;
     if (section.parentId) payload.parent_id = section.parentId;
     if (section.isPlaceholder !== undefined) payload.is_placeholder = section.isPlaceholder;
-    if ('conditionAttributeId' in section) payload.condition_attribute_id = section.conditionAttributeId ?? null;
-    if ('conditionValue' in section) payload.condition_value = section.conditionValue ?? null;
+    if ('conditionFeatureId' in section) payload.condition_feature_id = section.conditionFeatureId ?? null;
+    if ('conditionLabel' in section) payload.condition_label = section.conditionLabel ?? null;
+    if (section.isFinal !== undefined) payload.is_final = section.isFinal;
+    if (section.completedLanguages !== undefined) payload.completed_languages = section.completedLanguages;
 
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
@@ -60,8 +63,10 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
       order: data.order,
       isPlaceholder: data.is_placeholder,
       content: data.content,
-      conditionAttributeId: data.condition_attribute_id ?? null,
-      conditionValue: data.condition_value ?? null,
+      conditionFeatureId: data.condition_feature_id ?? null,
+      conditionLabel: data.condition_label ?? null,
+      isFinal: data.is_final ?? false,
+      completedLanguages: data.completed_languages ?? [],
     };
 };
 

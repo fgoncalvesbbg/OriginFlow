@@ -18,6 +18,7 @@ export interface IMTemplateMetadata {
   companyName?: string;
   backPageContent?: string;
   footerText?: string;
+  fontFamily?: string;
   masterPages?: Partial<Record<IMMasterLayoutName, IMMasterPageOverride>>;
   sectionLayoutMap?: Record<string, IMMasterLayoutName>;
 }
@@ -42,8 +43,10 @@ export interface IMSection {
   order: number;
   isPlaceholder: boolean;
   content: Record<string, string>; // langCode -> html
-  conditionAttributeId?: string | null;
-  conditionValue?: string | null;
+  conditionFeatureId?: string | null;
+  conditionLabel?: string | null;
+  isFinal?: boolean;
+  completedLanguages?: string[];
 }
 
 export interface ProjectIM {
