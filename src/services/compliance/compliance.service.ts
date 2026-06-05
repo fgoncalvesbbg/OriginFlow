@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { ComplianceRequest, ComplianceResponseItem, ComplianceRequestStatus } from '../../types';
 import { mapComplianceRequest } from '../../utils/mappers.utils';
 import { handleError, generateUUID, generateNumericCode } from '../../utils';
+import { runMutation } from '../core/db';
 import { upsertSupplierNotification } from '../shared/notification.service';
 
 /**
@@ -131,16 +132,14 @@ export const submitComplianceResponse = async (reqId: string, responses: Complia
     if (status === ComplianceRequestStatus.APPROVED) updates.completed_at = new Date().toISOString();
     if (user) updates.updated_by = user;
 
-    const { error } = await supabase.from('compliance_requests').update(updates).eq('id', reqId);
-    if (error) handleError(error, 'submitComplianceResponse');
+    await runMutation(supabase.from('compliance_requests').update(updates).eq('id', reqId), 'submitComplianceResponse');
 };
 
 /**
  * Delete a compliance request
  */
 export const deleteComplianceRequest = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('compliance_requests').delete().eq('id', id);
-    if (error) handleError(error, 'deleteComplianceRequest');
+    await runMutation(supabase.from('compliance_requests').delete().eq('id', id), 'deleteComplianceRequest');
 };
 
 /**

@@ -7,6 +7,7 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { IMTemplate, IMTemplateType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all IM templates
@@ -128,6 +129,5 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
 
     payload.updated_at = new Date().toISOString();
 
-    const { error } = await supabase.from('im_templates').update(payload).eq('id', id);
-    if (error) handleError(error, 'updateIMTemplate');
+    await runMutation(supabase.from('im_templates').update(payload).eq('id', id), 'updateIMTemplate');
 };

@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { Supplier, User, Project } from '../../types';
 import { mapSupplier, mapProfile, mapProject } from '../../utils/mappers.utils';
 import { handleError, generateUUID, generateNumericCode } from '../../utils';
+import { runMutation, runQuery } from '../core/db';
 
 /**
  * Get all suppliers
@@ -46,8 +47,7 @@ export const getSupplierByToken = async (token: string): Promise<Supplier | unde
  * Create a new supplier
  */
 export const createSupplier = async (name: string, code: string, email: string): Promise<Supplier> => {
-    const { data, error } = await supabase.from('suppliers').insert({ name, code, email }).select().single();
-    if (error) handleError(error, 'createSupplier');
+    const data = await runQuery(supabase.from('suppliers').insert({ name, code, email }).select().single(), 'createSupplier');
     return mapSupplier(data);
 };
 
@@ -113,8 +113,7 @@ export const ensureSupplierToken = async (supplierId: string): Promise<string> =
     if (!sup) throw new Error("Supplier not found");
     if (sup.portalToken) return sup.portalToken;
     const token = generateUUID();
-    const { error } = await supabase.from('suppliers').update({ portal_token: token }).eq('id', supplierId);
-    if (error) handleError(error, 'ensureSupplierToken');
+    await runMutation(supabase.from('suppliers').update({ portal_token: token }).eq('id', supplierId), 'ensureSupplierToken');
     return token;
 };
 
@@ -124,8 +123,7 @@ export const assignSupplierToPMs = async (supplierId: string, pmIds: string[]): 
     const { error: deleteError } = await supabase.from('supplier_pm_assignments').delete().eq('supplier_id', supplierId);
     if (deleteError) handleError(deleteError, 'assignSupplierToPMs');
     const assignments = pmIds.map(pmId => ({ supplier_id: supplierId, pm_id: pmId, assigned_by: user?.id }));
-    const { error } = await supabase.from('supplier_pm_assignments').insert(assignments);
-    if (error) handleError(error, 'assignSupplierToPMs');
+    await runMutation(supabase.from('supplier_pm_assignments').insert(assignments), 'assignSupplierToPMs');
 };
 
 export const getSupplierPMs = async (supplierId: string): Promise<User[]> => {

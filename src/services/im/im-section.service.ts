@@ -6,7 +6,8 @@
 import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { IMSection } from '../../types';
-import { handleError, generateUUID } from '../../utils';
+import { generateUUID } from '../../utils';
+import { runMutation, runQuery } from '../core/db';
 
 /**
  * Get all sections for an IM template
@@ -57,8 +58,7 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
 
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
-    const { data, error } = await supabase.from('im_sections').upsert(payload).select().single();
-    if (error) handleError(error, 'saveIMSection');
+    const data = await runQuery(supabase.from('im_sections').upsert(payload).select().single(), 'saveIMSection');
     return {
       id: data.id,
       templateId: data.template_id,
@@ -80,6 +80,5 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
  * Delete an IM section
  */
 export const deleteIMSection = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('im_sections').delete().eq('id', id);
-    if (error) handleError(error, 'deleteIMSection');
+    await runMutation(supabase.from('im_sections').delete().eq('id', id), 'deleteIMSection');
 };

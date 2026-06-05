@@ -7,6 +7,7 @@ import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all compliance requirements
@@ -49,16 +50,14 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
         self_declaration_accepted: req.selfDeclarationAccepted,
         test_report_origin: req.testReportOrigin
     };
-    const { error } = await supabase.from('compliance_requirements').upsert(payload);
-    if (error) handleError(error, 'saveRequirement');
+    await runMutation(supabase.from('compliance_requirements').upsert(payload), 'saveRequirement');
 };
 
 /**
  * Delete a compliance requirement
  */
 export const deleteRequirement = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('compliance_requirements').delete().eq('id', id);
-    if (error) handleError(error, 'deleteRequirement');
+    await runMutation(supabase.from('compliance_requirements').delete().eq('id', id), 'deleteRequirement');
 };
 
 /**
@@ -93,8 +92,7 @@ export const addComplianceSection = async (name: string): Promise<void> => {
  * Remove a custom section group (does not touch requirements already using it).
  */
 export const deleteComplianceSection = async (name: string): Promise<void> => {
-    const { error } = await supabase.from('compliance_sections').delete().eq('name', name);
-    if (error) handleError(error, 'deleteComplianceSection');
+    await runMutation(supabase.from('compliance_sections').delete().eq('name', name), 'deleteComplianceSection');
 };
 
 /**
@@ -142,16 +140,14 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         group: attr.group ?? 'Category Specific',
         akeneo_id: attr.akeneoId ?? null,
     };
-    const { error } = await supabase.from('category_attributes').upsert(payload);
-    if (error) handleError(error, 'saveCategoryAttribute');
+    await runMutation(supabase.from('category_attributes').upsert(payload), 'saveCategoryAttribute');
 };
 
 /**
  * Delete a category attribute
  */
 export const deleteCategoryAttribute = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('category_attributes').delete().eq('id', id);
-    if (error) handleError(error, 'deleteCategoryAttribute');
+    await runMutation(supabase.from('category_attributes').delete().eq('id', id), 'deleteCategoryAttribute');
 };
 
 /**

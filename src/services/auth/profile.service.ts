@@ -7,7 +7,7 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { User, UserRole } from '../../types';
 import { mapProfile } from '../../utils/mappers.utils';
-import { handleError } from '../../utils/error.utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all user profiles
@@ -51,6 +51,5 @@ export const getUserProfile = async (userId: string): Promise<User | null> => {
  * Update user role
  */
 export const updateUserRole = async (userId: string, role: UserRole): Promise<void> => {
-    const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
-    if (error) handleError(error, 'updateUserRole');
+    await runMutation(supabase.from('profiles').update({ role }).eq('id', userId), 'updateUserRole');
 };

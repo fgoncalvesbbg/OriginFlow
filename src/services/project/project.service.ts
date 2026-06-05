@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { Project, ProjectOverallStatus, ProjectMilestones, ProjectStep, ProjectDocument } from '../../types';
 import { mapProject, mapProjectStep, mapProjectDocument } from '../../utils/mappers.utils';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation, runQuery } from '../core/db';
 
 /**
  * Get all projects
@@ -134,8 +135,7 @@ export const updateProject = async (id: string, updates: Partial<Project>): Prom
     if (updates.supplierId !== undefined) payload.supplier_id = updates.supplierId;
     if (updates.pmId !== undefined) payload.pm_id = updates.pmId;
 
-    const { data, error } = await supabase.from('projects').update(payload).eq('id', id).select().single();
-    if (error) handleError(error, 'updateProject');
+    const data = await runQuery(supabase.from('projects').update(payload).eq('id', id).select().single(), 'updateProject');
     if (!data) throw new Error("Project not found or update failed (returned null data)");
     return mapProject(data);
 };
@@ -144,8 +144,7 @@ export const updateProject = async (id: string, updates: Partial<Project>): Prom
  * Delete a project
  */
 export const deleteProject = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('projects').delete().eq('id', id);
-    if (error) handleError(error, 'deleteProject');
+    await runMutation(supabase.from('projects').delete().eq('id', id), 'deleteProject');
 };
 
 /**
