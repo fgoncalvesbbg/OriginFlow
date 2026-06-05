@@ -17,7 +17,8 @@ import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, Refresh
 // Sentinel "category" id for the global requirements view — requirements stored with
 // categoryId = null apply to every category.
 const GLOBAL_VIEW = '__global__';
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
+import { geminiGenerateContent } from "../../services/ai/gemini.client";
 
 /** Human-readable "applies if" description for a requirement's attribute condition, or null when unconditioned. */
 const describeRequirementCondition = (cond: FeatureConditionFields | null | undefined, attrs: CategoryAttribute[]): string | null => {
@@ -250,10 +251,9 @@ const ComplianceLibrary: React.FC = () => {
 
     try {
       const categoryName = categories.find(c => c.id === selectedCategoryForReqs)?.name || 'Unknown Category';
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-      
+
       // Upgrade to gemini-3-pro-preview for complex regulatory reasoning
-      const response = await ai.models.generateContent({
+      const response = await geminiGenerateContent({
         model: 'gemini-3-pro-preview',
         contents: `Generate 5 key regulatory compliance requirements for a product in the category "${categoryName}". 
         The product is described as: "${aiProductDesc}".

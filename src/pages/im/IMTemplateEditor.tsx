@@ -13,7 +13,7 @@ import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, U
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
-import { GoogleGenAI } from "@google/genai";
+import { geminiGenerateContent } from "../../services/ai/gemini.client";
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
@@ -778,11 +778,10 @@ const IMTemplateEditor: React.FC = () => {
     setIsTranslating(true);
     try {
       const targetLangLabel = ALL_LANGUAGES.find(l => l.code === activeLang)?.label || activeLang;
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
       // Translate the section title (plain text) so titles localize alongside content.
       if (section.title?.trim()) {
-        const titleResp = await ai.models.generateContent({
+        const titleResp = await geminiGenerateContent({
           model: 'gemini-3-flash-preview',
           contents: { parts: [{ text: `Translate this short UI section title to ${targetLangLabel}. Return ONLY the translated text, no quotes or extra words. Title: ${section.title}` }] },
         });
@@ -794,7 +793,7 @@ const IMTemplateEditor: React.FC = () => {
 
       // Translate the body HTML when present.
       if (hasContent) {
-        const response = await ai.models.generateContent({
+        const response = await geminiGenerateContent({
           model: 'gemini-3-flash-preview',
           contents: {
             parts: [{ text: `Translate HTML to ${targetLangLabel}. Preserve HTML tags, classes, styles, bullet points, and placeholder spans exactly. Content: ${englishContent}` }]
