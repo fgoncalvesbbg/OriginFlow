@@ -53,30 +53,9 @@ import {
 import * as XLSX from 'xlsx';
 import { ProjectAICopilot } from '../components/ProjectAICopilot';
 import AttributeInput from '../components/common/AttributeInput';
+import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
 // --- Internal Components ---
-
-const ConfirmationModal: React.FC<{
-  isOpen: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}> = ({ isOpen, title, message, onConfirm, onCancel }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
-        <p className="text-sm text-gray-600 mb-6">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm font-medium">Confirm</button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const NotificationToast: React.FC<{ message: string, type: 'success' | 'error' | null, onClose: () => void }> = ({ message, type, onClose }) => {
   useEffect(() => {
