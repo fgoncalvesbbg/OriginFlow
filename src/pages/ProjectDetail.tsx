@@ -1,4 +1,8 @@
 
+/**
+ * ProjectDetail — the primary project workspace page: documents, steps/milestones, suppliers,
+ * compliance, SKUs, attribute requests, and production updates for a single project.
+ */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';

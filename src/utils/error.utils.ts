@@ -1,3 +1,7 @@
+/**
+ * Centralized error handling. `handleError` normalizes Supabase/JS errors into a user-friendly
+ * message and throws; service functions call it after a failed query so callers see a clear error.
+ */
 import { isLive } from '../config/environment.config';
 
 /**

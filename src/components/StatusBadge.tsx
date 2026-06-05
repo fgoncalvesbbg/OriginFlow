@@ -1,3 +1,4 @@
+/** Colored status pill for step/document/project statuses. */
 import React from 'react';
 import { StepStatus, DocStatus, ProjectOverallStatus } from '../types';
 

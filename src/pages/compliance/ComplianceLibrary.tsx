@@ -1,4 +1,5 @@
 
+/** Compliance library: manage categories, requirements, attributes (with AI-assisted authoring). */
 import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import {

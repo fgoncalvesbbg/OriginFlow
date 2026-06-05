@@ -1,3 +1,4 @@
+/** IMPreview — read-only rendered preview of a resolved IM template/section content. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getIMTemplateById, getIMSections, resolveManual } from '../../services';

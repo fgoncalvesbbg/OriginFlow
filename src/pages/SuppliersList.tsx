@@ -1,3 +1,4 @@
+/** Suppliers list/management page (create, edit, PM assignment). */
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { getSuppliers, getProjects, regenerateSupplierAccessCode, updateSupplier } from '../services';

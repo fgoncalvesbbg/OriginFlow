@@ -1,3 +1,7 @@
+/**
+ * Project SKU service — CRUD for the SKUs (product variants) attached to a project, including
+ * effective attribute-value resolution.
+ */
 import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ProjectSku, SkuAttributeValue, ProjectAttributeRequest } from '../../types';

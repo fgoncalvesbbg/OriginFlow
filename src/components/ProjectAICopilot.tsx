@@ -1,4 +1,5 @@
 
+/** Project AI copilot panel — chat assistant scoped to a project's data (uses Gemini). */
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { Project, ProjectStep, ProjectDocument, Supplier } from '../types';

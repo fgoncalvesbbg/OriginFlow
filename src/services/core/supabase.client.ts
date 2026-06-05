@@ -1,3 +1,7 @@
+/**
+ * Supabase client setup. Exports `supabase` (authenticated app client) and `portalClient`
+ * (separate client for unauthenticated supplier-portal access). Configured from environment.config.
+ */
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG, isLive } from '../../config/environment.config';
 

@@ -1,4 +1,5 @@
 
+/** Token-based supplier portal for responding to a single compliance request. */
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {

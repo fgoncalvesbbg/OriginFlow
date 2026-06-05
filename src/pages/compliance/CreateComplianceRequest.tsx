@@ -1,3 +1,4 @@
+/** Form page for creating a new compliance request for a supplier/category. */
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';

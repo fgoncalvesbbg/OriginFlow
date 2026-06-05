@@ -1,3 +1,4 @@
+/** Compliance dashboard: overview of compliance requests and their statuses. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';

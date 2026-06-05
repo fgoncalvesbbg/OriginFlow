@@ -1,3 +1,4 @@
+/** Polymorphic input that renders the correct control for a category attribute's data type. */
 import React from 'react';
 import { CategoryAttribute } from '../../types';
 import { uploadIMAsset } from '../../services/im/im-asset.service';

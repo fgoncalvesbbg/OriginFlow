@@ -1,4 +1,5 @@
 
+/** Root application component: defines the route table and wraps pages in providers/guards. */
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';

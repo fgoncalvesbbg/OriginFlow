@@ -1,4 +1,5 @@
 
+/** Supplier-facing dashboard: assigned projects, documents, and tasks for a logged-in supplier. */
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {

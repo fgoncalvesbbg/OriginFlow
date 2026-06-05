@@ -1,3 +1,7 @@
+/**
+ * Project attribute-request service — CRUD for supplier attribute-data requests, including the
+ * token-based supplier-portal submission flow (via portalClient).
+ */
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ProjectAttributeRequest } from '../../types';

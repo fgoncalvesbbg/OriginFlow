@@ -1,3 +1,4 @@
+/** Token-based supplier portal for submitting requested project attribute values. */
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getAttributeRequestByToken, submitAttributeRequest, getCategoryAttributes } from '../services';

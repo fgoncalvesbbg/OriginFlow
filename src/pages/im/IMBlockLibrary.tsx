@@ -1,3 +1,4 @@
+/** IMBlockLibrary — manage reusable IM content blocks (multilingual, with usage tracking). */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { getIMBlocks, saveIMBlock, deleteIMBlock, getIMBlockUsageCounts, BlockInUseError, getCategories, getCategoryAttributes } from '../../services';

@@ -1,4 +1,8 @@
 
+/**
+ * IMTemplateEditor — authoring UI for IM templates: section tree, block references, metadata,
+ * per-language content, and live preview (with AI-assisted translation).
+ */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';

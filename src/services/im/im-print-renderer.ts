@@ -1,3 +1,7 @@
+/**
+ * IM print renderer — turns a resolved Information Memorandum into a paginated PDF using
+ * html2canvas + jsPDF (client-side rendering of the on-screen IM layout).
+ */
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { IMSection, IMTemplate } from '../../types';

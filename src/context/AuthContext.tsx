@@ -1,4 +1,8 @@
 
+/**
+ * Auth context: tracks the Supabase session and current user profile, exposes useAuth(), and
+ * subscribes to auth-state changes for the app.
+ */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
 import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services';

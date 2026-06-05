@@ -1,4 +1,5 @@
 
+/** Compliance request detail: review a request, its requirements, and supplier responses. */
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { jsPDF } from 'jspdf';

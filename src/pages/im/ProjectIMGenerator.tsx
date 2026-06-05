@@ -1,4 +1,9 @@
 
+/**
+ * ProjectIMGenerator — the per-project Information Memorandum editor/generator. Resolves a
+ * template + the project's data into a previewable, publishable IM and exports it (PDF/JSON/XML).
+ * Sub-components and pure helpers live under ./project-im-generator/.
+ */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';

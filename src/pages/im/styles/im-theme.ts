@@ -1,3 +1,6 @@
+/**
+ * IM theme helpers — derive CSS variables/inline styles for IM rendering from template metadata.
+ */
 import { CSSProperties } from 'react';
 import { IMTemplateMetadata } from '../../../types';
 

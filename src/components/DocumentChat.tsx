@@ -1,4 +1,5 @@
 
+/** Per-document comment/chat thread UI. */
 import React, { useState, useEffect, useRef } from 'react';
 import { getDocumentComments, addDocumentComment } from '../services';
 import { DocumentComment } from '../types';
