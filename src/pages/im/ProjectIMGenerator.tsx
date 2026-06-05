@@ -25,6 +25,7 @@ import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
+import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition } from './project-im-generator/im-content.utils';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { BindableField } from './project-im-generator/BindableField';
 import { AddProjectSection } from './project-im-generator/AddProjectSection';
@@ -705,19 +706,6 @@ const ProjectIMGenerator: React.FC = () => {
 
   // ---------------- EXPORT HELPERS ----------------
 
-  const escapeXml = (unsafe: string) => {
-      if (!unsafe) return '';
-      return unsafe.replace(/[<>&'"]/g, function (c) {
-          switch (c) {
-              case '<': return '&lt;';
-              case '>': return '&gt;';
-              case '&': return '&amp;';
-              case '\'': return '&apos;';
-              case '"': return '&quot;';
-          }
-          return c;
-      });
-  };
 
   const getCleanContent = (html: string) => {
       if (!html) return '';
@@ -995,13 +983,6 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   /** Extract {{attributeId}} token names from an HTML/text fragment. */
-  const getTokensInFragment = (html: string): string[] => {
-      const out: string[] = [];
-      const re = /\{\{\s*([^}]+?)\s*\}\}/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(html)) !== null) out.push(m[1].trim());
-      return out;
-  };
 
   /**
    * All content fragments that make up a section in a given language: its own
@@ -1091,28 +1072,6 @@ const ProjectIMGenerator: React.FC = () => {
       );
   }
 
-  const matchesConditionValue = (value: string, conditionLabel: string, attr: CategoryAttribute): boolean => {
-    const v = value.trim();
-    const cv = conditionLabel.trim();
-    switch (attr.dataType) {
-      case 'boolean':
-        return (v === 'true' && cv === 'Yes') || (v === 'false' && cv === 'No');
-      case 'enum':
-        return cv.split(',').map(s => s.trim()).includes(v);
-      case 'integer':
-      case 'decimal': {
-        const num = parseFloat(v);
-        if (isNaN(num)) return false;
-        const rangeMatch = cv.match(/^([\d.]+)\s*[–\-]\s*([\d.]+)/);
-        if (rangeMatch) return num >= parseFloat(rangeMatch[1]) && num <= parseFloat(rangeMatch[2]);
-        return parseFloat(cv.replace(/[^\d.]/g, '')) === num;
-      }
-      case 'text':
-        return v.toLowerCase() === cv.toLowerCase();
-      default:
-        return true;
-    }
-  };
 
   const isSectionVisible = (section: IMSection): boolean => {
     const override = sectionVisibility[section.id];
@@ -1127,8 +1086,6 @@ const ProjectIMGenerator: React.FC = () => {
 
   // --- Conditional inline rows + shared blocks ("Show if" conditions) ---
   // A ref carries a condition when it requires (or requires the absence of) an attribute.
-  const refHasCondition = (ref: BlockRef): boolean =>
-    ref.kind !== 'sku_slot' && !!((ref as FeatureConditionFields).requires_feature || (ref as FeatureConditionFields).requires_feature_absent);
 
   // Auto visibility from the feature gate, evaluated against the same merged data the
   // resolver sees (submitted supplier values as the base, PM edits in formData on top).
