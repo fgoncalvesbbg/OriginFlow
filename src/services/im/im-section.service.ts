@@ -80,5 +80,6 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
  * Delete an IM section
  */
 export const deleteIMSection = async (id: string): Promise<void> => {
-    await supabase.from('im_sections').delete().eq('id', id);
+    const { error } = await supabase.from('im_sections').delete().eq('id', id);
+    if (error) handleError(error, 'deleteIMSection');
 };

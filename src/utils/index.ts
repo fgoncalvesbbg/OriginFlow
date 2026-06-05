@@ -5,6 +5,8 @@
 
 export { generateUUID } from './uuid.utils';
 export { handleError } from './error.utils';
+export { sanitizeHtml } from './sanitize-html.utils';
+export { generateNumericCode } from './code.utils';
 export {
   mapProfile,
   mapProject,

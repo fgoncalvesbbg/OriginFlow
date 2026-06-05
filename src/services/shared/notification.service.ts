@@ -6,6 +6,7 @@
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { Notification } from '../../types';
+import { handleError } from '../../utils/error.utils';
 
 /**
  * Get all notifications for the current user
@@ -53,7 +54,8 @@ export const getSupplierNotifications = async (supplierId: string): Promise<Noti
  * Mark a notification as read
  */
 export const markNotificationRead = async (id: string): Promise<void> => {
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    if (error) handleError(error, 'markNotificationRead');
 };
 
 /**

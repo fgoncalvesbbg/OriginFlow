@@ -68,7 +68,8 @@ export const assignPMToCategory = async (categoryId: string, pmId: string | null
  * Delete a compliance category
  */
 export const deleteCategory = async (id: string): Promise<void> => {
-    await supabase.from('categories_l3').delete().eq('id', id);
+    const { error } = await supabase.from('categories_l3').delete().eq('id', id);
+    if (error) handleError(error, 'deleteCategory');
 };
 
 /**
@@ -106,5 +107,6 @@ export const saveProductFeature = async (feat: ProductFeature): Promise<void> =>
  * Delete a product feature
  */
 export const deleteProductFeature = async (id: string): Promise<void> => {
-    await supabase.from('product_features').delete().eq('id', id);
+    const { error } = await supabase.from('product_features').delete().eq('id', id);
+    if (error) handleError(error, 'deleteProductFeature');
 };

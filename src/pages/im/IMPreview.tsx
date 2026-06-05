@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getIMTemplateById, getIMSections, resolveManual } from '../../services';
+import { sanitizeHtml } from '../../utils';
 import { wrapBlockCallout } from '../../services/im/im-resolver';
 import { IMTemplate, IMSection, IMMasterLayoutName, IMMasterPageOverride, ResolvedSection, localizedSectionTitle } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
@@ -154,7 +155,7 @@ const IMPreview: React.FC = () => {
             ) : (
                <div className="text-gray-700 leading-relaxed pl-8 font-sans im-content">
                   {html ? (
-                     <div dangerouslySetInnerHTML={{ __html: html }} />
+                     <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
                   ) : (
                      <span className="text-gray-400 italic">No content available for this language.</span>
                   )}
@@ -236,7 +237,7 @@ const IMPreview: React.FC = () => {
            {template.metadata?.backPageContent && (
              <div className="min-h-[800px] bg-light p-12 flex flex-col justify-end mt-4 border-t border-gray-200">
                 <div className="border-t pt-8" style={{ borderColor: 'var(--im-primary-color)' }}>
-                    <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
+                    <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(template.metadata.backPageContent) }} />
                     <div className="mt-10 text-xs text-gray-400 text-center">
                        &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.
                     </div>

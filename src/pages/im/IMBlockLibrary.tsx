@@ -3,6 +3,7 @@ import Layout from '../../components/Layout';
 import { getIMBlocks, saveIMBlock, deleteIMBlock, getIMBlockUsageCounts, BlockInUseError, getCategories, getCategoryAttributes } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { IMBlock, CategoryL3, CategoryAttribute } from '../../types';
+import { sanitizeHtml } from '../../utils';
 import {
   Layers, Plus, Search, CheckCircle2, Clock, Edit2, Trash2, X,
   ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame
@@ -462,7 +463,7 @@ const BlockCard: React.FC<BlockCardProps> = ({ block, onEdit, onDelete, categori
           <div className="px-4 pb-4">
             <div
               className="text-sm text-gray-600 border rounded-lg p-3 bg-light/30 max-h-40 overflow-y-auto im-content"
-              dangerouslySetInnerHTML={{ __html: block.content['en'] ?? '<em class="text-gray-400">No English content</em>' }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content['en'] ?? '<em class="text-gray-400">No English content</em>') }}
             />
           </div>
         )}

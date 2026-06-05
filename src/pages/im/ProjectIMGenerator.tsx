@@ -16,7 +16,7 @@ import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection
 import type { PublishResult } from '../../services';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Link2, Type, Search, RotateCw, Plus, ChevronUp, FilePlus2, Lock, Boxes } from 'lucide-react';
 import { InlineBlockEditor } from './editor/InlineBlockEditor';
-import { getAttributesForCategory } from '../../utils';
+import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
 import { getIMThemeVariables } from './styles/im-theme';
 
@@ -2001,7 +2001,7 @@ const ProjectIMGenerator: React.FC = () => {
                   ) : (
                     <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
                       <span className="absolute top-1 right-1 text-gray-300" title="Template content (locked)"><Lock size={11} /></span>
-                      <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>' }} />
+                      <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                     </div>
                   )}
                   {renderInsertButton(section.id, i + 1)}
@@ -2630,7 +2630,7 @@ const ProjectIMGenerator: React.FC = () => {
                                             </div>
                                           )}
                                           <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)' }}>{localizedSectionTitle(section, activeLang)}</h3>
-                                          <div className="im-content" dangerouslySetInnerHTML={{ __html: buildSectionHtml(section) }} />
+                                          <div className="im-content" dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
                                         </div>
                                       );
                                   })}
@@ -2648,7 +2648,7 @@ const ProjectIMGenerator: React.FC = () => {
                           {template?.metadata?.backPageContent && (
                               <div className="min-h-[297mm] bg-light p-[20mm] flex flex-col justify-end mt-4 break-before-page">
                                   <div className="border-t pt-8" style={{ borderColor: 'var(--im-primary-color)' }}>
-                                      <div dangerouslySetInnerHTML={{ __html: template.metadata.backPageContent }} />
+                                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(template.metadata.backPageContent) }} />
                                       <div className="mt-10 text-xs text-gray-400 text-center">
                                           &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.
                                       </div>

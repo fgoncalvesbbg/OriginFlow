@@ -7,7 +7,7 @@ import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequest, ComplianceResponseItem, ComplianceRequestStatus } from '../../types';
 import { mapComplianceRequest } from '../../utils/mappers.utils';
-import { handleError, generateUUID } from '../../utils';
+import { handleError, generateUUID, generateNumericCode } from '../../utils';
 import { upsertSupplierNotification } from '../shared/notification.service';
 
 /**
@@ -60,7 +60,7 @@ export const createComplianceRequest = async (
   conditionAttributes: Record<string, string> = {}
 ): Promise<ComplianceRequest> => {
   const token = generateUUID();
-  const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const accessCode = generateNumericCode(6);
 
   const { data, error } = await supabase.from('compliance_requests').insert({
     project_id: projectId || null,
@@ -131,7 +131,8 @@ export const submitComplianceResponse = async (reqId: string, responses: Complia
     if (status === ComplianceRequestStatus.APPROVED) updates.completed_at = new Date().toISOString();
     if (user) updates.updated_by = user;
 
-    await supabase.from('compliance_requests').update(updates).eq('id', reqId);
+    const { error } = await supabase.from('compliance_requests').update(updates).eq('id', reqId);
+    if (error) handleError(error, 'submitComplianceResponse');
 };
 
 /**

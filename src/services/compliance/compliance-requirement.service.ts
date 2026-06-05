@@ -57,7 +57,8 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
  * Delete a compliance requirement
  */
 export const deleteRequirement = async (id: string): Promise<void> => {
-    await supabase.from('compliance_requirements').delete().eq('id', id);
+    const { error } = await supabase.from('compliance_requirements').delete().eq('id', id);
+    if (error) handleError(error, 'deleteRequirement');
 };
 
 /**
@@ -149,7 +150,8 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
  * Delete a category attribute
  */
 export const deleteCategoryAttribute = async (id: string): Promise<void> => {
-    await supabase.from('category_attributes').delete().eq('id', id);
+    const { error } = await supabase.from('category_attributes').delete().eq('id', id);
+    if (error) handleError(error, 'deleteCategoryAttribute');
 };
 
 /**

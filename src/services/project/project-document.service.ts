@@ -74,7 +74,8 @@ export const updateDocStatus = async (id: string, status: DocStatus, comment?: s
  * Delete a document
  */
 export const removeDocument = async (id: string): Promise<void> => {
-    await supabase.from('project_documents').delete().eq('id', id);
+    const { error } = await supabase.from('project_documents').delete().eq('id', id);
+    if (error) handleError(error, 'removeDocument');
 };
 
 /**
@@ -137,7 +138,8 @@ export const uploadAdHocFile = async (projectId: string, step_number: number, fi
  * Delete a specific document version
  */
 export const deleteDocumentVersion = async (versionId: string): Promise<void> => {
-    await supabase.from('document_versions').delete().eq('id', versionId);
+    const { error } = await supabase.from('document_versions').delete().eq('id', versionId);
+    if (error) handleError(error, 'deleteDocumentVersion');
 };
 
 /**
