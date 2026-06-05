@@ -17,28 +17,7 @@ import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../type
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
-
-const ConfirmationModal: React.FC<{
-  isOpen: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}> = ({ isOpen, title, message, onConfirm, onCancel }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
-        <p className="text-sm text-gray-600 mb-6">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
-        </div>
-      </div>
-    </div>
-  );
-};
+import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
@@ -577,6 +556,7 @@ const AdminDashboard: React.FC = () => {
   return (
     <Layout>
       <ConfirmationModal
+        variant="danger"
         isOpen={deleteModal.isOpen}
         title={deleteModal.title}
         message={deleteModal.message}

@@ -53,9 +53,16 @@ behavior (every sibling function already did this).
 - Added `AUDIT_REPORT.md` (full findings) and this `CHANGES.md`.
 - Per request, inline `// [CHANGED]` markers were intentionally **not** used (see git history for the diff instead).
 
-## Recommended follow-ups (flagged, not done — need product/architecture decisions)
+## Follow-ups — status
 
-- 🔴 **Gemini API key client-side** (`IMTemplateEditor`, `ComplianceLibrary`, `ProjectAICopilot`) — `VITE_GEMINI_API_KEY` ships in the browser bundle. Needs a backend/edge proxy.
-- 🟠 **Service query wrapper** — ~75 repeats of the `const { data, error } = await supabase…; if (error) handleError(…)` pattern could become a `runQuery`/`runMutation` helper.
-- 🟠 **Deeper God-file decomposition** — split the stateful logic of ProjectIMGenerator/ProjectDetail/IMTemplateEditor into hooks/subcomponents, with runtime testing.
-- 🟡 File-naming consistency (`*.service.ts` kebab vs camelCase); remaining large pages (SupplierDashboard, AdminDashboard).
+Implemented after the initial cleanup (separate commits on this branch):
+
+- ✅ 🔴 **Gemini API key moved server-side** — Netlify Function proxy (`netlify/functions/gemini.ts`) + client (`src/services/ai/gemini.client.ts`); all client-side `VITE_GEMINI_API_KEY`/`GoogleGenAI` usage removed. **Deploy action:** set `GEMINI_API_KEY` (server-only) in Netlify env.
+- ✅ 🟠 **Service query wrapper** — `src/services/core/db.ts` (`runMutation`/`runQuery`); 24 mutations + 3 reads adopted it. Intentional swallow-and-fallback reads left explicit.
+- ◑ 🟠 **God-file decomposition** — pure, args-only helpers extracted from ProjectIMGenerator (`im-content.utils.ts`, `im-layout.utils.ts`) and subcomponents (`BindableField`, `AddProjectSection`). The remaining bulk of ProjectIMGenerator/ProjectDetail/IMTemplateEditor/SupplierDashboard is stateful component logic; extracting it (custom hooks) risks behavior changes and needs runtime testing — **deferred**.
+- ✅ 🟡 **ConfirmationModal** — folded AdminDashboard's copy (4th) into the shared `components/common/ConfirmationModal.tsx`.
+- ✅ 🟡 **File naming** — already consistent after `apiService.ts` removal (all `*.service.ts` / kebab domain files / `*.client.ts`); no risky renames performed.
+
+Still open (need a runtime-testing pass / product input):
+- Deeper stateful decomposition of the four large pages into hooks/subcomponents.
+- Local-dev note: AI features require `netlify dev` (the proxy isn't served by plain `vite`).
