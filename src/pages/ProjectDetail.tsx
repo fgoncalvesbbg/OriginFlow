@@ -24,25 +24,35 @@ import {
   getComplianceRequests,
   getCategories,
   getProjectIM,
+  getProjectIMStaleReasons,
   getProductionUpdates,
   saveProductionUpdate,
   createAttributeRequest,
   getAttributeRequestsByProject,
   deleteAttributeRequest,
-  getCategoryAttributes
+  updateAttributeRequestData,
+  getCategoryAttributes,
+  getProjectSkus,
+  createProjectSku,
+  updateProjectSku,
+  deleteProjectSku,
+  getEffectiveSkuValue,
+  MAX_SKUS_PER_PROJECT
 } from '../services';
+import { getAttributesForCategory } from '../utils';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason,
-  ProjectAttributeRequest
+  ProjectAttributeRequest, ProjectSku, SkuAttributeValue
 } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
-  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download
+  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { ProjectAICopilot } from '../components/ProjectAICopilot';
+import AttributeInput from '../components/common/AttributeInput';
 
 // --- Internal Components ---
 
@@ -104,6 +114,10 @@ const ProjectDetail: React.FC = () => {
   
   // IM State
   const [projectIM, setProjectIM] = useState<ProjectIM | null>(null);
+  const [projectLeaflet, setProjectLeaflet] = useState<ProjectIM | null>(null);
+  // Drill-down reasons a published manual is out of date (empty = up to date).
+  const [imStaleReasons, setImStaleReasons] = useState<import('../services').StaleReason[]>([]);
+  const [leafletStaleReasons, setLeafletStaleReasons] = useState<import('../services').StaleReason[]>([]);
 
   // Manufacturing State
   const [productionUpdates, setProductionUpdates] = useState<ProductionUpdate[]>([]);
@@ -123,18 +137,38 @@ const ProjectDetail: React.FC = () => {
   const [attrReqCategoryId, setAttrReqCategoryId] = useState('');
   const [attrReqSkuNumber, setAttrReqSkuNumber] = useState('');
   const [attrReqSkuTitle, setAttrReqSkuTitle] = useState('');
+  const [attrReqSelectedSkuId, setAttrReqSelectedSkuId] = useState('');
   const [attrReqSourceStep2, setAttrReqSourceStep2] = useState<ProjectAttributeRequest | null>(null);
   const [attrReqNote, setAttrReqNote] = useState('');
   const [attrReqSending, setAttrReqSending] = useState(false);
   const [attrReqSendingAll, setAttrReqSendingAll] = useState(false);
+  // Sending a defined SKU (from the Attributes tab) to the supplier for review.
+  const [sendingSkuId, setSendingSkuId] = useState<string | null>(null);
+  const [sendingAllSkus, setSendingAllSkus] = useState(false);
   const [attrLinkModal, setAttrLinkModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const [attrLinkCopied, setAttrLinkCopied] = useState(false);
   const [expandedAttrRequestId, setExpandedAttrRequestId] = useState<string | null>(null);
   const [attrReqRefreshing, setAttrReqRefreshing] = useState(false);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'checklist' | 'compliance' | 'timeline' | 'im' | 'manufacturing'>('checklist');
-  
+  const [activeTab, setActiveTab] = useState<'checklist' | 'attributes' | 'compliance' | 'timeline' | 'im' | 'manufacturing'>('checklist');
+
+  // Attributes tab: track which historical snapshots are expanded
+  const [expandedAttrHistoryId, setExpandedAttrHistoryId] = useState<string | null>(null);
+  // Attributes tab: inline editing of a snapshot's values (keyed by request id)
+  const [editingAttrReqId, setEditingAttrReqId] = useState<string | null>(null);
+  const [editingAttrValues, setEditingAttrValues] = useState<Record<string, string>>({});
+  const [editingAttrModes, setEditingAttrModes] = useState<Record<string, 'fixed' | 'range' | 'text'>>({});
+  const [savingAttr, setSavingAttr] = useState(false);
+
+  // Project-defined SKUs (canonical list, max 10) managed in the Attributes tab
+  const [projectSkus, setProjectSkus] = useState<ProjectSku[]>([]);
+  const [editingSkuId, setEditingSkuId] = useState<string | null>(null);
+  const [skuDraftNumber, setSkuDraftNumber] = useState('');
+  const [skuDraftTitle, setSkuDraftTitle] = useState('');
+  const [addingSku, setAddingSku] = useState(false);
+  const [savingSku, setSavingSku] = useState(false);
+
   // Review Modal State
   const [reviewingDoc, setReviewingDoc] = useState<ProjectDocument | null>(null);
   const [rejectComment, setRejectComment] = useState('');
@@ -206,13 +240,36 @@ const ProjectDetail: React.FC = () => {
     return () => clearTimeout(fallback);
   }, [id]);
 
+  // Why each published manual is out of date vs its source blocks/template (if at all).
+  useEffect(() => {
+    let active = true;
+    if (id && projectIM?.status === 'generated') {
+      getProjectIMStaleReasons(id, 'im').then(r => { if (active) setImStaleReasons(r); }).catch(() => {});
+    } else setImStaleReasons([]);
+    return () => { active = false; };
+  }, [id, projectIM?.status, projectIM?.updatedAt]);
+
+  useEffect(() => {
+    let active = true;
+    if (id && projectLeaflet?.status === 'generated') {
+      getProjectIMStaleReasons(id, 'warning_leaflet').then(r => { if (active) setLeafletStaleReasons(r); }).catch(() => {});
+    } else setLeafletStaleReasons([]);
+    return () => { active = false; };
+  }, [id, projectLeaflet?.status, projectLeaflet?.updatedAt]);
+
+  const staleSummary = (reasons: import('../services').StaleReason[]) => {
+    const blocks = reasons.filter(r => r.type === 'block').map(r => r.label);
+    const others = reasons.filter(r => r.type !== 'block').map(r => r.label);
+    return [blocks.length ? `Block${blocks.length > 1 ? 's' : ''}: ${blocks.join(', ')}` : '', ...others].filter(Boolean).join(' · ');
+  };
+
   const loadProjectData = async () => {
     if (!id) return;
     try {
       const p = await getProjectById(id);
       if (p) {
         setProject(p);
-        const [sData, stepsData, docsData, compReqs, cats, imData, prodUpdates] = await Promise.all([
+        const [sData, stepsData, docsData, compReqs, cats, imData, leafletData, prodUpdates] = await Promise.all([
           getSupplierById(p.supplierId).catch(err => {
             console.error('Error loading supplier:', err);
             return null;
@@ -228,6 +285,7 @@ const ProjectDetail: React.FC = () => {
             return [];
           }),
           getProjectIM(p.id),
+          getProjectIM(p.id, 'warning_leaflet'),
           getProductionUpdates(p.id)
         ]);
         setSupplier(sData || null);
@@ -237,16 +295,19 @@ const ProjectDetail: React.FC = () => {
         setComplianceRequests(compReqs.filter(r => r.projectId === p.id));
         setCategories(cats);
         setProjectIM(imData || null);
+        setProjectLeaflet(leafletData || null);
         setProductionUpdates(prodUpdates);
 
-        // Load attribute requests
+        // Load attribute requests, attribute definitions, and defined SKUs
         try {
-          const [attrReqs, attrDefs] = await Promise.all([
+          const [attrReqs, attrDefs, skus] = await Promise.all([
             getAttributeRequestsByProject(p.id),
             getCategoryAttributes(),
+            getProjectSkus(p.id),
           ]);
           setAttrRequests(attrReqs);
           setCategoryAttributeDefs(attrDefs);
+          setProjectSkus(skus);
         } catch (e) { console.error('Error loading attribute requests:', e); }
 
         // Init timeline form
@@ -388,10 +449,12 @@ const ProjectDetail: React.FC = () => {
     setAttrReqNote('');
     setAttrReqSourceStep2(step2Req || null);
     if (step === 3 && step2Req) {
+      setAttrReqSelectedSkuId('');
       setAttrReqSkuNumber(step2Req.skuNumber);
       setAttrReqSkuTitle(step2Req.skuTitle);
       setAttrReqCategoryId(step2Req.categoryId || project?.categoryId || complianceRequests[0]?.categoryId || '');
     } else {
+      setAttrReqSelectedSkuId('');
       setAttrReqSkuNumber('');
       setAttrReqSkuTitle('');
       setAttrReqCategoryId(project?.categoryId || complianceRequests[0]?.categoryId || '');
@@ -405,9 +468,13 @@ const ProjectDetail: React.FC = () => {
     setAttrReqSending(true);
     try {
       const cat = categories.find(c => c.id === attrReqCategoryId);
-      const prefill = attrReqStep === 3 && attrReqSourceStep2?.submittedData?.length
-        ? attrReqSourceStep2.submittedData
-        : undefined;
+      // Step 3 prefills from the source Step 2 submission; Step 2 prefills from the
+      // selected defined SKU's attribute values (if any) so the supplier sees the PM's spec.
+      const selectedSku = projectSkus.find(s => s.id === attrReqSelectedSkuId);
+      const skuPrefill = selectedSku?.attributeValues?.filter(v => v.value) ?? [];
+      const prefill = attrReqStep === 3
+        ? (attrReqSourceStep2?.submittedData?.length ? attrReqSourceStep2.submittedData : undefined)
+        : (skuPrefill.length ? skuPrefill : undefined);
       const req = await createAttributeRequest(
         project.id, project.name, project.projectId,
         attrReqCategoryId || null, cat?.name || '',
@@ -455,6 +522,64 @@ const ProjectDetail: React.FC = () => {
     }
   };
 
+  // Send a single project-defined SKU to the supplier for attribute review (Step 2).
+  // Creates a Step-2 request prefilled with the SKU's entered attribute values.
+  const handleSendSkuForReview = async (sku: ProjectSku) => {
+    if (!project) return;
+    setSendingSkuId(sku.id);
+    try {
+      const categoryId = project.categoryId || complianceRequests[0]?.categoryId || null;
+      const cat = categories.find(c => c.id === categoryId);
+      const prefill = sku.attributeValues?.filter(v => v.value) ?? [];
+      const req = await createAttributeRequest(
+        project.id, project.name, project.projectId,
+        categoryId, cat?.name || '',
+        2,
+        sku.skuNumber, sku.skuTitle,
+        undefined,
+        prefill.length ? prefill : undefined
+      );
+      const url = `${window.location.origin}/#/attribute-request/${req.token}`;
+      setAttrRequests(prev => [req, ...prev]);
+      setAttrLinkCopied(false);
+      setAttrLinkModal({ open: true, url });
+    } catch (e: any) {
+      showNotification('Failed to send SKU for review: ' + e.message, 'error');
+    } finally {
+      setSendingSkuId(null);
+    }
+  };
+
+  // Send every defined SKU that hasn't been sent for Step-2 review yet.
+  const handleSendAllSkusForReview = async () => {
+    if (!project) return;
+    const alreadySent = new Set(attrRequests.filter(r => r.step === 2).map(r => r.skuNumber));
+    const toSend = projectSkus.filter(s => !alreadySent.has(s.skuNumber));
+    if (!toSend.length) { showNotification('All defined SKUs have already been sent.', 'error'); return; }
+    setSendingAllSkus(true);
+    try {
+      const categoryId = project.categoryId || complianceRequests[0]?.categoryId || null;
+      const cat = categories.find(c => c.id === categoryId);
+      const newReqs = await Promise.all(toSend.map(sku => {
+        const prefill = sku.attributeValues?.filter(v => v.value) ?? [];
+        return createAttributeRequest(
+          project.id, project.name, project.projectId,
+          categoryId, cat?.name || '',
+          2,
+          sku.skuNumber, sku.skuTitle,
+          undefined,
+          prefill.length ? prefill : undefined
+        );
+      }));
+      setAttrRequests(prev => [...newReqs, ...prev]);
+      showNotification(`${newReqs.length} SKU(s) sent for supplier review.`, 'success');
+    } catch (e: any) {
+      showNotification('Failed to send SKUs: ' + e.message, 'error');
+    } finally {
+      setSendingAllSkus(false);
+    }
+  };
+
   const handleCopyAttrLink = (url: string) => {
     navigator.clipboard.writeText(url);
     setAttrLinkCopied(true);
@@ -498,8 +623,178 @@ const ProjectDetail: React.FC = () => {
     XLSX.writeFile(wb, filename);
   };
 
+  const handleStartEditAttr = (req: ProjectAttributeRequest) => {
+    setEditingAttrReqId(req.id);
+    setEditingAttrValues(Object.fromEntries((req.submittedData || []).map(d => [d.attributeId, d.value])));
+    // Seed the input mode per attribute from its definition: numeric range-capable
+    // values that already look like a range open in "range" mode, other numerics in
+    // "fixed", everything else in "text".
+    const modes: Record<string, 'fixed' | 'range' | 'text'> = {};
+    for (const d of req.submittedData || []) {
+      const def = categoryAttributeDefs.find(a => a.id === d.attributeId);
+      const isNumeric = def?.dataType === 'integer' || def?.dataType === 'decimal';
+      if (isNumeric) {
+        modes[d.attributeId] = def?.validationRules?.allowRange && /^.+-.+$/.test(d.value) ? 'range' : 'fixed';
+      } else {
+        modes[d.attributeId] = 'text';
+      }
+    }
+    setEditingAttrModes(modes);
+  };
+
+  const handleCancelEditAttr = () => {
+    setEditingAttrReqId(null);
+    setEditingAttrValues({});
+    setEditingAttrModes({});
+  };
+
+  const handleSaveAttr = async (req: ProjectAttributeRequest) => {
+    if (!req.submittedData) return;
+    setSavingAttr(true);
+    try {
+      const updatedData = req.submittedData.map(d => ({ ...d, value: editingAttrValues[d.attributeId] ?? d.value }));
+      const updated = await updateAttributeRequestData(req.id, updatedData);
+      setAttrRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
+      setEditingAttrReqId(null);
+      setEditingAttrValues({});
+      showNotification('Attributes updated', 'success');
+    } catch (e: any) {
+      showNotification('Failed to update: ' + e.message, 'error');
+    } finally {
+      setSavingAttr(false);
+    }
+  };
+
+  // --- Project-defined SKUs ---
+
+  // Attributes that apply to this project's category (empty when no category set).
+  const projectCatAttrs = project?.categoryId
+    ? getAttributesForCategory(categoryAttributeDefs, project.categoryId)
+    : [];
+
+  // Latest supplier submission (any step) for a SKU number, newest first.
+  const getLatestSkuSubmission = (skuNumber: string): ProjectAttributeRequest | undefined =>
+    attrRequests
+      .filter(r => r.skuNumber === skuNumber && r.status === 'submitted' && r.submittedData && r.submittedData.length > 0)
+      .sort((a, b) => new Date(b.submittedAt!).getTime() - new Date(a.submittedAt!).getTime())[0];
+
+  // Effective value for a SKU attribute (latest supplier submission wins, else the SKU's own
+  // value) is provided by the shared service helper — call as
+  // getEffectiveSkuValue(sku, attrRequests, attributeId).
+
+  const seedAttrEditorFromValues = (stored: SkuAttributeValue[]) => {
+    const map = new Map(stored.map(v => [v.attributeId, v.value]));
+    const values: Record<string, string> = {};
+    const modes: Record<string, 'fixed' | 'range' | 'text'> = {};
+    for (const a of projectCatAttrs) {
+      const v = map.get(a.id) ?? '';
+      values[a.id] = v;
+      const numeric = a.dataType === 'integer' || a.dataType === 'decimal';
+      modes[a.id] = numeric
+        ? (a.validationRules?.allowRange && /^.+-.+$/.test(v) ? 'range' : 'fixed')
+        : 'text';
+    }
+    setEditingAttrValues(values);
+    setEditingAttrModes(modes);
+  };
+
+  const handleStartEditSku = (sku: ProjectSku) => {
+    setEditingAttrReqId(null); // don't let the request editor and SKU editor clash
+    setEditingSkuId(sku.id);
+    setSkuDraftNumber(sku.skuNumber);
+    setSkuDraftTitle(sku.skuTitle);
+    // Overlay the latest supplier submission on the SKU's own values so the editor
+    // shows what was submitted rather than empty fields.
+    const seed: SkuAttributeValue[] = projectCatAttrs.map(a => ({
+      attributeId: a.id,
+      name: a.name,
+      value: getEffectiveSkuValue(sku, attrRequests, a.id),
+      type: a.dataType,
+    }));
+    seedAttrEditorFromValues(seed);
+  };
+
+  const handleCancelEditSku = () => {
+    setEditingSkuId(null);
+    setSkuDraftNumber('');
+    setSkuDraftTitle('');
+    setEditingAttrValues({});
+    setEditingAttrModes({});
+  };
+
+  const handleAddSku = async () => {
+    if (!project) return;
+    if (projectSkus.length >= MAX_SKUS_PER_PROJECT) {
+      showNotification(`Maximum of ${MAX_SKUS_PER_PROJECT} SKUs reached.`, 'error');
+      return;
+    }
+    if (!skuDraftNumber.trim()) { showNotification('SKU number is required.', 'error'); return; }
+    if (projectSkus.some(s => s.skuNumber.trim().toLowerCase() === skuDraftNumber.trim().toLowerCase())) {
+      showNotification('A SKU with that number already exists.', 'error');
+      return;
+    }
+    setSavingSku(true);
+    try {
+      const created = await createProjectSku(project.id, skuDraftNumber.trim(), skuDraftTitle.trim(), [], projectSkus.length);
+      setProjectSkus(prev => [...prev, created]);
+      setAddingSku(false);
+      setSkuDraftNumber('');
+      setSkuDraftTitle('');
+      handleStartEditSku(created); // jump straight into entering attribute values
+      showNotification('SKU added', 'success');
+    } catch (e: any) {
+      showNotification(e.message, 'error');
+    } finally {
+      setSavingSku(false);
+    }
+  };
+
+  const handleSaveSku = async (sku: ProjectSku) => {
+    if (!skuDraftNumber.trim()) { showNotification('SKU number is required.', 'error'); return; }
+    setSavingSku(true);
+    try {
+      const attributeValues: SkuAttributeValue[] = projectCatAttrs.map(a => ({
+        attributeId: a.id,
+        name: a.name,
+        value: editingAttrValues[a.id] ?? '',
+        type: a.dataType,
+      }));
+      const updated = await updateProjectSku(sku.id, {
+        skuNumber: skuDraftNumber.trim(),
+        skuTitle: skuDraftTitle.trim(),
+        attributeValues,
+      });
+      setProjectSkus(prev => prev.map(s => s.id === updated.id ? updated : s));
+      handleCancelEditSku();
+      showNotification('SKU saved', 'success');
+    } catch (e: any) {
+      showNotification('Failed to save SKU: ' + e.message, 'error');
+    } finally {
+      setSavingSku(false);
+    }
+  };
+
+  const handleDeleteSku = (sku: ProjectSku) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete SKU',
+      message: `Delete SKU "${sku.skuNumber || '—'}" and its attribute values? This cannot be undone.`,
+      action: async () => {
+        try {
+          await deleteProjectSku(sku.id);
+          setProjectSkus(prev => prev.filter(s => s.id !== sku.id));
+          if (editingSkuId === sku.id) handleCancelEditSku();
+          showNotification('SKU deleted', 'success');
+        } catch (e: any) {
+          showNotification(e.message, 'error');
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
   // --- Timeline Edit ---
-  
+
   const handleSaveTimeline = async () => {
     if (!project) return;
     try {
@@ -751,6 +1046,9 @@ const ProjectDetail: React.FC = () => {
         <button onClick={() => setActiveTab('checklist')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'checklist' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <ListTodo size={16} /> Checklist
         </button>
+        <button onClick={() => setActiveTab('attributes')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'attributes' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <Layers size={16} /> Attributes
+        </button>
         <button onClick={() => setActiveTab('compliance')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'compliance' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <ShieldCheck size={16} /> Compliance
         </button>
@@ -795,14 +1093,63 @@ const ProjectDetail: React.FC = () => {
                 </div>
 
                 <div className="divide-y divide-slate-100">
-                  {/* Attribute Data Requests — Step 2 and Step 3, one row per SKU */}
-                  {(step.stepNumber === 2 || step.stepNumber === 3) && (() => {
-                    const stepNum = step.stepNumber as 2 | 3;
-                    const stepReqs = attrRequests.filter(r => r.step === stepNum);
+                  {/* Reusable: a sent request row (status, link, data, delete). */}
+                  {/* Step 2 — Product Attribute Data: one row per DEFINED SKU (from the Attributes tab). */}
+                  {step.stepNumber === 2 && (() => {
                     const step2Reqs = attrRequests.filter(r => r.step === 2);
-                    const existingStep3Skus = new Set(attrRequests.filter(r => r.step === 3).map(r => r.skuNumber));
-                    const unsentStep3Count = step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber)).length;
-                    const label = stepNum === 2 ? 'Product Attribute Data' : 'Final Attribute Verification';
+                    // Latest Step-2 request per SKU number (prefer submitted, else newest).
+                    const latestReqBySku = new Map<string, ProjectAttributeRequest>();
+                    for (const r of step2Reqs) {
+                      const cur = latestReqBySku.get(r.skuNumber);
+                      if (!cur) { latestReqBySku.set(r.skuNumber, r); continue; }
+                      const prefer = (r.status === 'submitted' && cur.status !== 'submitted')
+                        || (!(cur.status === 'submitted' && r.status !== 'submitted') && new Date(r.createdAt) > new Date(cur.createdAt));
+                      if (prefer) latestReqBySku.set(r.skuNumber, r);
+                    }
+                    const definedNumbers = new Set(projectSkus.map(s => s.skuNumber));
+                    // Requests for SKU numbers no longer defined (legacy / removed) — keep them visible.
+                    const orphanReqs = Array.from(latestReqBySku.values()).filter(r => !definedNumbers.has(r.skuNumber));
+                    const unsentCount = projectSkus.filter(s => !latestReqBySku.has(s.skuNumber)).length;
+
+                    const renderReqExtras = (req: ProjectAttributeRequest) => {
+                      const isSubmitted = req.status === 'submitted';
+                      const isExpanded = expandedAttrRequestId === req.id;
+                      return (
+                        <>
+                          {isSubmitted && (
+                            <button onClick={() => setExpandedAttrRequestId(isExpanded ? null : req.id)} className="text-xs text-emerald-700 font-medium hover:underline flex items-center gap-1">
+                              {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>} Data
+                            </button>
+                          )}
+                          <a href={`${window.location.origin}/#/attribute-request/${req.token}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5" title="Open portal link">
+                            <LinkIcon size={11}/> Link
+                          </a>
+                          <button onClick={() => handleDeleteAttrRequest(req)} className="p-1 text-gray-300 hover:text-rose-500 rounded" title="Delete request">
+                            <Trash2 size={12}/>
+                          </button>
+                        </>
+                      );
+                    };
+
+                    const renderExpandedData = (req: ProjectAttributeRequest) => (
+                      expandedAttrRequestId === req.id && req.submittedData && req.submittedData.length > 0 ? (
+                        <div className="px-4 pb-4">
+                          <div className="flex justify-end mb-2">
+                            <button onClick={() => handleExportAttrData(req)} className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium">
+                              <Download size={12} /> Export to Excel
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {req.submittedData.map(d => (
+                              <div key={d.attributeId} className="bg-white rounded border border-indigo-100 px-3 py-2">
+                                <div className="text-xs text-gray-500">{d.name}</div>
+                                <div className="text-sm font-medium text-gray-800">{d.value || '—'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null
+                    );
 
                     return (
                       <div className="bg-indigo-50/30 border-b border-indigo-100">
@@ -810,34 +1157,134 @@ const ProjectDetail: React.FC = () => {
                         <div className="flex items-center justify-between px-4 py-3 border-b border-indigo-100/60">
                           <div className="flex items-center gap-2">
                             <ClipboardList size={15} className="text-indigo-500" />
-                            <span className="text-sm font-semibold text-gray-700">{label}</span>
+                            <span className="text-sm font-semibold text-gray-700">Product Attribute Data</span>
+                            {projectSkus.length > 0 && (
+                              <span className="text-[10px] bg-indigo-100 text-indigo-600 font-bold px-1.5 py-0.5 rounded">{projectSkus.length} SKU{projectSkus.length > 1 ? 's' : ''}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={handleRefreshAttrRequests} disabled={attrReqRefreshing} title="Refresh" className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-lg disabled:opacity-50">
+                              <RefreshCw size={12} className={attrReqRefreshing ? 'animate-spin' : ''} />
+                            </button>
+                            {unsentCount > 0 && (
+                              <button onClick={handleSendAllSkusForReview} disabled={sendingAllSkus} className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
+                                {sendingAllSkus ? <><RefreshCw size={12} className="animate-spin"/> Sending...</> : <><Send size={12}/> Send all ready ({unsentCount})</>}
+                              </button>
+                            )}
+                            <button onClick={() => setActiveTab('attributes')} className="flex items-center gap-1.5 text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-light font-medium" title="Define SKUs and their attribute values">
+                              <Boxes size={12} /> Manage SKUs
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Empty state — SKUs are defined on the Attributes tab */}
+                        {projectSkus.length === 0 && orphanReqs.length === 0 && (
+                          <div className="px-4 py-5 text-xs text-gray-400 text-center">
+                            No SKUs defined yet. Define SKUs in the{' '}
+                            <button onClick={() => setActiveTab('attributes')} className="text-indigo-600 font-medium hover:underline">Attributes tab</button>
+                            {' '}— they'll appear here ready to send for supplier review.
+                          </div>
+                        )}
+
+                        {/* One row per defined SKU */}
+                        {projectSkus.map(sku => {
+                          const req = latestReqBySku.get(sku.skuNumber);
+                          const isSubmitted = req?.status === 'submitted';
+                          const valuesSet = sku.attributeValues.filter(v => v.value).length;
+                          return (
+                            <div key={sku.id} className="border-t border-indigo-100/60 first:border-t-0">
+                              <div className="flex items-center justify-between px-4 py-3 gap-3">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isSubmitted ? 'bg-emerald-400' : req ? 'bg-amber-400' : 'bg-gray-300'}`} />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-sm font-semibold text-gray-800">{sku.skuNumber || '—'}</span>
+                                      {sku.skuTitle && <span className="text-xs text-gray-500 truncate">{sku.skuTitle}</span>}
+                                      {isSubmitted
+                                        ? <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded flex-shrink-0">SUBMITTED</span>
+                                        : req
+                                          ? <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex-shrink-0">PENDING</span>
+                                          : <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0">READY TO SEND</span>
+                                      }
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 mt-0.5">
+                                      {req
+                                        ? (isSubmitted ? `Submitted ${new Date(req.submittedAt!).toLocaleDateString()}` : `Sent ${new Date(req.createdAt).toLocaleDateString()}`)
+                                        : `${valuesSet} attribute value${valuesSet !== 1 ? 's' : ''} set`}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {req
+                                    ? renderReqExtras(req)
+                                    : (
+                                      <button onClick={() => handleSendSkuForReview(sku)} disabled={sendingSkuId === sku.id} className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
+                                        {sendingSkuId === sku.id ? <RefreshCw size={11} className="animate-spin"/> : <Send size={11}/>} Send for review
+                                      </button>
+                                    )}
+                                </div>
+                              </div>
+                              {req && renderExpandedData(req)}
+                            </div>
+                          );
+                        })}
+
+                        {/* Legacy requests whose SKU is no longer defined */}
+                        {orphanReqs.map(req => {
+                          const isSubmitted = req.status === 'submitted';
+                          return (
+                            <div key={req.id} className="border-t border-indigo-100/60">
+                              <div className="flex items-center justify-between px-4 py-3 gap-3">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isSubmitted ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-sm font-semibold text-gray-800">{req.skuNumber || '—'}</span>
+                                      {req.skuTitle && <span className="text-xs text-gray-500 truncate">{req.skuTitle}</span>}
+                                      {isSubmitted
+                                        ? <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded flex-shrink-0">SUBMITTED</span>
+                                        : <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex-shrink-0">PENDING</span>}
+                                      <span className="text-[10px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded flex-shrink-0" title="This SKU is not in the project's defined SKUs">NOT IN DEFINED SKUS</span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 mt-0.5">
+                                      {isSubmitted ? `Submitted ${new Date(req.submittedAt!).toLocaleDateString()}` : `Sent ${new Date(req.createdAt).toLocaleDateString()}`}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">{renderReqExtras(req)}</div>
+                              </div>
+                              {renderExpandedData(req)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Step 3 — Final Attribute Verification: derived from Step-2 requests. */}
+                  {step.stepNumber === 3 && (() => {
+                    const stepReqs = attrRequests.filter(r => r.step === 3);
+                    const step2Reqs = attrRequests.filter(r => r.step === 2);
+                    const existingStep3Skus = new Set(attrRequests.filter(r => r.step === 3).map(r => r.skuNumber));
+                    const unsentStep3Count = step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber)).length;
+
+                    return (
+                      <div className="bg-indigo-50/30 border-b border-indigo-100">
+                        {/* Section header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-indigo-100/60">
+                          <div className="flex items-center gap-2">
+                            <ClipboardList size={15} className="text-indigo-500" />
+                            <span className="text-sm font-semibold text-gray-700">Final Attribute Verification</span>
                             {stepReqs.length > 0 && (
                               <span className="text-[10px] bg-indigo-100 text-indigo-600 font-bold px-1.5 py-0.5 rounded">{stepReqs.length} SKU{stepReqs.length > 1 ? 's' : ''}</span>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={handleRefreshAttrRequests}
-                              disabled={attrReqRefreshing}
-                              title="Refresh"
-                              className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-lg disabled:opacity-50"
-                            >
+                            <button onClick={handleRefreshAttrRequests} disabled={attrReqRefreshing} title="Refresh" className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-lg disabled:opacity-50">
                               <RefreshCw size={12} className={attrReqRefreshing ? 'animate-spin' : ''} />
                             </button>
-                            {stepNum === 2 && (
-                              <button
-                                onClick={() => handleOpenAttrReqModal(2)}
-                                className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium"
-                              >
-                                <Plus size={12} /> Add SKU
-                              </button>
-                            )}
-                            {stepNum === 3 && unsentStep3Count > 0 && (
-                              <button
-                                onClick={handleSendAllProductionRequests}
-                                disabled={attrReqSendingAll}
-                                className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50"
-                              >
+                            {unsentStep3Count > 0 && (
+                              <button onClick={handleSendAllProductionRequests} disabled={attrReqSendingAll} className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
                                 {attrReqSendingAll ? <><RefreshCw size={12} className="animate-spin"/> Sending...</> : <><Send size={12}/> Send All ({unsentStep3Count})</>}
                               </button>
                             )}
@@ -847,11 +1294,11 @@ const ProjectDetail: React.FC = () => {
                         {/* Empty state */}
                         {stepReqs.length === 0 && (
                           <div className="px-4 py-4 text-xs text-gray-400 text-center">
-                            {stepNum === 2 ? 'No SKU requests sent yet. Click "Add SKU" to start.' : 'No production requests yet. Add SKUs in Step 2 first, then use "Send All".'}
+                            No production requests yet. Send SKUs for review in Step 2 first, then use "Send All".
                           </div>
                         )}
 
-                        {/* One row per SKU */}
+                        {/* One row per sent Step-3 request */}
                         {stepReqs.map(req => {
                           const isSubmitted = req.status === 'submitted';
                           const isExpanded = expandedAttrRequestId === req.id;
@@ -877,38 +1324,24 @@ const ProjectDetail: React.FC = () => {
                                 </div>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
                                   {isSubmitted && (
-                                    <button
-                                      onClick={() => setExpandedAttrRequestId(isExpanded ? null : req.id)}
-                                      className="text-xs text-emerald-700 font-medium hover:underline flex items-center gap-1"
-                                    >
+                                    <button onClick={() => setExpandedAttrRequestId(isExpanded ? null : req.id)} className="text-xs text-emerald-700 font-medium hover:underline flex items-center gap-1">
                                       {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>} Data
                                     </button>
                                   )}
-                                  <a
-                                    href={`${window.location.origin}/#/attribute-request/${req.token}`}
-                                    target="_blank" rel="noreferrer"
-                                    className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5"
-                                    title="Open portal link"
-                                  >
+                                  <a href={`${window.location.origin}/#/attribute-request/${req.token}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-500 hover:underline flex items-center gap-0.5" title="Open portal link">
                                     <LinkIcon size={11}/> Link
                                   </a>
-                                  {stepNum === 3 && (
-                                    <button
-                                      onClick={() => {
-                                        const s2 = attrRequests.find(r => r.step === 2 && r.skuNumber === req.skuNumber);
-                                        handleOpenAttrReqModal(3, s2);
-                                      }}
-                                      className="text-xs text-gray-500 hover:text-indigo-600 flex items-center gap-0.5"
-                                      title="Resend"
-                                    >
-                                      <RefreshCw size={11}/> Resend
-                                    </button>
-                                  )}
                                   <button
-                                    onClick={() => handleDeleteAttrRequest(req)}
-                                    className="p-1 text-gray-300 hover:text-rose-500 rounded"
-                                    title="Delete request"
+                                    onClick={() => {
+                                      const s2 = attrRequests.find(r => r.step === 2 && r.skuNumber === req.skuNumber);
+                                      handleOpenAttrReqModal(3, s2);
+                                    }}
+                                    className="text-xs text-gray-500 hover:text-indigo-600 flex items-center gap-0.5"
+                                    title="Resend"
                                   >
+                                    <RefreshCw size={11}/> Resend
+                                  </button>
+                                  <button onClick={() => handleDeleteAttrRequest(req)} className="p-1 text-gray-300 hover:text-rose-500 rounded" title="Delete request">
                                     <Trash2 size={12}/>
                                   </button>
                                 </div>
@@ -917,10 +1350,7 @@ const ProjectDetail: React.FC = () => {
                               {isExpanded && req.submittedData && req.submittedData.length > 0 && (
                                 <div className="px-4 pb-4">
                                   <div className="flex justify-end mb-2">
-                                    <button
-                                      onClick={() => handleExportAttrData(req)}
-                                      className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium"
-                                    >
+                                    <button onClick={() => handleExportAttrData(req)} className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium">
                                       <Download size={12} /> Export to Excel
                                     </button>
                                   </div>
@@ -938,8 +1368,8 @@ const ProjectDetail: React.FC = () => {
                           );
                         })}
 
-                        {/* Step 3: show which Step 2 SKUs are not yet sent */}
-                        {stepNum === 3 && step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber)).map(r => (
+                        {/* Step 2 SKUs not yet sent for production verification */}
+                        {step2Reqs.filter(r => !existingStep3Skus.has(r.skuNumber)).map(r => (
                           <div key={r.id} className="border-t border-indigo-100/60 flex items-center justify-between px-4 py-3 gap-3">
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                               <div className="w-2 h-2 rounded-full flex-shrink-0 bg-gray-300" />
@@ -951,10 +1381,7 @@ const ProjectDetail: React.FC = () => {
                                 </div>
                               </div>
                             </div>
-                            <button
-                              onClick={() => handleOpenAttrReqModal(3, r)}
-                              className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-medium"
-                            >
+                            <button onClick={() => handleOpenAttrReqModal(3, r)} className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-medium">
                               <Send size={11}/> Send
                             </button>
                           </div>
@@ -1060,6 +1487,409 @@ const ProjectDetail: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* ATTRIBUTES TAB */}
+      {activeTab === 'attributes' && (() => {
+        const stepLabel = (s: 2 | 3) => (s === 3 ? 'Final Verification' : 'Product Data');
+
+        // Group every request by SKU. Each SKU can have multiple requests over time
+        // (Step 2 product data, Step 3 final verification, resends) — each submitted
+        // request is one historical snapshot of that SKU's attributes.
+        const bySku = new Map<string, ProjectAttributeRequest[]>();
+        for (const r of attrRequests) {
+          const key = r.skuNumber || '—';
+          if (!bySku.has(key)) bySku.set(key, []);
+          bySku.get(key)!.push(r);
+        }
+
+        const skuGroups = Array.from(bySku.entries()).map(([sku, reqs]) => {
+          // Snapshots = submitted requests with data, newest first
+          const snapshots = reqs
+            .filter(r => r.status === 'submitted' && r.submittedData && r.submittedData.length > 0)
+            .sort((a, b) => new Date(b.submittedAt!).getTime() - new Date(a.submittedAt!).getTime());
+          const pending = reqs.filter(r => r.status !== 'submitted');
+          const title = reqs.find(r => r.skuTitle)?.skuTitle || '';
+          return { sku, title, snapshots, pending };
+        }).sort((a, b) => a.sku.localeCompare(b.sku));
+
+        // Render the right editor for an attribute, honoring its defined data type
+        // (enum → dropdown, boolean → Yes/No, numeric → number/range, image → upload).
+        // Falls back to a plain text input when no definition is found for the attribute.
+        const renderAttrEditor = (d: { attributeId: string; name: string; value: string; type?: string }) => {
+          const def = categoryAttributeDefs.find(a => a.id === d.attributeId);
+          const setVal = (v: string) => setEditingAttrValues(prev => ({ ...prev, [d.attributeId]: v }));
+          if (def) {
+            return (
+              <AttributeInput
+                attribute={def}
+                value={editingAttrValues[d.attributeId] ?? ''}
+                onChange={setVal}
+                mode={editingAttrModes[d.attributeId] || 'text'}
+                onModeChange={mode => {
+                  setEditingAttrModes(prev => ({ ...prev, [d.attributeId]: mode }));
+                  setVal('');
+                }}
+              />
+            );
+          }
+          return (
+            <input
+              value={editingAttrValues[d.attributeId] ?? ''}
+              onChange={(e) => setVal(e.target.value)}
+              className="mt-0.5 w-full text-sm border border-gray-300 rounded px-2 py-1 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+            />
+          );
+        };
+
+        return (
+          <div>
+            {/* ===== Defined SKUs manager ===== */}
+            <div className="mb-8">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">Defined SKUs</h3>
+                  <p className="text-sm text-muted mt-0.5">Up to {MAX_SKUS_PER_PROJECT} SKUs for this project, each with its attribute values. These SKUs are used across the project.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-gray-400">{projectSkus.length}/{MAX_SKUS_PER_PROJECT}</span>
+                  <button
+                    onClick={() => { setAddingSku(true); setSkuDraftNumber(''); setSkuDraftTitle(''); setEditingSkuId(null); }}
+                    disabled={projectSkus.length >= MAX_SKUS_PER_PROJECT || addingSku}
+                    className="flex items-center gap-1.5 text-sm bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 font-medium disabled:opacity-50"
+                  >
+                    <Plus size={16} /> Add SKU
+                  </button>
+                </div>
+              </div>
+
+              {/* Add SKU inline form */}
+              {addingSku && (
+                <div className="bg-white rounded-xl border border-indigo-200 shadow p-4 mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">SKU Number *</label>
+                      <input value={skuDraftNumber} onChange={e => setSkuDraftNumber(e.target.value)} placeholder="e.g. SKU-001" className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">SKU Title</label>
+                      <input value={skuDraftTitle} onChange={e => setSkuDraftTitle(e.target.value)} placeholder="e.g. Wireless Charger 10W" className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => { setAddingSku(false); setSkuDraftNumber(''); setSkuDraftTitle(''); }} className="text-sm text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg font-medium">Cancel</button>
+                    <button onClick={handleAddSku} disabled={savingSku} className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
+                      {savingSku ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />} Add
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {projectSkus.length === 0 && !addingSku && (
+                <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-muted">
+                  No SKUs defined yet. Click "Add SKU" to define the SKUs used across this project.
+                </div>
+              )}
+
+              {/* SKU cards */}
+              <div className="space-y-4">
+                {projectSkus.map(sku => {
+                  const isEditing = editingSkuId === sku.id;
+                  const submission = getLatestSkuSubmission(sku.skuNumber);
+                  const valuesSet = projectCatAttrs.length > 0
+                    ? projectCatAttrs.filter(a => getEffectiveSkuValue(sku, attrRequests, a.id)).length
+                    : sku.attributeValues.filter(v => v.value).length;
+                  return (
+                    <div key={sku.id} className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden">
+                      <div className="bg-light px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600"><Boxes size={20} /></div>
+                          {isEditing ? (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <input value={skuDraftNumber} onChange={e => setSkuDraftNumber(e.target.value)} placeholder="SKU number" className="text-sm font-semibold border border-gray-300 rounded px-2 py-1 w-32 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none" />
+                              <input value={skuDraftTitle} onChange={e => setSkuDraftTitle(e.target.value)} placeholder="Title" className="text-sm border border-gray-300 rounded px-2 py-1 w-48 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none" />
+                            </div>
+                          ) : (
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-gray-800">{sku.skuNumber}</h4>
+                                {sku.skuTitle && <span className="text-sm text-gray-500 truncate">{sku.skuTitle}</span>}
+                                {submission && (
+                                  <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded flex-shrink-0" title={`Latest supplier submission ${new Date(submission.submittedAt!).toLocaleDateString()}`}>
+                                    SUPPLIER DATA
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted mt-0.5">
+                                {valuesSet} attribute value{valuesSet !== 1 ? 's' : ''} set
+                                {submission && <span className="text-emerald-600"> · showing latest submission ({new Date(submission.submittedAt!).toLocaleDateString()})</span>}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {isEditing ? (
+                            <>
+                              <button onClick={() => handleSaveSku(sku)} disabled={savingSku} className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
+                                {savingSku ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />} Save
+                              </button>
+                              <button onClick={handleCancelEditSku} disabled={savingSku} className="flex items-center gap-1 text-xs text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"><X size={12} /> Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => handleStartEditSku(sku)} className="flex items-center gap-1 text-xs text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg font-medium"><Pencil size={12} /> Edit</button>
+                              <button onClick={() => handleDeleteSku(sku)} className="p-1.5 text-gray-300 hover:text-rose-500 rounded" title="Delete SKU"><Trash2 size={14} /></button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-6">
+                        {!project?.categoryId ? (
+                          <div className="text-sm text-gray-400 flex items-center gap-2"><AlertCircle size={14} /> Assign a category to this project to enter attribute values.</div>
+                        ) : projectCatAttrs.length === 0 ? (
+                          <div className="text-sm text-gray-400">No attributes are defined for this project's category.</div>
+                        ) : isEditing ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {projectCatAttrs.map(a => (
+                              <div key={a.id} className="bg-light rounded border border-gray-100 px-3 py-2">
+                                <div className="text-xs text-gray-500 mb-0.5">{a.name}{a.validationRules?.unit ? ` (${a.validationRules.unit})` : ''}</div>
+                                {renderAttrEditor({ attributeId: a.id, name: a.name, value: editingAttrValues[a.id] ?? '', type: a.dataType })}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {projectCatAttrs.map(a => {
+                              const ownVal = sku.attributeValues.find(x => x.attributeId === a.id)?.value || '';
+                              const submittedVal = submission?.submittedData?.find(d => d.attributeId === a.id)?.value || '';
+                              const v = submittedVal || ownVal;
+                              const fromSupplier = !!submittedVal && submittedVal !== ownVal;
+                              return (
+                                <div key={a.id} className="bg-light rounded border border-gray-100 px-3 py-2">
+                                  <div className="text-xs text-gray-500 flex items-center gap-1">
+                                    {a.name}
+                                    {fromSupplier && <span className="text-[9px] font-bold text-emerald-600" title="From latest supplier submission">★</span>}
+                                  </div>
+                                  <div className="text-sm font-medium text-gray-800 break-words">{v || '—'}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ===== Supplier submission history ===== */}
+            <div className="flex justify-between items-center mb-6 mt-10 pt-8 border-t border-gray-200">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800">Supplier Submission History</h3>
+                <p className="text-sm text-muted mt-0.5">Attribute data submitted by suppliers via attribute requests, grouped by SKU.</p>
+              </div>
+              <button
+                onClick={handleRefreshAttrRequests}
+                disabled={attrReqRefreshing}
+                className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-50"
+              >
+                <RefreshCw size={16} className={attrReqRefreshing ? 'animate-spin' : ''} /> Refresh
+              </button>
+            </div>
+
+            {skuGroups.length === 0 ? (
+              <div className="bg-white border border-dashed border-gray-300 rounded-xl p-10 text-center text-muted">
+                No attribute data yet. Send attribute requests from the Checklist tab (Step 2 / Step 3) to collect SKU attributes.
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {skuGroups.map(({ sku, title, snapshots, pending }) => {
+                  const latest = snapshots[0];
+                  const history = snapshots.slice(1);
+                  return (
+                    <div key={sku} className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden">
+                      {/* SKU header */}
+                      <div className="bg-light px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600"><Boxes size={20} /></div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-gray-800">{sku}</h4>
+                              {title && <span className="text-sm text-gray-500 truncate">{title}</span>}
+                            </div>
+                            <p className="text-xs text-muted mt-0.5">
+                              {snapshots.length > 0
+                                ? `${snapshots.length} submission${snapshots.length > 1 ? 's' : ''} on record`
+                                : 'Awaiting submission'}
+                            </p>
+                          </div>
+                        </div>
+                        {latest && (
+                          <button
+                            onClick={() => handleExportAttrData(latest)}
+                            className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium flex-shrink-0"
+                          >
+                            <Download size={12} /> Export Latest
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="p-6">
+                        {/* Latest attributes */}
+                        {latest ? (
+                          <>
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Latest Attributes</span>
+                                <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">{stepLabel(latest.step)}</span>
+                                <span className="text-[11px] text-gray-400">Submitted {new Date(latest.submittedAt!).toLocaleDateString()}</span>
+                              </div>
+                              {editingAttrReqId === latest.id ? (
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  <button
+                                    onClick={() => handleSaveAttr(latest)}
+                                    disabled={savingAttr}
+                                    className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50"
+                                  >
+                                    {savingAttr ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />} Save
+                                  </button>
+                                  <button
+                                    onClick={handleCancelEditAttr}
+                                    disabled={savingAttr}
+                                    className="flex items-center gap-1 text-xs text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                                  >
+                                    <X size={12} /> Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleStartEditAttr(latest)}
+                                  className="flex items-center gap-1 text-xs text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg font-medium flex-shrink-0"
+                                >
+                                  <Pencil size={12} /> Edit
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {latest.submittedData!.map(d => (
+                                <div key={d.attributeId} className="bg-light rounded border border-gray-100 px-3 py-2">
+                                  <div className="text-xs text-gray-500 mb-0.5">{d.name}</div>
+                                  {editingAttrReqId === latest.id ? (
+                                    renderAttrEditor(d)
+                                  ) : (
+                                    <div className="text-sm font-medium text-gray-800 break-words">{d.value || '—'}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-gray-400 flex items-center gap-2">
+                            <Clock size={14} /> No submitted attributes yet for this SKU.
+                            {pending.length > 0 && ` ${pending.length} request${pending.length > 1 ? 's' : ''} pending.`}
+                          </div>
+                        )}
+
+                        {/* History */}
+                        {history.length > 0 && (
+                          <div className="mt-6 pt-5 border-t border-gray-100">
+                            <div className="flex items-center gap-2 mb-3">
+                              <History size={14} className="text-gray-400" />
+                              <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">History ({history.length})</span>
+                            </div>
+                            <div className="space-y-2">
+                              {history.map((snap, idx) => {
+                                const isOpen = expandedAttrHistoryId === snap.id;
+                                // The snapshot chronologically just before this one (older) to highlight changes.
+                                const prevSnap = snapshots[snapshots.indexOf(snap) + 1];
+                                const prevValues = new Map((prevSnap?.submittedData || []).map(d => [d.attributeId, d.value]));
+                                return (
+                                  <div key={snap.id} className="border border-gray-100 rounded-lg overflow-hidden">
+                                    <button
+                                      onClick={() => setExpandedAttrHistoryId(isOpen ? null : snap.id)}
+                                      className="w-full flex items-center justify-between px-3 py-2.5 bg-light/50 hover:bg-light text-left"
+                                    >
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {isOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                                        <span className="text-sm font-medium text-gray-700">{stepLabel(snap.step)}</span>
+                                        <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">v{history.length - idx}</span>
+                                        <span className="text-xs text-gray-400">Submitted {new Date(snap.submittedAt!).toLocaleString()}</span>
+                                      </div>
+                                      <span
+                                        onClick={(e) => { e.stopPropagation(); handleExportAttrData(snap); }}
+                                        className="text-gray-400 hover:text-emerald-600 p-1"
+                                        title="Export this snapshot"
+                                      >
+                                        <Download size={13} />
+                                      </span>
+                                    </button>
+                                    {isOpen && snap.submittedData && (
+                                      <div className="px-3 py-3">
+                                        <div className="flex justify-end mb-2">
+                                          {editingAttrReqId === snap.id ? (
+                                            <div className="flex items-center gap-1.5">
+                                              <button
+                                                onClick={() => handleSaveAttr(snap)}
+                                                disabled={savingAttr}
+                                                className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50"
+                                              >
+                                                {savingAttr ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />} Save
+                                              </button>
+                                              <button
+                                                onClick={handleCancelEditAttr}
+                                                disabled={savingAttr}
+                                                className="flex items-center gap-1 text-xs text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                                              >
+                                                <X size={12} /> Cancel
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <button
+                                              onClick={() => handleStartEditAttr(snap)}
+                                              className="flex items-center gap-1 text-xs text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg font-medium"
+                                            >
+                                              <Pencil size={12} /> Edit
+                                            </button>
+                                          )}
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                          {snap.submittedData.map(d => {
+                                            const editing = editingAttrReqId === snap.id;
+                                            const changed = !editing && prevSnap && prevValues.get(d.attributeId) !== d.value;
+                                            return (
+                                              <div key={d.attributeId} className={`rounded border px-3 py-2 ${changed ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-white'}`}>
+                                                <div className="text-xs text-gray-500 flex items-center gap-1 mb-0.5">
+                                                  {d.name}
+                                                  {changed && <span className="text-[9px] font-bold bg-amber-200 text-amber-800 px-1 rounded">CHANGED</span>}
+                                                </div>
+                                                {editing ? (
+                                                  renderAttrEditor(d)
+                                                ) : (
+                                                  <div className="text-sm font-medium text-gray-800 break-words">{d.value || '—'}</div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* COMPLIANCE TAB */}
       {activeTab === 'compliance' && (
@@ -1169,10 +1999,53 @@ const ProjectDetail: React.FC = () => {
                         {projectIM.status === 'generated' ? <CheckCircle2 className="text-emerald-600" size={20} /> : <Circle className="text-orange-500" size={20} />}
                         <span className="font-bold text-gray-800 capitalize">{projectIM.status}</span>
                      </div>
+                     {imStaleReasons.length > 0 && (
+                        <div className="mt-2">
+                           <div className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200" title={`${staleSummary(imStaleReasons)} changed since last publish. Re-publish from the generator to update.`}>
+                              <RefreshCw size={11} /> Needs re-publish
+                           </div>
+                           <div className="text-[11px] text-orange-600/80 mt-1">↳ {staleSummary(imStaleReasons)}</div>
+                        </div>
+                     )}
                   </div>
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
                      <h4 className="text-xs font-bold text-muted uppercase mb-2">Last Updated</h4>
                      <span className="font-mono text-gray-700">{new Date(projectIM.updatedAt).toLocaleString()}</span>
+                  </div>
+               </div>
+            )}
+
+            {/* Warning Leaflet */}
+            <div className="mt-8 bg-gradient-to-br from-amber-900 to-amber-950 rounded-xl p-8 text-white shadow-lg flex justify-between items-center">
+               <div>
+                  <h3 className="text-2xl font-bold mb-2 flex items-center gap-2"><AlertTriangle className="text-amber-300"/> Warning Leaflet</h3>
+                  <p className="text-amber-100/80 text-sm max-w-lg">Generate the safety warning leaflet based on the category's leaflet template and project data.</p>
+               </div>
+               <Link to={`/project/${project.id}/im-generator/warning_leaflet`} className="bg-amber-500 hover:bg-amber-400 text-amber-950 px-6 py-3 rounded-xl font-bold shadow-lg transition-all flex items-center gap-2">
+                  {projectLeaflet ? 'Edit Leaflet' : 'Start Generator'} <ArrowRight size={18} />
+               </Link>
+            </div>
+
+            {projectLeaflet && (
+               <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+                     <h4 className="text-xs font-bold text-muted uppercase mb-2">Status</h4>
+                     <div className="flex items-center gap-2">
+                        {projectLeaflet.status === 'generated' ? <CheckCircle2 className="text-emerald-600" size={20} /> : <Circle className="text-orange-500" size={20} />}
+                        <span className="font-bold text-gray-800 capitalize">{projectLeaflet.status}</span>
+                     </div>
+                     {leafletStaleReasons.length > 0 && (
+                        <div className="mt-2">
+                           <div className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200" title={`${staleSummary(leafletStaleReasons)} changed since last publish. Re-publish from the generator to update.`}>
+                              <RefreshCw size={11} /> Needs re-publish
+                           </div>
+                           <div className="text-[11px] text-orange-600/80 mt-1">↳ {staleSummary(leafletStaleReasons)}</div>
+                        </div>
+                     )}
+                  </div>
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+                     <h4 className="text-xs font-bold text-muted uppercase mb-2">Last Updated</h4>
+                     <span className="font-mono text-gray-700">{new Date(projectLeaflet.updatedAt).toLocaleString()}</span>
                   </div>
                </div>
             )}
@@ -1443,35 +2316,57 @@ const ProjectDetail: React.FC = () => {
               </div>
             )}
 
-            {/* SKU fields */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  SKU Number <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className={`w-full border rounded-lg p-2 text-sm outline-none ${attrReqStep === 3 ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 focus:ring-2 focus:ring-indigo-500'}`}
-                  placeholder="e.g. SKU-001"
-                  value={attrReqSkuNumber}
-                  onChange={e => setAttrReqSkuNumber(e.target.value)}
-                  disabled={attrReqStep === 3}
-                />
+            {/* SKU selection */}
+            {attrReqStep === 3 ? (
+              // Step 3 SKU is locked — it comes from the source Step 2 request.
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SKU Number</label>
+                  <input
+                    type="text"
+                    className="w-full border rounded-lg p-2 text-sm outline-none bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed"
+                    value={attrReqSkuNumber}
+                    disabled
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SKU Title</label>
+                  <input
+                    type="text"
+                    className="w-full border rounded-lg p-2 text-sm outline-none bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed"
+                    value={attrReqSkuTitle}
+                    disabled
+                  />
+                </div>
               </div>
-              <div>
+            ) : (
+              <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  SKU Title
+                  SKU <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  className={`w-full border rounded-lg p-2 text-sm outline-none ${attrReqStep === 3 ? 'bg-gray-50 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 focus:ring-2 focus:ring-indigo-500'}`}
-                  placeholder="e.g. Wireless Charger 10W"
-                  value={attrReqSkuTitle}
-                  onChange={e => setAttrReqSkuTitle(e.target.value)}
-                  disabled={attrReqStep === 3}
-                />
+                {projectSkus.length === 0 ? (
+                  <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    No SKUs defined yet. Add SKUs in the Attributes tab first.
+                  </div>
+                ) : (
+                  <select
+                    className="w-full border border-gray-300 rounded-lg p-2 text-sm outline-none bg-white focus:ring-2 focus:ring-indigo-500"
+                    value={attrReqSelectedSkuId}
+                    onChange={e => {
+                      const s = projectSkus.find(x => x.id === e.target.value);
+                      setAttrReqSelectedSkuId(e.target.value);
+                      setAttrReqSkuNumber(s?.skuNumber ?? '');
+                      setAttrReqSkuTitle(s?.skuTitle ?? '');
+                    }}
+                  >
+                    <option value="">— Select a SKU —</option>
+                    {projectSkus.map(s => (
+                      <option key={s.id} value={s.id}>{s.skuNumber}{s.skuTitle ? ` — ${s.skuTitle}` : ''}</option>
+                    ))}
+                  </select>
+                )}
               </div>
-            </div>
+            )}
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1505,7 +2400,7 @@ const ProjectDetail: React.FC = () => {
               <button onClick={() => setAttrReqModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
               <button
                 onClick={handleSendAttrRequest}
-                disabled={attrReqSending}
+                disabled={attrReqSending || (attrReqStep === 2 && !attrReqSelectedSkuId)}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
               >
                 {attrReqSending ? <><span className="animate-spin">⏳</span> Creating...</> : <><Send size={14}/> Create Request</>}

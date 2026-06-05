@@ -32,3 +32,4 @@ export {
 
 export type { ValidationResult } from './validators.utils';
 export { validateAttributeValue, getAttributesForCategory } from './attribute-validation.utils';
+export { passesFeatureGate, isFalsy } from './attribute-condition.utils';

@@ -11,6 +11,8 @@ interface RenderProjectIMPdfParams {
   formData: Record<string, string>;
   conditions: Record<string, boolean>;
   useLegacyHtml2Canvas?: boolean;
+  /** Publish version stamped into the page footer (e.g. 3 → "v3"). */
+  version?: number;
 }
 
 const MM_TO_PX = 3.7795275591;
@@ -141,6 +143,7 @@ export const buildIMPrintDocument = ({
   sections,
   formData,
   conditions,
+  version,
 }: Omit<RenderProjectIMPdfParams, 'previewElement' | 'useLegacyHtml2Canvas'>) => {
   const orderedSections = [...sections].sort((a, b) => a.order - b.order);
   const primaryColor = template?.metadata?.primaryColor || '#0f172a';
@@ -162,6 +165,12 @@ export const buildIMPrintDocument = ({
       ? formData.__custom_footer
       : template?.metadata?.footerText || '';
 
+  // Version stamp shown in every page footer (so it always lands on the last page).
+  const versionLabel = version ? `v${version}` : '';
+  const footerWithVersion = versionLabel
+    ? (displayFooter ? `${displayFooter}  ·  ${versionLabel}` : versionLabel)
+    : displayFooter;
+
   const sectionPages = orderedSections
     .map((section) => {
       const sectionHtml = processSectionHtml(
@@ -177,21 +186,21 @@ export const buildIMPrintDocument = ({
             <h2 class="im-section-title">${escapeHtml(section.title)}</h2>
             <div class="im-section-content">${sectionHtml}</div>
           </div>
-          <div class="im-running-footer">${escapeHtml(displayFooter)}</div>
+          <div class="im-running-footer">${escapeHtml(footerWithVersion)}</div>
           <div class="im-page-number"></div>
         </section>
       `;
     })
     .join('');
 
-  const endPage = template?.metadata?.backPageContent
+  const endPage = (template?.metadata?.backPageContent || versionLabel)
     ? `
       <section class="im-page-section im-page-end">
         <div class="im-page-inner">
-          <div class="im-end-content">${template.metadata.backPageContent}</div>
+          ${template?.metadata?.backPageContent ? `<div class="im-end-content">${template.metadata.backPageContent}</div>` : ''}
           <div class="im-end-copyright">© ${new Date().getFullYear()} ${escapeHtml(
-            template.metadata.companyName || 'Company Name'
-          )}. All rights reserved.</div>
+            template?.metadata?.companyName || 'Company Name'
+          )}. All rights reserved.${versionLabel ? ` · ${versionLabel}` : ''}</div>
         </div>
       </section>
     `
@@ -378,7 +387,7 @@ export const buildIMPrintDocument = ({
           </div>
         </section>
 
-        ${buildTOCPage(orderedSections, primaryColor, projectName, language, displayFooter)}
+        ${buildTOCPage(orderedSections, primaryColor, projectName, language, footerWithVersion)}
         ${sectionPages}
         ${endPage}
       </body>

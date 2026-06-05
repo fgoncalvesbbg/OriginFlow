@@ -11,6 +11,7 @@ import {
 } from '../../services';
 import { useAuth } from '../../context/AuthContext';
 import { useRefetchOnFocus } from '../../hooks';
+import { passesFeatureGate } from '../../utils';
 import {
   ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
@@ -99,13 +100,14 @@ const ComplianceRequestDetail: React.FC = () => {
           });
         }
 
+        const condAttrs = r.conditionAttributes ?? {};
         const applicableReqs = allReqs.filter(requirement => {
-        if (requirement.categoryId !== r.categoryId) return false;
-        if (requirement.appliesByDefault && (!requirement.conditionFeatureIds || requirement.conditionFeatureIds.length === 0)) return true;
-        const hasTriggerFeature = requirement.conditionFeatureIds?.some(fid => 
-            r.features.find(f => f.featureId === fid)?.value
-        );
-        return hasTriggerFeature;
+        // Global requirements (categoryId null) apply to every category.
+        if (requirement.categoryId != null && requirement.categoryId !== r.categoryId) return false;
+        const cond = requirement.condition;
+        const hasCond = !!cond && (!!cond.requires_feature || !!cond.requires_feature_absent);
+        if (!hasCond) return requirement.appliesByDefault;
+        return passesFeatureGate(cond!, condAttrs, {});
       });
       setRequirements(applicableReqs);
 

@@ -107,6 +107,7 @@ export const mapComplianceRequest = (r: any): ComplianceRequest => {
     supplierId: r.supplier_id,
     categoryId: r.category_id,
     features: Array.isArray(r.features) ? r.features : [],
+    conditionAttributes: (r.condition_attributes && typeof r.condition_attributes === 'object') ? r.condition_attributes : {},
     status: r.status,
     responses: Array.isArray(r.responses) ? r.responses : [],
     token: r.token,

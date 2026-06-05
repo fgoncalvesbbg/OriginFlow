@@ -56,7 +56,8 @@ export const getComplianceRequestsBySupplierId = async (supplierId: string): Pro
  */
 export const createComplianceRequest = async (
   projectId: string, projectName: string, requestIdCode: string, supplierId: string,
-  categoryId: string, features: { featureId: string; value: boolean }[], deadline?: string
+  categoryId: string, features: { featureId: string; value: boolean }[], deadline?: string,
+  conditionAttributes: Record<string, string> = {}
 ): Promise<ComplianceRequest> => {
   const token = generateUUID();
   const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -68,6 +69,7 @@ export const createComplianceRequest = async (
     supplier_id: supplierId,
     category_id: categoryId,
     features,
+    condition_attributes: conditionAttributes,
     status: ComplianceRequestStatus.PENDING_SUPPLIER,
     token,
     access_code: accessCode,

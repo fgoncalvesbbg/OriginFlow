@@ -14,7 +14,7 @@ import {
   Project, Supplier, User, ComplianceRequest, ComplianceRequestStatus,
   CategoryL3, ProductFeature, ComplianceRequirement, ProjectStep, ProjectDocument,
   DashboardStats, DocStatus, StepStatus, ResponsibleParty, UserRole, ProjectOverallStatus,
-  ComplianceResponseItem, ChangeLogEntry, Notification, IMTemplate, IMSection, ProjectIM,
+  ComplianceResponseItem, ChangeLogEntry, Notification, IMTemplate, IMTemplateType, IMSection, ProjectIM,
   DocumentComment, ProjectMilestones, IMTemplateMetadata,
   RFQ, RFQEntry, RFQStatus, RFQEntryStatus, CategoryAttribute, RFQAttributeValue, RFQAttachment,
   SupplierProposal, ProductionUpdate, DeadlineItem
@@ -1124,8 +1124,12 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
     return (data || []).map((a: any) => ({
         id: a.id,
         categoryId: a.category_id,
+        assignedCategoryIds: a.assigned_category_ids ?? [],
         name: a.name,
-        dataType: a.dataType
+        dataType: a.data_type,
+        validationRules: a.validation_rules ?? {},
+        group: a.group ?? undefined,
+        akeneoId: a.akeneo_id ?? undefined
     }));
 };
 
@@ -1133,8 +1137,12 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
     const payload = {
         id: attr.id,
         category_id: attr.categoryId,
+        assigned_category_ids: attr.assignedCategoryIds ?? [],
         name: attr.name,
-        dataType: attr.dataType
+        data_type: attr.dataType,
+        validation_rules: attr.validationRules ?? {},
+        group: attr.group ?? null,
+        akeneo_id: attr.akeneoId ?? null
     };
     const { error } = await supabase.from('category_attributes').upsert(payload);
     if (error) handleError(error, 'saveCategoryAttribute');
@@ -1206,6 +1214,7 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
     return (data || []).map((t: any) => ({
       id: t.id,
       categoryId: t.category_id,
+      templateType: (t.template_type ?? 'im') as IMTemplateType,
       name: t.name,
       languages: t.languages,
       isFinalized: t.is_finalized,
@@ -1223,6 +1232,7 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
     return {
       id: data.id,
       categoryId: data.category_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       name: data.name,
       languages: data.languages,
       isFinalized: data.is_finalized,
@@ -1243,6 +1253,7 @@ export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMT
     return {
       id: data.id,
       categoryId: data.category_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       name: data.name,
       languages: data.languages,
       isFinalized: data.is_finalized,
@@ -1266,6 +1277,7 @@ export const createIMTemplate = async (categoryId: string, name: string): Promis
     return {
       id: data.id,
       categoryId: data.category_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       name: data.name,
       languages: data.languages,
       isFinalized: data.is_finalized,
@@ -1351,7 +1363,9 @@ export const getProjectIM = async (projectId: string): Promise<ProjectIM | null>
     return {
       id: data.id,
       templateId: data.template_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       placeholderData: data.placeholder_data,
+      skuContent: data.sku_content ?? {},
       status: data.status,
       updatedAt: data.updated_at
     };
@@ -1359,12 +1373,12 @@ export const getProjectIM = async (projectId: string): Promise<ProjectIM | null>
 
 export const saveProjectIM = async (projectId: string, templateId: string, placeholderData: Record<string, string>, status: 'draft' | 'generated'): Promise<ProjectIM> => {
     const { data: existing } = await supabase.from('project_ims').select('id').eq('project_id', projectId).maybeSingle();
-    
+
     const payload = {
-        project_id: projectId, 
-        template_id: templateId, 
-        placeholder_data: placeholderData, 
-        status, 
+        project_id: projectId,
+        template_id: templateId,
+        placeholder_data: placeholderData,
+        status,
         updated_at: new Date().toISOString()
     };
 
@@ -1374,7 +1388,9 @@ export const saveProjectIM = async (projectId: string, templateId: string, place
         return {
           id: data.id,
           templateId: data.template_id,
+          templateType: (data.template_type ?? 'im') as IMTemplateType,
           placeholderData: data.placeholder_data,
+          skuContent: data.sku_content ?? {},
           status: data.status,
           updatedAt: data.updated_at
         };
@@ -1384,7 +1400,9 @@ export const saveProjectIM = async (projectId: string, templateId: string, place
         return {
           id: data.id,
           templateId: data.template_id,
+          templateType: (data.template_type ?? 'im') as IMTemplateType,
           placeholderData: data.placeholder_data,
+          skuContent: data.sku_content ?? {},
           status: data.status,
           updatedAt: data.updated_at
         };

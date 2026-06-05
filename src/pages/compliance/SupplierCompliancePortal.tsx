@@ -10,6 +10,7 @@ import {
   ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
+import { passesFeatureGate } from '../../utils';
 import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle } from 'lucide-react';
 
 const SupplierCompliancePortal: React.FC = () => {
@@ -34,7 +35,7 @@ const SupplierCompliancePortal: React.FC = () => {
   const [respondentPosition, setRespondentPosition] = useState('');
 
   // Filter and Sort State
-  const [filterMode, setFilterMode] = useState<'all' | 'unanswered' | 'mandatory' | 'answered'>('unanswered');
+  const [filterMode, setFilterMode] = useState<'all' | 'unanswered' | 'mandatory' | 'answered'>('all');
   const [sortMode, setSortMode] = useState<'section' | 'mandatory'>('section');
 
   const handleLogin = async (e?: React.FormEvent) => {
@@ -83,18 +84,16 @@ const SupplierCompliancePortal: React.FC = () => {
           const cat = allCats.find(c => c.id === requestData.categoryId);
           setCategory(cat || null);
 
+          const condAttrs = requestData.conditionAttributes ?? {};
           const applicableReqs = allReqs.filter(requirement => {
-            if (requirement.categoryId !== requestData.categoryId) return false;
+            // Global requirements (categoryId null) apply to every category.
+            if (requirement.categoryId != null && requirement.categoryId !== requestData.categoryId) return false;
 
-            if (requirement.appliesByDefault && (!requirement.conditionFeatureIds || requirement.conditionFeatureIds.length === 0)) {
-                return true;
-            }
+            const cond = requirement.condition;
+            const hasCond = !!cond && (!!cond.requires_feature || !!cond.requires_feature_absent);
+            if (!hasCond) return requirement.appliesByDefault;
 
-            const featureList = requestData.features || [];
-            return (requirement.conditionFeatureIds || []).some(fid => {
-                const matchedFeature = featureList.find(f => f.featureId === fid);
-                return matchedFeature?.value === true;
-            });
+            return passesFeatureGate(cond!, condAttrs, {});
           });
 
           setRequirements(applicableReqs);
@@ -335,6 +334,41 @@ const SupplierCompliancePortal: React.FC = () => {
                 <div className="font-medium">{req.deadline ? new Date(req.deadline).toLocaleDateString() : 'None'}</div>
             </div>
         </div>
+
+        {/* Intro / Legend Card */}
+        {!submitted && (
+          <div className="mb-6 bg-white border border-gray-200 rounded-xl shadow p-6">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-2">
+              <ShieldCheck size={18} className="text-indigo-600" />
+              About this declaration
+            </h3>
+            <p className="text-sm text-gray-600 leading-relaxed mb-4">
+              This Technical Compliance File (TCF) declaration confirms that your product meets the
+              regulatory and safety requirements for the <strong>{category?.name || 'selected'}</strong> category.
+              For each requirement below, mark whether you can <strong>Confirm</strong> compliance or
+              <strong> Cannot Confirm</strong>. The badges on each item tell you how compliance must be
+              evidenced — please read them before responding.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="flex items-start gap-2">
+                <Building size={14} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                <span><strong>In-House / 3rd Party</strong> — whether the test may be run by your own lab, or must use an independent accredited laboratory.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <FileCheck size={14} className="text-green-600 mt-0.5 flex-shrink-0" />
+                <span><strong>Self-Decl OK / Lab Report Req</strong> — whether a signed self-declaration is enough, or a qualified lab test report is required as evidence.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <Clock size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                <span><strong>At ETD / ETD+Xw</strong> — when the documentation must be ready, relative to the Estimated Time of Delivery.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold uppercase mt-0.5 flex-shrink-0">Required</span>
+                <span><strong>Required</strong> — mandatory items must be completed; marking "Cannot Confirm" needs a valid business reason.</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Progress Overview Card */}
         {!submitted && (
@@ -659,6 +693,18 @@ const SupplierCompliancePortal: React.FC = () => {
                             <input type="text" disabled={submitted} className={`w-full border rounded p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none ${submitted ? 'bg-gray-100 border-gray-100 cursor-not-allowed' : 'border-gray-300'}`} placeholder="e.g. Quality Manager" value={respondentPosition} onChange={(e) => !submitted && setRespondentPosition(e.target.value)} />
                         </div>
                     </div>
+
+                    {!submitted && (
+                        <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                            <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                            <p className="text-xs text-amber-900 leading-relaxed">
+                                By submitting this declaration you confirm that the responses above are accurate and that you
+                                agree to honour the stated compliance commitments, evidence requirements and deadlines.
+                                Failure to meet these commitments may result in the project being cancelled, and you may be
+                                required to compensate for any resulting losses.
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {!submitted && (

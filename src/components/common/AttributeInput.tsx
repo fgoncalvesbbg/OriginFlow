@@ -1,5 +1,7 @@
 import React from 'react';
 import { CategoryAttribute } from '../../types';
+import { uploadIMAsset } from '../../services/im/im-asset.service';
+import { ImageIcon, Upload, Loader2, X, Lock } from 'lucide-react';
 
 interface AttributeInputProps {
   attribute: CategoryAttribute;
@@ -34,6 +36,24 @@ const AttributeInput: React.FC<AttributeInputProps> = ({
   onValuesChange,
 }) => {
   const rules = attribute.validationRules;
+  const [uploading, setUploading] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadIMAsset(file, 'sku');
+      onChange(url);
+    } catch (err: any) {
+      alert(err?.message || 'Image upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const isNumeric = attribute.dataType === 'integer' || attribute.dataType === 'decimal';
   const effectiveMode = forceRange ? 'range' : mode;
   const placeholder = rules?.placeholder || (isNumeric && effectiveMode === 'range' ? 'e.g. 100-200' : 'Enter value');
@@ -69,6 +89,72 @@ const AttributeInput: React.FC<AttributeInputProps> = ({
   };
 
   const renderInput = () => {
+    // ── Image: single upload, replaceable ────────────────────────────────────
+    // One image per attribute. When `disabled`, the existing image is shown
+    // read-only (suppliers can set it once; only a PM/internal user replaces it).
+    if (attribute.dataType === 'image') {
+      return (
+        <div className={`${error ? 'p-2 border rounded ' + errorClass : ''}`}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageFile}
+            disabled={disabled || uploading}
+          />
+          {value ? (
+            <div className="flex items-start gap-3">
+              <img
+                src={value}
+                alt={attribute.name}
+                className="h-24 w-24 object-cover rounded-lg border border-gray-200 bg-gray-50"
+              />
+              {disabled ? (
+                <span className="inline-flex items-center gap-1 text-xs text-gray-400 mt-1">
+                  <Lock size={12} /> Locked — only a PM can replace
+                </span>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded border border-indigo-100 disabled:opacity-50"
+                  >
+                    {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    {uploading ? 'Uploading…' : 'Replace'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChange('')}
+                    disabled={uploading}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded border border-transparent hover:border-rose-100 disabled:opacity-50"
+                  >
+                    <X size={13} /> Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : disabled ? (
+            <div className="flex items-center gap-2 text-sm text-gray-400 border border-dashed border-gray-200 rounded-lg px-3 py-4 justify-center">
+              <ImageIcon size={16} /> No image uploaded
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full flex items-center justify-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 border border-dashed border-indigo-300 rounded-lg px-3 py-4 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+              {uploading ? 'Uploading…' : 'Upload image'}
+            </button>
+          )}
+        </div>
+      );
+    }
+
     // ── Enum: multi-select checkboxes (RFQ creation) ────────────────────────
     if (attribute.dataType === 'enum' && onValuesChange) {
       const options = rules?.enumOptions ?? [];

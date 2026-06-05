@@ -116,6 +116,22 @@ export const deleteAttributeRequest = async (id: string): Promise<void> => {
   }
 };
 
+// PM/admin-side direct edit of a request's attribute data (by id, not token).
+export const updateAttributeRequestData = async (id: string, submittedData: SubmittedValue[]): Promise<ProjectAttributeRequest> => {
+  if (!isLive) throw new Error('Database not configured.');
+  const { data, error } = await supabase
+    .from('project_attribute_requests')
+    .update({ submitted_data: submittedData })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    console.error('updateAttributeRequestData error:', error);
+    throw new Error(error.message || 'Failed to update attributes');
+  }
+  return map(data);
+};
+
 export const submitAttributeRequest = async (token: string, submittedData: SubmittedValue[]): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
   const { error } = await portalClient

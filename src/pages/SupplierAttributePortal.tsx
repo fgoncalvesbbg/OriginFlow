@@ -19,6 +19,9 @@ const SupplierAttributePortal: React.FC = () => {
   const [values, setValues] = useState<Record<string, string>>({});
   const [types, setTypes] = useState<Record<string, 'fixed' | 'range' | 'text'>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Image attributes that already have a value: a supplier may upload an image once,
+  // but once set only a PM can replace it (locked read-only here).
+  const [lockedImageIds, setLockedImageIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!token) { setError('Invalid link.'); setLoading(false); return; }
@@ -43,12 +46,17 @@ const SupplierAttributePortal: React.FC = () => {
           initValues[a.id] = '';
         });
         // Pre-fill if previously submitted
+        const locked = new Set<string>();
         if (req.submittedData) {
           req.submittedData.forEach(d => {
             initValues[d.attributeId] = d.value;
             if (d.type) initTypes[d.attributeId] = d.type as any;
+            // An image carried over from a previous submission/stage is locked for suppliers.
+            const attr = catAttrs.find(a => a.id === d.attributeId);
+            if (attr?.dataType === 'image' && d.value) locked.add(d.attributeId);
           });
         }
+        setLockedImageIds(locked);
         setValues(initValues);
         setTypes(initTypes);
       } catch (e: any) {
@@ -224,6 +232,7 @@ const SupplierAttributePortal: React.FC = () => {
                           setTypes(prev => ({ ...prev, [attr.id]: mode }));
                           setValues(prev => ({ ...prev, [attr.id]: '' }));
                         }}
+                        disabled={attr.dataType === 'image' && lockedImageIds.has(attr.id)}
                         error={errors[attr.id]}
                       />
                     </div>

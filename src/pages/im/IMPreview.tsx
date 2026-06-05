@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getIMTemplateById, getIMSections } from '../../services';
-import { IMTemplate, IMSection, IMMasterLayoutName, IMMasterPageOverride } from '../../types';
+import { getIMTemplateById, getIMSections, resolveManual } from '../../services';
+import { wrapBlockCallout } from '../../services/im/im-resolver';
+import { IMTemplate, IMSection, IMMasterLayoutName, IMMasterPageOverride, ResolvedSection, localizedSectionTitle } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
@@ -92,30 +93,58 @@ const IMPreview: React.FC = () => {
   // Filter available languages based on what's enabled in the template
   const enabledLanguages = ALL_LANGUAGES.filter(l => template.languages?.includes(l.code));
   
-  const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
   const imThemeVars = getIMThemeVariables(template.metadata);
   const masterPages = {
     ...DEFAULT_MASTER_PAGES,
     ...(template.metadata?.masterPages || {})
   };
 
+  // Resolve the full document for the active language. Recomputes whenever
+  // the language switcher changes; no project context in preview mode.
+  const resolved = useMemo(
+    () => resolveManual(template, sections, {}, null, activeLang),
+    [template, sections, activeLang],
+  );
+
+  // Build a lookup from section id → ResolvedSection for the renderer
+  const resolvedById = useMemo(() => {
+    const map: Record<string, ResolvedSection> = {};
+    for (const rs of resolved.sections) map[rs.id] = rs;
+    return map;
+  }, [resolved]);
+
+  const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
+
+  /** Convert resolved nodes to an HTML string for dangerouslySetInnerHTML. */
+  const nodesToHtml = (rs: ResolvedSection): string =>
+    rs.nodes
+      .map(node => {
+        if (node.type === 'html') return node.html;
+        if (node.type === 'callout') return wrapBlockCallout(node.variant, node.html);
+        // Typed nodes (annotated_image_set, legend_table, step_sequence) are
+        // rendered as simple placeholders in preview mode; full renderers come in Phase 3.
+        return `<p class="text-gray-400 italic text-sm">[${node.type} — rendered in project view]</p>`;
+      })
+      .join('');
+
   const renderSection = (s: IMSection, indexPrefix: string, level: number) => {
      const children = sections.filter(sec => sec.parentId === s.id).sort((a, b) => a.order - b.order);
      const isSub = level > 0;
-     const content = s.content[activeLang];
-     const layout = resolveSectionLayout(s, template.metadata?.sectionLayoutMap);
+     const rs = resolvedById[s.id];
+     const layout = rs?.layout ?? resolveSectionLayout(s, template.metadata?.sectionLayoutMap);
      const layoutOverride = masterPages[layout];
+     const html = rs ? nodesToHtml(rs) : '';
 
      return (
         <div key={s.id} className={isSub ? 'mt-6 ml-8' : 'mt-10'} style={getBackgroundStyle(layoutOverride)}>
             <div className="flex items-baseline gap-3 mb-3">
                <span className={`${isSub ? 'text-gray-400 text-lg' : 'text-gray-300 text-xl'} font-bold`}>{indexPrefix}</span>
-               <h3 className={`${isSub ? 'text-lg text-gray-700' : 'text-xl text-gray-800'} font-bold`}>{s.title}</h3>
+               <h3 className={`${isSub ? 'text-lg text-gray-700' : 'text-xl text-gray-800'} font-bold`}>{localizedSectionTitle(s, activeLang)}</h3>
                <span className="text-[10px] uppercase tracking-wide text-gray-400">{layout}</span>
             </div>
 
             {layoutOverride?.iconStrip && <div className="text-xs text-gray-500 mb-3">{layoutOverride.iconStrip}</div>}
-            
+
             {s.isPlaceholder ? (
                <div className="bg-light border border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center text-center text-gray-400">
                   <LayoutTemplate size={32} className="mb-2 opacity-30" />
@@ -124,14 +153,14 @@ const IMPreview: React.FC = () => {
                </div>
             ) : (
                <div className="text-gray-700 leading-relaxed pl-8 font-sans im-content">
-                  {content ? (
-                     <div dangerouslySetInnerHTML={{ __html: content }} />
+                  {html ? (
+                     <div dangerouslySetInnerHTML={{ __html: html }} />
                   ) : (
                      <span className="text-gray-400 italic">No content available for this language.</span>
                   )}
                </div>
             )}
-            
+
             {children.map((child, idx) => renderSection(child, `${indexPrefix}${idx + 1}.`, level + 1))}
         </div>
      );

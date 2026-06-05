@@ -47,7 +47,15 @@ export {
   getAttributeRequestsByProjectPublic,
   getAttributeRequestByToken,
   submitAttributeRequest,
-  deleteAttributeRequest
+  updateAttributeRequestData,
+  deleteAttributeRequest,
+  MAX_SKUS_PER_PROJECT,
+  getProjectSkus,
+  createProjectSku,
+  updateProjectSku,
+  deleteProjectSku,
+  getEffectiveSkuValue,
+  collapseSkuAttributeValues
 } from './project';
 
 // Supplier module
@@ -107,6 +115,9 @@ export {
   saveRequirement,
   deleteRequirement,
   addStandardRequirements,
+  getComplianceSections,
+  addComplianceSection,
+  deleteComplianceSection,
   getCategoryAttributes,
   saveCategoryAttribute,
   deleteCategoryAttribute,
@@ -129,8 +140,28 @@ export {
   deleteIMSection,
   getProjectIM,
   saveProjectIM,
-  deleteProjectIM
+  deleteProjectIM,
+  getAllProjectIMs,
+  getIMBlocks,
+  getIMBlockById,
+  getIMBlockBySlug,
+  saveIMBlock,
+  deleteIMBlock,
+  getIMBlockUsage,
+  getIMBlockUsageCounts,
+  BlockInUseError,
+  resolveManual,
+  publishResolvedManuals,
+  normalizeResolverData,
+  getPublishedManifestUrl,
+  getStaleProjectIMKeys,
+  getStaleProjectIMDetails,
+  getProjectIMStaleReasons,
+  isProjectIMStale,
+  republishProjectIM,
+  stalenessKey
 } from './im';
+export type { PublishResult, PublishedLanguage, IMBlockUsageRef, StaleReason, StaleManual } from './im';
 
 // Sourcing module
 export {

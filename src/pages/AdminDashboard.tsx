@@ -8,7 +8,7 @@ import {
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   assignAttributeToCategory, unassignAttributeFromCategory,
   assignSupplierToPMs, getSupplierPMs,
-  reassignProjectPM, getProjects,
+  reassignProjectPM, getProjects, deleteProject,
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS
 } from '../services';
 import { generateUUID, getAttributesForCategory } from '../utils';
@@ -196,6 +196,23 @@ const AdminDashboard: React.FC = () => {
     setSelectedProjectForReassignment(project);
     setNewPMIdForProject(project.pmId);
     setProjectReassignmentModalOpen(true);
+  };
+
+  const handleDeleteProject = (proj: any) => {
+    setDeleteModal({
+      isOpen: true,
+      title: 'Delete Project',
+      message: `Permanently delete "${proj.name}" (${proj.projectId})? This also deletes all linked SKUs, attribute requests, compliance requests, instruction manuals, documents and history. This cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteProject(proj.id);
+          await loadData();
+        } catch (e: any) {
+          alert(`Failed to delete project: ${e.message}`);
+        }
+        setDeleteModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // --- CATEGORY & ATTRIBUTE ACTIONS ---
@@ -726,14 +743,24 @@ const AdminDashboard: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <button
-                      onClick={() => openProjectReassignmentModal(proj)}
-                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors ml-4 whitespace-nowrap"
-                      title="Reassign PM"
-                    >
-                      <SlidersHorizontal size={14} />
-                      Change PM
-                    </button>
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={() => openProjectReassignmentModal(proj)}
+                        className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors whitespace-nowrap"
+                        title="Reassign PM"
+                      >
+                        <SlidersHorizontal size={14} />
+                        Change PM
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProject(proj)}
+                        className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors whitespace-nowrap"
+                        title="Delete Project"
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -791,6 +818,7 @@ const AdminDashboard: React.FC = () => {
                         <option value="decimal">Decimal (fractional number)</option>
                         <option value="boolean">Boolean (Yes / No)</option>
                         <option value="enum">Dropdown (fixed options list)</option>
+                        <option value="image">Image (single upload)</option>
                       </select>
                     </div>
 
