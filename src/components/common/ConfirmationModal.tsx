@@ -9,6 +9,7 @@
  */
 
 import React from 'react';
+import { Button } from './Button';
 
 export interface ConfirmationModalProps {
   isOpen: boolean;
@@ -19,11 +20,6 @@ export interface ConfirmationModalProps {
   variant?: 'primary' | 'danger';
   confirmLabel?: string;
 }
-
-const CONFIRM_BUTTON_CLASSES: Record<'primary' | 'danger', string> = {
-  primary: 'bg-indigo-600 text-white hover:bg-indigo-700',
-  danger: 'bg-rose-600 text-white hover:bg-red-700',
-};
 
 const DEFAULT_CONFIRM_LABEL: Record<'primary' | 'danger', string> = {
   primary: 'Confirm',
@@ -40,10 +36,10 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
         <p className="text-sm text-gray-600 mb-6">{message}</p>
         <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className={`px-4 py-2 rounded text-sm font-medium ${CONFIRM_BUTTON_CLASSES[variant]}`}>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant={variant === 'danger' ? 'danger' : 'primary'} onClick={onConfirm}>
             {confirmLabel ?? DEFAULT_CONFIRM_LABEL[variant]}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
