@@ -18,11 +18,20 @@
           },
           extend: {
             colors: {
-              primary: '#1a1f35', // Deep charcoal
-              secondary: '#6b7280', // Refined gray
-              accent: '#4f46e5', // Elegant indigo
-              muted: '#9ca3af', // Soft gray
-              light: '#f9fafb', // Almost white
+              // Brand neutrals
+              primary: '#1a1f35',        // Control-Room Ink — sidebar bg + body text
+              secondary: '#6b7280',      // Refined gray — secondary text
+              muted: '#9ca3af',          // Soft gray — muted text / icons
+              light: '#f9fafb',          // Canvas — app background
+              surface: '#ffffff',        // Raised surfaces (cards, top bar, panels)
+              border: '#e5e7eb',         // Hairline borders / dividers
+              // Action accent
+              accent: '#4f46e5',         // Action Indigo — primary action / active / selection
+              'accent-hover': '#4338ca', // Action Indigo, deepened for hover
+              // Semantic status (see DESIGN.md status vocabulary)
+              success: '#047857',        // Progress Emerald
+              warning: '#b45309',        // Pending Amber
+              danger: '#be123c',         // Blocked Rose
             }
           }
         }
