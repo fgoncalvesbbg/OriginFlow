@@ -1,15 +1,39 @@
 
+/** Compliance library: manage categories, requirements, attributes (with AI-assisted authoring). */
 import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import {
   getCategories, getComplianceRequirements,
   saveRequirement, deleteRequirement, addStandardRequirements,
+  getCategoryAttributes,
+  getComplianceSections, addComplianceSection, deleteComplianceSection,
   COMPLIANCE_SECTIONS
 } from '../../services';
-import { CategoryL3, ComplianceRequirement } from '../../types';
+import { CategoryL3, ComplianceRequirement, CategoryAttribute, FeatureConditionFields } from '../../types';
+import { getAttributesForCategory } from '../../utils';
 // Added comment above fix: Adding missing X icon to lucide-react imports
-import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X } from 'lucide-react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe } from 'lucide-react';
+
+// Sentinel "category" id for the global requirements view — requirements stored with
+// categoryId = null apply to every category.
+const GLOBAL_VIEW = '__global__';
+import { Type } from "@google/genai";
+import { geminiGenerateContent } from "../../services/ai/gemini.client";
+
+/** Human-readable "applies if" description for a requirement's attribute condition, or null when unconditioned. */
+const describeRequirementCondition = (cond: FeatureConditionFields | null | undefined, attrs: CategoryAttribute[]): string | null => {
+  if (!cond) return null;
+  const condAttrId = cond.requires_feature ?? cond.requires_feature_absent ?? null;
+  if (!condAttrId) return null;
+  const condAttr = attrs.find(a => a.id === condAttrId);
+  const name = condAttr?.name ?? 'attribute';
+  if (cond.requires_feature_absent) return `${name}: absent`;
+  if (cond.requires_feature_label) return `${name} ∈ ${cond.requires_feature_label}`;
+  if (cond.requires_feature_num_min && cond.requires_feature_num_max) return `${name}: ${cond.requires_feature_num_min}–${cond.requires_feature_num_max}`;
+  if (cond.requires_feature_num_min) return `${name} ≥ ${cond.requires_feature_num_min}`;
+  if (cond.requires_feature_num_max) return `${name} ≤ ${cond.requires_feature_num_max}`;
+  return `${name}: has value`;
+};
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -51,6 +75,9 @@ const ConfirmationModal: React.FC<{
 const ComplianceLibrary: React.FC = () => {
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
+  const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
+  const [customSections, setCustomSections] = useState<string[]>([]);
+  const [newSectionInput, setNewSectionInput] = useState('');
   const [loading, setLoading] = useState(true);
 
   const [selectedCategoryForReqs, setSelectedCategoryForReqs] = useState<string | null>(null);
@@ -82,11 +109,13 @@ const ComplianceLibrary: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [c, r] = await Promise.all([
-        getCategories(), getComplianceRequirements()
+      const [c, r, a, s] = await Promise.all([
+        getCategories(), getComplianceRequirements(), getCategoryAttributes(), getComplianceSections()
       ]);
       setCategories(c);
       setRequirements(r);
+      setAttributes(a);
+      setCustomSections(s);
     } catch (error) {
       console.error("Failed to load library data", error);
     } finally {
@@ -121,15 +150,23 @@ const ComplianceLibrary: React.FC = () => {
     e.preventDefault();
     try {
         const item = editingItem as ComplianceRequirement;
-        const catId = item.categoryId || selectedCategoryForReqs;
-        
-        if (!catId) throw new Error("Category ID is missing.");
-        
-        await saveRequirement({ 
-            ...item, 
-            categoryId: catId, 
-            id: item.id || generateUUID() 
+        // Global view (or an item explicitly marked global) saves with categoryId = null.
+        const isGlobal = selectedCategoryForReqs === GLOBAL_VIEW || item.categoryId === null;
+        const catId = isGlobal ? null : (item.categoryId || selectedCategoryForReqs);
+
+        if (!isGlobal && !catId) throw new Error("Category ID is missing.");
+
+        // Drop an "enabled but unset" condition (no attribute chosen) back to null.
+        let condition = item.condition ?? null;
+        if (condition && !condition.requires_feature && !condition.requires_feature_absent) condition = null;
+
+        await saveRequirement({
+            ...item,
+            categoryId: catId,
+            condition,
+            id: item.id || generateUUID()
         });
+        await persistSectionIfNew(item.section);
         setIsModalOpen(false);
         loadData();
     } catch (err: any) {
@@ -151,16 +188,17 @@ const ComplianceLibrary: React.FC = () => {
   };
 
   const openAddModal = (sectionName?: string) => {
-    const catId = selectedCategoryForReqs || categories[0]?.id;
-    if (!catId) { showAlert("Notice", "No category selected"); return; }
-    setEditingItem({ 
-      categoryId: catId, 
+    const isGlobal = selectedCategoryForReqs === GLOBAL_VIEW;
+    const catId = isGlobal ? null : (selectedCategoryForReqs || categories[0]?.id);
+    if (!isGlobal && !catId) { showAlert("Notice", "No category selected"); return; }
+    setEditingItem({
+      categoryId: catId,
       section: sectionName || '',
       title: '', 
       description: '', 
-      isMandatory: true, 
-      appliesByDefault: true, 
-      conditionFeatureIds: [],
+      isMandatory: true,
+      appliesByDefault: true,
+      condition: null,
       timingType: 'ETD',
       timingWeeks: 0,
       testReportOrigin: 'third_party_mandatory',
@@ -213,10 +251,9 @@ const ComplianceLibrary: React.FC = () => {
 
     try {
       const categoryName = categories.find(c => c.id === selectedCategoryForReqs)?.name || 'Unknown Category';
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-      
+
       // Upgrade to gemini-3-pro-preview for complex regulatory reasoning
-      const response = await ai.models.generateContent({
+      const response = await geminiGenerateContent({
         model: 'gemini-3-pro-preview',
         contents: `Generate 5 key regulatory compliance requirements for a product in the category "${categoryName}". 
         The product is described as: "${aiProductDesc}".
@@ -269,7 +306,7 @@ const ComplianceLibrary: React.FC = () => {
         isMandatory: item.isMandatory || false,
         referenceCode: item.referenceCode,
         appliesByDefault: true,
-        conditionFeatureIds: [],
+        condition: null,
         timingType: 'ETD',
         timingWeeks: 0,
         selfDeclarationAccepted: false,
@@ -286,12 +323,67 @@ const ComplianceLibrary: React.FC = () => {
     }
   };
 
+  // Built-in sections + user-defined ones + any already referenced by a requirement.
+  // Order: built-ins first, then custom (creation order), then legacy free-text values.
+  const usedSections = requirements.map(r => r.section).filter(Boolean) as string[];
+  const availableSections = Array.from(new Set([...COMPLIANCE_SECTIONS, ...customSections, ...usedSections]));
+
+  // Persist a section the moment a requirement adopts it, so it shows for every category.
+  const persistSectionIfNew = async (name?: string) => {
+    const clean = (name || '').trim();
+    if (!clean || COMPLIANCE_SECTIONS.includes(clean) || customSections.includes(clean)) return;
+    await addComplianceSection(clean);
+  };
+
+  const handleAddSection = async () => {
+    const clean = newSectionInput.trim();
+    if (!clean) return;
+    if (COMPLIANCE_SECTIONS.includes(clean) || customSections.includes(clean)) { setNewSectionInput(''); return; }
+    try {
+      await addComplianceSection(clean);
+      setNewSectionInput('');
+      await loadData();
+    } catch (e: any) {
+      showAlert('Error', `Failed to add section: ${e.message}`);
+    }
+  };
+
+  const handleDeleteSection = (name: string) => {
+    showConfirm('Delete Section Group', `Remove the "${name}" section group? Requirements already using it keep their label.`, async () => {
+      try {
+        await deleteComplianceSection(name);
+        await loadData();
+      } catch (e: any) {
+        showAlert('Error', `Failed to delete section: ${e.message}`);
+      }
+    });
+  };
+
   const renderRequirementsView = () => {
     if (!selectedCategoryForReqs) {
       return (
         <div>
             <h3 className="text-lg font-bold text-gray-800 mb-4">Select a Category to Manage Requirements</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {(() => {
+                const globalCount = requirements.filter(r => r.categoryId == null).length;
+                return (
+                <div
+                    key={GLOBAL_VIEW}
+                    onClick={() => setSelectedCategoryForReqs(GLOBAL_VIEW)}
+                    className="p-6 rounded-xl border shadow cursor-pointer hover:shadow-md transition-all group relative overflow-hidden bg-amber-50 border-amber-200 hover:border-amber-400"
+                >
+                    <div className="absolute top-0 right-0 bg-amber-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg flex items-center gap-1">
+                        <Globe size={10} /> ALL CATEGORIES
+                    </div>
+                    <h3 className="font-bold text-lg text-amber-900 group-hover:text-amber-700 transition-colors flex items-center gap-2"><Globe size={18} /> Global Requirements</h3>
+                    <p className="text-amber-700/80 text-sm mt-2">{globalCount} Requirement{globalCount !== 1 ? 's' : ''} · applied to every category</p>
+                    <div className="mt-4 text-xs font-medium text-amber-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                    Manage Global <ArrowLeft className="rotate-180" size={12} />
+                    </div>
+                </div>
+                );
+            })()}
             {categories.map(cat => {
                 const count = requirements.filter(r => r.categoryId === cat.id).length;
                 return (
@@ -323,8 +415,13 @@ const ComplianceLibrary: React.FC = () => {
       );
     }
 
-    const catReqs = requirements.filter(r => r.categoryId === selectedCategoryForReqs);
-    const category = categories.find(c => c.id === selectedCategoryForReqs);
+    const isGlobalView = selectedCategoryForReqs === GLOBAL_VIEW;
+    const category = isGlobalView ? null : categories.find(c => c.id === selectedCategoryForReqs);
+    const globalReqs = requirements.filter(r => r.categoryId == null);
+    // In a category view, global requirements appear (locked) alongside the category's own.
+    const catReqs = isGlobalView
+        ? globalReqs
+        : [...globalReqs, ...requirements.filter(r => r.categoryId === selectedCategoryForReqs)];
 
     const groupedReqs = catReqs.reduce((acc, req) => {
         const sec = req.section || 'General Requirements';
@@ -332,15 +429,10 @@ const ComplianceLibrary: React.FC = () => {
         acc[sec].push(req);
         return acc;
     }, {} as Record<string, ComplianceRequirement[]>);
-    
-    const sortedSections = Object.keys(groupedReqs).sort((a, b) => {
-        const indexA = COMPLIANCE_SECTIONS.indexOf(a);
-        const indexB = COMPLIANCE_SECTIONS.indexOf(b);
-        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-        if (indexA !== -1) return -1;
-        if (indexB !== -1) return 1;
-        return a.localeCompare(b);
-    });
+
+    // Show every known section group (so newly added/predefined ones are visible even
+    // when empty), then any legacy section a requirement uses that isn't in the list.
+    const sortedSections = Array.from(new Set([...availableSections, ...Object.keys(groupedReqs)]));
 
     return (
       <div>
@@ -354,47 +446,87 @@ const ComplianceLibrary: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <div>
             <h3 className="text-2xl font-bold text-primary flex items-center gap-3">
-              {category?.name}
+              {isGlobalView ? <><Globe size={22} className="text-amber-500" /> Global Requirements</> : category?.name}
               {category?.isFinalized && (
                 <span title="Finalized Category">
                   <CheckCircle className="text-indigo-600" size={20} />
                 </span>
               )}
             </h3>
-            <p className="text-muted text-sm">Managing requirements for this category.</p>
+            <p className="text-muted text-sm">
+              {isGlobalView
+                ? 'These requirements apply to every category and appear locked in each one.'
+                : 'Managing requirements for this category.'}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button 
-              onClick={handlePreloadDefaults}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-light text-sm font-medium shadow"
-              title="Add standard template requirements"
-            >
-              <RefreshCw size={16} /> Preload Standard
-            </button>
-            <button 
-              onClick={() => setIsAiModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium shadow"
-            >
-              <Sparkles size={16} /> AI Suggest
-            </button>
-            <button 
-              onClick={() => openAddModal()} 
+            {!isGlobalView && (
+              <>
+                <button
+                  onClick={handlePreloadDefaults}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-light text-sm font-medium shadow"
+                  title="Add standard template requirements"
+                >
+                  <RefreshCw size={16} /> Preload Standard
+                </button>
+                <button
+                  onClick={() => setIsAiModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium shadow"
+                >
+                  <Sparkles size={16} /> AI Suggest
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => openAddModal()}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow"
             >
-              <Plus size={16} /> Add Requirement
+              <Plus size={16} /> Add {isGlobalView ? 'Global ' : ''}Requirement
             </button>
           </div>
         </div>
 
+        {/* Section group management — added groups show for every category */}
+        <div className="bg-light border border-gray-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Section Groups</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {availableSections.map(s => {
+              const isCustom = !COMPLIANCE_SECTIONS.includes(s);
+              return (
+                <span key={s} className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border ${isCustom ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-200 text-gray-600'}`}>
+                  {s}
+                  {isCustom && (
+                    <button type="button" onClick={() => handleDeleteSection(s)} className="text-indigo-400 hover:text-rose-600" title="Delete section group">
+                      <X size={12} />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+            <span className="inline-flex items-center gap-1">
+              <input
+                type="text"
+                placeholder="New section group…"
+                value={newSectionInput}
+                onChange={e => setNewSectionInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSection(); } }}
+                className="border border-gray-300 rounded-md px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <button type="button" onClick={handleAddSection} disabled={!newSectionInput.trim()}
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-40 font-medium">
+                <Plus size={12} /> Add
+              </button>
+            </span>
+          </div>
+        </div>
+
         <div className="space-y-6">
-          {sortedSections.length === 0 ? (
-            <div className="text-center py-12 bg-light rounded-xl border border-dashed border-gray-200">
-              <p className="text-muted">No requirements found for this category yet.</p>
-            </div>
-          ) : (
+          {(
             sortedSections.map((section) => {
                 const isExpanded = expandedSections.has(section);
-                const items = groupedReqs[section];
+                const items = groupedReqs[section] ?? [];
                 return (
                     <div key={section} className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow">
                         <div 
@@ -416,13 +548,20 @@ const ComplianceLibrary: React.FC = () => {
                         
                         {isExpanded && (
                             <div className="divide-y divide-slate-100">
-                                {items.map(r => (
+                                {items.length === 0 && (
+                                    <div className="px-5 py-4 text-xs text-gray-400">No requirements in this section yet.</div>
+                                )}
+                                {items.map(r => {
+                                const isLocked = !isGlobalView && r.categoryId == null;
+                                return (
                                 <div key={r.id} className="bg-white p-5 hover:bg-light transition-colors group">
                                     <div className="flex justify-between items-start gap-4">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-1">
                                         <h4 className="font-bold text-primary text-sm">{r.title}</h4>
                                         {r.isMandatory && <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">Mandatory</span>}
+                                        {r.categoryId == null && <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide"><Globe size={10} /> Global</span>}
+                                        {isLocked && <span className="inline-flex items-center gap-1 text-gray-400 text-[10px] font-bold px-1.5 py-0.5 uppercase tracking-wide"><Lock size={10} /> Locked</span>}
                                         </div>
                                         <p className="text-gray-600 text-xs leading-relaxed mb-3">{r.description}</p>
                                         
@@ -448,27 +587,48 @@ const ComplianceLibrary: React.FC = () => {
                                                     <span className="text-[10px] font-bold text-gray-700">{r.selfDeclarationAccepted ? 'Accepted' : 'Report Mandatory'}</span>
                                                 </div>
                                             </div>
-                                            
+
+                                            {(() => {
+                                                const desc = describeRequirementCondition(r.condition, attributes);
+                                                if (!desc) return null;
+                                                return (
+                                                    <div className="flex items-center gap-1.5 min-w-[160px]">
+                                                        <GitBranch size={12} className="text-indigo-500" />
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter leading-none">Applies If</span>
+                                                            <span className="text-[10px] font-bold text-indigo-700">{desc}</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
                                         </div>
                                     </div>
                                     
-                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button 
-                                        onClick={() => handleEditRequirement(r)}
-                                        className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
-                                        >
-                                        <Edit2 size={14} />
-                                        </button>
-                                        <button 
-                                        onClick={() => handleDeleteRequirement(r.id)}
-                                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors"
-                                        >
-                                        <Trash2 size={14} />
-                                        </button>
-                                    </div>
+                                    {isLocked ? (
+                                        <div className="flex items-center gap-1 text-[10px] text-gray-400 whitespace-nowrap" title="Managed in Global Requirements">
+                                            <Lock size={12} /> Edit in Global
+                                        </div>
+                                    ) : (
+                                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                            onClick={() => handleEditRequirement(r)}
+                                            className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
+                                            >
+                                            <Edit2 size={14} />
+                                            </button>
+                                            <button
+                                            onClick={() => handleDeleteRequirement(r.id)}
+                                            className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors"
+                                            >
+                                            <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    )}
                                     </div>
                                 </div>
-                                ))}
+                                );
+                                })}
                             </div>
                         )}
                     </div>
@@ -590,8 +750,10 @@ const ComplianceLibrary: React.FC = () => {
                <h3 className="font-bold text-lg text-gray-800 capitalize">
                  {editingItem.id ? 'Edit' : 'Add'} Requirement
                </h3>
-               <span className="text-xs bg-indigo-100 text-blue-800 px-2 py-1 rounded font-medium">
-                   {categories.find(c => c.id === (editingItem.categoryId || selectedCategoryForReqs))?.name || 'No Category'}
+               <span className={`text-xs px-2 py-1 rounded font-medium ${(editingItem.categoryId == null) ? 'bg-amber-100 text-amber-800 inline-flex items-center gap-1' : 'bg-indigo-100 text-blue-800'}`}>
+                   {editingItem.categoryId == null
+                     ? <><Globe size={12} /> Global · All Categories</>
+                     : (categories.find(c => c.id === editingItem.categoryId)?.name || 'No Category')}
                </span>
             </div>
             
@@ -609,7 +771,7 @@ const ComplianceLibrary: React.FC = () => {
                         }}
                     >
                         <option value="">-- Select or Type New --</option>
-                        {COMPLIANCE_SECTIONS.map(s => (
+                        {availableSections.map(s => (
                             <option key={s} value={s}>{s}</option>
                         ))}
                     </select>
@@ -725,6 +887,120 @@ const ComplianceLibrary: React.FC = () => {
                       </label>
                   </div>
               </div>
+
+              {/* Conditional applicability — mirrors IM block conditions */}
+              {(() => {
+                const editCatId = editingItem.categoryId || selectedCategoryForReqs;
+                const condAttrs = editCatId ? getAttributesForCategory(attributes, editCatId) : [];
+                const cond: FeatureConditionFields | null = editingItem.condition ?? null;
+                const condEnabled = cond != null;
+                const condMode: 'present' | 'absent' = cond?.requires_feature_absent ? 'absent' : 'present';
+                const condAttrId = cond?.requires_feature ?? cond?.requires_feature_absent ?? '';
+                const condAttr = condAttrs.find(a => a.id === condAttrId);
+                const enumSelected = cond?.requires_feature_label ? cond.requires_feature_label.split(',').map(s => s.trim()).filter(Boolean) : [];
+                const setCond = (next: FeatureConditionFields | null) => setEditingItem({ ...editingItem, condition: next });
+
+                return (
+                  <div className="bg-light border border-gray-200 p-4 rounded-xl shadow space-y-4">
+                    <div className="flex items-center justify-between border-b pb-2 border-gray-200">
+                      <h4 className="font-bold text-sm text-gray-800 flex items-center gap-2"><GitBranch size={14} className="text-indigo-600" /> Conditional Applicability</h4>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input type="checkbox" className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                          checked={condEnabled}
+                          onChange={e => setCond(e.target.checked ? {} : null)} />
+                        <span className="text-xs font-medium text-gray-700">Only if attribute condition met</span>
+                      </label>
+                    </div>
+
+                    {!condEnabled && (
+                      <p className="text-xs text-gray-500">This requirement always applies. Enable the toggle to gate it by a product attribute.</p>
+                    )}
+
+                    {condEnabled && (
+                      <>
+                        {condAttrs.length === 0 && (
+                          <p className="text-xs text-rose-500">No attributes defined for this category. Add attributes in Admin to use conditions.</p>
+                        )}
+                        {/* Present / Absent toggle */}
+                        <div className="flex gap-2">
+                          {(['present', 'absent'] as const).map(m => (
+                            <button type="button" key={m}
+                              onClick={() => setCond(m === 'absent' ? { requires_feature_absent: condAttrId || undefined } : { requires_feature: condAttrId || undefined })}
+                              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${condMode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500 hover:border-gray-400'}`}>
+                              {m === 'present' ? 'Attribute has a value' : 'Attribute has no value (absent)'}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Attribute selector */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-muted uppercase mb-1">Attribute</label>
+                          <select className="w-full border rounded-lg p-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            value={condAttrId}
+                            onChange={e => setCond(condMode === 'absent' ? { requires_feature_absent: e.target.value } : { requires_feature: e.target.value })}>
+                            <option value="">— select attribute —</option>
+                            {condAttrs.map(a => <option key={a.id} value={a.id}>{a.name} ({a.dataType})</option>)}
+                          </select>
+                        </div>
+
+                        {/* Value input — only for 'present' mode */}
+                        {condMode === 'present' && condAttr && (
+                          <div>
+                            <label className="block text-[10px] font-bold text-muted uppercase mb-2">
+                              {condAttr.dataType === 'enum' ? 'Match any of' : (condAttr.dataType === 'integer' || condAttr.dataType === 'decimal') ? 'Value range' : 'Expected value'}
+                            </label>
+                            {condAttr.dataType === 'enum' && (
+                              <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
+                                {(condAttr.validationRules?.enumOptions ?? []).map(opt => (
+                                  <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <input type="checkbox" checked={enumSelected.includes(opt)}
+                                      onChange={e => {
+                                        const next = e.target.checked ? [...enumSelected, opt] : enumSelected.filter(v => v !== opt);
+                                        setCond({ requires_feature: condAttrId, requires_feature_label: next.length ? next.join(', ') : undefined });
+                                      }}
+                                      className="rounded text-indigo-600" />
+                                    {opt}
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                            {(condAttr.dataType === 'integer' || condAttr.dataType === 'decimal') && (
+                              <div className="flex items-center gap-2">
+                                <input type="number" placeholder="Min" value={cond?.requires_feature_num_min ?? ''}
+                                  onChange={e => setCond({ ...cond, requires_feature: condAttrId, requires_feature_num_min: e.target.value || undefined })}
+                                  className="flex-1 border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                                <span className="text-gray-400">–</span>
+                                <input type="number" placeholder="Max" value={cond?.requires_feature_num_max ?? ''}
+                                  onChange={e => setCond({ ...cond, requires_feature: condAttrId, requires_feature_num_max: e.target.value || undefined })}
+                                  className="flex-1 border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                                {condAttr.validationRules?.unit && <span className="text-xs text-gray-500">{condAttr.validationRules.unit}</span>}
+                              </div>
+                            )}
+                            {condAttr.dataType === 'boolean' && (
+                              <div className="flex gap-4">
+                                {['true', 'false'].map(v => (
+                                  <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <input type="radio" name="reqCondBool" value={v}
+                                      checked={(cond?.requires_feature_label === 'No' ? 'false' : 'true') === v}
+                                      onChange={() => setCond({ requires_feature: condAttrId, requires_feature_label: v === 'true' ? 'Yes' : 'No' })}
+                                      className="text-indigo-600" />
+                                    {v === 'true' ? 'Yes' : 'No'}
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                            {condAttr.dataType === 'text' && (
+                              <input type="text" placeholder="Exact value to match…" value={cond?.requires_feature_label ?? ''}
+                                onChange={e => setCond({ requires_feature: condAttrId, requires_feature_label: e.target.value || undefined })}
+                                className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
             </form>
             </div>

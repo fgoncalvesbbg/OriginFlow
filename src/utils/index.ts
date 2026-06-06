@@ -5,6 +5,8 @@
 
 export { generateUUID } from './uuid.utils';
 export { handleError } from './error.utils';
+export { sanitizeHtml } from './sanitize-html.utils';
+export { generateNumericCode } from './code.utils';
 export {
   mapProfile,
   mapProject,
@@ -32,3 +34,4 @@ export {
 
 export type { ValidationResult } from './validators.utils';
 export { validateAttributeValue, getAttributesForCategory } from './attribute-validation.utils';
+export { passesFeatureGate, isFalsy } from './attribute-condition.utils';

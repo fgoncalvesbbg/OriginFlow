@@ -1,3 +1,4 @@
+/** RFQ detail page: view entries/quotes and award the RFQ. */
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';

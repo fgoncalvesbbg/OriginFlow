@@ -1,4 +1,5 @@
 
+/** Timeline dashboard: cross-project deadlines and milestones in a calendar/timeline view. */
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';

@@ -1,15 +1,23 @@
 
+/**
+ * IMTemplateEditor — authoring UI for IM templates: section tree, block references, metadata,
+ * per-language content, and live preview (with AI-assisted translation).
+ */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes } from '../../services';
-import { IMTemplate, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, Bold, Italic, Underline, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, Info, Upload, Grid, Layers, Zap, AlertOctagon } from 'lucide-react';
+import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
+import { uploadIMAsset } from '../../services/im/im-asset.service';
+import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
-import { GoogleGenAI } from "@google/genai";
+import { skuSyntheticAttribute } from '../../config/compliance.constants';
+import { geminiGenerateContent } from "../../services/ai/gemini.client";
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
+import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 
 const ALL_LANGUAGES = [
   { code: 'en', label: 'English (Default)' },
@@ -34,329 +42,12 @@ const SECTION_LAYOUT_OPTIONS: { value: IMMasterLayoutName; label: string }[] = [
   { value: 'end', label: 'End' }
 ];
 
-// --- Internal Confirmation Modal ---
-const ConfirmationModal: React.FC<{
-  isOpen: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}> = ({ isOpen, title, message, onConfirm, onCancel }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
-        <p className="text-sm text-gray-600 mb-6">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- Structured Rich Text Editor ---
-type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric';
-
-type InlineNode =
-  | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
-  | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string }
-  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string };
-
-type EditorBlock =
-  | { id: string; type: 'paragraph'; content: InlineNode[] }
-  | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
-  | { id: string; type: 'callout'; variant: 'warning' | 'caution' | 'electric' | 'info'; content: InlineNode[] }
-  | { id: string; type: 'image'; src: string; alt?: string }
-  | { id: string; type: 'table'; rows: string[][] }
-  | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
-  | { id: string; type: 'legacy_html'; html: string };
-
-interface EditorProps {
-  initialContent: string;
-  onChange: (html: string) => void;
-  placeholder?: string;
-  onInsertPlaceholder?: (type: 'text' | 'image') => void;
-  onInsertCondition?: () => void;
-  minimal?: boolean;
-}
-
-const createId = () => Math.random().toString(36).slice(2, 11);
-
-const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, minimal }) => {
-  const [blocks, setBlocks] = useState<EditorBlock[]>([]);
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const [isFocused, setIsFocused] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const initializingRef = useRef(false);
-  const isUserEditingRef = useRef(false);
-  const lastEmittedHtmlRef = useRef<string>('');
-  const onChangeRef = useRef(onChange);
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-
-  const parseInlineNodes = useCallback((container: HTMLElement): InlineNode[] => {
-    const inlines: InlineNode[] = [];
-
-    const walk = (node: Node, marks: Array<'bold' | 'italic' | 'underline'> = []) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent || '';
-        if (text) inlines.push({ type: 'text', text, marks: marks.length ? marks : undefined });
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-      const el = node as HTMLElement;
-
-      if (el.classList.contains('im-placeholder')) {
-        inlines.push({
-          type: 'placeholder',
-          id: el.dataset.id || createId(),
-          placeholderType: (el.dataset.type as 'text' | 'image') || 'text',
-          label: decodeURIComponent(el.dataset.label || '').trim() || el.textContent?.replace(/[\[\]]/g, '').trim() || 'Text'
-        });
-        return;
-      }
-
-      if (el.classList.contains('im-condition')) {
-        inlines.push({
-          type: 'condition',
-          id: el.dataset.id || createId(),
-          featureId: el.dataset.featureId || 'manual',
-          featureName: el.dataset.featureName || '',
-          conditionLabel: decodeURIComponent(el.dataset.conditionLabel || ''),
-          content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || ''
-        });
-        return;
-      }
-
-      if (el.tagName === 'BR') {
-        inlines.push({ type: 'text', text: '\n', marks: marks.length ? marks : undefined });
-        return;
-      }
-
-      const nextMarks = [...marks];
-      if (['B', 'STRONG'].includes(el.tagName) && !nextMarks.includes('bold')) nextMarks.push('bold');
-      if (['I', 'EM'].includes(el.tagName) && !nextMarks.includes('italic')) nextMarks.push('italic');
-      if (el.tagName === 'U' && !nextMarks.includes('underline')) nextMarks.push('underline');
-
-      Array.from(el.childNodes).forEach((child) => walk(child, nextMarks));
-    };
-
-    Array.from(container.childNodes).forEach((child) => walk(child));
-    return inlines;
-  }, []);
-
-  const serializeInline = useCallback((inlines: InlineNode[]): string => inlines.map((inline) => {
-    if (inline.type === 'placeholder') {
-      const colorClass = inline.placeholderType === 'text' ? 'bg-amber-100 border-yellow-300 text-amber-800' : 'bg-indigo-100 border-indigo-300 text-blue-800';
-      return `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${inline.placeholderType}" data-id="${inline.id}" data-label="${encodeURIComponent(inline.label)}">[${inline.label}]</span>&nbsp;`;
-    }
-
-    if (inline.type === 'condition') {
-      const displayLabel = inline.featureId === 'manual'
-          ? 'Optional'
-          : inline.conditionLabel ? `${inline.featureName}: ${inline.conditionLabel}` : (inline.featureName || 'Auto-Spec');
-      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionLabel || '')}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
-    }
-
-    let textHtml = inline.text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br />');
-    (inline.marks || []).forEach((mark) => {
-      if (mark === 'bold') textHtml = `<strong>${textHtml}</strong>`;
-      if (mark === 'italic') textHtml = `<em>${textHtml}</em>`;
-      if (mark === 'underline') textHtml = `<u>${textHtml}</u>`;
-    });
-    return textHtml;
-  }).join(''), []);
-
-  const deserializeHtmlToBlocks = useCallback((html: string): EditorBlock[] => {
-    if (!html.trim()) return [{ id: createId(), type: 'paragraph', content: [] }];
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
-    const root = doc.body.firstElementChild as HTMLElement;
-    const parsed: EditorBlock[] = [];
-
-    Array.from(root.childNodes).forEach((node) => {
-      if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
-        parsed.push({ id: createId(), type: 'paragraph', content: [{ type: 'text', text: node.textContent }] });
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-      const el = node as HTMLElement;
-      if (el.matches('h1, h2, h3')) {
-        parsed.push({ id: createId(), type: 'heading', level: Number(el.tagName[1]) as 1 | 2 | 3, content: parseInlineNodes(el) });
-        return;
-      }
-      if (el.tagName === 'P') {
-        parsed.push({ id: createId(), type: 'paragraph', content: parseInlineNodes(el) });
-        return;
-      }
-      if (el.classList.contains('im-block-wrapper')) {
-        const contentEl = el.querySelector('.im-block-content') as HTMLElement | null;
-        const variant = (['warning', 'caution', 'electric', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as 'warning' | 'caution' | 'electric' | 'info';
-        // Use only the <p> body — the .im-block-title strong is re-generated on serialize, exclude it
-        const bodyEl = contentEl?.querySelector('p') as HTMLElement | null;
-        parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(bodyEl || contentEl || el) });
-        return;
-      }
-      if (el.tagName === 'IMG') {
-        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '' });
-        return;
-      }
-      if (el.tagName === 'TABLE') {
-        const rows = Array.from(el.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((cell) => (cell.textContent || '').trim()));
-        parsed.push({ id: createId(), type: 'table', rows: rows.length ? rows : [['Header 1', 'Header 2'], ['Value 1', 'Value 2']] });
-        return;
-      }
-      if (el.classList.contains('im-condition') && !el.closest('p, h1, h2, h3, .im-block-wrapper')) {
-        parsed.push({ id: createId(), type: 'conditional', condition: { id: el.dataset.id || createId(), featureId: el.dataset.featureId || 'manual', featureName: el.dataset.featureName || '' }, content: [{ type: 'condition', id: el.dataset.id || createId(), featureId: el.dataset.featureId || 'manual', featureName: el.dataset.featureName || '', content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || '' }] });
-        return;
-      }
-      parsed.push({ id: createId(), type: 'legacy_html', html: el.outerHTML });
-    });
-
-    return parsed.length ? parsed : [{ id: createId(), type: 'paragraph', content: [] }];
-  }, [parseInlineNodes]);
-
-  const serializeBlocksToHtml = useCallback((list: EditorBlock[]): string => {
-    return list.map((block) => {
-      if (block.type === 'paragraph') return `<p>${serializeInline(block.content)}</p>`;
-      if (block.type === 'heading') return `<h${block.level}>${serializeInline(block.content)}</h${block.level}>`;
-      if (block.type === 'callout') {
-        // ISO 7010 W001 — General Warning (equilateral triangle, exclamation mark)
-        const w001 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="display:block;width:100%;height:100%;"><polygon points="50,6 94,87 6,87" fill="#FFDA00" stroke="#231F20" stroke-width="4.5" stroke-linejoin="round"/><rect x="46.5" y="30" width="7" height="31" rx="2.5" fill="#231F20"/><circle cx="50" cy="73" r="5.5" fill="#231F20"/></svg>`;
-        // ISO 7010 W012 — Electrical Hazard (triangle, lightning bolt)
-        const w012 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="display:block;width:100%;height:100%;"><polygon points="50,6 94,87 6,87" fill="#FFDA00" stroke="#231F20" stroke-width="4.5" stroke-linejoin="round"/><path d="M57,24 L39,55 L51,55 L44,78 L62,47 L50,47 Z" fill="#231F20"/></svg>`;
-        // ISO 7000-0190 / M002 — Information (blue circle, white i)
-        const m002 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="display:block;width:100%;height:100%;"><circle cx="50" cy="50" r="46" fill="#0066B2"/><circle cx="50" cy="26" r="7" fill="white"/><rect x="43" y="40" width="14" height="36" rx="4" fill="white"/></svg>`;
-        const isoIcons: Record<string, string> = { warning: w001, caution: w001, electric: w012, info: m002 };
-        const title = block.variant === 'electric' ? 'ELECTRIC HAZARD' : block.variant.toUpperCase();
-        const icon = `<div class="im-block-icon">${isoIcons[block.variant]}</div>`;
-        return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
-      }
-      if (block.type === 'image') return `<img src="${block.src}" alt="${block.alt || ''}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" />`;
-      if (block.type === 'table') {
-        const [headerRow, ...body] = block.rows;
-        const th = (headerRow || []).map((cell) => `<th>${cell}</th>`).join('');
-        const tr = body.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
-        return `<table class="im-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
-      }
-      if (block.type === 'conditional') {
-        return `<p>${serializeInline([{ type: 'condition', id: block.condition.id, featureId: block.condition.featureId, featureName: block.condition.featureName, content: block.content.map((x) => x.type === 'text' ? x.text : '').join(' ').trim() || 'Conditional content' }])}</p>`;
-      }
-      return block.html;
-    }).join('');
-  }, [serializeInline]);
-
-  useEffect(() => {
-    // Skip re-init when initialContent is just our own update echoed back from the parent
-    if (initialContent === lastEmittedHtmlRef.current) return;
-    initializingRef.current = true;
-    const next = deserializeHtmlToBlocks(initialContent || '');
-    setBlocks(next);
-    if (!selectedBlockId && next.length) setSelectedBlockId(next[0].id);
-  }, [deserializeHtmlToBlocks, initialContent]);
-
-  useEffect(() => {
-    if (initializingRef.current) {
-      initializingRef.current = false;
-      return;
-    }
-    const html = serializeBlocksToHtml(blocks);
-    lastEmittedHtmlRef.current = html;
-    onChangeRef.current(html);
-  }, [blocks, serializeBlocksToHtml]);
-
-  const saveSelection = useCallback(() => {
-    // Selection persistence is handled by the browser for this editor implementation.
-  }, []);
-
-  const handleChange = useCallback((event: React.FormEvent<HTMLDivElement>) => {
-    isUserEditingRef.current = true;
-    const next = deserializeHtmlToBlocks(event.currentTarget.innerHTML);
-    setBlocks(next);
-  }, [deserializeHtmlToBlocks]);
-
-  useEffect(() => {
-    if (isUserEditingRef.current) {
-      isUserEditingRef.current = false;
-      return;
-    }
-    if (!contentRef.current) return;
-    contentRef.current.innerHTML = serializeBlocksToHtml(blocks);
-  }, [blocks, serializeBlocksToHtml]);
-
-  const insertBlock = (type: BlockInsertType) => {
-    const newBlock: EditorBlock = type === 'table'
-      ? { id: createId(), type: 'table', rows: [['Header 1', 'Header 2'], ['Row 1 Col 1', 'Row 1 Col 2']] }
-      : { id: createId(), type: 'callout', variant: type, content: [{ type: 'text', text: type === 'warning' ? 'Indicates a hazardous situation which, if not avoided, could result in serious injury or death.' : type === 'caution' ? 'Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.' : type === 'electric' ? 'Risk of electric shock. Disconnect power before servicing.' : 'Offers helpful tips and information for using your product.' }] };
-    setBlocks((prev) => [...prev, newBlock]);
-    setSelectedBlockId(newBlock.id);
-  };
-
-  useEffect(() => {
-    (window as any).currentEditorInsertHtml = (htmlString: string) => {
-      if (!contentRef.current) return;
-      contentRef.current.focus();
-      // Insert at the current cursor position within the full-document editor
-      document.execCommand('insertHTML', false, htmlString);
-    };
-
-    return () => { (window as any).currentEditorInsertHtml = undefined; };
-  }, []);
-
-  return (
-    <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
-
-      <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
-        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 1, content: [{ type: 'text', text: 'Heading 1' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H1</button>
-        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 2, content: [{ type: 'text', text: 'Heading 2' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H2</button>
-        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 3, content: [{ type: 'text', text: 'Heading 3' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H3</button>
-        <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'paragraph', content: [] }]); }} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Paragraph</button>
-        {!minimal && (
-          <>
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('warning'); }} className="p-1.5 hover:bg-orange-100 hover:text-amber-600 rounded text-gray-600" title="Warning Block"><AlertTriangle size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('caution'); }} className="p-1.5 hover:bg-amber-100 hover:text-amber-600 rounded text-gray-600" title="Caution Block"><AlertOctagon size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('electric'); }} className="p-1.5 hover:bg-rose-100 hover:text-rose-600 rounded text-gray-600" title="Electric Hazard"><Zap size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('info'); }} className="p-1.5 hover:bg-indigo-100 hover:text-indigo-600 rounded text-gray-600" title="Info Block"><Info size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('table'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Insert Table"><TableIcon size={16} /></button>
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('text'); }} className="flex items-center gap-1 px-2 py-1 bg-amber-50 text-yellow-700 hover:bg-amber-100 rounded text-xs font-medium border border-amber-200" title="Insert User Input Field"><Type size={14} /> Text</button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertPlaceholder?.('image'); }} className="flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-xs font-medium border border-indigo-200" title="Insert Image Upload Field"><ImageIcon size={14} /> Img</button>
-            <button onMouseDown={(e) => { e.preventDefault(); onInsertCondition?.(); }} className="flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-xs font-medium border border-purple-200" title="Insert Optional/Conditional Text"><GitBranch size={14} /> Cond</button>
-          </>
-        )}
-      </div>
-      
-      <div className="flex-1 relative bg-white cursor-text" onClick={() => { contentRef.current?.focus(); }}>
-        {!initialContent && !isFocused && placeholder && (
-           <div className="absolute top-4 left-4 text-gray-400 pointer-events-none select-none z-10">{placeholder}</div>
-        )}
-        <div className="absolute inset-0 overflow-y-auto">
-          <div 
-            ref={contentRef}
-            className="min-h-full p-4 outline-none im-content max-w-none font-sans"
-            contentEditable
-            onInput={handleChange}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => { setIsFocused(false); saveSelection(); }}
-            onMouseUp={saveSelection}
-            onKeyUp={saveSelection}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
+/** Stable serialization of a section, used to detect unsaved (dirty) changes. */
+const sectionSnapshotKey = (s: IMSection): string => JSON.stringify(s);
 
 const IMTemplateEditor: React.FC = () => {
-  const { categoryId } = useParams<{ categoryId: string }>();
+  const { categoryId, templateType: templateTypeParam } = useParams<{ categoryId: string; templateType?: string }>();
+  const templateType: IMTemplateType = templateTypeParam === 'warning_leaflet' ? 'warning_leaflet' : 'im';
   const navigate = useNavigate();
   const { user } = useAuth();
   
@@ -369,6 +60,12 @@ const IMTemplateEditor: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Snapshot of each section as last persisted — diffing against it tells us
+  // which sections have unsaved edits, so both manual Save and autosave only
+  // write what actually changed.
+  const savedSnapshot = useRef<Map<string, string>>(new Map());
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const [categoryAttributes, setCategoryAttributes] = useState<CategoryAttribute[]>([]);
   const [isTranslating, setIsTranslating] = useState(false);
@@ -377,6 +74,7 @@ const IMTemplateEditor: React.FC = () => {
   const [assets, setAssets] = useState<string[]>([]);
 
   const [isLangModalOpen, setIsLangModalOpen] = useState(false);
+  const [langDraft, setLangDraft] = useState<string[]>(['en']);
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isPlaceholderModalOpen, setIsPlaceholderModalOpen] = useState(false);
@@ -403,6 +101,27 @@ const IMTemplateEditor: React.FC = () => {
   const [placeholderConfig, setPlaceholderConfig] = useState<{type: 'text' | 'image', label: string}>({ type: 'text', label: '' });
   const [placeholderAttrId, setPlaceholderAttrId] = useState<string>('');
 
+  // Block library state
+  const [availableBlocks, setAvailableBlocks] = useState<IMBlock[]>([]);
+  const [showBlockPicker, setShowBlockPicker] = useState(false);
+  const [blockPickerSearch, setBlockPickerSearch] = useState('');
+
+  // SKU slot state
+  const [showSkuSlotForm, setShowSkuSlotForm] = useState(false);
+  const [skuSlotDraft, setSkuSlotDraft] = useState<{ slot: string; schema: 'rich_text' | 'annotated_image_set' | 'legend_table' | 'step_sequence'; labelEn: string; required: boolean }>({ slot: '', schema: 'rich_text', labelEn: '', required: true });
+
+  // Block condition modal state
+  const [isBlockCondModalOpen, setIsBlockCondModalOpen] = useState(false);
+  const [blockCondSectionId, setBlockCondSectionId] = useState('');
+  const [blockCondRefIdx, setBlockCondRefIdx] = useState(0);
+  const [blockCondMode, setBlockCondMode] = useState<'present' | 'absent'>('present');
+  const [blockCondAttrId, setBlockCondAttrId] = useState('');
+  const [blockCondEnumSelected, setBlockCondEnumSelected] = useState<string[]>([]);
+  const [blockCondNumMin, setBlockCondNumMin] = useState('');
+  const [blockCondNumMax, setBlockCondNumMax] = useState('');
+  const [blockCondBoolValue, setBlockCondBoolValue] = useState('true');
+  const [blockCondTextValue, setBlockCondTextValue] = useState('');
+
   const [metaSettings, setMetaSettings] = useState<IMTemplateMetadata>({
      pageSize: 'a4',
      primaryColor: '#0f172a',
@@ -419,18 +138,20 @@ const IMTemplateEditor: React.FC = () => {
   useEffect(() => {
     if (!categoryId) return;
     loadData();
-  }, [categoryId]);
+  }, [categoryId, templateType]);
 
   const loadData = async () => {
     if (!categoryId) return;
     try {
-      const [cats, temp, attrs] = await Promise.all([
+      const [cats, temp, attrs, blks] = await Promise.all([
           getCategories(),
-          getIMTemplateByCategoryId(categoryId),
-          getCategoryAttributes()
+          getIMTemplateByCategoryId(categoryId, templateType),
+          getCategoryAttributes(),
+          getIMBlocks()
       ]);
       setCategory(cats.find(c => c.id === categoryId) || null);
       setCategoryAttributes(attrs);
+      setAvailableBlocks(blks);
 
       if (temp) {
         setTemplate(temp);
@@ -451,9 +172,19 @@ const IMTemplateEditor: React.FC = () => {
         }
 
         const secs = await getIMSections(temp.id);
-        setSections(secs);
-        if (secs.length > 0 && !selectedSectionId) {
-           setSelectedSectionId(secs[0].id);
+        // Sections with content but no block_refs get an auto inline row so the
+        // row composer can display them without a separate data migration.
+        const normalizedSecs = secs.map(s => {
+          if ((s.blockRefs ?? []).length === 0 && Object.values(s.content || {}).some(v => v)) {
+            return { ...s, blockRefs: [{ kind: 'inline' as const, content: s.content }] };
+          }
+          return s;
+        });
+        setSections(normalizedSecs);
+        // Baseline snapshot — these match the DB, so nothing is dirty on load.
+        savedSnapshot.current = new Map(normalizedSecs.map(s => [s.id, sectionSnapshotKey(s)]));
+        if (normalizedSecs.length > 0 && !selectedSectionId) {
+           setSelectedSectionId(normalizedSecs[0].id);
         }
       }
     } catch (e) {
@@ -477,12 +208,21 @@ const IMTemplateEditor: React.FC = () => {
 
   const handleConfirmPlaceholder = () => {
     const label = placeholderConfig.label.trim() || (placeholderConfig.type === 'text' ? 'Text' : 'Image');
-    const id = Math.random().toString(36).substr(2, 9);
+    // When bound to an attribute, use the attribute id as data-id so the generator
+    // resolves the value (e.g. a supplier-uploaded product image) automatically.
+    const id = placeholderAttrId || Math.random().toString(36).substr(2, 9);
     const type = placeholderConfig.type;
     const colorClass = type === 'text' ? 'bg-amber-100 border-yellow-300 text-amber-800' : 'bg-indigo-100 border-indigo-300 text-blue-800';
     const labelAttr = encodeURIComponent(label);
-    const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}" data-label="${labelAttr}">[${label}]</span>&nbsp;`;
-    insertHtmlToCurrentEditor(html);
+    const attrAttr = placeholderAttrId ? ` data-attr-id="${placeholderAttrId}"` : '';
+    const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}"${attrAttr} data-label="${labelAttr}">[${label}]</span>&nbsp;`;
+    // Prefer the row-aware fan-out (shares the placeholder across all languages);
+    // fall back to a plain caret insert if no row registered one.
+    if ((window as any).currentEditorCommitPlaceholder) {
+      (window as any).currentEditorCommitPlaceholder(html);
+    } else {
+      insertHtmlToCurrentEditor(html);
+    }
     setIsPlaceholderModalOpen(false);
   };
 
@@ -633,6 +373,7 @@ const IMTemplateEditor: React.FC = () => {
     const newSection: Partial<IMSection> = { templateId: template.id, title: 'New Section', order: newOrder, isPlaceholder: false, content: { en: '' } };
     try {
         const saved = await saveIMSection(newSection as any);
+        savedSnapshot.current.set(saved.id, sectionSnapshotKey(saved));
         setSections([...sections, saved]);
         setSelectedSectionId(saved.id);
         setTemplate(prev => prev ? ({ ...prev, lastUpdatedBy: user?.name || 'User', updatedAt: new Date().toISOString() }) : null);
@@ -649,6 +390,7 @@ const IMTemplateEditor: React.FC = () => {
     const newSection: Partial<IMSection> = { templateId: template.id, parentId: parentId, title: 'New Sub-Section', order: newOrder, isPlaceholder: false, content: { en: '' } };
     try {
         const saved = await saveIMSection(newSection as any);
+        savedSnapshot.current.set(saved.id, sectionSnapshotKey(saved));
         setSections([...sections, saved]);
         setSelectedSectionId(saved.id);
         setTemplate(prev => prev ? ({ ...prev, lastUpdatedBy: user?.name || 'User', updatedAt: new Date().toISOString() }) : null);
@@ -656,16 +398,59 @@ const IMTemplateEditor: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  const handleSaveSection = async () => {
-    const section = sections.find(s => s.id === selectedSectionId);
-    if (!section) return;
+  /** Sections whose current state differs from the last persisted snapshot. */
+  const getDirtySections = useCallback(
+    () => sections.filter(s => savedSnapshot.current.get(s.id) !== sectionSnapshotKey(s)),
+    [sections]
+  );
+
+  /** Persist the given sections in parallel and mark them clean. */
+  const persistSections = useCallback(async (targets: IMSection[]): Promise<boolean> => {
+    if (targets.length === 0) return true;
+    // Capture the exact serialized state we're about to save, before any await,
+    // so edits made during the save remain flagged dirty for the next pass.
+    const pending = targets.map(s => ({ id: s.id, key: sectionSnapshotKey(s), section: s }));
     setSaving(true);
     try {
-      await saveIMSection(section);
+      await Promise.all(pending.map(p => saveIMSection(p.section)));
+      pending.forEach(p => savedSnapshot.current.set(p.id, p.key));
       setTemplate(prev => prev ? ({ ...prev, lastUpdatedBy: user?.name || 'User', updatedAt: new Date().toISOString() }) : null);
       setLastSaved(new Date());
-    } catch (e) { console.error(e); alert("Error saving section."); } finally { setSaving(false); }
+      return true;
+    } catch (e) {
+      console.error('Failed to save sections', e);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [user]);
+
+  const handleSaveAll = async () => {
+    if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+    const dirty = getDirtySections();
+    if (dirty.length === 0) { setLastSaved(new Date()); return; }
+    const ok = await persistSections(dirty);
+    if (!ok) alert('Error saving sections — see console for details.');
   };
+
+  // Debounced autosave — persist dirty sections ~2.5s after the last edit.
+  useEffect(() => {
+    if (loading || saving) return;
+    const dirty = getDirtySections();
+    if (dirty.length === 0) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => { persistSections(dirty); }, 2500);
+    return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
+  }, [sections, loading, saving, getDirtySections, persistSections]);
+
+  // Warn before leaving with unsaved edits (e.g. a slow/failed autosave).
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (getDirtySections().length > 0) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [getDirtySections]);
 
   const handleDeleteSection = (id: string) => {
     // Open modal instead of window.confirm
@@ -677,6 +462,7 @@ const IMTemplateEditor: React.FC = () => {
     const id = deleteModal.sectionId;
     await deleteIMSection(id);
     const newSections = sections.filter(s => s.id !== id && s.parentId !== id);
+    savedSnapshot.current.delete(id);
     setSections(newSections);
     if (selectedSectionId === id) setSelectedSectionId(newSections[0]?.id || null);
     setLastSaved(new Date());
@@ -727,10 +513,12 @@ const IMTemplateEditor: React.FC = () => {
     // Save all modified siblings
     try {
         await Promise.all(updates.map(u => saveIMSection({ id: u.id, templateId: template.id, order: u.order })));
+        // Re-baseline the moved sections so the new order isn't seen as dirty.
+        updates.forEach(u => savedSnapshot.current.set(u.id, sectionSnapshotKey(u)));
         setLastSaved(new Date());
-    } catch (e) { 
-        console.error("Reorder failed", e); 
-        loadData(); 
+    } catch (e) {
+        console.error("Reorder failed", e);
+        loadData();
     }
   };
 
@@ -738,12 +526,230 @@ const IMTemplateEditor: React.FC = () => {
     setSections(prev => prev.map(s => s.id === selectedSectionId ? { ...s, ...updates } : s));
   };
 
+  // Legacy single-editor update (kept for AI translate path which reads section.content)
   const updateContent = useCallback((htmlValue: string) => {
     setSections(prevSections => {
       if (!selectedSectionId) return prevSections;
       return prevSections.map(s => s.id === selectedSectionId ? { ...s, content: { ...s.content, [activeLang]: htmlValue } } : s);
     });
   }, [selectedSectionId, activeLang]);
+
+  // Row composer handlers
+  const updateInlineRefContent = useCallback((refIndex: number, lang: string, html: string) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      const ref = refs[refIndex];
+      if (!ref || ref.kind !== 'inline') return s;
+      refs[refIndex] = { ...ref, content: { ...ref.content, [lang]: html } };
+      // Keep section.content in sync for the PDF renderer's legacy path
+      return { ...s, blockRefs: refs, content: { ...s.content, [lang]: html } };
+    }));
+  }, [selectedSectionId]);
+
+  // Set/clear the ISO callout box that wraps an inline row's whole content.
+  const updateInlineRefVariant = useCallback((refIndex: number, variant: CalloutVariant | undefined) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      const ref = refs[refIndex];
+      if (!ref || ref.kind !== 'inline') return s;
+      const { variant: _drop, ...rest } = ref;
+      refs[refIndex] = variant ? { ...rest, variant } : { ...rest };
+      return { ...s, blockRefs: refs };
+    }));
+  }, [selectedSectionId]);
+
+  const addInlineRow = () => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const newRef: BlockRef = { kind: 'inline', content: {} };
+      return { ...s, blockRefs: [...(s.blockRefs ?? []), newRef] };
+    }));
+  };
+
+  const moveRow = (fromIdx: number, toIdx: number) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      if (toIdx < 0 || toIdx >= refs.length) return s;
+      const [moved] = refs.splice(fromIdx, 1);
+      refs.splice(toIdx, 0, moved);
+      return { ...s, blockRefs: refs };
+    }));
+  };
+
+  const removeRef = (index: number) => {
+    setSections(prev => prev.map(s =>
+      s.id === selectedSectionId
+        ? { ...s, blockRefs: (s.blockRefs ?? []).filter((_, i) => i !== index) }
+        : s
+    ));
+  };
+
+  const openBlockCondModal = (sectionId: string, refIdx: number, existing?: FeatureConditionFields) => {
+    setBlockCondSectionId(sectionId);
+    setBlockCondRefIdx(refIdx);
+    if (existing?.requires_feature_absent) {
+      setBlockCondMode('absent');
+      setBlockCondAttrId(existing.requires_feature_absent);
+    } else {
+      setBlockCondMode('present');
+      setBlockCondAttrId(existing?.requires_feature ?? '');
+      // Restore value state from existing condition
+      if (existing?.requires_feature_label) {
+        const attr = categoryAttributes.find(a => a.id === existing.requires_feature);
+        if (attr?.dataType === 'enum') setBlockCondEnumSelected(existing.requires_feature_label.split(',').map(s => s.trim()).filter(Boolean));
+        else if (attr?.dataType === 'boolean') setBlockCondBoolValue(existing.requires_feature_label === 'Yes' ? 'true' : 'false');
+        else setBlockCondTextValue(existing.requires_feature_label);
+      } else {
+        setBlockCondEnumSelected([]);
+        setBlockCondTextValue('');
+        setBlockCondBoolValue('true');
+      }
+      setBlockCondNumMin(existing?.requires_feature_num_min ?? '');
+      setBlockCondNumMax(existing?.requires_feature_num_max ?? '');
+    }
+    setIsBlockCondModalOpen(true);
+  };
+
+  const buildBlockConditionValue = (): string => {
+    const attr = categoryAttributes.find(a => a.id === blockCondAttrId);
+    if (!attr) return '';
+    switch (attr.dataType) {
+      case 'enum':    return blockCondEnumSelected.join(', ');
+      case 'integer':
+      case 'decimal': {
+        const unit = attr.validationRules?.unit ? ` ${attr.validationRules.unit}` : '';
+        if (blockCondNumMin && blockCondNumMax) return `${blockCondNumMin}–${blockCondNumMax}${unit}`;
+        return `${blockCondNumMin || blockCondNumMax}${unit}`;
+      }
+      case 'boolean': return blockCondBoolValue === 'true' ? 'Yes' : 'No';
+      case 'text':    return blockCondTextValue;
+      default:        return '';
+    }
+  };
+
+  const handleSaveBlockCondition = () => {
+    if (!blockCondAttrId) return;
+    const attr = categoryAttributes.find(a => a.id === blockCondAttrId);
+    const isNumeric = attr?.dataType === 'integer' || attr?.dataType === 'decimal';
+    const label = buildBlockConditionValue();
+    setSections(prev => prev.map(s => {
+      if (s.id !== blockCondSectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      const ref = refs[blockCondRefIdx];
+      if (!ref || ref.kind === 'sku_slot') return s;
+      refs[blockCondRefIdx] = {
+        ...ref,
+        requires_feature: blockCondMode === 'present' ? blockCondAttrId : undefined,
+        requires_feature_label: (blockCondMode === 'present' && !isNumeric && label) ? label : undefined,
+        requires_feature_num_min: (blockCondMode === 'present' && isNumeric && blockCondNumMin) ? blockCondNumMin : undefined,
+        requires_feature_num_max: (blockCondMode === 'present' && isNumeric && blockCondNumMax) ? blockCondNumMax : undefined,
+        requires_feature_absent: blockCondMode === 'absent' ? blockCondAttrId : undefined,
+      } as typeof ref;
+      return { ...s, blockRefs: refs };
+    }));
+    setIsBlockCondModalOpen(false);
+  };
+
+  /** Human-readable "Show if" description for a ref's feature condition, or null when unconditioned. */
+  const describeRefCondition = (ref: FeatureConditionFields): string | null => {
+    const condAttrId = ref.requires_feature ?? ref.requires_feature_absent ?? null;
+    if (!condAttrId) return null;
+    const condAttr = categoryAttributes.find(a => a.id === condAttrId);
+    if (!condAttr) return null;
+    if (ref.requires_feature_absent) return `${condAttr.name}: absent`;
+    if (ref.requires_feature_label) return `${condAttr.name} ∈ ${ref.requires_feature_label}`;
+    if (ref.requires_feature_num_min && ref.requires_feature_num_max) return `${condAttr.name}: ${ref.requires_feature_num_min}–${ref.requires_feature_num_max}`;
+    if (ref.requires_feature_num_min) return `${condAttr.name} ≥ ${ref.requires_feature_num_min}`;
+    if (ref.requires_feature_num_max) return `${condAttr.name} ≤ ${ref.requires_feature_num_max}`;
+    return `${condAttr.name}: has value`;
+  };
+
+  const clearBlockCondition = (sectionId: string, refIdx: number) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== sectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      const ref = refs[refIdx];
+      if (!ref || ref.kind === 'sku_slot') return s;
+      refs[refIdx] = {
+        ...ref,
+        requires_feature: undefined,
+        requires_feature_label: undefined,
+        requires_feature_num_min: undefined,
+        requires_feature_num_max: undefined,
+        requires_feature_absent: undefined,
+      } as typeof ref;
+      return { ...s, blockRefs: refs };
+    }));
+  };
+
+  const addBlockRef = (blockId: string) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const already = (s.blockRefs ?? []).some(r => r.kind === 'block' && r.block_id === blockId);
+      if (already) return s;
+      const newRef: BlockRef = { kind: 'block', block_id: blockId };
+      return { ...s, blockRefs: [...(s.blockRefs ?? []), newRef] };
+    }));
+    setShowBlockPicker(false);
+    setBlockPickerSearch('');
+  };
+
+  const removeBlockRef = (blockId: string) => {
+    setSections(prev => prev.map(s =>
+      s.id === selectedSectionId
+        ? { ...s, blockRefs: (s.blockRefs ?? []).filter(r => !(r.kind === 'block' && r.block_id === blockId)) }
+        : s
+    ));
+  };
+
+  const addSkuSlotRef = () => {
+    const { slot, schema, labelEn, required } = skuSlotDraft;
+    if (!slot.trim() || !labelEn.trim()) return;
+    const newRef: BlockRef = { kind: 'sku_slot', slot: slot.trim(), schema, label: { en: labelEn.trim() }, required };
+    setSections(prev => prev.map(s =>
+      s.id === selectedSectionId
+        ? { ...s, blockRefs: [...(s.blockRefs ?? []), newRef] }
+        : s
+    ));
+    setShowSkuSlotForm(false);
+    setSkuSlotDraft({ slot: '', schema: 'rich_text', labelEn: '', required: true });
+  };
+
+  const removeSkuSlotRef = (slot: string) => {
+    setSections(prev => prev.map(s =>
+      s.id === selectedSectionId
+        ? { ...s, blockRefs: (s.blockRefs ?? []).filter(r => !(r.kind === 'sku_slot' && r.slot === slot)) }
+        : s
+    ));
+  };
+
+  const openLangModal = () => {
+    setLangDraft(templateLanguages);
+    setIsLangModalOpen(true);
+  };
+
+  const handleSaveLanguages = async () => {
+    if (!template) return;
+    // English is always included; keep the canonical ALL_LANGUAGES ordering.
+    const ordered = ALL_LANGUAGES.map(l => l.code).filter(c => c === 'en' || langDraft.includes(c));
+    setSaving(true);
+    try {
+      await updateIMTemplate(template.id, { languages: ordered, lastUpdatedBy: user?.name });
+      setTemplateLanguages(ordered);
+      setTemplate(prev => prev ? ({ ...prev, languages: ordered }) : prev);
+      if (!ordered.includes(activeLang)) setActiveLang('en');
+      setLastSaved(new Date());
+      setIsLangModalOpen(false);
+    } catch (e) {
+      console.error('Failed to save template languages', e);
+      alert('Failed to save languages — see console for details.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSaveMetadata = async () => {
       if (!template) return;
@@ -765,24 +771,41 @@ const IMTemplateEditor: React.FC = () => {
     const section = sections.find(s => s.id === selectedSectionId);
     if (!section) return;
     const englishContent = section.content['en'];
-    if (!englishContent || !englishContent.trim()) { alert("Please add English content first."); return; }
+    const hasContent = !!(englishContent && englishContent.trim());
+    // Allow translating placeholder sections too — they may have no content but still
+    // need their title localized. Only block when there's nothing at all to translate.
+    if (!hasContent && !section.title?.trim()) { alert("Please add an English title or content first."); return; }
     setIsTranslating(true);
     try {
       const targetLangLabel = ALL_LANGUAGES.find(l => l.code === activeLang)?.label || activeLang;
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-      // Added comment above fix: Using gemini-3-flash-preview for translations
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [{ text: `Translate HTML to ${targetLangLabel}. Preserve HTML tags, classes, styles, bullet points, and placeholder spans exactly. Content: ${englishContent}` }]
+
+      // Translate the section title (plain text) so titles localize alongside content.
+      if (section.title?.trim()) {
+        const titleResp = await geminiGenerateContent({
+          model: 'gemini-3-flash-preview',
+          contents: { parts: [{ text: `Translate this short UI section title to ${targetLangLabel}. Return ONLY the translated text, no quotes or extra words. Title: ${section.title}` }] },
+        });
+        const translatedTitle = titleResp.text?.trim().replace(/^["']|["']$/g, '') || '';
+        if (translatedTitle) {
+          updateCurrentSection({ titleI18n: { ...(section.titleI18n ?? {}), [activeLang]: translatedTitle } });
         }
-      });
-      const cleanText = response.text?.trim().replace(/^```html/, '').replace(/^```/, '').replace(/```$/, '') || '';
-      updateContent(cleanText);
-    } catch (e: any) { 
-      alert("AI Translation failed: " + (e.message || e.toString())); 
-    } finally { 
-      setIsTranslating(false); 
+      }
+
+      // Translate the body HTML when present.
+      if (hasContent) {
+        const response = await geminiGenerateContent({
+          model: 'gemini-3-flash-preview',
+          contents: {
+            parts: [{ text: `Translate HTML to ${targetLangLabel}. Preserve HTML tags, classes, styles, bullet points, and placeholder spans exactly. Content: ${englishContent}` }]
+          }
+        });
+        const cleanText = response.text?.trim().replace(/^```html/, '').replace(/^```/, '').replace(/```$/, '') || '';
+        updateContent(cleanText);
+      }
+    } catch (e: any) {
+      alert("AI Translation failed: " + (e.message || e.toString()));
+    } finally {
+      setIsTranslating(false);
     }
   };
 
@@ -816,7 +839,7 @@ const IMTemplateEditor: React.FC = () => {
        <div key={s.id} className="flex flex-col">
            <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
               <span className="text-gray-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
-              <span className="truncate flex-1">{s.title}</span>
+              <span className="truncate flex-1">{localizedSectionTitle(s, activeLang)}</span>
               <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
                   {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
                   <div className="flex flex-col">
@@ -848,8 +871,14 @@ const IMTemplateEditor: React.FC = () => {
   const currentSection = sections.find(s => s.id === selectedSectionId);
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
-  const categoryFeatures = categoryId ? getAttributesForCategory(categoryAttributes, categoryId) : [];
+  // Offer the synthetic SKU attribute first so authors can bind placeholders/conditions to the
+  // project's SKU identifier; it resolves to the SKU number(s) at generation time.
+  const categoryFeatures = [
+    skuSyntheticAttribute(),
+    ...(categoryId ? getAttributesForCategory(categoryAttributes, categoryId) : []),
+  ];
   const imThemeVars = getIMThemeVariables(metaSettings);
+  const unsavedCount = getDirtySections().length;
 
   return (
     <Layout>
@@ -859,18 +888,30 @@ const IMTemplateEditor: React.FC = () => {
             <div className="flex items-center gap-3">
                <button onClick={() => navigate('/im')} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20}/></button>
                <div>
-                 <h2 className="text-xl font-bold text-primary">{category?.name} Manual</h2>
+                 <h2 className="text-xl font-bold text-primary flex items-center gap-2">
+                   {category?.name} — {IM_TEMPLATE_TYPE_LABELS[templateType]}
+                   {templateType === 'warning_leaflet' && (
+                     <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">Leaflet</span>
+                   )}
+                 </h2>
                  <div className="flex items-center gap-4 text-xs text-muted mt-1">
                     {template.updatedAt && <span className="flex items-center gap-1"><Clock size={12} /> Saved: {new Date(template.updatedAt).toLocaleDateString()}</span>}
                     {template.lastUpdatedBy && <span className="flex items-center gap-1"><User size={12} /> By: {template.lastUpdatedBy}</span>}
-                    {lastSaved && <span className="text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full font-medium"><CheckCircle size={10} /> Saved</span>}
+                    {saving ? (
+                      <span className="text-indigo-600 flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-full font-medium"><Loader2 size={10} className="animate-spin" /> Saving…</span>
+                    ) : unsavedCount > 0 ? (
+                      <span className="text-amber-600 flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-full font-medium"><Clock size={10} /> {unsavedCount} unsaved</span>
+                    ) : lastSaved ? (
+                      <span className="text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full font-medium"><CheckCircle size={10} /> Saved</span>
+                    ) : null}
                  </div>
                </div>
             </div>
 
             <div className="flex gap-3 items-center">
+               <button onClick={openLangModal} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Globe size={16} /> Languages <span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span></button>
                <button onClick={() => setIsSettingsModalOpen(true)} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Settings size={16} /> Settings</button>
-               <button onClick={handleSaveSection} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : 'Save'}</button>
+               <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
             </div>
           </div>
 
@@ -922,8 +963,24 @@ const IMTemplateEditor: React.FC = () => {
                    <>
                      <div className="p-4 border-b border-gray-100 bg-light/50 flex justify-between items-start">
                         <div className="flex-1 max-w-md">
-                           <div className="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">{currentSection.parentId ? 'Sub-Chapter' : 'Section'}</div>
-                           <input className="w-full font-bold text-lg bg-transparent border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none text-primary" value={currentSection.title} onChange={(e) => updateCurrentSection({ title: e.target.value })} />
+                           <div className="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">
+                              {currentSection.parentId ? 'Sub-Chapter' : 'Section'} title
+                              {activeLang !== 'en' && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] normal-case">{activeLang.toUpperCase()} translation</span>}
+                           </div>
+                           {activeLang === 'en' ? (
+                             <input
+                               className="w-full font-bold text-lg bg-transparent border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none text-primary"
+                               value={currentSection.title}
+                               onChange={(e) => updateCurrentSection({ title: e.target.value })}
+                             />
+                           ) : (
+                             <input
+                               className="w-full font-bold text-lg bg-transparent border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none text-primary"
+                               value={currentSection.titleI18n?.[activeLang] ?? ''}
+                               placeholder={currentSection.title || 'Section title'}
+                               onChange={(e) => updateCurrentSection({ titleI18n: { ...(currentSection.titleI18n ?? {}), [activeLang]: e.target.value } })}
+                             />
+                           )}
                         </div>
                         <div className="flex items-center gap-4">
                            <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600 select-none">
@@ -958,7 +1015,7 @@ const IMTemplateEditor: React.FC = () => {
                            <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-muted hover:text-gray-700'}`}>{lang.label}</button>
                            ))}
                         </div>
-                        {activeLang !== 'en' && !currentSection.isPlaceholder && (
+                        {activeLang !== 'en' && (
                            <button onClick={handleAiTranslate} disabled={isTranslating} className="flex items-center gap-1.5 text-xs bg-purple-100 text-purple-700 px-3 py-1.5 rounded-md hover:bg-purple-200 font-medium transition-colors mr-2 disabled:opacity-60">
                               {isTranslating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                               {isTranslating ? 'Translating...' : 'AI Translate'}
@@ -966,17 +1023,251 @@ const IMTemplateEditor: React.FC = () => {
                         )}
                      </div>
 
-                     <div className="flex-1 relative flex flex-col">
-                        <div className="flex-1 overflow-hidden flex flex-col relative p-4">
-                           <SimpleRichTextEditor
-                              key={`${currentSection.id}-${activeLang}`}
-                              initialContent={currentSection.content[activeLang] || ''}
-                              onChange={updateContent}
-                              placeholder="Enter content..."
-                              onInsertPlaceholder={handleInsertPlaceholder}
-                              onInsertCondition={handleOpenConditionModal}
-                           />
-                        </div>
+                     {/* Row composer */}
+                     <div className="flex-1 flex flex-col overflow-hidden">
+                       {/* Rows */}
+                       <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                         {(currentSection.blockRefs ?? []).length === 0 && (
+                           <div className="flex flex-col items-center justify-center py-10 text-gray-400 text-center">
+                             <p className="text-sm font-medium mb-1">No rows yet</p>
+                             <p className="text-xs">Use the buttons below to add content rows.</p>
+                           </div>
+                         )}
+                         {(currentSection.blockRefs ?? []).map((ref, index) => {
+                           const refs = currentSection.blockRefs ?? [];
+                           const isFirst = index === 0;
+                           const isLast = index === refs.length - 1;
+                           return (
+                             <div key={`${currentSection.id}-row-${index}`} className="flex gap-2 items-start">
+                               {/* Reorder */}
+                               <div className="flex flex-col gap-0.5 pt-2.5 shrink-0">
+                                 <button onClick={() => moveRow(index, index - 1)} disabled={isFirst}
+                                   className="p-0.5 text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed rounded">
+                                   <ChevronUp size={13} />
+                                 </button>
+                                 <button onClick={() => moveRow(index, index + 1)} disabled={isLast}
+                                   className="p-0.5 text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed rounded">
+                                   <ChevronDown size={13} />
+                                 </button>
+                               </div>
+                               {/* Card */}
+                               <div className={`flex-1 rounded-xl border overflow-hidden ${
+                                 ref.kind === 'inline'    ? 'border-gray-200 bg-white' :
+                                 ref.kind === 'block'     ? 'border-indigo-200 bg-indigo-50/20' :
+                                                            'border-violet-200 bg-violet-50/20'
+                               }`}>
+                                 {/* Card header */}
+                                 <div className={`flex items-center justify-between px-3 py-1.5 border-b ${
+                                   ref.kind === 'inline'    ? 'bg-gray-50 border-gray-100' :
+                                   ref.kind === 'block'     ? 'bg-indigo-50 border-indigo-100' :
+                                                              'bg-violet-50 border-violet-100'
+                                 }`}>
+                                   <div className="flex items-center gap-2 min-w-0">
+                                     {ref.kind === 'inline' && (() => {
+                                       const vCfg = ref.variant ? CALLOUT_VARIANTS.find(v => v.value === ref.variant) : undefined;
+                                       return (
+                                         <>
+                                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Inline HTML</span>
+                                           {vCfg && (
+                                             <span className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${vCfg.chip}`}>
+                                               <vCfg.Icon size={10} /> {vCfg.label.toUpperCase()}
+                                             </span>
+                                           )}
+                                         </>
+                                       );
+                                     })()}
+                                     {ref.kind === 'block' && (() => {
+                                       const blk = availableBlocks.find(b => b.id === ref.block_id);
+                                       return (
+                                         <>
+                                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                                             blk?.blockType === 'warning' ? 'bg-amber-100 text-amber-700' :
+                                             blk?.blockType === 'caution' ? 'bg-orange-100 text-orange-700' :
+                                             blk?.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' :
+                                             blk?.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' :
+                                             blk?.blockType === 'info'    ? 'bg-sky-100 text-sky-700' :
+                                                                             'bg-indigo-100 text-indigo-700'
+                                           }`}>{(blk?.blockType ?? 'block').toUpperCase()}</span>
+                                           <span className="text-xs font-semibold text-gray-800 truncate">{blk?.title ?? 'Unknown block'}</span>
+                                           <span className="text-[10px] font-mono text-gray-400 hidden sm:block truncate">{blk?.slug}</span>
+                                         </>
+                                       );
+                                     })()}
+                                     {ref.kind === 'sku_slot' && (
+                                       <>
+                                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 shrink-0">
+                                           {ref.schema.replace(/_/g, ' ').toUpperCase()}
+                                         </span>
+                                         <span className="text-xs font-semibold text-gray-800 truncate">{ref.label?.en ?? ref.slot}</span>
+                                         <span className="text-[10px] font-mono text-gray-400 hidden sm:block truncate">{ref.slot}</span>
+                                         {ref.required && <span className="text-[10px] text-rose-400 shrink-0">*required</span>}
+                                       </>
+                                     )}
+                                   </div>
+                                   <button onClick={() => removeRef(index)} className="text-gray-300 hover:text-rose-500 p-0.5 ml-2 shrink-0">
+                                     <X size={13} />
+                                   </button>
+                                 </div>
+                                 {/* Card body */}
+                                 {ref.kind === 'inline' && (
+                                   <>
+                                     <InlineHtmlRow
+                                       content={ref.content}
+                                       variant={ref.variant}
+                                       languages={availableLangsForTabs}
+                                       sectionId={currentSection.id}
+                                       index={index}
+                                       onChange={(lang, html) => updateInlineRefContent(index, lang, html)}
+                                       onVariantChange={(v) => updateInlineRefVariant(index, v)}
+                                       onInsertPlaceholder={handleInsertPlaceholder}
+                                       onInsertCondition={handleOpenConditionModal}
+                                     />
+                                     {/* Whole-row visibility condition — hides the row unless the condition is met */}
+                                     {(() => {
+                                       const condDesc = describeRefCondition(ref);
+                                       return (
+                                         <div className="px-3 pb-2 border-t border-gray-100 pt-2 flex items-center gap-1.5 flex-wrap">
+                                           <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Show if:</span>
+                                           {condDesc ? (
+                                             <>
+                                               <span className="text-[10px] bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full font-medium">{condDesc}</span>
+                                               <button onClick={() => openBlockCondModal(currentSection.id, index, ref)}
+                                                 className="text-[10px] text-indigo-400 hover:text-indigo-600 hover:underline">Edit</button>
+                                               <button onClick={() => clearBlockCondition(currentSection.id, index)}
+                                                 className="text-gray-300 hover:text-rose-500"><X size={11} /></button>
+                                             </>
+                                           ) : (
+                                             <button onClick={() => openBlockCondModal(currentSection.id, index, ref)}
+                                               className="text-[10px] text-indigo-400 hover:text-indigo-600 flex items-center gap-1">
+                                               <GitBranch size={10} /> Add condition…
+                                             </button>
+                                           )}
+                                         </div>
+                                       );
+                                     })()}
+                                   </>
+                                 )}
+                                 {ref.kind === 'block' && (() => {
+                                   const blk = availableBlocks.find(b => b.id === ref.block_id);
+                                   const preview = (blk?.content['en'] ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+                                   const condAttrId = ref.requires_feature ?? ref.requires_feature_absent ?? null;
+                                   const isAbsent = !!ref.requires_feature_absent;
+                                   const condAttr = condAttrId ? categoryAttributes.find(a => a.id === condAttrId) : null;
+
+                                   // Build a human-readable condition description
+                                   const condDesc = (() => {
+                                     if (!condAttr) return null;
+                                     if (isAbsent) return `${condAttr.name}: absent`;
+                                     if (ref.requires_feature_label) return `${condAttr.name} ∈ ${ref.requires_feature_label}`;
+                                     if (ref.requires_feature_num_min && ref.requires_feature_num_max) return `${condAttr.name}: ${ref.requires_feature_num_min}–${ref.requires_feature_num_max}`;
+                                     if (ref.requires_feature_num_min) return `${condAttr.name} ≥ ${ref.requires_feature_num_min}`;
+                                     if (ref.requires_feature_num_max) return `${condAttr.name} ≤ ${ref.requires_feature_num_max}`;
+                                     return `${condAttr.name}: has value`;
+                                   })();
+
+                                   return (
+                                     <>
+                                       {preview ? (
+                                         <div className="px-3 py-2 text-xs text-gray-500 italic leading-relaxed line-clamp-2">{preview}</div>
+                                       ) : (
+                                         <div className="px-3 py-2 text-xs text-gray-400 italic">No English content preview.</div>
+                                       )}
+                                       {/* Condition row */}
+                                       <div className="px-3 pb-2 border-t border-indigo-100 pt-2 flex items-center gap-1.5 flex-wrap">
+                                         <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wide">Show if:</span>
+                                         {condDesc ? (
+                                           <>
+                                             <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{condDesc}</span>
+                                             <button onClick={() => openBlockCondModal(currentSection.id, index, ref)}
+                                               className="text-[10px] text-indigo-400 hover:text-indigo-600 hover:underline">Edit</button>
+                                             <button onClick={() => clearBlockCondition(currentSection.id, index)}
+                                               className="text-gray-300 hover:text-rose-500"><X size={11} /></button>
+                                           </>
+                                         ) : (
+                                           <button onClick={() => openBlockCondModal(currentSection.id, index, ref)}
+                                             className="text-[10px] text-indigo-400 hover:text-indigo-600 flex items-center gap-1">
+                                             <GitBranch size={10} /> Add condition…
+                                           </button>
+                                         )}
+                                       </div>
+                                     </>
+                                   );
+                                 })()}
+                                 {ref.kind === 'sku_slot' && (
+                                   <div className="px-3 py-2 text-xs text-gray-500">
+                                     Assembler fills: <span className="font-mono text-violet-700">{ref.slot}</span>
+                                   </div>
+                                 )}
+                               </div>
+                             </div>
+                           );
+                         })}
+                       </div>
+
+                       {/* Add-row bar */}
+                       <div className="border-t border-gray-100 bg-light/40 px-3 py-2 flex flex-wrap items-center gap-2">
+                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Add row:</span>
+                         <button onClick={addInlineRow}
+                           className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-800 font-medium">
+                           <Plus size={11} /> Inline HTML
+                         </button>
+                         <button onClick={() => { setShowBlockPicker(true); setBlockPickerSearch(''); }}
+                           className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium">
+                           <Layers size={11} /> Shared Block
+                         </button>
+                         <button onClick={() => { setShowSkuSlotForm(true); setSkuSlotDraft({ slot: '', schema: 'rich_text', labelEn: '', required: true }); }}
+                           className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 font-medium">
+                           <Grid size={11} /> SKU Slot
+                         </button>
+                       </div>
+
+                       {/* SKU slot form (inline, above add-row bar) */}
+                       {showSkuSlotForm && (
+                         <div className="border-t border-violet-200 bg-white px-4 py-3 space-y-2">
+                           <p className="text-xs font-semibold text-violet-700">Configure SKU Slot</p>
+                           <div className="grid grid-cols-2 gap-2">
+                             <div>
+                               <label className="text-[10px] uppercase font-bold text-gray-400 mb-0.5 block">Slot ID</label>
+                               <input className="w-full border rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-violet-400"
+                                 placeholder="control_panel"
+                                 value={skuSlotDraft.slot}
+                                 onChange={e => setSkuSlotDraft(d => ({ ...d, slot: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') }))}
+                               />
+                             </div>
+                             <div>
+                               <label className="text-[10px] uppercase font-bold text-gray-400 mb-0.5 block">Schema</label>
+                               <select className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-400"
+                                 value={skuSlotDraft.schema}
+                                 onChange={e => setSkuSlotDraft(d => ({ ...d, schema: e.target.value as typeof d.schema }))}>
+                                 <option value="rich_text">Rich Text</option>
+                                 <option value="annotated_image_set">Annotated Images</option>
+                                 <option value="legend_table">Legend Table</option>
+                                 <option value="step_sequence">Step Sequence</option>
+                               </select>
+                             </div>
+                           </div>
+                           <div>
+                             <label className="text-[10px] uppercase font-bold text-gray-400 mb-0.5 block">Label (EN)</label>
+                             <input className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-400"
+                               placeholder="Control panel"
+                               value={skuSlotDraft.labelEn}
+                               onChange={e => setSkuSlotDraft(d => ({ ...d, labelEn: e.target.value }))}
+                             />
+                           </div>
+                           <label className="flex items-center gap-2 text-xs cursor-pointer">
+                             <input type="checkbox" checked={skuSlotDraft.required}
+                               onChange={e => setSkuSlotDraft(d => ({ ...d, required: e.target.checked }))} className="rounded" />
+                             Required
+                           </label>
+                           <div className="flex gap-2 justify-end pt-1">
+                             <button onClick={() => setShowSkuSlotForm(false)} className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">Cancel</button>
+                             <button onClick={addSkuSlotRef} disabled={!skuSlotDraft.slot || !skuSlotDraft.labelEn}
+                               className="text-xs bg-violet-600 text-white px-3 py-1 rounded hover:bg-violet-700 disabled:opacity-40">
+                               Add Slot
+                             </button>
+                           </div>
+                         </div>
+                       )}
                      </div>
                    </>
                 ) : (
@@ -1056,6 +1347,45 @@ const IMTemplateEditor: React.FC = () => {
                         <button onClick={handleSaveMetadata} className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Save Settings</button>
                     </div>
                 </div>
+              </div>
+          )}
+          {/* Language Selection Modal — defines which languages this category's manual supports */}
+          {isLangModalOpen && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="font-bold text-lg flex items-center gap-2"><Globe size={18} className="text-indigo-500" /> Manual Languages</h3>
+                          <button onClick={() => setIsLangModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                      </div>
+                      <p className="text-xs text-muted mb-4">
+                          Choose which languages this category's manual supports. Each enabled language gets its own tab on every inline content row. English is always included.
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
+                          {ALL_LANGUAGES.map(l => {
+                            const checked = l.code === 'en' || langDraft.includes(l.code);
+                            const locked = l.code === 'en';
+                            return (
+                              <label key={l.code} className={`flex items-center gap-2 text-sm p-2 rounded border transition-colors ${checked ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'} ${locked ? 'cursor-default' : 'cursor-pointer'}`}>
+                                <input
+                                  type="checkbox"
+                                  className="rounded accent-indigo-600"
+                                  checked={checked}
+                                  disabled={locked}
+                                  onChange={e => setLangDraft(prev => e.target.checked ? [...prev, l.code] : prev.filter(c => c !== l.code))}
+                                />
+                                <span className={locked ? 'text-gray-500' : ''}>{l.label}</span>
+                                {locked && <span className="ml-auto text-[10px] text-gray-400 uppercase tracking-wide">required</span>}
+                              </label>
+                            );
+                          })}
+                      </div>
+                      <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-4">
+                          <button onClick={() => setIsLangModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+                          <button onClick={handleSaveLanguages} disabled={saving} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                              {saving ? 'Saving…' : 'Save Languages'}
+                          </button>
+                      </div>
+                  </div>
               </div>
           )}
           {isConditionModalOpen && (
@@ -1212,7 +1542,14 @@ const IMTemplateEditor: React.FC = () => {
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 animate-in fade-in zoom-in duration-200">
                     <h3 className="font-bold text-lg mb-4">Add {placeholderConfig.type === 'text' ? 'Text' : 'Image'} Placeholder</h3>
-                    {categoryFeatures.length > 0 && (
+                    {(() => {
+                      // Image placeholders bind to image attributes (e.g. the Product Images
+                      // group); text placeholders bind to the remaining attributes.
+                      const attrOptions = categoryFeatures.filter(f =>
+                        placeholderConfig.type === 'image' ? f.dataType === 'image' : f.dataType !== 'image'
+                      );
+                      if (attrOptions.length === 0) return null;
+                      return (
                       <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">From Attribute (optional)</label>
                         <select
@@ -1230,15 +1567,20 @@ const IMTemplateEditor: React.FC = () => {
                           }}
                         >
                           <option value="">— Custom label —</option>
-                          <optgroup label="Category Attributes">
-                            {categoryFeatures.map(f => (
+                          <optgroup label={placeholderConfig.type === 'image' ? 'Product Image Attributes' : 'Category Attributes'}>
+                            {attrOptions.map(f => (
                               <option key={f.id} value={f.id}>{f.name} ({f.dataType})</option>
                             ))}
                           </optgroup>
                         </select>
-                        <p className="text-xs text-muted mt-1">Select an attribute to pre-fill the label, or enter a custom one below.</p>
+                        <p className="text-xs text-muted mt-1">
+                          {placeholderConfig.type === 'image'
+                            ? 'Bind to a product image so the uploaded photo renders here automatically.'
+                            : 'Select an attribute to pre-fill the label, or enter a custom one below.'}
+                        </p>
                       </div>
-                    )}
+                      );
+                    })()}
                     <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
                         <input className="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-indigo-500" placeholder={placeholderConfig.type === 'text' ? "e.g. Product Name" : "e.g. Front View"} value={placeholderConfig.label} onChange={(e) => setPlaceholderConfig({...placeholderConfig, label: e.target.value})} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleConfirmPlaceholder()} />
@@ -1338,12 +1680,177 @@ const IMTemplateEditor: React.FC = () => {
 
           {/* Delete Confirmation Modal */}
           <ConfirmationModal
+            variant="danger"
             isOpen={deleteModal.isOpen}
             title="Delete Section?"
             message="Are you sure you want to delete this section? All content within it will be lost."
             onConfirm={confirmDeleteSection}
             onCancel={() => setDeleteModal({ isOpen: false, sectionId: null })}
           />
+
+          {/* Block Picker Modal */}
+          {showBlockPicker && (() => {
+            const pickerBlocks = availableBlocks.filter(b => {
+              if (blockPickerSearch) {
+                const q = blockPickerSearch.toLowerCase();
+                return b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q);
+              }
+              return true;
+            });
+            const attachedIds = new Set(
+              (sections.find(s => s.id === selectedSectionId)?.blockRefs ?? [])
+                .filter(r => r.kind === 'block')
+                .map(r => (r as any).block_id as string)
+            );
+            return (
+              <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col max-h-[80vh]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-100">
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><Layers size={16} className="text-indigo-600" /> Add Shared Block</h3>
+                    <button onClick={() => setShowBlockPicker(false)} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+                  </div>
+                  <div className="p-3 border-b border-gray-100">
+                    <input
+                      autoFocus
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      placeholder="Search by title or slug…"
+                      value={blockPickerSearch}
+                      onChange={e => setBlockPickerSearch(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                    {pickerBlocks.length === 0 && (
+                      <p className="text-center py-8 text-sm text-gray-400">
+                        {availableBlocks.length === 0
+                          ? 'No blocks in the library yet. Go to Block Library to create some.'
+                          : 'No blocks match your search.'}
+                      </p>
+                    )}
+                    {pickerBlocks.map(blk => {
+                      const already = attachedIds.has(blk.id);
+                      return (
+                        <button
+                          key={blk.id}
+                          onClick={() => !already && addBlockRef(blk.id)}
+                          disabled={already}
+                          className={`w-full text-left flex items-start gap-3 p-3 rounded-lg border transition-colors ${already ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed' : 'border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 cursor-pointer'}`}
+                        >
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${blk.blockType === 'warning' ? 'bg-amber-100 text-amber-700' : blk.blockType === 'caution' ? 'bg-orange-100 text-orange-700' : blk.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' : blk.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' : blk.blockType === 'info' ? 'bg-sky-100 text-sky-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {blk.blockType.toUpperCase()}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-gray-800">{blk.title}</span>
+                              {blk.approvalStatus === 'approved'
+                                ? <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">APPROVED</span>
+                                : <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold">DRAFT</span>}
+                              {already && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">ADDED</span>}
+                            </div>
+                            <p className="text-[11px] font-mono text-gray-400 truncate">{blk.slug}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Block Condition Modal */}
+          {isBlockCondModalOpen && (() => {
+            const attr = categoryAttributes.find(a => a.id === blockCondAttrId);
+            const canSave = !!blockCondAttrId && (blockCondMode === 'absent' || !!buildBlockConditionValue() ||
+              (attr?.dataType === 'integer' || attr?.dataType === 'decimal' ? (!!blockCondNumMin || !!blockCondNumMax) : false));
+            return (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4 backdrop-blur-sm">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5">
+                  <div className="flex justify-between items-center mb-1">
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><GitBranch size={16} className="text-indigo-600" /> Block Show Condition</h3>
+                    <button onClick={() => setIsBlockCondModalOpen(false)} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">This block renders only when the selected attribute matches.</p>
+
+                  {/* Present / Absent toggle */}
+                  <div className="flex gap-2 mb-4">
+                    {(['present', 'absent'] as const).map(m => (
+                      <button key={m} onClick={() => setBlockCondMode(m)}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${blockCondMode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500 hover:border-gray-400'}`}>
+                        {m === 'present' ? 'Has a value' : 'Has no value (absent)'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Attribute selector */}
+                  <div className="mb-4">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Attribute</label>
+                    <select className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      value={blockCondAttrId}
+                      onChange={e => { setBlockCondAttrId(e.target.value); setBlockCondEnumSelected([]); setBlockCondNumMin(''); setBlockCondNumMax(''); setBlockCondTextValue(''); setBlockCondBoolValue('true'); }}
+                    >
+                      <option value="">— select attribute —</option>
+                      {categoryAttributes.map(a => (
+                        <option key={a.id} value={a.id}>{a.name} ({a.dataType})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Value input — only shown for 'present' mode */}
+                  {blockCondMode === 'present' && attr && (
+                    <div className="mb-4">
+                      <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">
+                        {attr.dataType === 'enum' ? 'Match any of' : attr.dataType === 'integer' || attr.dataType === 'decimal' ? 'Value range' : 'Expected value'}
+                      </label>
+                      {attr.dataType === 'enum' && (
+                        <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
+                          {(attr.validationRules?.enumOptions ?? []).map(opt => (
+                            <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="checkbox" checked={blockCondEnumSelected.includes(opt)}
+                                onChange={e => setBlockCondEnumSelected(prev => e.target.checked ? [...prev, opt] : prev.filter(v => v !== opt))}
+                                className="rounded text-indigo-600" />
+                              {opt}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      {(attr.dataType === 'integer' || attr.dataType === 'decimal') && (
+                        <div className="flex items-center gap-2">
+                          <input type="number" placeholder="Min" value={blockCondNumMin} onChange={e => setBlockCondNumMin(e.target.value)}
+                            className="flex-1 border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                          <span className="text-gray-400">–</span>
+                          <input type="number" placeholder="Max" value={blockCondNumMax} onChange={e => setBlockCondNumMax(e.target.value)}
+                            className="flex-1 border rounded p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                          {attr.validationRules?.unit && <span className="text-xs text-gray-500">{attr.validationRules.unit}</span>}
+                        </div>
+                      )}
+                      {attr.dataType === 'boolean' && (
+                        <div className="flex gap-4">
+                          {['true', 'false'].map(v => (
+                            <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="radio" name="blockCondBool" value={v} checked={blockCondBoolValue === v} onChange={() => setBlockCondBoolValue(v)} className="text-indigo-600" />
+                              {v === 'true' ? 'Yes' : 'No'}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      {attr.dataType === 'text' && (
+                        <input type="text" placeholder="Exact value to match…" value={blockCondTextValue} onChange={e => setBlockCondTextValue(e.target.value)}
+                          className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                    <button onClick={() => setIsBlockCondModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+                    <button onClick={handleSaveBlockCondition} disabled={!canSave}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                      Save Condition
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
        </div>
     </Layout>
   );

@@ -1,3 +1,4 @@
+/** Admin dashboard page: user/role management and administrative overview. */
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import {
@@ -8,7 +9,7 @@ import {
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   assignAttributeToCategory, unassignAttributeFromCategory,
   assignSupplierToPMs, getSupplierPMs,
-  reassignProjectPM, getProjects,
+  reassignProjectPM, getProjects, deleteProject,
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS
 } from '../services';
 import { generateUUID, getAttributesForCategory } from '../utils';
@@ -16,28 +17,7 @@ import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../type
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
-
-const ConfirmationModal: React.FC<{
-  isOpen: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}> = ({ isOpen, title, message, onConfirm, onCancel }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-        <h3 className="text-lg font-bold text-primary mb-2">{title}</h3>
-        <p className="text-sm text-gray-600 mb-6">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-rose-600 text-white hover:bg-red-700 rounded text-sm font-medium">Delete</button>
-        </div>
-      </div>
-    </div>
-  );
-};
+import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
@@ -196,6 +176,23 @@ const AdminDashboard: React.FC = () => {
     setSelectedProjectForReassignment(project);
     setNewPMIdForProject(project.pmId);
     setProjectReassignmentModalOpen(true);
+  };
+
+  const handleDeleteProject = (proj: any) => {
+    setDeleteModal({
+      isOpen: true,
+      title: 'Delete Project',
+      message: `Permanently delete "${proj.name}" (${proj.projectId})? This also deletes all linked SKUs, attribute requests, compliance requests, instruction manuals, documents and history. This cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteProject(proj.id);
+          await loadData();
+        } catch (e: any) {
+          alert(`Failed to delete project: ${e.message}`);
+        }
+        setDeleteModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // --- CATEGORY & ATTRIBUTE ACTIONS ---
@@ -559,6 +556,7 @@ const AdminDashboard: React.FC = () => {
   return (
     <Layout>
       <ConfirmationModal
+        variant="danger"
         isOpen={deleteModal.isOpen}
         title={deleteModal.title}
         message={deleteModal.message}
@@ -726,14 +724,24 @@ const AdminDashboard: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <button
-                      onClick={() => openProjectReassignmentModal(proj)}
-                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors ml-4 whitespace-nowrap"
-                      title="Reassign PM"
-                    >
-                      <SlidersHorizontal size={14} />
-                      Change PM
-                    </button>
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={() => openProjectReassignmentModal(proj)}
+                        className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors whitespace-nowrap"
+                        title="Reassign PM"
+                      >
+                        <SlidersHorizontal size={14} />
+                        Change PM
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProject(proj)}
+                        className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors whitespace-nowrap"
+                        title="Delete Project"
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -791,6 +799,7 @@ const AdminDashboard: React.FC = () => {
                         <option value="decimal">Decimal (fractional number)</option>
                         <option value="boolean">Boolean (Yes / No)</option>
                         <option value="enum">Dropdown (fixed options list)</option>
+                        <option value="image">Image (single upload)</option>
                       </select>
                     </div>
 

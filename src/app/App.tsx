@@ -1,4 +1,5 @@
 
+/** Root application component: defines the route table and wraps pages in providers/guards. */
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
@@ -35,6 +36,7 @@ import ComplianceLibrary from '../pages/compliance/ComplianceLibrary';
 import IMDashboard from '../pages/im/IMDashboard';
 import IMTemplateEditor from '../pages/im/IMTemplateEditor';
 import IMPreview from '../pages/im/IMPreview';
+import IMBlockLibrary from '../pages/im/IMBlockLibrary';
 import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
 // Sourcing Pages
@@ -115,7 +117,7 @@ const AppContent: React.FC = () => {
           } />
 
           {/* Project IM Generator */}
-          <Route path="/project/:projectId/im-generator" element={
+          <Route path="/project/:projectId/im-generator/:templateType?" element={
             <ProtectedRoute>
               <ProjectIMGenerator />
             </ProtectedRoute>
@@ -149,9 +151,14 @@ const AppContent: React.FC = () => {
               <IMDashboard />
             </ProtectedRoute>
           } />
-          <Route path="/im/template/:categoryId" element={
+          <Route path="/im/template/:categoryId/:templateType?" element={
             <ProtectedRoute>
               <IMTemplateEditor />
+            </ProtectedRoute>
+          } />
+          <Route path="/im/library" element={
+            <ProtectedRoute>
+              <IMBlockLibrary />
             </ProtectedRoute>
           } />
 

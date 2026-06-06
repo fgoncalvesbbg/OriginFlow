@@ -6,6 +6,10 @@ export default defineConfig(() => {
   return {
     envPrefix: ['VITE_', 'SUPABASE_'],
     plugins: [react()],
+    test: {
+      environment: 'node',
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    },
     build: {
         outDir: 'dist',
         sourcemap: true,

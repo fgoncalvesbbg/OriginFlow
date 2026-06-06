@@ -7,6 +7,7 @@ import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all compliance requirements
@@ -18,6 +19,7 @@ export const getComplianceRequirements = async (): Promise<ComplianceRequirement
     return (data || []).map((r: any) => ({
         ...r,
         categoryId: r.category_id,
+        condition: r.condition ?? null,
         conditionFeatureIds: r.condition_feature_ids,
         referenceCode: r.reference_code,
         isMandatory: r.is_mandatory,
@@ -42,21 +44,55 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
         is_mandatory: req.isMandatory,
         reference_code: req.referenceCode,
         applies_by_default: req.appliesByDefault,
-        condition_feature_ids: req.conditionFeatureIds,
+        condition: req.condition ?? null,
         timing_type: req.timingType,
         timing_weeks: req.timingWeeks,
         self_declaration_accepted: req.selfDeclarationAccepted,
         test_report_origin: req.testReportOrigin
     };
-    const { error } = await supabase.from('compliance_requirements').upsert(payload);
-    if (error) handleError(error, 'saveRequirement');
+    await runMutation(supabase.from('compliance_requirements').upsert(payload), 'saveRequirement');
 };
 
 /**
  * Delete a compliance requirement
  */
 export const deleteRequirement = async (id: string): Promise<void> => {
-    await supabase.from('compliance_requirements').delete().eq('id', id);
+    await runMutation(supabase.from('compliance_requirements').delete().eq('id', id), 'deleteRequirement');
+};
+
+/**
+ * Custom section groups (built-in sections live in COMPLIANCE_SECTIONS). Returns
+ * the user-defined section names so they can be offered for every category.
+ */
+export const getComplianceSections = async (): Promise<string[]> => {
+    if (!isLive) return [];
+    const { data, error } = await portalClient
+        .from('compliance_sections')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+    if (error) return [];
+    return (data || []).map((s: any) => s.name as string);
+};
+
+/**
+ * Define a new section group (no-op if it already exists). Once added it is
+ * offered for requirements in every category.
+ */
+export const addComplianceSection = async (name: string): Promise<void> => {
+    const clean = name.trim();
+    if (!clean) return;
+    const { error } = await supabase
+        .from('compliance_sections')
+        .upsert({ name: clean }, { onConflict: 'name' });
+    if (error) handleError(error, 'addComplianceSection');
+};
+
+/**
+ * Remove a custom section group (does not touch requirements already using it).
+ */
+export const deleteComplianceSection = async (name: string): Promise<void> => {
+    await runMutation(supabase.from('compliance_sections').delete().eq('name', name), 'deleteComplianceSection');
 };
 
 /**
@@ -104,15 +140,14 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         group: attr.group ?? 'Category Specific',
         akeneo_id: attr.akeneoId ?? null,
     };
-    const { error } = await supabase.from('category_attributes').upsert(payload);
-    if (error) handleError(error, 'saveCategoryAttribute');
+    await runMutation(supabase.from('category_attributes').upsert(payload), 'saveCategoryAttribute');
 };
 
 /**
  * Delete a category attribute
  */
 export const deleteCategoryAttribute = async (id: string): Promise<void> => {
-    await supabase.from('category_attributes').delete().eq('id', id);
+    await runMutation(supabase.from('category_attributes').delete().eq('id', id), 'deleteCategoryAttribute');
 };
 
 /**

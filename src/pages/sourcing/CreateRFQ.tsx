@@ -1,4 +1,5 @@
 
+/** Form page for creating a request-for-quote (RFQ) and inviting suppliers. */
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';

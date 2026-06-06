@@ -1,3 +1,4 @@
+/** Modal for converting an accepted supplier proposal into an RFQ. */
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { convertProposalToRFQ, getSuppliers } from '../../services';

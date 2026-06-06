@@ -1,4 +1,5 @@
 
+/** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject } from '../services';

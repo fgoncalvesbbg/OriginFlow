@@ -1,4 +1,5 @@
 
+/** Token-based supplier portal for submitting a quote in response to an RFQ. */
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getRFQEntryByToken, submitRFQEntry } from '../../services';

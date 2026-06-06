@@ -16,7 +16,9 @@ export type {
   DocVersion,
   ProjectDocument,
   DocumentComment,
-  ProjectAttributeRequest
+  ProjectAttributeRequest,
+  ProjectSku,
+  SkuAttributeValue
 } from './project.types';
 
 // Compliance types
@@ -38,10 +40,39 @@ export type {
   IMMasterLayoutName,
   IMMasterPageOverride,
   IMTemplateMetadata,
+  IMTemplateType,
   IMTemplate,
   IMSection,
-  ProjectIM
+  ProjectIM,
+  ProjectBlockAddition,
+  ProjectExtraSection,
+  // Block refs
+  InlineBlockRef,
+  SharedBlockRef,
+  SKUSlotRef,
+  BlockRef,
+  CalloutVariant,
+  FeatureConditionFields,
+  // IMBlock
+  IMBlock,
+  // SKU content schemas
+  RichTextContent,
+  AnnotatedImage,
+  AnnotatedImageSetContent,
+  LegendTableContent,
+  StepSequenceContent,
+  SKUContentValue,
+  // ResolvedManual node tree
+  ResolvedHtmlNode,
+  ResolvedCalloutNode,
+  ResolvedAnnotatedImageSetNode,
+  ResolvedLegendTableNode,
+  ResolvedStepSequenceNode,
+  ResolvedNode,
+  ResolvedSection,
+  ResolvedManual
 } from './im.types';
+export { IM_TEMPLATE_TYPE_LABELS, RESOLVED_MANUAL_SCHEMA_VERSION, localizedSectionTitle } from './im.types';
 
 // Sourcing types
 export { RFQStatus, RFQEntryStatus } from './sourcing.types';

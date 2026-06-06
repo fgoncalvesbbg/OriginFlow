@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { RFQ, RFQEntry, RFQStatus, RFQEntryStatus, RFQAttributeValue, RFQAttachment } from '../../types';
 import { mapRFQ } from '../../utils/mappers.utils';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all RFQs
@@ -149,8 +150,7 @@ export const createRFQ = async (
  * Delete an RFQ
  */
 export const deleteRFQ = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('rfqs').delete().eq('id', id);
-    if (error) handleError(error, 'deleteRFQ');
+    await runMutation(supabase.from('rfqs').delete().eq('id', id), 'deleteRFQ');
 };
 
 /**

@@ -104,6 +104,24 @@ export interface ProjectAttributeRequest {
   submittedAt?: string | null;
 }
 
+export interface SkuAttributeValue {
+  attributeId: string;
+  name: string;
+  value: string;
+  type?: string;
+}
+
+export interface ProjectSku {
+  id: string;
+  projectId: string;
+  skuNumber: string;
+  skuTitle: string;
+  attributeValues: SkuAttributeValue[];
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DocumentComment {
   id: string;
   documentId: string;

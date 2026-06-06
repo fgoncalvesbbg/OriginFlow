@@ -7,6 +7,7 @@ import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { CategoryL3, ProductFeature } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all compliance categories, joined with the assigned PM's name
@@ -49,8 +50,7 @@ export const saveCategory = async (cat: CategoryL3): Promise<void> => {
         finalized_at: cat.finalizedAt,
         pm_id: cat.pmId ?? null
     };
-    const { error } = await supabase.from('categories_l3').upsert(payload);
-    if (error) handleError(error, 'saveCategory');
+    await runMutation(supabase.from('categories_l3').upsert(payload), 'saveCategory');
 };
 
 /**
@@ -68,7 +68,7 @@ export const assignPMToCategory = async (categoryId: string, pmId: string | null
  * Delete a compliance category
  */
 export const deleteCategory = async (id: string): Promise<void> => {
-    await supabase.from('categories_l3').delete().eq('id', id);
+    await runMutation(supabase.from('categories_l3').delete().eq('id', id), 'deleteCategory');
 };
 
 /**
@@ -98,13 +98,12 @@ export const saveProductFeature = async (feat: ProductFeature): Promise<void> =>
     if (feat.categoryId) {
         payload.category_id = feat.categoryId;
     }
-    const { error } = await supabase.from('product_features').upsert(payload);
-    if (error) handleError(error, 'saveFeature');
+    await runMutation(supabase.from('product_features').upsert(payload), 'saveFeature');
 };
 
 /**
  * Delete a product feature
  */
 export const deleteProductFeature = async (id: string): Promise<void> => {
-    await supabase.from('product_features').delete().eq('id', id);
+    await runMutation(supabase.from('product_features').delete().eq('id', id), 'deleteProductFeature');
 };

@@ -1,4 +1,5 @@
 
+/** Token/code-based supplier portal entry for accessing a project's supplier workspace. */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic } from '../services';

@@ -7,6 +7,7 @@ import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { SupplierProposal, RFQAttributeValue, RFQAttachment, RFQ, RFQStatus, RFQEntryStatus } from '../../types';
 import { handleError } from '../../utils/error.utils';
+import { generateUUID, generateNumericCode } from '../../utils';
 
 /**
  * Get all supplier proposals
@@ -100,19 +101,8 @@ export const createEnhancedSupplierProposal = async (
  */
 const generateRFQId = (): string => {
     const year = new Date().getFullYear();
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    const random = generateNumericCode(4);
     return `RFQ-${year}-${random}`;
-};
-
-/**
- * Helper function to generate UUID
- */
-const generateUUID = (): string => {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
 };
 
 /**

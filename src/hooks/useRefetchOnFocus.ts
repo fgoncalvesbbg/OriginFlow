@@ -1,3 +1,7 @@
+/**
+ * useRefetchOnFocus — re-runs the given callback when the window/tab regains focus, so pages
+ * refresh stale data when the user returns to them.
+ */
 import { useEffect, useRef } from 'react';
 
 /**

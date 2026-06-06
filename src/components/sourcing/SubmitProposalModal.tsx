@@ -1,3 +1,4 @@
+/** Modal for a supplier to submit a proposal (attributes, images, attachments). */
 import React, { useState, useEffect } from 'react';
 import { X, Loader2, Layers, Image as ImageIcon, Upload, FileText } from 'lucide-react';
 import { createEnhancedSupplierProposal, getCategories, getCategoryAttributes } from '../../services';

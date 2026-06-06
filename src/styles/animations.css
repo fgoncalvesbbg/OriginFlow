@@ -114,3 +114,20 @@
 .animate-smoothPulse {
   animation: smoothPulse 2s ease-in-out infinite;
 }
+
+/*
+ * Reduced-motion: honor the user's OS-level preference (WCAG 2.1, PRODUCT.md a11y goal).
+ * Collapse animations and transitions to near-instant rather than removing feedback entirely,
+ * so state changes still register without movement. Covers app keyframes above and the
+ * Tailwind animate-* / transition utilities used throughout the UI.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

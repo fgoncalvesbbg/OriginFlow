@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { ProjectDocument, DocStatus, ResponsibleParty, DocumentComment, ProjectOverallStatus } from '../../types';
 import { mapProjectDocument } from '../../utils/mappers.utils';
 import { handleError } from '../../utils/error.utils';
+import { runMutation } from '../core/db';
 import { getProjectsBySupplierId } from './project.service';
 
 /**
@@ -74,7 +75,7 @@ export const updateDocStatus = async (id: string, status: DocStatus, comment?: s
  * Delete a document
  */
 export const removeDocument = async (id: string): Promise<void> => {
-    await supabase.from('project_documents').delete().eq('id', id);
+    await runMutation(supabase.from('project_documents').delete().eq('id', id), 'removeDocument');
 };
 
 /**
@@ -137,7 +138,7 @@ export const uploadAdHocFile = async (projectId: string, step_number: number, fi
  * Delete a specific document version
  */
 export const deleteDocumentVersion = async (versionId: string): Promise<void> => {
-    await supabase.from('document_versions').delete().eq('id', versionId);
+    await runMutation(supabase.from('document_versions').delete().eq('id', versionId), 'deleteDocumentVersion');
 };
 
 /**

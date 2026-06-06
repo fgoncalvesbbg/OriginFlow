@@ -118,6 +118,15 @@
   color: #b91c1c;
 }
 
+.im-block-flammable {
+  background-color: #fff1f2;
+  border-left-color: #ea580c;
+}
+
+.im-block-flammable .im-block-title {
+  color: #c2410c;
+}
+
 .im-block-info {
   background-color: #eff6ff;
   border-left-color: #3b82f6;

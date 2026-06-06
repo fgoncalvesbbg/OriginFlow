@@ -6,7 +6,7 @@
 import { portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { RFQEntry } from '../../types';
-import { handleError } from '../../utils/error.utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all RFQs available for a supplier
@@ -58,6 +58,5 @@ export const submitRFQEntry = async (entryId: string, data: Partial<RFQEntry>): 
         attribute_responses: data.attributeResponses ?? []
     };
 
-    const { error } = await portalClient.from('rfq_entries').update(payload).eq('id', entryId);
-    if (error) handleError(error, 'submitRFQEntry');
+    await runMutation(portalClient.from('rfq_entries').update(payload).eq('id', entryId), 'submitRFQEntry');
 };

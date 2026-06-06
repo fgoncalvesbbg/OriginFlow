@@ -42,5 +42,16 @@ export {
   getAttributeRequestsByProjectPublic,
   getAttributeRequestByToken,
   submitAttributeRequest,
+  updateAttributeRequestData,
   deleteAttributeRequest
 } from './project-attribute-request.service';
+
+export {
+  MAX_SKUS_PER_PROJECT,
+  getProjectSkus,
+  createProjectSku,
+  updateProjectSku,
+  deleteProjectSku,
+  getEffectiveSkuValue,
+  collapseSkuAttributeValues
+} from './project-sku.service';

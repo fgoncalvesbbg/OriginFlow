@@ -5,8 +5,9 @@
 
 import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { IMTemplate } from '../../types';
+import { IMTemplate, IMTemplateType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all IM templates
@@ -18,6 +19,7 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
     return (data || []).map((t: any) => ({
       id: t.id,
       categoryId: t.category_id,
+      templateType: (t.template_type ?? 'im') as IMTemplateType,
       name: t.name,
       languages: t.languages,
       isFinalized: t.is_finalized,
@@ -38,6 +40,7 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
     return {
       id: data.id,
       categoryId: data.category_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       name: data.name,
       languages: data.languages,
       isFinalized: data.is_finalized,
@@ -49,15 +52,25 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
 };
 
 /**
- * Get IM template by category ID
+ * Get IM template by category ID and type (defaults to the normal 'im').
+ * A category holds at most one template per type.
  */
-export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMTemplate | undefined> => {
+export const getIMTemplateByCategoryId = async (
+  categoryId: string,
+  templateType: IMTemplateType = 'im',
+): Promise<IMTemplate | undefined> => {
     if (!categoryId || !isLive) return undefined;
-    const { data, error } = await supabase.from('im_templates').select('*').eq('category_id', categoryId).single();
+    const { data, error } = await supabase
+      .from('im_templates')
+      .select('*')
+      .eq('category_id', categoryId)
+      .eq('template_type', templateType)
+      .single();
     if (error || !data) return undefined;
     return {
       id: data.id,
       categoryId: data.category_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       name: data.name,
       languages: data.languages,
       isFinalized: data.is_finalized,
@@ -71,10 +84,15 @@ export const getIMTemplateByCategoryId = async (categoryId: string): Promise<IMT
 /**
  * Create a new IM template
  */
-export const createIMTemplate = async (categoryId: string, name: string): Promise<IMTemplate> => {
+export const createIMTemplate = async (
+  categoryId: string,
+  name: string,
+  templateType: IMTemplateType = 'im',
+): Promise<IMTemplate> => {
     const { data, error } = await supabase.from('im_templates').insert({
         id: generateUUID(),
         category_id: categoryId,
+        template_type: templateType,
         name,
         languages: ['en'],
         is_finalized: false,
@@ -85,6 +103,7 @@ export const createIMTemplate = async (categoryId: string, name: string): Promis
     return {
       id: data.id,
       categoryId: data.category_id,
+      templateType: (data.template_type ?? 'im') as IMTemplateType,
       name: data.name,
       languages: data.languages,
       isFinalized: data.is_finalized,
@@ -110,6 +129,5 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
 
     payload.updated_at = new Date().toISOString();
 
-    const { error } = await supabase.from('im_templates').update(payload).eq('id', id);
-    if (error) handleError(error, 'updateIMTemplate');
+    await runMutation(supabase.from('im_templates').update(payload).eq('id', id), 'updateIMTemplate');
 };

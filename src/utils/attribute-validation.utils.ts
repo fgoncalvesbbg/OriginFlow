@@ -1,3 +1,6 @@
+/**
+ * Validation helpers for category attribute values (type/required checks and per-category lookup).
+ */
 import { CategoryAttribute } from '../types';
 
 /**

@@ -106,8 +106,10 @@ It also triggers a compliance deadline check on app mount.
   - `portalClient` for public/tokenized supplier flows
 
 ### Service Layer Structure
-- Domain service folders exist (`project`, `supplier`, `compliance`, `sourcing`, `im`, etc.)
-- A monolithic legacy `apiService.ts` still exists and is used heavily by pages
+- Domain service folders (`project`, `supplier`, `compliance`, `sourcing`, `im`, etc.) are the single
+  service layer; pages import them via the `src/services/index.ts` barrel.
+- The legacy monolithic `apiService.ts` has been removed (migration complete). Shared query/mutation
+  boilerplate is centralized in `src/services/core/db.ts` (`runMutation` / `runQuery`).
 
 ### Data Mapping Strategy
 - Mapper utilities translate snake_case DB rows into frontend domain models
@@ -179,9 +181,11 @@ Migrations show an evolution from broad authenticated policies toward PM-scoped 
 - Reusable hook/component infrastructure
 
 ### Weaknesses
-- `apiService.ts` duplicates logic already present in modular service files
-- Most pages still consume `apiService.ts`
-- High risk of behavior drift between duplicated implementations
+- Several large page components remain (e.g. `ProjectIMGenerator`, `ProjectDetail`,
+  `IMTemplateEditor`, `SupplierDashboard`); pure helpers and shared components have been extracted,
+  but their stateful logic could still be split into hooks.
+- (Resolved) The duplicated `apiService.ts` monolith has been removed, eliminating the prior
+  behavior-drift risk between it and the modular services.
 
 ---
 
@@ -227,14 +231,16 @@ In auth context, a cleanup function is returned from an async initializer but no
 Schema/migration artifacts include permissive public policies (including `FOR ALL USING (true)` patterns) on portal-accessed tables. This should be hardened to token-scoped read + RPC-based writes.
 
 ## 9.5 Service Drift / Inconsistent Behavior
-Examples of logic mismatch exist between `apiService.ts` and modular services (e.g., project insert payload differences like `created_by` handling), which may cause RLS or behavior inconsistencies.
+(Resolved) Previously, logic mismatches existed between `apiService.ts` and the modular services
+(e.g., project insert payload differences like `created_by` handling). `apiService.ts` has since been
+removed, so the modular services are now the single implementation.
 
 ---
 
 ## 10) Suggested Refactor Roadmap
 
-1. Consolidate all page imports to modular services exposed from `src/services/index.ts`.
-2. Deprecate and eventually remove duplicated logic from `src/services/apiService.ts`.
+1. ✅ Done — all page imports use the modular services exposed from `src/services/index.ts`.
+2. ✅ Done — `src/services/apiService.ts` and its duplicated logic have been removed.
 3. Normalize create/update payloads for RLS compatibility (especially `created_by` assumptions).
 4. Harden public policies and route all sensitive portal writes through audited security-definer RPCs.
 5. Implement real compliance deadline processing and notification generation.
