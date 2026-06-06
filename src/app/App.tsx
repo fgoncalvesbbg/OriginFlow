@@ -4,11 +4,9 @@ import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider, ToastContext } from '../context/ToastContext';
-import { ModalProvider, ModalContext } from '../context/ModalContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminRoute from '../components/AdminRoute';
 import { ToastContainer } from '../components/common/Toast';
-import { ModalContainer } from '../components/common/Modal';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { checkComplianceDeadlines } from '../services';
 
@@ -53,7 +51,6 @@ const AppContent: React.FC = () => {
   }, []);
 
   const toastContext = React.useContext(ToastContext);
-  const modalContext = React.useContext(ModalContext);
 
   return (
     <>
@@ -184,7 +181,6 @@ const AppContent: React.FC = () => {
         </Routes>
       </Router>
       {toastContext && <ToastContainer toasts={toastContext.toasts} onClose={toastContext.removeToast} />}
-      {modalContext && <ModalContainer modals={modalContext.modals} onClose={modalContext.close} />}
     </>
   );
 };
@@ -194,9 +190,7 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <AuthProvider>
         <ToastProvider>
-          <ModalProvider>
-            <AppContent />
-          </ModalProvider>
+          <AppContent />
         </ToastProvider>
       </AuthProvider>
     </ErrorBoundary>

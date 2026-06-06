@@ -7,31 +7,5 @@ export { generateUUID } from './uuid.utils';
 export { handleError } from './error.utils';
 export { sanitizeHtml } from './sanitize-html.utils';
 export { generateNumericCode } from './code.utils';
-export {
-  mapProfile,
-  mapProject,
-  mapProjectStep,
-  mapProjectDocument,
-  mapSupplier,
-  mapComplianceRequest,
-  mapProductionUpdate,
-  mapRFQ
-} from './mappers.utils';
-export {
-  validateEmail,
-  validatePassword,
-  validateRequired,
-  validateLength,
-  validateNumber,
-  validateNumberRange,
-  validateFile,
-  validateUrl,
-  validatePhoneNumber,
-  validateDate,
-  validateFutureDate,
-  combineValidations
-} from './validators.utils';
-
-export type { ValidationResult } from './validators.utils';
 export { validateAttributeValue, getAttributesForCategory } from './attribute-validation.utils';
-export { passesFeatureGate, isFalsy } from './attribute-condition.utils';
+export { passesFeatureGate } from './attribute-condition.utils';

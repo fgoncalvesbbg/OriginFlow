@@ -6,7 +6,6 @@
 export {
   getComplianceRequests,
   getComplianceRequestById,
-  getComplianceRequestByToken,
   getComplianceRequestsBySupplierId,
   createComplianceRequest,
   verifySupplierAccess,
@@ -18,13 +17,9 @@ export {
 
 export {
   getCategories,
-  createCategory,
   saveCategory,
   deleteCategory,
-  assignPMToCategory,
-  getProductFeatures,
-  saveProductFeature,
-  deleteProductFeature
+  assignPMToCategory
 } from './compliance-category.service';
 
 export {
