@@ -12,7 +12,6 @@ export {
   login,
   signUp,
   logout,
-  getSessionUser,
   getProfiles,
   getUserProfile,
   updateUserRole
@@ -23,7 +22,6 @@ export {
   getProjects,
   getProjectById,
   getProjectByToken,
-  getProjectsBySupplierId,
   getProjectsBySupplierToken,
   createProject,
   updateProject,
@@ -39,7 +37,6 @@ export {
   uploadFile,
   uploadAdHocFile,
   deleteDocumentVersion,
-  getDocumentComments,
   addDocumentComment,
   getMissingDocumentsForSupplier,
   createAttributeRequest,
@@ -86,16 +83,13 @@ export {
   getNotifications,
   getSupplierNotifications,
   markNotificationRead,
-  triggerEmailNotification,
-  getDocumentComments as getSharedDocumentComments,
-  addDocumentComment as addSharedDocumentComment
+  triggerEmailNotification
 } from './shared';
 
 // Compliance module
 export {
   getComplianceRequests,
   getComplianceRequestById,
-  getComplianceRequestByToken,
   getComplianceRequestsBySupplierId,
   createComplianceRequest,
   verifySupplierAccess,
@@ -104,13 +98,9 @@ export {
   deleteComplianceRequest,
   checkComplianceDeadlines,
   getCategories,
-  createCategory,
   saveCategory,
   deleteCategory,
   assignPMToCategory,
-  getProductFeatures,
-  saveProductFeature,
-  deleteProductFeature,
   getComplianceRequirements,
   saveRequirement,
   deleteRequirement,
@@ -143,25 +133,20 @@ export {
   deleteProjectIM,
   getAllProjectIMs,
   getIMBlocks,
-  getIMBlockById,
-  getIMBlockBySlug,
   saveIMBlock,
   deleteIMBlock,
-  getIMBlockUsage,
   getIMBlockUsageCounts,
   BlockInUseError,
   resolveManual,
   publishResolvedManuals,
   normalizeResolverData,
   getPublishedManifestUrl,
-  getStaleProjectIMKeys,
   getStaleProjectIMDetails,
   getProjectIMStaleReasons,
-  isProjectIMStale,
   republishProjectIM,
   stalenessKey
 } from './im';
-export type { PublishResult, PublishedLanguage, IMBlockUsageRef, StaleReason, StaleManual } from './im';
+export type { PublishResult, StaleReason, StaleManual } from './im';
 
 // Sourcing module
 export {
@@ -175,7 +160,6 @@ export {
   submitRFQEntry,
   getAllSupplierProposals,
   getSupplierProposals,
-  createSupplierProposal,
   createEnhancedSupplierProposal,
   convertProposalToRFQ
 } from './sourcing';

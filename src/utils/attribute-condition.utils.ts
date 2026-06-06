@@ -7,7 +7,7 @@
  */
 import { FeatureConditionFields } from '../types';
 
-export const isFalsy = (v: string | boolean | undefined): boolean =>
+const isFalsy = (v: string | boolean | undefined): boolean =>
   v === undefined || v === false || v === 'false' || v === '';
 
 /**

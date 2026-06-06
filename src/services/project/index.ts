@@ -7,7 +7,6 @@ export {
   getProjects,
   getProjectById,
   getProjectByToken,
-  getProjectsBySupplierId,
   getProjectsBySupplierToken,
   createProject,
   updateProject,
@@ -29,12 +28,9 @@ export {
   uploadFile,
   uploadAdHocFile,
   deleteDocumentVersion,
-  getDocumentComments,
   addDocumentComment,
   getMissingDocumentsForSupplier
 } from './project-document.service';
-
-export { saveProjectMilestones as saveProjectMilestonesDirect } from './project-milestone.service';
 
 export {
   createAttributeRequest,

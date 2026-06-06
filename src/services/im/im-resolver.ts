@@ -183,8 +183,8 @@ const isSectionVisible = (
 // passesFeatureGate / isFalsy now live in src/utils/attribute-condition.utils.ts so the
 // compliance module can reuse the same attribute-condition logic. Re-exported here to
 // keep existing IM imports (and tests) working unchanged.
-import { passesFeatureGate, isFalsy } from '../../utils/attribute-condition.utils';
-export { passesFeatureGate, isFalsy };
+import { passesFeatureGate } from '../../utils/attribute-condition.utils';
+export { passesFeatureGate };
 
 const resolveInlineRef = (
   ref: InlineBlockRef,

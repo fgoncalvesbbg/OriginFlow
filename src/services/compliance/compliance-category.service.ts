@@ -5,8 +5,8 @@
 
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { CategoryL3, ProductFeature } from '../../types';
-import { handleError, generateUUID } from '../../utils';
+import { CategoryL3 } from '../../types';
+import { handleError } from '../../utils';
 import { runMutation } from '../core/db';
 
 /**
@@ -27,15 +27,6 @@ export const getCategories = async (): Promise<CategoryL3[]> => {
         pmId: c.pm_id ?? null,
         pmName: c.pm?.name ?? null
     }));
-};
-
-/**
- * Create a new compliance category
- */
-export const createCategory = async (name: string): Promise<CategoryL3> => {
-    const newCat: CategoryL3 = { id: generateUUID(), name, active: true, isFinalized: false };
-    await saveCategory(newCat);
-    return newCat;
 };
 
 /**
@@ -71,39 +62,3 @@ export const deleteCategory = async (id: string): Promise<void> => {
     await runMutation(supabase.from('categories_l3').delete().eq('id', id), 'deleteCategory');
 };
 
-/**
- * Get all product features
- */
-export const getProductFeatures = async (): Promise<ProductFeature[]> => {
-    if (!isLive) return [];
-    const { data, error } = await portalClient.from('product_features').select('*');
-    if (error) return [];
-    return (data || []).map((f: any) => ({
-        id: f.id,
-        categoryId: f.category_id,
-        name: f.name,
-        active: f.active
-    }));
-};
-
-/**
- * Save/update a product feature
- */
-export const saveProductFeature = async (feat: ProductFeature): Promise<void> => {
-    const payload: any = {
-        id: feat.id,
-        name: feat.name,
-        active: feat.active
-    };
-    if (feat.categoryId) {
-        payload.category_id = feat.categoryId;
-    }
-    await runMutation(supabase.from('product_features').upsert(payload), 'saveFeature');
-};
-
-/**
- * Delete a product feature
- */
-export const deleteProductFeature = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('product_features').delete().eq('id', id), 'deleteProductFeature');
-};

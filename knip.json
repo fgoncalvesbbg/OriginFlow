@@ -11,6 +11,7 @@
     "netlify/**/*.ts"
   ],
   "ignore": [
-    "src/vite-env.d.ts"
+    "src/vite-env.d.ts",
+    "src/modules/im-viewer/**"
   ]
 }

@@ -1,6 +1,6 @@
 /**
  * Shared services module
- * Services used across multiple domains (notifications, dashboard, comments)
+ * Services used across multiple domains (notifications, dashboard)
  */
 
 export {
@@ -13,8 +13,3 @@ export {
   markNotificationRead,
   triggerEmailNotification
 } from './notification.service';
-
-export {
-  getDocumentComments,
-  addDocumentComment
-} from './document-comment.service';

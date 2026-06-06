@@ -140,7 +140,7 @@ const buildTOCPage = (
   `;
 };
 
-export const buildIMPrintDocument = ({
+const buildIMPrintDocument =({
   projectName,
   language,
   template,

@@ -32,17 +32,6 @@ export const getComplianceRequestById = async (id: string): Promise<ComplianceRe
 };
 
 /**
- * Get compliance request by token (for supplier portal)
- */
-export const getComplianceRequestByToken = async (token: string): Promise<ComplianceRequest | undefined> => {
-    if (!isLive) return undefined;
-    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('token', token).maybeSingle();
-    if (error) return undefined;
-    if (!data) return undefined;
-    return mapComplianceRequest(data);
-};
-
-/**
  * Get all compliance requests for a specific supplier
  */
 export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {

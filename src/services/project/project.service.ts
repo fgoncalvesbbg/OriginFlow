@@ -148,8 +148,9 @@ export const deleteProject = async (id: string): Promise<void> => {
 };
 
 /**
- * Save project milestones (POPlacement, Mass Production, ETD, ETA)
+ * Save project milestones (PO Placement, Mass Production, ETD, ETA)
  */
 export const saveProjectMilestones = async (projectId: string, milestones: ProjectMilestones): Promise<void> => {
     await updateProject(projectId, { milestones });
 };
+

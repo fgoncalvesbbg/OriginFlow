@@ -56,21 +56,6 @@ export const getSupplierProposals = async (supplierId: string): Promise<Supplier
 };
 
 /**
- * Create a new supplier proposal
- */
-export const createSupplierProposal = async (supplierId: string, title: string, description: string, fileUrl: string): Promise<void> => {
-    const { error } = await portalClient.from('supplier_proposals').insert({
-        supplier_id: supplierId,
-        title,
-        description,
-        file_url: fileUrl,
-        status: 'new',
-        created_at: new Date().toISOString()
-    });
-    if (error) handleError(error, 'createSupplierProposal');
-};
-
-/**
  * Create an enhanced supplier proposal with full RFQ structure
  */
 export const createEnhancedSupplierProposal = async (

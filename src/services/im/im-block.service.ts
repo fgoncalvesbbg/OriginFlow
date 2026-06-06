@@ -59,34 +59,6 @@ export const getIMBlocks = async (filters?: {
   }
 };
 
-export const getIMBlockById = async (id: string): Promise<IMBlock | null> => {
-  if (!isLive) return null;
-  try {
-    const { data, error } = await withTimeout(
-      supabase.from('im_blocks').select('*').eq('id', id).maybeSingle()
-    );
-    if (error) { console.error(TAG, 'getIMBlockById error:', error); return null; }
-    return data ? mapRow(data) : null;
-  } catch (e) {
-    console.error(TAG, 'getIMBlockById threw:', e);
-    return null;
-  }
-};
-
-export const getIMBlockBySlug = async (slug: string): Promise<IMBlock | null> => {
-  if (!isLive) return null;
-  try {
-    const { data, error } = await withTimeout(
-      supabase.from('im_blocks').select('*').eq('slug', slug).maybeSingle()
-    );
-    if (error) { console.error(TAG, 'getIMBlockBySlug error:', error); return null; }
-    return data ? mapRow(data) : null;
-  } catch (e) {
-    console.error(TAG, 'getIMBlockBySlug threw:', e);
-    return null;
-  }
-};
-
 export const saveIMBlock = async (block: Partial<IMBlock>): Promise<IMBlock> => {
   const isNew = !block.id;
   const id = block.id ?? generateUUID();
@@ -155,7 +127,7 @@ export interface IMBlockUsageRef {
  * deleteIMBlock) treat an empty result as "safe to delete", so a silent
  * failure here must never be mistaken for "not in use".
  */
-export const getIMBlockUsage = async (id: string): Promise<IMBlockUsageRef[]> => {
+const getIMBlockUsage = async (id: string): Promise<IMBlockUsageRef[]> => {
   if (!isLive) return [];
   const { data, error } = await withTimeout(
     supabase.from('im_block_section_usage').select('section_id, template_id').eq('block_id', id)

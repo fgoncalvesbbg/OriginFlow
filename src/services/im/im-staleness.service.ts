@@ -159,10 +159,6 @@ export const getStaleProjectIMDetails = async (): Promise<Map<string, StaleManua
   return result;
 };
 
-/** Convenience: just the set of stale keys. */
-export const getStaleProjectIMKeys = async (): Promise<Set<string>> =>
-  new Set((await getStaleProjectIMDetails()).keys());
-
 /** Single-project drill-down (used by the project detail page). Empty = not stale. */
 export const getProjectIMStaleReasons = async (
   projectId: string,
@@ -183,12 +179,6 @@ export const getProjectIMStaleReasons = async (
   if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes))) return [];
   return computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, templateType)));
 };
-
-/** Single-project boolean check. */
-export const isProjectIMStale = async (
-  projectId: string,
-  templateType: IMTemplateType = 'im',
-): Promise<boolean> => (await getProjectIMStaleReasons(projectId, templateType)).length > 0;
 
 /**
  * Re-publish a project's manual: re-resolve its current template + sections +
