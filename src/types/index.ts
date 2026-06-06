@@ -89,8 +89,5 @@ export type {
 export { ProductionDelayReason } from './manufacturing.types';
 export type { ProductionUpdate } from './manufacturing.types';
 
-// Modal types
-export type { ModalOptions, ConfirmOptions, Modal, ModalContextType } from './modal.types';
-
 // Toast types
 export type { Toast, ToastType, ToastContextType } from './toast.types';
