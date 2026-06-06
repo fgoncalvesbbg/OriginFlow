@@ -15,10 +15,14 @@ View your app in AI Studio: https://ai.studio/apps/drive/1buDBiNMWeQPfX3MfF4WIsO
 
 1. Install dependencies:
    `npm install`
-2. Set the `VITE_GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. (Optional) Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` if you want live Supabase data
+2. (Optional) Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in [.env.local](.env.local) for live Supabase data
+3. (Optional) For AI features, set `GEMINI_API_KEY` — **server-side, no `VITE_` prefix**. It is read by the
+   Netlify Function proxy ([netlify/functions/gemini.ts](netlify/functions/gemini.ts)) and never shipped to the browser.
 4. Run the app:
-   `npm run dev`
+   - `npm start` — Vite dev server (everything except AI works)
+   - `npx netlify dev` — use this instead if you want the AI features to work locally (serves the Gemini proxy function)
+
+Build with `npm run build`; run tests with `npm test`.
 
 ## Service Layer Conventions
 
