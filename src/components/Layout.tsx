@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2 } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
 import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
@@ -116,6 +116,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link to="/im" className={navItemClass(location.pathname.startsWith('/im'))}>
             <BookOpen size={18} />
             Instruction Manuals
+          </Link>
+
+          <Link to="/attributes" className={navItemClass(location.pathname.startsWith('/attributes'))}>
+            <Table2 size={18} />
+            Attribute Viewer
           </Link>
 
           {user?.role === UserRole.ADMIN && (

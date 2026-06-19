@@ -223,21 +223,33 @@ const RFQDetail: React.FC = () => {
                           </div>
                       )}
 
-                      {/* Quote File */}
-                      {drawerEntry.quoteFileUrl && (
-                          <div>
-                              <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3 flex items-center gap-2">
-                                  <Paperclip size={13} /> Quote File
-                              </h3>
-                              <a
-                                  href={drawerEntry.quoteFileUrl}
-                                  download={`Quote_${drawerEntry.supplierName}`}
-                                  className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-3 rounded-lg border border-indigo-100 font-medium"
-                              >
-                                  <Download size={14} /> Download quote file
-                              </a>
-                          </div>
-                      )}
+                      {/* Quote Files */}
+                      {(() => {
+                          const files = drawerEntry.attachments?.length
+                              ? drawerEntry.attachments
+                              : (drawerEntry.quoteFileUrl ? [{ name: 'Quote file', url: drawerEntry.quoteFileUrl, type: '' }] : []);
+                          if (files.length === 0) return null;
+                          return (
+                              <div>
+                                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3 flex items-center gap-2">
+                                      <Paperclip size={13} /> Quote {files.length > 1 ? 'Files' : 'File'}
+                                  </h3>
+                                  <div className="space-y-2">
+                                      {files.map((f, idx) => (
+                                          <a
+                                              key={idx}
+                                              href={f.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-3 rounded-lg border border-indigo-100 font-medium"
+                                          >
+                                              <Download size={14} /> <span className="truncate">{f.name || 'Download quote file'}</span>
+                                          </a>
+                                      ))}
+                                  </div>
+                              </div>
+                          );
+                      })()}
 
                       {drawerEntry.status === RFQEntryStatus.PENDING && (
                           <div className="bg-amber-50 border border-amber-100 rounded-lg p-4 text-sm text-amber-700">

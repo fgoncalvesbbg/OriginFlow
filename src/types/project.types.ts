@@ -122,6 +122,23 @@ export interface ProjectSku {
   updatedAt: string;
 }
 
+/**
+ * A review flag on a single (SKU, attribute) cell in the Attribute Viewer. One flag per cell;
+ * re-flagging updates the existing row. Flags are resolved rather than deleted to keep the trail.
+ */
+export interface SkuAttributeFlag {
+  id: string;
+  projectSkuId: string;
+  attributeId: string;
+  status: 'open' | 'resolved';
+  comment: string;
+  flaggedBy: string | null;
+  flaggedByName: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
 export interface DocumentComment {
   id: string;
   documentId: string;

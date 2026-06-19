@@ -36,6 +36,7 @@ export {
   createAttributeRequest,
   getAttributeRequestsByProject,
   getAttributeRequestsByProjectPublic,
+  getAttributeRequestsForSupplier,
   getAttributeRequestByToken,
   submitAttributeRequest,
   updateAttributeRequestData,
@@ -51,3 +52,12 @@ export {
   getEffectiveSkuValue,
   collapseSkuAttributeValues
 } from './project-sku.service';
+
+export {
+  getSkusByCategory,
+  getFlagsForSkus,
+  upsertSkuAttributeFlag,
+  setSkuAttributeFlagResolved,
+  deleteSkuAttributeFlag
+} from './sku-attribute-review.service';
+export type { CategorySku } from './sku-attribute-review.service';

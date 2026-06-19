@@ -21,6 +21,7 @@ import AdminDashboard from '../pages/AdminDashboard';
 import AdminTestEmail from '../pages/AdminTestEmail';
 import SupplierDashboard from '../pages/SupplierDashboard';
 import SuppliersList from '../pages/SuppliersList';
+import AttributeViewer from '../pages/products/AttributeViewer';
 
 // Compliance Pages
 import ComplianceDashboard from '../pages/compliance/ComplianceDashboard';
@@ -93,6 +94,12 @@ const AppContent: React.FC = () => {
           <Route path="/suppliers" element={
             <ProtectedRoute>
               <SuppliersList />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/attributes" element={
+            <ProtectedRoute>
+              <AttributeViewer />
             </ProtectedRoute>
           } />
 

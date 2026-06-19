@@ -46,7 +46,8 @@ export interface RFQEntry {
   toolingCost?: number;
   currency?: string;
   supplierNotes?: string;
-  quoteFileUrl?: string;
+  quoteFileUrl?: string;          // legacy single quote document (kept for backwards compat)
+  attachments?: RFQAttachment[];  // supplier-uploaded quote documents (multiple allowed)
   submittedAt?: string;
   createdAt: string;
   supplierName?: string;

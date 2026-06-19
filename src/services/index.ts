@@ -42,6 +42,7 @@ export {
   createAttributeRequest,
   getAttributeRequestsByProject,
   getAttributeRequestsByProjectPublic,
+  getAttributeRequestsForSupplier,
   getAttributeRequestByToken,
   submitAttributeRequest,
   updateAttributeRequestData,
@@ -52,8 +53,14 @@ export {
   updateProjectSku,
   deleteProjectSku,
   getEffectiveSkuValue,
-  collapseSkuAttributeValues
+  collapseSkuAttributeValues,
+  getSkusByCategory,
+  getFlagsForSkus,
+  upsertSkuAttributeFlag,
+  setSkuAttributeFlagResolved,
+  deleteSkuAttributeFlag
 } from './project';
+export type { CategorySku } from './project';
 
 // Supplier module
 export {

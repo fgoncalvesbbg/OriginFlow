@@ -18,7 +18,8 @@ export type {
   DocumentComment,
   ProjectAttributeRequest,
   ProjectSku,
-  SkuAttributeValue
+  SkuAttributeValue,
+  SkuAttributeFlag
 } from './project.types';
 
 // Compliance types

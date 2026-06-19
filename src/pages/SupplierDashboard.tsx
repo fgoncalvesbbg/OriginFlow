@@ -6,12 +6,13 @@ import {
   getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
-  logAccessCodeAttempt, submitRFQEntry, getSupplierProposals, addDocumentComment
+  logAccessCodeAttempt, getSupplierProposals, addDocumentComment,
+  getAttributeRequestsForSupplier
 } from '../services';
-import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus } from '../types';
+import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Upload, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag, ClipboardList } from 'lucide-react';
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -23,23 +24,11 @@ const SupplierDashboard: React.FC = () => {
   const [missingDocs, setMissingDocs] = useState<(ProjectDocument & { projectName: string, projectIdCode: string })[]>([]);
   const [openRfqs, setOpenRfqs] = useState<RFQEntry[]>([]);
   const [proposals, setProposals] = useState<SupplierProposal[]>([]);
+  const [attributeRequests, setAttributeRequests] = useState<ProjectAttributeRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
-  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
-  const [submittingQuote, setSubmittingQuote] = useState(false);
-  const [selectedRfqForQuote, setSelectedRfqForQuote] = useState<RFQEntry | null>(null);
-  const [quoteForm, setQuoteForm] = useState({
-    unitPrice: '',
-    moq: '',
-    leadTimeWeeks: '',
-    toolingCost: '',
-    currency: 'USD',
-    supplierNotes: '',
-    quoteFileUrl: ''
-  });
-
   // Manufacturing Widget Data
   const [projectsNeedingUpdate, setProjectsNeedingUpdate] = useState<{project: Project, daysUntilEtd: number}[]>([]);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
@@ -86,7 +75,7 @@ const SupplierDashboard: React.FC = () => {
   };
 
   // Tab Navigation State
-  const [activeTab, setActiveTab] = useState<'projects' | 'rfq' | 'tcf' | 'proposals'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'rfq' | 'tcf' | 'attributes' | 'proposals'>('projects');
 
   // Session Management (60 min timeout)
   const SESSION_TIMEOUT = 60 * 60 * 1000;
@@ -94,7 +83,6 @@ const SupplierDashboard: React.FC = () => {
 
   // Dashboard State Management
   const [dashboardError, setDashboardError] = useState('');
-  const [refreshingRfqs, setRefreshingRfqs] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
@@ -185,10 +173,6 @@ const SupplierDashboard: React.FC = () => {
         if (isViewProposalOpen) {
           setIsViewProposalOpen(false);
         }
-        if (isQuoteModalOpen) {
-          setIsQuoteModalOpen(false);
-          setSelectedRfqForQuote(null);
-        }
         if (isUpdateModalOpen) {
           setIsUpdateModalOpen(false);
         }
@@ -203,7 +187,7 @@ const SupplierDashboard: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isViewProposalOpen, isQuoteModalOpen, isUpdateModalOpen, isProposalModalOpen, showNotifications]);
+  }, [isViewProposalOpen, isUpdateModalOpen, isProposalModalOpen, showNotifications]);
 
   // Load dashboard data after access verification
   useEffect(() => {
@@ -211,6 +195,14 @@ const SupplierDashboard: React.FC = () => {
 
     let mounted = true;
     const controller = new AbortController();
+
+    // The authenticated supabase client's auth lock can take up to ~5s to settle on
+    // first use (see supabase.client.ts). The initial load can fire inside that window
+    // and come back empty/failed, so auto-retry a few times — what the user otherwise
+    // has to do by hand with the Refresh button.
+    let autoRetries = 0;
+    const MAX_AUTO_RETRIES = 3;
+    const AUTO_RETRY_DELAY_MS = 1500;
 
     // Retry wrapper for API calls to handle database locks
     const retryApiCall = async <T,>(
@@ -246,7 +238,8 @@ const SupplierDashboard: React.FC = () => {
           retryApiCall(() => getSupplierNotifications(supplier.id)),
           retryApiCall(() => getMissingDocumentsForSupplier(supplier.id)),
           retryApiCall(() => getRFQsForSupplier(supplier.id)),
-          retryApiCall(() => getSupplierProposals(supplier.id))
+          retryApiCall(() => getSupplierProposals(supplier.id)),
+          retryApiCall(() => getAttributeRequestsForSupplier(supplier.id))
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -257,13 +250,9 @@ const SupplierDashboard: React.FC = () => {
         const mDocs = results[3].status === 'fulfilled' ? results[3].value : [];
         const rfqList = results[4].status === 'fulfilled' ? results[4].value : [];
         const propList = results[5].status === 'fulfilled' ? results[5].value : [];
+        const attrList = results[6].status === 'fulfilled' ? results[6].value : [];
 
-        // Check if any critical calls failed
         const failedCalls = results.filter(r => r.status === 'rejected');
-        if (failedCalls.length > 0) {
-          console.warn(`Dashboard: ${failedCalls.length} data source(s) failed to load:`, failedCalls);
-          setDashboardError(`Some data failed to load. ${failedCalls.length} section(s) may be incomplete. Please refresh the page if needed.`);
-        }
 
         setProjects(pList);
         setComplianceReqs(cList);
@@ -271,6 +260,24 @@ const SupplierDashboard: React.FC = () => {
         setMissingDocs(mDocs);
         setOpenRfqs(rfqList);
         setProposals(propList);
+        setAttributeRequests(attrList);
+
+        // If the first attempt(s) came back failed or entirely empty — typically because
+        // the supabase auth lock hadn't settled yet — retry automatically rather than
+        // leaving the supplier with a blank dashboard until they hit Refresh.
+        const looksEmpty = !pList.length && !cList.length && !nList.length && !mDocs.length && !rfqList.length && !propList.length && !attrList.length;
+        if ((failedCalls.length > 0 || looksEmpty) && autoRetries < MAX_AUTO_RETRIES) {
+          autoRetries++;
+          await new Promise(resolve => setTimeout(resolve, AUTO_RETRY_DELAY_MS));
+          if (!mounted || controller.signal.aborted) return;
+          return loadDashboardData();
+        }
+
+        // Only surface the error banner once we've exhausted automatic retries.
+        if (failedCalls.length > 0) {
+          console.warn(`Dashboard: ${failedCalls.length} data source(s) failed to load:`, failedCalls);
+          setDashboardError(`Some data failed to load. ${failedCalls.length} section(s) may be incomplete. Please refresh the page if needed.`);
+        }
 
         // Calculate Manufacturing Checks - fetch all updates in parallel
         const needsUpdate: {project: Project, daysUntilEtd: number}[] = [];
@@ -384,7 +391,8 @@ const SupplierDashboard: React.FC = () => {
         getSupplierNotifications(supplier.id),
         getMissingDocumentsForSupplier(supplier.id),
         getRFQsForSupplier(supplier.id),
-        getSupplierProposals(supplier.id)
+        getSupplierProposals(supplier.id),
+        getAttributeRequestsForSupplier(supplier.id)
       ]);
 
       const pList = results[0].status === 'fulfilled' ? results[0].value : [];
@@ -393,6 +401,7 @@ const SupplierDashboard: React.FC = () => {
       const mDocs = results[3].status === 'fulfilled' ? results[3].value : [];
       const rfqList = results[4].status === 'fulfilled' ? results[4].value : [];
       const propList = results[5].status === 'fulfilled' ? results[5].value : [];
+      const attrList = results[6].status === 'fulfilled' ? results[6].value : [];
 
       const failedCalls = results.filter(r => r.status === 'rejected');
       if (failedCalls.length > 0) {
@@ -408,6 +417,7 @@ const SupplierDashboard: React.FC = () => {
       setMissingDocs(mDocs);
       setOpenRfqs(rfqList);
       setProposals(propList);
+      setAttributeRequests(attrList);
     } catch (err: any) {
       console.error('Error refreshing dashboard:', err);
       setDashboardError('Failed to refresh dashboard. Please try again.');
@@ -470,64 +480,6 @@ const SupplierDashboard: React.FC = () => {
       console.error('Error reporting delay:', err);
       setToastMessage('Failed to report delay. Please try again.');
       setToastType('error');
-    }
-  };
-
-  const handleSubmitQuote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRfqForQuote) return;
-
-    if (!quoteForm.unitPrice) {
-      setToastMessage('Please enter a unit price.');
-      setToastType('error');
-      return;
-    }
-
-    setSubmittingQuote(true);
-    try {
-      await submitRFQEntry(selectedRfqForQuote.id, {
-        unitPrice: parseFloat(quoteForm.unitPrice),
-        moq: quoteForm.moq ? parseInt(quoteForm.moq) : undefined,
-        leadTimeWeeks: quoteForm.leadTimeWeeks ? parseInt(quoteForm.leadTimeWeeks) : undefined,
-        toolingCost: quoteForm.toolingCost ? parseFloat(quoteForm.toolingCost) : undefined,
-        currency: quoteForm.currency,
-        supplierNotes: quoteForm.supplierNotes,
-        quoteFileUrl: quoteForm.quoteFileUrl
-      });
-
-      // Reset form
-      setQuoteForm({
-        unitPrice: '',
-        moq: '',
-        leadTimeWeeks: '',
-        toolingCost: '',
-        currency: 'USD',
-        supplierNotes: '',
-        quoteFileUrl: ''
-      });
-      setIsQuoteModalOpen(false);
-      setSelectedRfqForQuote(null);
-
-      // Refresh RFQs list with loading state
-      setRefreshingRfqs(true);
-      try {
-        const updatedRfqs = await getRFQsForSupplier(supplier!.id);
-        setOpenRfqs(updatedRfqs);
-        setToastMessage('Quote submitted successfully! Your quote is now visible to the PM.');
-        setToastType('success');
-      } catch (refreshErr: any) {
-        console.error('Error refreshing RFQs after submission:', refreshErr);
-        setToastMessage('Quote submitted, but failed to refresh list. Please refresh the page.');
-        setToastType('error');
-      } finally {
-        setRefreshingRfqs(false);
-      }
-    } catch (err: any) {
-      console.error('Error submitting quote:', err);
-      setToastMessage('Failed to submit quote. Please try again.');
-      setToastType('error');
-    } finally {
-      setSubmittingQuote(false);
     }
   };
 
@@ -705,6 +657,17 @@ const SupplierDashboard: React.FC = () => {
     });
   }, [proposals, debouncedSearchTerm, filterActionItemsOnly]);
 
+  const filteredAttributeRequests = useMemo(() => {
+    return attributeRequests.filter(r => {
+      const matchesSearchTerm = matchesSearch(r.skuNumber) || matchesSearch(r.skuTitle) || matchesSearch(r.projectName);
+      if (!matchesSearchTerm) return false;
+      if (filterActionItemsOnly && r.status === 'submitted') return false;
+      return true;
+    });
+  }, [attributeRequests, debouncedSearchTerm, filterActionItemsOnly]);
+
+  const pendingAttributeCount = attributeRequests.filter(r => r.status !== 'submitted').length;
+
   const summaryStats = React.useMemo(() => {
     const activeProjects = filteredProjects.filter(p => p.status === 'in_progress').length;
     const pendingCompliance = filteredCompliance.filter(c => c.status === ComplianceRequestStatus.PENDING_SUPPLIER).length;
@@ -728,7 +691,7 @@ const SupplierDashboard: React.FC = () => {
         return days !== null && days < 0;
       })
     ].length;
-    const pendingActions = pendingCompliance + filteredDocuments.length + filteredRfqs.length;
+    const pendingActions = pendingCompliance + filteredDocuments.length + filteredRfqs.length + filteredAttributeRequests.filter(r => r.status !== 'submitted').length;
 
     return {
       activeProjects,
@@ -737,7 +700,7 @@ const SupplierDashboard: React.FC = () => {
       overdueCount,
       unreadNotifications: notifications.filter(n => !n.isRead).length
     };
-  }, [filteredProjects, filteredCompliance, filteredDocuments, filteredRfqs, notifications]);
+  }, [filteredProjects, filteredCompliance, filteredDocuments, filteredRfqs, filteredAttributeRequests, notifications]);
 
   // Dashboard insights for visualizations
   const dashboardInsights = React.useMemo(() => {
@@ -992,6 +955,22 @@ const SupplierDashboard: React.FC = () => {
               TCF Requests ({complianceReqs.length})
             </button>
             <button
+              onClick={() => setActiveTab('attributes')}
+              className={`relative flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
+                activeTab === 'attributes'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <ClipboardList size={16} className="inline mr-2" />
+              Product Data ({attributeRequests.length})
+              {pendingAttributeCount > 0 && (
+                <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'attributes' ? 'bg-white text-primary' : 'bg-amber-100 text-amber-700'}`}>
+                  {pendingAttributeCount}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveTab('proposals')}
               className={`flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
                 activeTab === 'proposals'
@@ -1023,7 +1002,7 @@ const SupplierDashboard: React.FC = () => {
                   <input
                     id="dashboard-search"
                     type="text"
-                    placeholder={activeTab === 'projects' ? 'Search projects...' : activeTab === 'rfq' ? 'Search RFQs...' : 'Search compliance requests...'}
+                    placeholder={activeTab === 'projects' ? 'Search projects...' : activeTab === 'rfq' ? 'Search RFQs...' : activeTab === 'attributes' ? 'Search product data...' : 'Search compliance requests...'}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     aria-label={`Search ${activeTab}`}
@@ -1078,12 +1057,16 @@ const SupplierDashboard: React.FC = () => {
                 const allDocsForProject = missingDocs.filter(d => d.projectIdCode === p.projectId);
                 const allComplianceForProject = filteredCompliance.filter(c => c.projectId === p.id);
                 const pendingCompliance = allComplianceForProject.filter(c => c.status === ComplianceRequestStatus.PENDING_SUPPLIER);
+                const allAttrForProject = filteredAttributeRequests.filter(r => r.projectId === p.id);
+                const pendingAttrForProject = allAttrForProject.filter(r => r.status !== 'submitted');
                 const projectNeedsUpdate = projectsNeedingUpdate.find(pnu => pnu.project.id === p.id);
 
                 const nextAction = pendingDocs.length > 0
                   ? `Upload ${pendingDocs.length} document${pendingDocs.length > 1 ? 's' : ''}`
                   : pendingCompliance.length > 0
                   ? `Complete ${pendingCompliance.length} compliance request${pendingCompliance.length > 1 ? 's' : ''}`
+                  : pendingAttrForProject.length > 0
+                  ? `Submit ${pendingAttrForProject.length} attribute data form${pendingAttrForProject.length > 1 ? 's' : ''}`
                   : 'No pending actions';
 
                 return (
@@ -1311,6 +1294,49 @@ const SupplierDashboard: React.FC = () => {
                               </div>
                             </div>
                           )}
+
+                          {/* Product Attribute Data for this Project */}
+                          {allAttrForProject.length > 0 && (
+                            <div>
+                              <h4 className="font-bold text-sm mb-2">Product Attribute Data ({allAttrForProject.length})</h4>
+                              <div className="space-y-2">
+                                {allAttrForProject.map(req => {
+                                  const submitted = req.status === 'submitted';
+                                  return (
+                                    <div
+                                      key={req.id}
+                                      onClick={() => !submitted && navigate(`/attribute-request/${req.token}`)}
+                                      className={`bg-white rounded-lg p-3 border-l-4 transition ${
+                                        submitted ? 'border-gray-300 opacity-75' : 'border-primary hover:shadow-sm cursor-pointer'
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between gap-2 mb-1">
+                                        <p className="font-medium text-sm break-words">
+                                          {req.skuNumber ? `${req.skuNumber}${req.skuTitle ? ` — ${req.skuTitle}` : ''}` : 'Product Attribute Data'}
+                                        </p>
+                                        <span className={`text-xs font-semibold px-2 py-1 rounded-full border whitespace-nowrap flex-shrink-0 ${
+                                          submitted ? 'text-green-700 bg-green-50 border-green-300' : 'text-amber-700 bg-amber-50 border-amber-300'
+                                        }`}>
+                                          {submitted ? 'Submitted' : 'Action Required'}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-gray-500">
+                                        {req.step === 3 ? 'Production Validation' : 'Business Case & Development'}
+                                      </p>
+                                      {!submitted && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); navigate(`/attribute-request/${req.token}`); }}
+                                          className="w-full mt-2 px-3 py-1.5 bg-primary text-white rounded text-xs font-medium hover:bg-primary-dark transition"
+                                        >
+                                          Fill Attribute Data
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1350,10 +1376,7 @@ const SupplierDashboard: React.FC = () => {
                   </div>
                   {rfq.status === 'pending' && (
                     <button
-                      onClick={() => {
-                        setSelectedRfqForQuote(rfq);
-                        setIsQuoteModalOpen(true);
-                      }}
+                      onClick={() => navigate('/sourcing/supplier/' + rfq.token)}
                       className="w-full px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition"
                     >
                       Submit Quote
@@ -1415,6 +1438,69 @@ const SupplierDashboard: React.FC = () => {
                         className="w-full text-xs py-2 px-3 mt-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded text-blue-700 font-medium transition"
                       >
                         {copiedCode === compliance.accessCode ? '✓ Copied!' : '📋 Copy Access Code'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        )}
+
+        {/* PRODUCT ATTRIBUTE DATA TAB */}
+        {activeTab === 'attributes' && (
+        <div className="mb-8">
+          <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">
+            <ClipboardList size={20} className="text-primary flex-shrink-0" />
+            <span>Product Attribute Data {filteredAttributeRequests.length !== attributeRequests.length && `(${filteredAttributeRequests.length}/${attributeRequests.length})`}</span>
+          </h2>
+          {filteredAttributeRequests.length === 0 ? (
+            <p className="text-muted text-sm">{debouncedSearchTerm ? 'No attribute requests match your search' : 'No product attribute data requested'}</p>
+          ) : (
+            <div className="space-y-3">
+              {filteredAttributeRequests.map(req => {
+                const submitted = req.status === 'submitted';
+                return (
+                  <div
+                    key={req.id}
+                    className={`bg-white rounded-lg shadow border-l-4 p-4 transition ${
+                      submitted ? 'border-gray-300 opacity-75' : 'border-primary hover:shadow-md cursor-pointer'
+                    }`}
+                    onClick={() => !submitted && navigate(`/attribute-request/${req.token}`)}
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-base break-words">
+                          {req.skuNumber ? `${req.skuNumber}${req.skuTitle ? ` — ${req.skuTitle}` : ''}` : 'Product Attribute Data'}
+                        </h3>
+                        <p className="text-xs sm:text-sm text-muted mt-1">
+                          {req.projectName}{req.projectIdCode && ` · ${req.projectIdCode}`}
+                        </p>
+                        {req.categoryName && <p className="text-xs text-gray-400 mt-0.5">Category: {req.categoryName}</p>}
+                      </div>
+                      <span className={`text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap flex-shrink-0 ${
+                        submitted ? 'text-green-700 bg-green-50 border-green-300' : 'text-amber-700 bg-amber-50 border-amber-300'
+                      }`}>
+                        {submitted ? 'Submitted' : 'Action Required'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      {req.step === 3 ? 'Production Validation' : 'Business Case & Development'}
+                    </p>
+                    {req.note && (
+                      <div className="mt-2 bg-indigo-50 border border-indigo-100 rounded p-2 text-xs text-indigo-800">
+                        <strong>Note from PM:</strong> {req.note}
+                      </div>
+                    )}
+                    {submitted ? (
+                      <p className="text-xs text-gray-600 mt-2">Submitted {req.submittedAt && new Date(req.submittedAt).toLocaleDateString()}</p>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); navigate(`/attribute-request/${req.token}`); }}
+                        className="w-full mt-3 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition flex items-center justify-center gap-2"
+                      >
+                        <ClipboardList size={16} /> Fill Attribute Data
                       </button>
                     )}
                   </div>
@@ -1597,157 +1683,6 @@ const SupplierDashboard: React.FC = () => {
                   className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark"
                 >
                   Report Delay
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Quote Submission Modal */}
-      {isQuoteModalOpen && selectedRfqForQuote && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full p-4 sm:p-6 max-h-screen overflow-y-auto">
-            <div className="flex items-start justify-between gap-2 mb-6">
-              <div className="min-w-0">
-                <h2 className="text-lg sm:text-xl font-bold break-words">{selectedRfqForQuote.rfqTitle}</h2>
-                <p className="text-xs sm:text-sm text-muted mt-1">{selectedRfqForQuote.rfqIdentifier}</p>
-              </div>
-              <button
-                onClick={() => {
-                  setIsQuoteModalOpen(false);
-                  setSelectedRfqForQuote(null);
-                  setQuoteForm({
-                    unitPrice: '',
-                    moq: '',
-                    leadTimeWeeks: '',
-                    toolingCost: '',
-                    currency: 'USD',
-                    supplierNotes: '',
-                    quoteFileUrl: ''
-                  });
-                }}
-                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitQuote} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs sm:text-sm font-medium mb-2">
-                    Unit Price <span className="text-red-600">*</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <select
-                      value={quoteForm.currency}
-                      onChange={(e) => setQuoteForm({ ...quoteForm, currency: e.target.value })}
-                      className="px-2 py-2 border border-gray-300 rounded-lg"
-                    >
-                      <option value="USD">USD</option>
-                      <option value="EUR">EUR</option>
-                      <option value="GBP">GBP</option>
-                      <option value="CNY">CNY</option>
-                    </select>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={quoteForm.unitPrice}
-                      onChange={(e) => setQuoteForm({ ...quoteForm, unitPrice: e.target.value })}
-                      placeholder="0.00"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">MOQ</label>
-                  <input
-                    type="number"
-                    value={quoteForm.moq}
-                    onChange={(e) => setQuoteForm({ ...quoteForm, moq: e.target.value })}
-                    placeholder="Minimum order qty"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Lead Time (weeks)</label>
-                  <input
-                    type="number"
-                    value={quoteForm.leadTimeWeeks}
-                    onChange={(e) => setQuoteForm({ ...quoteForm, leadTimeWeeks: e.target.value })}
-                    placeholder="e.g., 4"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Tooling Cost</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={quoteForm.toolingCost}
-                    onChange={(e) => setQuoteForm({ ...quoteForm, toolingCost: e.target.value })}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Notes</label>
-                <textarea
-                  value={quoteForm.supplierNotes}
-                  onChange={(e) => setQuoteForm({ ...quoteForm, supplierNotes: e.target.value })}
-                  placeholder="Add any additional notes about your quote..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                  rows={3}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Quote Document URL</label>
-                <input
-                  type="url"
-                  value={quoteForm.quoteFileUrl}
-                  onChange={(e) => setQuoteForm({ ...quoteForm, quoteFileUrl: e.target.value })}
-                  placeholder="https://example.com/quote.pdf"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary"
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsQuoteModalOpen(false);
-                    setSelectedRfqForQuote(null);
-                  }}
-                  className="flex-1 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingQuote}
-                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 font-medium flex items-center justify-center gap-2"
-                >
-                  {submittingQuote ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Submitting...
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={16} />
-                      Submit Quote
-                    </>
-                  )}
                 </button>
               </div>
             </form>

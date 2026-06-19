@@ -294,6 +294,7 @@ const AttributeInput: React.FC<AttributeInputProps> = ({
     <div>
       {renderToggle()}
       {renderInput()}
+      {rules?.placeholder && <p className="text-xs text-gray-400 mt-1">{rules.placeholder}</p>}
       {error && <p className="text-xs text-rose-500 mt-1">{error}</p>}
     </div>
   );

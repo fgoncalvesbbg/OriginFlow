@@ -4,8 +4,9 @@
  */
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { ProjectAttributeRequest } from '../../types';
+import { ProjectAttributeRequest, ProjectOverallStatus } from '../../types';
 import { generateUUID } from '../../utils';
+import { getProjectsBySupplierId } from './project.service';
 
 type SubmittedValue = { attributeId: string; name: string; value: string; type?: string };
 
@@ -92,6 +93,29 @@ export const getAttributeRequestsByProjectPublic = async (projectId: string): Pr
     .order('created_at', { ascending: true });
   if (error) {
     console.error('getAttributeRequestsByProjectPublic error:', error);
+    return [];
+  }
+  return (data || []).map(map);
+};
+
+/**
+ * All attribute-data requests across a supplier's active projects, for the logged-in
+ * supplier dashboard. Uses portalClient (token/access-code context, no Supabase auth).
+ */
+export const getAttributeRequestsForSupplier = async (supplierId: string): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive) return [];
+  const projects = await getProjectsBySupplierId(supplierId);
+  const activeProjects = projects.filter(p => p.status !== ProjectOverallStatus.ARCHIVED && p.status !== ProjectOverallStatus.CANCELLED && p.status !== ProjectOverallStatus.COMPLETED);
+  if (activeProjects.length === 0) return [];
+
+  const projectIds = activeProjects.map(p => p.id);
+  const { data, error } = await portalClient
+    .from('project_attribute_requests')
+    .select('*')
+    .in('project_id', projectIds)
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('getAttributeRequestsForSupplier error:', error);
     return [];
   }
   return (data || []).map(map);

@@ -33,6 +33,7 @@ export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]
       currency: e.currency,
       supplierNotes: e.supplier_notes,
       quoteFileUrl: e.quote_file_url,
+      attachments: e.attachments ?? [],
       submittedAt: e.submitted_at,
       createdAt: e.created_at,
       supplierName: e.supplier?.name,
@@ -53,8 +54,10 @@ export const submitRFQEntry = async (entryId: string, data: Partial<RFQEntry>): 
         moq: data.moq,
         lead_time_weeks: data.leadTimeWeeks,
         tooling_cost: data.toolingCost,
+        currency: data.currency,
         supplier_notes: data.supplierNotes,
         quote_file_url: data.quoteFileUrl,
+        attachments: data.attachments ?? [],
         attribute_responses: data.attributeResponses ?? []
     };
 
