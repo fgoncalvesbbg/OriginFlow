@@ -1863,6 +1863,9 @@ const ProjectIMGenerator: React.FC = () => {
            template={template}
            formData={formData}
            languages={publishResult.languages.map((l) => l.language)}
+           skus={(boundSkuIds.length ? projectSkus.filter((s) => boundSkuIds.includes(s.id)) : projectSkus)
+             .map((s) => s.skuNumber)
+             .filter(Boolean)}
            version={instance?.version}
            onClose={() => setShowPrintDialog(false)}
          />

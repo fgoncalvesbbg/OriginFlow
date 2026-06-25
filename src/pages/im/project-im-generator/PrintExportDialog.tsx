@@ -10,10 +10,10 @@
  * configured; never blocks Generate/Publish.
  */
 
-import React, { useState } from 'react';
-import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
-import { requestPrintPdf, PrintPdfResult } from '../../../services';
+import { requestPrintPdf, getPrintRenders, PrintPdfResult, PrintRender } from '../../../services';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 
 interface PrintExportDialogProps {
@@ -24,6 +24,8 @@ interface PrintExportDialogProps {
   formData: Record<string, string>;
   /** Published languages available for export. */
   languages: string[];
+  /** SKU / article numbers this IM covers (one IM can cover several). */
+  skus: string[];
   version?: number;
   onClose: () => void;
 }
@@ -35,6 +37,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   template,
   formData,
   languages,
+  skus,
   version,
   onClose,
 }) => {
@@ -49,7 +52,9 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
   // Shared cover, prefilled from existing override hooks + template metadata.
   const [title, setTitle] = useState(formData['__cover_title'] ?? projectName);
-  const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? 'INSTRUCTION MANUAL');
+  // Empty subtitle → builder auto-fills "Instruction Manual" in every printed language.
+  const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? '');
+  const [skuText, setSkuText] = useState(skus.join(', '));
   const [logoUrl, setLogoUrl] = useState(formData['__custom_logo'] ?? meta?.companyLogoUrl ?? '');
   const [coverImageUrl, setCoverImageUrl] = useState(
     formData['__custom_cover_image'] ?? meta?.coverImageUrl ?? '',
@@ -65,6 +70,46 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PrintPdfResult | null>(null);
+
+  // Render history (for "already exists" + version comparison + credit guard).
+  const [renders, setRenders] = useState<PrintRender[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [confirmCredit, setConfirmCredit] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getPrintRenders(projectId, templateType)
+      .then((r) => alive && setRenders(r))
+      .finally(() => alive && setLoadingHistory(false));
+    return () => {
+      alive = false;
+    };
+  }, [projectId, templateType]);
+
+  const sameSet = (a: string[], b: string[]) =>
+    a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
+
+  // The most recent render matching the currently selected languages + page size.
+  const match = renders.find((r) => r.pageSize === pageSize && sameSet(r.languages, selected)) ?? null;
+
+  // Compare the matching render's IM version against the IM's current version.
+  type RegenStatus = 'new' | 'outdated' | 'current' | 'unknown';
+  const status: RegenStatus = !match
+    ? 'new'
+    : version != null && match.imVersion != null
+      ? version > match.imVersion
+        ? 'outdated'
+        : 'current'
+      : 'unknown';
+
+  // Generating the SAME version again wastes a credit → require explicit confirmation.
+  const needsConfirm = status === 'current' || status === 'unknown';
+  const canGenerate = !!selected.length && !busy && (!needsConfirm || confirmCredit);
+
+  // Re-evaluate confirmation whenever the selection (and thus the match) changes.
+  useEffect(() => {
+    setConfirmCredit(false);
+  }, [pageSize, selected.join(',')]);
 
   const toggleLang = (lang: string) =>
     setSelected((prev) =>
@@ -110,10 +155,15 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         version,
         cover: {
           title,
-          subtitle,
+          subtitle: subtitle.trim() || undefined,
           logoUrl: logoUrl || undefined,
           coverImageUrl: coverImageUrl || undefined,
           markUrls: coverMarks.length ? coverMarks : undefined,
+          skus: skuText
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+          imName: template?.name,
           companyName: meta?.companyName,
           footerText: formData['__custom_footer'] ?? meta?.footerText,
         },
@@ -124,11 +174,18 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         },
       });
       setResult(res);
+      if (res.render) setRenders((prev) => [res.render as PrintRender, ...prev]);
+      setConfirmCredit(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Print render failed.');
     } finally {
       setBusy(false);
     }
+  };
+
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
   const ImgField: React.FC<{
@@ -270,9 +327,20 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                 <input
                   value={subtitle}
                   onChange={(e) => setSubtitle(e.target.value)}
+                  placeholder='Auto: "Instruction Manual" in all selected languages'
                   className="w-full text-sm border rounded px-2 py-1.5 mt-1"
                 />
               </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">SKU / Article number(s)</label>
+              <input
+                value={skuText}
+                onChange={(e) => setSkuText(e.target.value)}
+                placeholder="Comma-separated, e.g. 10045123, 10045124"
+                className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">Shown on the cover. Prefilled from the SKUs bound to this manual.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
@@ -311,6 +379,72 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             <MarkList label="Marks" slot="back-mark" marks={backMarks} setMarks={setBackMarks} />
           </div>
 
+          {/* Existing-version / regeneration guard for the current selection */}
+          {!loadingHistory && match && (
+            <div
+              className={`rounded border px-3 py-2.5 text-sm ${
+                status === 'outdated'
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-blue-50 border-blue-200 text-blue-800'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  {status === 'outdated' ? (
+                    <>
+                      A PDF for this selection exists (built from <strong>v{match.imVersion}</strong>, {fmtDate(match.createdAt)}),
+                      but the manual has since been updated to <strong>v{version}</strong>. Generating will include the changes.
+                    </>
+                  ) : status === 'current' ? (
+                    <>
+                      A PDF for this selection already exists for the current version (<strong>v{match.imVersion}</strong>,
+                      {' '}{fmtDate(match.createdAt)}). Nothing has changed since — regenerating will spend a render credit.
+                    </>
+                  ) : (
+                    <>
+                      A PDF for this selection already exists ({fmtDate(match.createdAt)}). Regenerating will spend a render credit.
+                    </>
+                  )}
+                  <div className="mt-1.5">
+                    <a href={match.url} target="_blank" rel="noreferrer" className="underline font-medium inline-flex items-center gap-1">
+                      <Download size={13} /> Download existing
+                    </a>
+                  </div>
+                  {needsConfirm && (
+                    <label className="mt-2 flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={confirmCredit} onChange={(e) => setConfirmCredit(e.target.checked)} />
+                      <span>Generate a new one anyway (uses a credit)</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Full render history */}
+          {!loadingHistory && renders.length > 0 && (
+            <details className="border rounded">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700 flex items-center gap-2">
+                <History size={14} /> Previous exports ({renders.length})
+              </summary>
+              <div className="divide-y border-t max-h-40 overflow-auto">
+                {renders.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between px-3 py-2 text-xs">
+                    <span className="text-gray-600">
+                      <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize.toUpperCase()}
+                      {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
+                      {r.createdBy && <> · {r.createdBy}</>}
+                    </span>
+                    <a href={r.url} target="_blank" rel="noreferrer" className="px-2 py-1 border rounded hover:bg-gray-50">
+                      Download
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</div>}
 
           {result && (
@@ -334,11 +468,12 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
           </button>
           <button
             onClick={handleGenerate}
-            disabled={busy || !selected.length}
+            disabled={!canGenerate}
+            title={!selected.length ? 'Select at least one language' : needsConfirm && !confirmCredit ? 'This selection already exists — confirm to spend a credit' : ''}
             className="text-sm px-4 py-2 bg-primary text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
-            {busy ? 'Rendering…' : 'Generate print PDF'}
+            {busy ? 'Rendering…' : status === 'outdated' ? 'Generate updated PDF' : 'Generate print PDF'}
           </button>
         </div>
       </div>

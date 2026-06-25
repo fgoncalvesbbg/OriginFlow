@@ -45,6 +45,7 @@ export type { StaleReason, StaleManual } from './im-staleness.service';
 export {
   requestPrintPdf,
   getPrintPdfUrl,
+  getPrintRenders,
   isPrintExportAvailable,
 } from './im-print-export.service';
 export type {
@@ -52,4 +53,5 @@ export type {
   PrintPdfResult,
   PrintCoverInput,
   PrintBackInput,
+  PrintRender,
 } from './im-print-export.service';

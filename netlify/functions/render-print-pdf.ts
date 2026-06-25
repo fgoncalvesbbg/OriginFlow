@@ -28,6 +28,7 @@ import { buildPrintHtml, PrintManual, PrintHtmlOptions } from '../../src/service
 interface NetlifyEvent {
   httpMethod: string;
   body: string | null;
+  headers: Record<string, string | undefined>;
 }
 
 interface RenderRequest {
@@ -90,6 +91,15 @@ export const handler = async (event: NetlifyEvent) => {
     return json(500, { error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' });
   }
 
+  // Require a valid logged-in user. This endpoint costs render credits and writes to the public
+  // bucket, so it must not be callable anonymously.
+  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return json(401, { error: 'Authentication required.' });
+  const { data: userData, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !userData?.user) return json(401, { error: 'Invalid or expired session.' });
+  const createdBy = userData.user.email ?? userData.user.id;
+
   let req: RenderRequest;
   try {
     req = JSON.parse(event.body || '{}');
@@ -142,21 +152,38 @@ export const handler = async (event: NetlifyEvent) => {
     }
     const pdf = Buffer.from(await pdfRes.arrayBuffer());
 
-    // 4. Upload to im-print and return the public URL.
-    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
-    const storagePath = `${req.projectId}/${req.templateType}/${name}.pdf`;
-    const { error } = await supabase.storage.from(BUCKET).upload(storagePath, pdf, {
-      upsert: true,
+    // 4. Upload to im-print under a UNIQUE path (never overwrite — history is preserved).
+    const storagePath = `${req.projectId}/${req.templateType}/${name}-v${req.version ?? 0}-${Date.now()}.pdf`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(storagePath, pdf, {
+      upsert: false,
       contentType: 'application/pdf',
       cacheControl: '0',
     });
-    if (error) throw new Error(`Upload failed (${storagePath}): ${error.message}`);
+    if (upErr) throw new Error(`Upload failed (${storagePath}): ${upErr.message}`);
 
     const {
       data: { publicUrl },
     } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
 
-    return json(200, { url: publicUrl, storagePath, bytes: pdf.byteLength });
+    // 5. Record the render so the app can show history + guard against unchanged duplicates.
+    const { data: row, error: insErr } = await supabase
+      .from('im_print_renders')
+      .insert({
+        project_id: req.projectId,
+        template_type: req.templateType,
+        im_version: req.version ?? null,
+        languages: ordered,
+        page_size: req.pageSize,
+        storage_path: storagePath,
+        url: publicUrl,
+        bytes: pdf.byteLength,
+        created_by: createdBy,
+      })
+      .select()
+      .single();
+    if (insErr) console.error('[render-print-pdf] render-row insert failed:', insErr.message);
+
+    return json(200, { url: publicUrl, storagePath, bytes: pdf.byteLength, render: row ?? null });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Print render failed.';
     return json(502, { error: message });

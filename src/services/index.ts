@@ -154,6 +154,7 @@ export {
   stalenessKey,
   requestPrintPdf,
   getPrintPdfUrl,
+  getPrintRenders,
   isPrintExportAvailable
 } from './im';
 export type {
@@ -163,7 +164,8 @@ export type {
   RequestPrintPdfParams,
   PrintPdfResult,
   PrintCoverInput,
-  PrintBackInput
+  PrintBackInput,
+  PrintRender
 } from './im';
 
 // Sourcing module

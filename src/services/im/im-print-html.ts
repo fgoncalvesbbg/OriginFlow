@@ -79,9 +79,14 @@ export interface PrintCoverOptions {
   logoUrl?: string;
   coverImageUrl?: string;
   title?: string;
+  /** Cover subtitle. When empty, the builder auto-fills "Instruction Manual" in every printed language. */
   subtitle?: string;
   /** Certification / brand mark image URLs laid out in a row (CE, UKCA, WEEE, …). */
   markUrls?: string[];
+  /** SKU / article numbers this manual covers (one IM can cover several SKUs). Shown on the cover. */
+  skus?: string[];
+  /** The IM / manual name, shown in the cover footer. */
+  imName?: string;
   companyName?: string;
   footerText?: string;
 }
@@ -133,6 +138,29 @@ const LANGUAGE_NAMES: Record<string, string> = {
   da: 'Dansk', fi: 'Suomi', no: 'Norsk', ro: 'Română', hu: 'Magyar',
 };
 const languageName = (code: string) => LANGUAGE_NAMES[code] ?? code.toUpperCase();
+
+/** "Instruction Manual" per language — used for the multilingual cover subtitle. */
+const INSTRUCTION_MANUAL_NAMES: Record<string, string> = {
+  en: 'INSTRUCTION MANUAL', de: 'BEDIENUNGSANLEITUNG', fr: "MODE D'EMPLOI",
+  es: 'MANUAL DE INSTRUCCIONES', it: 'MANUALE DI ISTRUZIONI', nl: 'GEBRUIKSAANWIJZING',
+  pt: 'MANUAL DE INSTRUÇÕES', pl: 'INSTRUKCJA OBSŁUGI', cs: 'NÁVOD K POUŽITÍ',
+  sv: 'BRUKSANVISNING', da: 'BRUGSANVISNING', fi: 'KÄYTTÖOHJE', no: 'BRUKSANVISNING',
+  ro: 'MANUAL DE UTILIZARE', hu: 'HASZNÁLATI ÚTMUTATÓ',
+};
+
+/** "Instruction Manual" rendered in each printed language (deduped, in order). */
+const multilingualSubtitle = (languages: string[]): string => {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const l of languages) {
+    const name = INSTRUCTION_MANUAL_NAMES[l] ?? INSTRUCTION_MANUAL_NAMES.en;
+    if (!seen.has(name)) {
+      seen.add(name);
+      parts.push(name);
+    }
+  }
+  return parts.join(' · ');
+};
 
 // Page content height (mm) minus the ~36mm of @page margins — used so cover/divider fill the page.
 const PAGE_DIMS: Record<PrintPageSize, { w: number; h: number; css: string; fillH: number }> = {
@@ -223,11 +251,18 @@ const markRow = (urls?: string[]): string =>
     ? `<div class="im-marks">${urls.map((u) => `<img class="im-mark" src="${u}" alt="" />`).join('')}</div>`
     : '';
 
-const buildCoverPage = (opts: PrintCoverOptions): string => {
+const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string => {
   const coverImage = opts.coverImageUrl
     ? `<div class="im-cover-image" style="background-image:url('${opts.coverImageUrl}')"></div>`
     : '';
   const logo = opts.logoUrl ? `<img src="${opts.logoUrl}" alt="Logo" class="im-cover-logo" />` : '';
+  // Subtitle: explicit override wins; otherwise "Instruction Manual" in every printed language.
+  const subtitle = opts.subtitle && opts.subtitle.trim() ? opts.subtitle : multilingualSubtitle(languages);
+  const skus = (opts.skus ?? []).filter(Boolean);
+  const skuLine = skus.length
+    ? `<div class="im-cover-skus">${skus.length > 1 ? 'Art. Nos.' : 'Art. No.'}: ${escapeHtml(skus.join(' · '))}</div>`
+    : '';
+  const imNameLine = opts.imName ? `<div class="im-cover-imname">${escapeHtml(opts.imName)}</div>` : '';
   return `
     <section class="im-page im-page-cover">
       ${coverImage}
@@ -235,12 +270,13 @@ const buildCoverPage = (opts: PrintCoverOptions): string => {
         <div>
           ${logo}
           <h1 class="im-cover-title">${escapeHtml(opts.title || '')}</h1>
-          <p class="im-cover-subtitle">${escapeHtml(opts.subtitle || 'INSTRUCTION MANUAL')}</p>
+          <p class="im-cover-subtitle">${escapeHtml(subtitle)}</p>
         </div>
         <div class="im-cover-footer">
           ${markRow(opts.markUrls)}
           <div><strong>${escapeHtml(opts.companyName || '')}</strong></div>
-          <div>Original Instructions</div>
+          ${imNameLine}
+          ${skuLine}
         </div>
       </div>
     </section>
@@ -333,10 +369,13 @@ const buildStyles = (
     .im-page-cover { min-height: ${dims.fillH}mm; display: flex; flex-direction: column; }
     .im-cover-image { height: ${mm(90)}; background-size: cover; background-position: center; margin-bottom: ${mm(12)}; }
     .im-cover-body { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
-    .im-cover-logo { height: ${mm(18)}; object-fit: contain; margin-bottom: ${mm(16)}; }
-    .im-cover-title { margin: 0 0 ${mm(6)}; color: ${primaryColor}; font-size: ${mm(16)}; line-height: 1.1; }
-    .im-cover-subtitle { margin: 0; color: #475569; font-size: ${mm(6)}; letter-spacing: 0.2em; text-transform: uppercase; }
+    /* Logo and the two cover headers are intentionally half-size (per brand spec). */
+    .im-cover-logo { height: ${mm(9)}; object-fit: contain; margin-bottom: ${mm(16)}; }
+    .im-cover-title { margin: 0 0 ${mm(6)}; color: ${primaryColor}; font-size: ${mm(8)}; line-height: 1.1; }
+    .im-cover-subtitle { margin: 0; color: #475569; font-size: ${mm(3)}; letter-spacing: 0.2em; text-transform: uppercase; line-height: 1.4; }
     .im-cover-footer { border-top: 1.5mm solid ${primaryColor}; padding-top: ${mm(6)}; font-size: ${mm(3.4)}; color: #334155; }
+    .im-cover-imname { margin-top: ${mm(1.5)}; color: #475569; }
+    .im-cover-skus { margin-top: ${mm(1.5)}; font-weight: 600; letter-spacing: 0.02em; color: #334155; }
 
     /* Certification / brand marks */
     .im-marks { display: flex; flex-wrap: wrap; gap: ${mm(4)}; align-items: center; margin-bottom: ${mm(6)}; }
@@ -442,15 +481,21 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
   const fontStack = getFontStack(fontFamily);
   const multi = manuals.length > 1;
   const versionLabel = opts.version ? `v${opts.version}` : '';
+  const languages = manuals.map((m) => m.language);
 
-  const cover = buildCoverPage({
-    title: opts.cover.title,
-    subtitle: opts.cover.subtitle,
-    logoUrl: opts.cover.logoUrl ?? base?.companyLogoUrl,
-    coverImageUrl: opts.cover.coverImageUrl ?? base?.coverImageUrl,
-    markUrls: opts.cover.markUrls,
-    companyName: opts.cover.companyName ?? base?.companyName,
-  });
+  const cover = buildCoverPage(
+    {
+      title: opts.cover.title,
+      subtitle: opts.cover.subtitle,
+      logoUrl: opts.cover.logoUrl ?? base?.companyLogoUrl,
+      coverImageUrl: opts.cover.coverImageUrl ?? base?.coverImageUrl,
+      markUrls: opts.cover.markUrls,
+      skus: opts.cover.skus,
+      imName: opts.cover.imName,
+      companyName: opts.cover.companyName ?? base?.companyName,
+    },
+    languages,
+  );
 
   const body = manuals
     .map((manual) => {

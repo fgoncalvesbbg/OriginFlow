@@ -24,10 +24,30 @@ export interface PrintCoverInput {
   logoUrl?: string;
   coverImageUrl?: string;
   title?: string;
+  /** Empty → the cover auto-fills "Instruction Manual" in every printed language. */
   subtitle?: string;
   markUrls?: string[];
+  /** SKU / article numbers this manual covers (shown on the cover). */
+  skus?: string[];
+  /** The IM / manual name, shown in the cover footer. */
+  imName?: string;
   companyName?: string;
   footerText?: string;
+}
+
+/** A historical print-PDF render of a project IM (one row per generation; never overwritten). */
+export interface PrintRender {
+  id: string;
+  projectId: string;
+  templateType: IMTemplateType;
+  imVersion: number | null;
+  languages: string[];
+  pageSize: 'a4' | 'a5';
+  storagePath: string;
+  url: string;
+  bytes: number | null;
+  createdBy: string | null;
+  createdAt: string;
 }
 
 export interface PrintBackInput {
@@ -52,7 +72,43 @@ export interface PrintPdfResult {
   url: string;
   storagePath: string;
   bytes?: number;
+  render?: PrintRender | null;
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const mapRender = (r: any): PrintRender => ({
+  id: r.id,
+  projectId: r.project_id,
+  templateType: r.template_type,
+  imVersion: r.im_version ?? null,
+  languages: r.languages ?? [],
+  pageSize: r.page_size,
+  storagePath: r.storage_path,
+  url: r.url,
+  bytes: r.bytes ?? null,
+  createdBy: r.created_by ?? null,
+  createdAt: r.created_at,
+});
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/** Render history for a project IM, newest first. */
+export const getPrintRenders = async (
+  projectId: string,
+  templateType: IMTemplateType,
+): Promise<PrintRender[]> => {
+  if (!isLive) return [];
+  const { data, error } = await supabase
+    .from('im_print_renders')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('template_type', templateType)
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('[im-print-export] getPrintRenders failed:', error.message);
+    return [];
+  }
+  return (data ?? []).map(mapRender);
+};
 
 /**
  * Deterministic public URL of a previously rendered print PDF. Mirrors getPublishedManifestUrl —
@@ -77,9 +133,14 @@ export const getPrintPdfUrl = (
 export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<PrintPdfResult> => {
   if (!params.languages.length) throw new Error('Select at least one language.');
 
+  // The render function requires a valid session (it costs credits + writes to storage).
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error('You must be signed in to generate a print PDF.');
+
   const res = await fetch(ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
   });
 
