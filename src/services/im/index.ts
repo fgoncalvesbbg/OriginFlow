@@ -42,3 +42,14 @@ export {
   stalenessKey,
 } from './im-staleness.service';
 export type { StaleReason, StaleManual } from './im-staleness.service';
+export {
+  requestPrintPdf,
+  getPrintPdfUrl,
+  isPrintExportAvailable,
+} from './im-print-export.service';
+export type {
+  RequestPrintPdfParams,
+  PrintPdfResult,
+  PrintCoverInput,
+  PrintBackInput,
+} from './im-print-export.service';

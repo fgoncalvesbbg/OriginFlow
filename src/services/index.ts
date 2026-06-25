@@ -151,9 +151,20 @@ export {
   getStaleProjectIMDetails,
   getProjectIMStaleReasons,
   republishProjectIM,
-  stalenessKey
+  stalenessKey,
+  requestPrintPdf,
+  getPrintPdfUrl,
+  isPrintExportAvailable
 } from './im';
-export type { PublishResult, StaleReason, StaleManual } from './im';
+export type {
+  PublishResult,
+  StaleReason,
+  StaleManual,
+  RequestPrintPdfParams,
+  PrintPdfResult,
+  PrintCoverInput,
+  PrintBackInput
+} from './im';
 
 // Sourcing module
 export {

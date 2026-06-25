@@ -12,7 +12,7 @@ import {
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
     addDocument, uploadFile, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
-    getProjectSkus, collapseSkuAttributeValues
+    getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable
 } from '../../services';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
@@ -29,6 +29,7 @@ import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition 
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { BindableField } from './project-im-generator/BindableField';
 import { AddProjectSection } from './project-im-generator/AddProjectSection';
+import PrintExportDialog from './project-im-generator/PrintExportDialog';
 
 const ProjectIMGenerator: React.FC = () => {
   const { projectId, templateType: templateTypeParam } = useParams<{ projectId: string; templateType?: string }>();
@@ -81,6 +82,7 @@ const ProjectIMGenerator: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  const [showPrintDialog, setShowPrintDialog] = useState(false);
   // Pre-publish checklist: populated when the user clicks Publish and something is
   // missing, so they can review before confirming (or cancel and fix).
   const [checklist, setChecklist] = useState<{ blocking: string[]; values: string[]; slots: string[]; translations: { lang: string; items: string[] }[] } | null>(null);
@@ -1842,10 +1844,28 @@ const ProjectIMGenerator: React.FC = () => {
 
              <div className="flex justify-end gap-2">
                <button onClick={() => setPublishResult(null)} className="text-sm px-3 py-2 border rounded hover:bg-gray-50">Stay here</button>
+               {isPrintExportAvailable() && (
+                 <button onClick={() => setShowPrintDialog(true)} className="text-sm px-3 py-2 border border-primary text-primary rounded hover:bg-primary/5 flex items-center gap-1.5">
+                   <FileDown size={14} /> Export print PDF
+                 </button>
+               )}
                <button onClick={() => navigate(`/project/${project?.id}`)} className="text-sm px-3 py-2 bg-primary text-white rounded hover:opacity-90">Go to project</button>
              </div>
            </div>
          </div>
+       )}
+
+       {showPrintDialog && publishResult && project && (
+         <PrintExportDialog
+           projectId={project.id}
+           templateType={templateType}
+           projectName={project.name}
+           template={template}
+           formData={formData}
+           languages={publishResult.languages.map((l) => l.language)}
+           version={instance?.version}
+           onClose={() => setShowPrintDialog(false)}
+         />
        )}
 
        {/* PRE-PUBLISH CHECKLIST */}
