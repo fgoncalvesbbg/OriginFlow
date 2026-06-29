@@ -1091,8 +1091,11 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Auto visibility from the feature gate, evaluated against the same merged data the
   // resolver sees (submitted supplier values as the base, PM edits in formData on top).
-  const refAutoVisible = (ref: BlockRef): boolean =>
-    passesFeatureGate(ref as FeatureConditionFields, { ...submittedAttrValues, ...formData }, {});
+  const refAutoVisible = (ref: BlockRef): boolean => {
+    // A placeholder inline row is opt-in: hidden by default until the PM includes it.
+    if (ref.kind === 'inline' && (ref as InlineBlockRef).isPlaceholder) return false;
+    return passesFeatureGate(ref as FeatureConditionFields, { ...submittedAttrValues, ...formData }, {});
+  };
 
   // Effective visibility: a manual Include/Exclude override wins; otherwise the gate.
   const isRefVisible = (sectionId: string, index: number, ref: BlockRef): boolean => {
@@ -1359,7 +1362,7 @@ const ProjectIMGenerator: React.FC = () => {
   const renderInlineHtml = (content: Record<string, string> | undefined, variant?: CalloutVariant): string => {
     const html = processContent(content?.[activeLang] || content?.['en'] || '');
     if (!html) return '';
-    return variant ? wrapBlockCallout(variant, html) : html;
+    return variant ? wrapBlockCallout(variant, html, activeLang) : html;
   };
 
   const buildSectionHtml = (section: IMSection): string => {
@@ -1391,7 +1394,7 @@ const ProjectIMGenerator: React.FC = () => {
       if (ref.kind === 'inline') {
         const html = processContent((ref as any).content?.[activeLang] || (ref as any).content?.['en'] || '');
         // A row variant wraps its whole content in the ISO callout box (matches the resolver).
-        if (html) parts.push((ref as any).variant ? wrapBlockCallout((ref as any).variant, html) : html);
+        if (html) parts.push((ref as any).variant ? wrapBlockCallout((ref as any).variant, html, activeLang) : html);
       } else if (ref.kind === 'block') {
         const blk = availableBlocks[(ref as any).block_id];
         if (blk) {
@@ -1402,7 +1405,7 @@ const ProjectIMGenerator: React.FC = () => {
             /\{\{\s*([^}]+?)\s*\}\}/g,
             (_, k) => formData[k.trim()] ?? submittedAttrValues[k.trim()] ?? `{{${k.trim()}}}`
           );
-          if (rawHtml) parts.push(wrapBlockCallout(blk.blockType, rawHtml));
+          if (rawHtml) parts.push(wrapBlockCallout(blk.blockType, rawHtml, activeLang));
         }
       }
       // sku_slot — visible in the config form; not rendered in the text preview
@@ -1592,7 +1595,7 @@ const ProjectIMGenerator: React.FC = () => {
       if (!blk) return '';
       const baseHtml = processContent(blk.content[activeLang] || blk.content['en'] || '');
       const rawHtml = baseHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, k) => formData[k.trim()] ?? submittedAttrValues[k.trim()] ?? `{{${k.trim()}}}`);
-      return rawHtml ? wrapBlockCallout(blk.blockType, rawHtml) : '';
+      return rawHtml ? wrapBlockCallout(blk.blockType, rawHtml, activeLang) : '';
     }
     return '';
   };
@@ -2158,28 +2161,32 @@ const ProjectIMGenerator: React.FC = () => {
                          </div>
                        )}
 
-                       {/* CONDITIONAL CONTENT — inline rows + shared blocks with a "Show if" condition */}
+                       {/* OPTIONAL & CONDITIONAL CONTENT — inline rows / shared blocks with a
+                           "Show if" condition, plus inline rows marked as opt-in placeholders. */}
                        {(() => {
                          const condRefs = orderedSections.flatMap(section =>
                            (section.blockRefs ?? [])
                              .map((ref, index) => ({ section, ref, index }))
-                             .filter(x => refHasCondition(x.ref))
+                             .filter(x => refHasCondition(x.ref) || (x.ref.kind === 'inline' && (x.ref as InlineBlockRef).isPlaceholder))
                          );
                          if (condRefs.length === 0) return null;
                          const merged = { ...submittedAttrValues, ...formData };
                          return (
                            <div className="border-b border-gray-100 pb-6">
                              <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                               <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs font-bold">IF</span> Conditional Content
+                               <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs font-bold">IF</span> Optional &amp; Conditional Content
                              </h4>
                              <div className="space-y-2">
                                {condRefs.map(({ section, ref, index }) => {
                                  const key = `${section.id}:${index}`;
                                  const visible = isRefVisible(section.id, index, ref);
                                  const hasOverride = refVisibility[key] !== undefined;
-                                 const desc = describeRefCondition(ref as FeatureConditionFields);
+                                 const isPlaceholder = ref.kind === 'inline' && (ref as InlineBlockRef).isPlaceholder;
+                                 const desc = isPlaceholder
+                                   ? ((ref as InlineBlockRef).note || 'Optional — review before including')
+                                   : describeRefCondition(ref as FeatureConditionFields);
                                  const condAttrId = (ref as FeatureConditionFields).requires_feature ?? undefined;
-                                 const noData = !!condAttrId && !merged[condAttrId];
+                                 const noData = !isPlaceholder && !!condAttrId && !merged[condAttrId];
                                  const auto = refAutoVisible(ref);
                                  const rawContent = ref.kind === 'block'
                                    ? (() => { const blk = availableBlocks[(ref as any).block_id]; return blk?.content?.[activeLang] || blk?.content?.['en'] || ''; })()
@@ -2191,16 +2198,19 @@ const ProjectIMGenerator: React.FC = () => {
                                      <div className="flex items-start justify-between gap-2">
                                        <div className="flex-1 min-w-0">
                                          <div className="font-semibold text-gray-800 truncate flex items-center gap-1">
-                                           <GitBranch size={11} className="text-purple-400 shrink-0" />
+                                           {isPlaceholder
+                                             ? <AlertCircle size={11} className="text-amber-500 shrink-0" />
+                                             : <GitBranch size={11} className="text-purple-400 shrink-0" />}
                                            <span className="text-gray-400 font-normal">{localizedSectionTitle(section, activeLang)} ·</span> {label}
                                          </div>
-                                         <div className="text-muted mt-0.5">
+                                         <div className={`mt-0.5 ${isPlaceholder ? 'text-amber-700' : 'text-muted'}`}>
+                                           {isPlaceholder && <span className="font-semibold mr-1">Placeholder —</span>}
                                            {desc ?? 'Conditional'}
-                                           {noData
+                                           {!isPlaceholder && (noData
                                              ? <span className="ml-1 text-amber-500">(no data yet)</span>
                                              : auto
                                                ? <span className="ml-1 text-emerald-600">✓ matches</span>
-                                               : <span className="ml-1 text-rose-500">✗ no match</span>}
+                                               : <span className="ml-1 text-rose-500">✗ no match</span>)}
                                          </div>
                                        </div>
                                        <div className="flex items-center gap-1 shrink-0">

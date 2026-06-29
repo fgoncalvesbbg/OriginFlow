@@ -118,7 +118,7 @@ export const ViewerShell: React.FC<Props> = ({ manual, languages, currentLang, o
       </aside>
 
       <main className="imv-doc" ref={docRef}>
-        <DocumentView ordered={ordered} metadata={metadata} />
+        <DocumentView ordered={ordered} metadata={metadata} language={manual.language} />
       </main>
     </>
   );

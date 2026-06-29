@@ -146,6 +146,13 @@ export interface InlineBlockRef extends FeatureConditionFields {
   // resolve (same treatment a shared block gets from its blockType). Absent =
   // plain content, no wrapping.
   variant?: CalloutVariant;
+  // Marks this inline row as an optional "placeholder": it is NOT auto-included
+  // when a project manual is generated. Instead the PM sees it as an opt-in
+  // suggestion (with `note` as a review warning) and chooses to include it.
+  isPlaceholder?: boolean;
+  // Free-text guidance shown next to the opt-in (e.g. "Use this for the Beersafe
+  // family"). Authoring-only — never rendered into the resolved manual.
+  note?: string;
 }
 
 export interface SharedBlockRef extends FeatureConditionFields {

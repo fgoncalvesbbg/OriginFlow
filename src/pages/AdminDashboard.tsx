@@ -7,7 +7,7 @@ import {
   getCategories, saveCategory,
   deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
-  assignAttributeToCategory, unassignAttributeFromCategory,
+  unassignAttributeFromCategory, makeAttributeGlobal,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS
@@ -282,10 +282,10 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleAssignAttribute = async (attributeId: string) => {
-    if (!selectedCategoryDetail) return;
     setAssigningAttrId(attributeId);
     try {
-      await assignAttributeToCategory(attributeId, selectedCategoryDetail);
+      // Promote the attribute to global: it keeps its group and applies to every category.
+      await makeAttributeGlobal(attributeId);
       await loadData();
       setAssignAttrModal(false);
     } catch (e: any) {
@@ -362,7 +362,7 @@ const AdminDashboard: React.FC = () => {
                             ? attributes.filter(a => a.categoryId === null && (a.group ?? 'Category Specific') === group)
                             : attributes.filter(a =>
                                 (a.group ?? 'Category Specific') === group &&
-                                (a.categoryId === selectedCategoryDetail || (a.assignedCategoryIds ?? []).includes(selectedCategoryDetail!))
+                                (a.categoryId === null || a.categoryId === selectedCategoryDetail || (a.assignedCategoryIds ?? []).includes(selectedCategoryDetail!))
                               );
                         return (
                             <div key={group} className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
@@ -375,14 +375,6 @@ const AdminDashboard: React.FC = () => {
                                         <span className="text-xs text-gray-400">({groupAttrs.length})</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
-                                        {!isPredefined && (
-                                            <button
-                                                onClick={openAssignModal}
-                                                className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded border border-transparent hover:border-violet-100 transition-colors"
-                                            >
-                                                <LinkIcon size={13} /> Assign Existing
-                                            </button>
-                                        )}
                                         <button
                                             onClick={() => openAddModal('attribute', group)}
                                             className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded border border-transparent hover:border-indigo-100 transition-colors"
@@ -454,9 +446,14 @@ const AdminDashboard: React.FC = () => {
         <div>
             <div className="flex justify-between items-center px-6 py-4 bg-light border-b border-gray-200">
                 <h3 className="font-bold text-gray-800">Product Categories</h3>
-                <button onClick={() => openAddModal('category')} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow">
-                    <Plus size={16} /> Add Category
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={openAssignModal} className="flex items-center gap-2 px-4 py-2 bg-white text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 text-sm font-medium shadow-sm">
+                        <LinkIcon size={16} /> Assign Existing
+                    </button>
+                    <button onClick={() => openAddModal('category')} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow">
+                        <Plus size={16} /> Add Category
+                    </button>
+                </div>
             </div>
             <div className="divide-y divide-slate-100">
                 {categories.map(c => {
@@ -1114,17 +1111,13 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Assign Existing Attribute Modal */}
-      {assignAttrModal && selectedCategoryDetail && (() => {
-        const currentCategoryName = categories.find(c => c.id === selectedCategoryDetail)?.name ?? '';
-        const assignable = attributes.filter(a =>
-          (a.group === 'Category Specific' || !a.group) &&
-          a.categoryId !== null &&
-          a.categoryId !== selectedCategoryDetail &&
-          !(a.assignedCategoryIds ?? []).includes(selectedCategoryDetail)
-        );
+      {/* Assign Existing Attribute Modal — promote a category attribute to global */}
+      {assignAttrModal && (() => {
+        // Category-scoped attributes can be promoted to global; already-global ones are excluded.
+        const assignable = attributes.filter(a => a.categoryId !== null);
         const filtered = assignable.filter(a =>
           a.name.toLowerCase().includes(assignAttrSearch.toLowerCase()) ||
+          (a.group ?? 'Category Specific').toLowerCase().includes(assignAttrSearch.toLowerCase()) ||
           (categories.find(c => c.id === a.categoryId)?.name ?? '').toLowerCase().includes(assignAttrSearch.toLowerCase())
         );
         return (
@@ -1135,7 +1128,7 @@ const AdminDashboard: React.FC = () => {
                 <button onClick={() => setAssignAttrModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
               </div>
               <p className="text-xs text-muted mb-4">
-                Adding to: <span className="font-semibold text-gray-700">{currentCategoryName}</span>. The attribute stays in its original category and is also shared here.
+                Pick an attribute to make it <span className="font-semibold text-gray-700">global</span>. It keeps its group and will appear on every category automatically.
               </p>
 
               <div className="relative mb-3">
@@ -1143,7 +1136,7 @@ const AdminDashboard: React.FC = () => {
                 <input
                   autoFocus
                   type="text"
-                  placeholder="Search by name or category…"
+                  placeholder="Search by name, group or category…"
                   value={assignAttrSearch}
                   onChange={e => setAssignAttrSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-violet-500 outline-none"
@@ -1154,17 +1147,18 @@ const AdminDashboard: React.FC = () => {
                 {filtered.length === 0 ? (
                   <div className="p-6 text-center text-sm text-gray-400 italic">
                     {assignable.length === 0
-                      ? 'No attributes from other categories to assign.'
+                      ? 'No category attributes available to make global.'
                       : 'No attributes match your search.'}
                   </div>
                 ) : filtered.map(a => {
                   const originName = categories.find(c => c.id === a.categoryId)?.name ?? 'Unknown';
+                  const groupName = a.group ?? 'Category Specific';
                   return (
                     <div key={a.id} className="flex items-center justify-between px-4 py-3 hover:bg-light transition-colors">
                       <div>
                         <div className="font-medium text-sm text-gray-800">{a.name}</div>
                         <div className="text-xs text-muted mt-0.5 capitalize">
-                          {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''} · from <span className="text-violet-500">{originName}</span>
+                          {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''} · <span className="text-indigo-500 normal-case">{groupName}</span> · from <span className="text-violet-500 normal-case">{originName}</span>
                         </div>
                       </div>
                       <button
@@ -1172,7 +1166,7 @@ const AdminDashboard: React.FC = () => {
                         disabled={assigningAttrId === a.id}
                         className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded border border-violet-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <LinkIcon size={12} /> {assigningAttrId === a.id ? 'Assigning…' : 'Assign'}
+                        <LinkIcon size={12} /> {assigningAttrId === a.id ? 'Assigning…' : 'Make Global'}
                       </button>
                     </div>
                   );

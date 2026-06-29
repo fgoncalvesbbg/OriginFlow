@@ -14,6 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Bold, Italic, Underline, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Info, Upload, Loader2, Code, type LucideIcon } from 'lucide-react';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
+import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { CalloutVariant, CategoryAttribute } from '../../../types';
 
 // --- ISO 7010 / 7000 callout signs (shared by the editor preview and serializer) ---
@@ -41,14 +42,17 @@ type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric';
 type InlineNode =
   | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
   | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string; attrId?: string }
-  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string };
+  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string }
+  // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
+  // `width` is the optional CSS width set via the resize control (e.g. "50%").
+  | { type: 'image'; src: string; alt?: string; width?: string };
 
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: 'warning' | 'caution' | 'electric' | 'info'; content: InlineNode[] }
-  | { id: string; type: 'image'; src: string; alt?: string }
-  | { id: string; type: 'table'; rows: string[][] }
+  | { id: string; type: 'image'; src: string; alt?: string; width?: string }
+  | { id: string; type: 'table'; rows: InlineNode[][][] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
   | { id: string; type: 'legacy_html'; html: string };
 
@@ -63,6 +67,26 @@ interface EditorProps {
 
 const createId = () => Math.random().toString(36).slice(2, 11);
 
+/** A table cell holding a single plain-text run (used for defaults/fallbacks). */
+const textCell = (text: string): InlineNode[] => [{ type: 'text', text }];
+
+/**
+ * Collapse pretty-print / indentation whitespace inside a parsed table cell and
+ * trim its edges. Source tables are often indented HTML, and the serializer pads
+ * chips with `&nbsp;`; without this, that whitespace leaks into the cell and
+ * compounds on every save/reload round-trip. `\s` includes ` `, so the chip
+ * padding normalizes to a single space here and the serializer re-adds exactly
+ * one `&nbsp;`, keeping the round-trip stable.
+ */
+const normalizeCellInlines = (nodes: InlineNode[]): InlineNode[] => {
+  const collapsed = nodes.map((n) => (n.type === 'text' ? { ...n, text: n.text.replace(/\s+/g, ' ') } : n));
+  const first = collapsed[0];
+  if (first?.type === 'text') first.text = first.text.replace(/^\s+/, '');
+  const last = collapsed[collapsed.length - 1];
+  if (last?.type === 'text') last.text = last.text.replace(/\s+$/, '');
+  return collapsed.filter((n) => !(n.type === 'text' && n.text === ''));
+};
+
 const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, minimal }) => {
   const [blocks, setBlocks] = useState<EditorBlock[]>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
@@ -71,6 +95,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Editing surface: 'rich' = structured WYSIWYG, 'html' = raw HTML source.
   const [mode, setMode] = useState<'rich' | 'html'>('rich');
   const [htmlDraft, setHtmlDraft] = useState('');
+  // The image the user last clicked in the editor — target of the resize buttons.
+  const [imgSelected, setImgSelected] = useState(false);
+  const selectedImgRef = useRef<HTMLImageElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const initializingRef = useRef(false);
@@ -166,6 +193,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
 
+      // Images dropped at the caret live inside a <p>/heading/cell. Without this
+      // they fall through to the recursion below (an <img> has no children) and
+      // are silently dropped on the deserialize→serialize round-trip — i.e. they
+      // render but never save. `width` carries any resize the user applied.
+      if (el.tagName === 'IMG') {
+        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined });
+        return;
+      }
+
       const nextMarks = [...marks];
       if (['B', 'STRONG'].includes(el.tagName) && !nextMarks.includes('bold')) nextMarks.push('bold');
       if (['I', 'EM'].includes(el.tagName) && !nextMarks.includes('italic')) nextMarks.push('italic');
@@ -190,6 +226,11 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           ? 'Optional'
           : inline.conditionLabel ? `${inline.featureName}: ${inline.conditionLabel}` : (inline.featureName || 'Auto-Spec');
       return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionLabel || '')}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
+    }
+
+    if (inline.type === 'image') {
+      const sizing = inline.width ? `width:${inline.width};max-width:100%;` : 'max-width:100%;';
+      return `<img src="${inline.src}" alt="${inline.alt || ''}" style="${sizing}height:auto;border-radius:0.375rem;margin:1rem 0;" />`;
     }
 
     let textHtml = inline.text
@@ -237,12 +278,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
       if (el.tagName === 'IMG') {
-        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '' });
+        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined });
         return;
       }
       if (el.tagName === 'TABLE') {
-        const rows = Array.from(el.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((cell) => (cell.textContent || '').trim()));
-        parsed.push({ id: createId(), type: 'table', rows: rows.length ? rows : [['Header 1', 'Header 2'], ['Value 1', 'Value 2']] });
+        // Parse each cell into inline nodes (not textContent) so placeholder /
+        // condition chips inside cells survive the round-trip instead of being
+        // flattened to their bare label text.
+        const rows = Array.from(el.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((cell) => normalizeCellInlines(parseInlineNodes(cell as HTMLElement))));
+        parsed.push({ id: createId(), type: 'table', rows: rows.length ? rows : [[textCell('Header 1'), textCell('Header 2')], [textCell('Value 1'), textCell('Value 2')]] });
         return;
       }
       if (el.classList.contains('im-condition') && !el.closest('p, h1, h2, h3, .im-block-wrapper')) {
@@ -264,11 +308,14 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         const icon = `<div class="im-block-icon">${CALLOUT_ICONS[block.variant]}</div>`;
         return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
       }
-      if (block.type === 'image') return `<img src="${block.src}" alt="${block.alt || ''}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" />`;
+      if (block.type === 'image') {
+        const sizing = block.width ? `width:${block.width};max-width:100%;` : 'max-width:100%;';
+        return `<img src="${block.src}" alt="${block.alt || ''}" style="${sizing}height:auto;border-radius:0.375rem;margin:1rem 0;" />`;
+      }
       if (block.type === 'table') {
         const [headerRow, ...body] = block.rows;
-        const th = (headerRow || []).map((cell) => `<th>${cell}</th>`).join('');
-        const tr = body.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+        const th = (headerRow || []).map((cell) => `<th>${serializeInline(cell)}</th>`).join('');
+        const tr = body.map((row) => `<tr>${row.map((cell) => `<td>${serializeInline(cell)}</td>`).join('')}</tr>`).join('');
         return `<table class="im-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
       }
       if (block.type === 'conditional') {
@@ -317,6 +364,35 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setBlocks(next);
   }, [deserializeHtmlToBlocks, saveSelection]);
 
+  // Click an image to select it (shows the resize buttons); clicking anything
+  // else deselects. The selection outline is DOM-only — `parseInlineNodes` reads
+  // just `style.width`, so it never leaks into the saved HTML.
+  const handleEditorClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const prev = selectedImgRef.current;
+    if (prev && prev !== target) prev.style.outline = '';
+    if (target.tagName === 'IMG') {
+      selectedImgRef.current = target as HTMLImageElement;
+      (target as HTMLImageElement).style.outline = '2px solid #6366f1';
+      setImgSelected(true);
+    } else {
+      selectedImgRef.current = null;
+      setImgSelected(false);
+    }
+  }, []);
+
+  // Resize the selected image. Setting the DOM width then re-parsing persists the
+  // width into blocks (and the emitted HTML) while keeping the live node in place.
+  // `width === ''` clears the override → back to natural size (capped at 100%).
+  const applyImgWidth = useCallback((width: string) => {
+    const img = selectedImgRef.current;
+    const el = contentRef.current;
+    if (!img || !el) return;
+    img.style.width = width;
+    isUserEditingRef.current = true; // keep the DOM node; just sync blocks + emit
+    setBlocks(deserializeHtmlToBlocks(el.innerHTML));
+  }, [deserializeHtmlToBlocks]);
+
   useEffect(() => {
     if (isUserEditingRef.current) {
       isUserEditingRef.current = false;
@@ -324,11 +400,14 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
     if (!contentRef.current) return;
     contentRef.current.innerHTML = serializeBlocksToHtml(blocks);
+    // The rewrite replaces any selected <img> node — drop the stale selection.
+    selectedImgRef.current = null;
+    setImgSelected(false);
   }, [blocks, serializeBlocksToHtml]);
 
   const insertBlock = (type: BlockInsertType) => {
     const newBlock: EditorBlock = type === 'table'
-      ? { id: createId(), type: 'table', rows: [['Header 1', 'Header 2'], ['Row 1 Col 1', 'Row 1 Col 2']] }
+      ? { id: createId(), type: 'table', rows: [[textCell('Header 1'), textCell('Header 2')], [textCell('Row 1 Col 1'), textCell('Row 1 Col 2')]] }
       : { id: createId(), type: 'callout', variant: type, content: [{ type: 'text', text: type === 'warning' ? 'Indicates a hazardous situation which, if not avoided, could result in serious injury or death.' : type === 'caution' ? 'Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.' : type === 'electric' ? 'Risk of electric shock. Disconnect power before servicing.' : 'Offers helpful tips and information for using your product.' }] };
     setBlocks((prev) => [...prev, newBlock]);
     setSelectedBlockId(newBlock.id);
@@ -337,9 +416,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Mode switching. Going to HTML seeds the textarea from the current blocks;
   // returning to rich re-parses whatever HTML the user typed back into blocks.
   const switchToHtml = useCallback(() => {
-    setHtmlDraft(serializeBlocksToHtml(blocks));
+    // Serialize from the live DOM, not `blocks`: programmatic chip inserts
+    // (placeholders/conditions) land in the contentEditable immediately, while
+    // `blocks` may lag behind, which would drop the chip from the HTML view.
+    const live = contentRef.current?.innerHTML;
+    const source = live != null ? deserializeHtmlToBlocks(live) : blocks;
+    setBlocks(source);
+    setHtmlDraft(serializeBlocksToHtml(source));
     setMode('html');
-  }, [blocks, serializeBlocksToHtml]);
+  }, [blocks, serializeBlocksToHtml, deserializeHtmlToBlocks]);
 
   const switchToRich = useCallback(() => {
     isUserEditingRef.current = false; // force the rich surface to re-render from blocks
@@ -402,6 +487,16 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImgUpload} />
           </>
         )}
+        {mode === 'rich' && imgSelected && (
+          <>
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Resize the selected image">Image</span>
+            {['25%', '50%', '75%', '100%'].map((w) => (
+              <button key={w} onMouseDown={(e) => { e.preventDefault(); applyImgWidth(w); }} className="px-1.5 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 rounded">{w}</button>
+            ))}
+            <button onMouseDown={(e) => { e.preventDefault(); applyImgWidth(''); }} className="px-1.5 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 rounded" title="Reset to original size">Auto</button>
+          </>
+        )}
         {mode === 'html' && (
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-1">Raw HTML source</span>
         )}
@@ -438,6 +533,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                 className="min-h-full p-4 outline-none im-content max-w-none font-sans"
                 contentEditable
                 onInput={handleChange}
+                onClick={handleEditorClick}
                 onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
                 onBlur={() => { setIsFocused(false); saveSelection(); }}
                 onMouseUp={saveSelection}
@@ -590,7 +686,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
         {variantCfg && (
           <div className="flex items-center gap-2 px-1 py-1.5">
             <span className="w-6 h-6 shrink-0" dangerouslySetInnerHTML={{ __html: CALLOUT_ICONS[variantCfg.value] }} />
-            <span className="text-[11px] font-extrabold tracking-wide text-gray-700">{CALLOUT_TITLES[variantCfg.value]}</span>
+            <span className="text-[11px] font-extrabold tracking-wide text-gray-700">{getCalloutTitle(variantCfg.value, activeCode)}</span>
             <span className="text-[10px] text-gray-400 italic">— everything below renders inside this box</span>
           </div>
         )}

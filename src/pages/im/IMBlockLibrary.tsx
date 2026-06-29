@@ -3,11 +3,13 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { getIMBlocks, saveIMBlock, deleteIMBlock, getIMBlockUsageCounts, BlockInUseError, getCategories, getCategoryAttributes } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
+import { buildSlug, makeUid } from '../../services/im/block-slug';
 import { IMBlock, CategoryL3, CategoryAttribute } from '../../types';
 import { sanitizeHtml } from '../../utils';
 import {
   Layers, Plus, Search, CheckCircle2, Clock, Edit2, Trash2, X,
-  ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame
+  ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame,
+  Code, Bold, Italic, Underline
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -48,24 +50,6 @@ const blockTypeIcon = (bt: string) => {
 };
 
 // ---------------------------------------------------------------------------
-// Slug generation
-// ---------------------------------------------------------------------------
-
-const toSnake = (s: string) =>
-  s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
-
-const makeUid = () => Math.random().toString(36).slice(2, 8);
-
-/** Derives a slug from title + blockType + a short unique suffix. */
-const buildSlug = (title: string, blockType: string, uid: string): string => {
-  const typePrefix = blockType && blockType !== 'content' && blockType !== 'legacy_html'
-    ? `${blockType}_` : '';
-  const titlePart = toSnake(title);
-  const raw = `${typePrefix}${titlePart}${titlePart ? '_' : ''}${uid}`;
-  return raw.replace(/_+/g, '_').replace(/^_|_$/g, '');
-};
-
-// ---------------------------------------------------------------------------
 // Empty block factory
 // ---------------------------------------------------------------------------
 
@@ -103,12 +87,35 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
   const [uploadingImg, setUploadingImg] = useState(false);
   const [slugDirty, setSlugDirty] = useState(false);
   const [slugUid, setSlugUid] = useState(makeUid);
+  // Content editing surface: 'visual' = WYSIWYG (contentEditable), 'html' = raw source.
+  const [contentMode, setContentMode] = useState<'visual' | 'html'>('visual');
   const imgInputRef = useRef<HTMLInputElement>(null);
+  const visualRef = useRef<HTMLDivElement>(null);
 
   const set = (updates: Partial<IMBlock>) => setDraft(prev => ({ ...prev, ...updates }));
 
   const setContent = (lang: string, html: string) =>
     setDraft(prev => ({ ...prev, content: { ...prev.content, [lang]: html } }));
+
+  // Seed the visual surface from state only when the language or mode changes —
+  // never on every keystroke, so the caret doesn't jump while typing.
+  useEffect(() => {
+    if (contentMode === 'visual' && visualRef.current) {
+      visualRef.current.innerHTML = draft.content?.[activeLang] ?? '';
+    }
+  }, [activeLang, contentMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Append a snippet (image / attribute token) into the content, mode-aware so it
+  // shows immediately in whichever surface is active and stays faithfully in sync.
+  const insertIntoContent = (html: string) => {
+    if (contentMode === 'visual' && visualRef.current) {
+      const next = (visualRef.current.innerHTML || '') + html;
+      visualRef.current.innerHTML = next;
+      setContent(activeLang, next);
+    } else {
+      setContent(activeLang, (draft.content?.[activeLang] ?? '') + html);
+    }
+  };
 
   // Auto-generate slug from title + type while the user hasn't hand-edited it
   useEffect(() => {
@@ -130,7 +137,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
     try {
       const url = await uploadIMAsset(file, 'blocks');
       const tag = `<img src="${url}" alt="${file.name}" style="max-width:100%;height:auto;border-radius:4px;margin:8px 0;">`;
-      setContent(activeLang, (draft.content?.[activeLang] ?? '') + tag);
+      insertIntoContent(tag);
     } catch (err: any) {
       console.error('[BlockModal] image upload failed:', err);
       alert(err?.message ?? 'Image upload failed — see console for details.');
@@ -308,7 +315,27 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
               ))}
             </div>
             <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className="text-[10px] text-gray-400 mr-auto">Raw HTML</span>
+              {/* Visual / HTML view toggle */}
+              <div className="flex rounded border border-gray-200 overflow-hidden mr-auto">
+                <button
+                  type="button"
+                  onClick={() => setContentMode('visual')}
+                  className={`px-2 py-1 text-xs font-medium transition-colors ${contentMode === 'visual' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >Visual</button>
+                <button
+                  type="button"
+                  onClick={() => setContentMode('html')}
+                  className={`px-2 py-1 text-xs font-medium flex items-center gap-1 transition-colors ${contentMode === 'html' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                ><Code size={12} /> HTML</button>
+              </div>
+              {/* Inline formatting (visual mode) */}
+              {contentMode === 'visual' && (
+                <>
+                  <button type="button" onMouseDown={e => { e.preventDefault(); document.execCommand('bold'); }} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Bold"><Bold size={14} /></button>
+                  <button type="button" onMouseDown={e => { e.preventDefault(); document.execCommand('italic'); }} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Italic"><Italic size={14} /></button>
+                  <button type="button" onMouseDown={e => { e.preventDefault(); document.execCommand('underline'); }} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Underline"><Underline size={14} /></button>
+                </>
+              )}
               {/* Attribute value token picker */}
               {allAttributes.length > 0 && (
                 <select
@@ -317,7 +344,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                   onChange={e => {
                     const attr = allAttributes.find(a => a.id === e.target.value);
                     if (!attr) return;
-                    setContent(activeLang, (draft.content?.[activeLang] ?? '') + `{{${attr.id}}}`);
+                    insertIntoContent(`{{${attr.id}}}`);
                     e.target.value = '';
                   }}
                 >
@@ -338,13 +365,23 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
               </button>
               <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImgUpload} />
             </div>
-            <textarea
-              className="w-full border rounded-lg p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
-              rows={8}
-              value={draft.content?.[activeLang] ?? ''}
-              onChange={e => setContent(activeLang, e.target.value)}
-              placeholder={`<p>Block content in ${activeLang.toUpperCase()}…</p>`}
-            />
+            {contentMode === 'html' ? (
+              <textarea
+                className="w-full border rounded-lg p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
+                rows={8}
+                value={draft.content?.[activeLang] ?? ''}
+                onChange={e => setContent(activeLang, e.target.value)}
+                placeholder={`<p>Block content in ${activeLang.toUpperCase()}…</p>`}
+              />
+            ) : (
+              <div
+                ref={visualRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={e => setContent(activeLang, e.currentTarget.innerHTML)}
+                className="im-content w-full border rounded-lg p-3 text-sm min-h-[12rem] max-h-[24rem] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+              />
+            )}
             <p className="text-[10px] text-gray-400 mt-1">
               Use <code className="bg-gray-100 px-1 rounded">{`{{token}}`}</code> or pick an attribute above to insert its auto-resolved value.
               English is required; other languages are optional (resolver falls back to EN with a warning).

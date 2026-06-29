@@ -8,7 +8,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
-import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
+import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
@@ -556,6 +556,18 @@ const IMTemplateEditor: React.FC = () => {
       if (!ref || ref.kind !== 'inline') return s;
       const { variant: _drop, ...rest } = ref;
       refs[refIndex] = variant ? { ...rest, variant } : { ...rest };
+      return { ...s, blockRefs: refs };
+    }));
+  }, [selectedSectionId]);
+
+  // Patch arbitrary fields on an inline ref (used by the "Placeholder" toggle + note).
+  const patchInlineRef = useCallback((refIndex: number, patch: Partial<InlineBlockRef>) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      const ref = refs[refIndex];
+      if (!ref || ref.kind !== 'inline') return s;
+      refs[refIndex] = { ...ref, ...patch };
       return { ...s, blockRefs: refs };
     }));
   }, [selectedSectionId]);
@@ -1145,6 +1157,26 @@ const IMTemplateEditor: React.FC = () => {
                                          </div>
                                        );
                                      })()}
+                                     {/* Placeholder toggle — a placeholder row is NOT auto-included; the PM
+                                         opts into it during generation (seeing the note as a review warning). */}
+                                     <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap">
+                                       <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Placeholder:</span>
+                                       <button
+                                         onClick={() => patchInlineRef(index, { isPlaceholder: !ref.isPlaceholder })}
+                                         title="Mark as an optional placeholder the PM chooses to include during generation"
+                                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${ref.isPlaceholder ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-500 border-gray-300 hover:border-amber-400'}`}
+                                       >
+                                         {ref.isPlaceholder ? 'On — optional (opt-in)' : 'Off'}
+                                       </button>
+                                       {ref.isPlaceholder && (
+                                         <input
+                                           value={ref.note ?? ''}
+                                           onChange={(e) => patchInlineRef(index, { note: e.target.value })}
+                                           placeholder="Review note (e.g. Use this for the Beersafe family)"
+                                           className="flex-1 min-w-[180px] text-[11px] border border-amber-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-amber-300"
+                                         />
+                                       )}
+                                     </div>
                                    </>
                                  )}
                                  {ref.kind === 'block' && (() => {

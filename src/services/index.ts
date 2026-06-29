@@ -120,6 +120,7 @@ export {
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
+  makeAttributeGlobal,
   COMPLIANCE_SECTIONS,
   ATTRIBUTE_GROUPS,
   PREDEFINED_ATTRIBUTE_GROUPS

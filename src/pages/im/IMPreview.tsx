@@ -122,7 +122,7 @@ const IMPreview: React.FC = () => {
     rs.nodes
       .map(node => {
         if (node.type === 'html') return node.html;
-        if (node.type === 'callout') return wrapBlockCallout(node.variant, node.html);
+        if (node.type === 'callout') return wrapBlockCallout(node.variant, node.html, activeLang);
         // Typed nodes (annotated_image_set, legend_table, step_sequence) are
         // rendered as simple placeholders in preview mode; full renderers come in Phase 3.
         return `<p class="text-gray-400 italic text-sm">[${node.type} — rendered in project view]</p>`;

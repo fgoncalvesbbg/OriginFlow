@@ -34,7 +34,8 @@ export {
   saveCategoryAttribute,
   deleteCategoryAttribute,
   assignAttributeToCategory,
-  unassignAttributeFromCategory
+  unassignAttributeFromCategory,
+  makeAttributeGlobal
 } from './compliance-requirement.service';
 
 export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';

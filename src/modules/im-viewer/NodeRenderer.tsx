@@ -29,7 +29,7 @@ const HtmlBlock: React.FC<{ id: string; html: string }> = ({ id, html }) => {
   );
 };
 
-export const NodeRenderer: React.FC<{ node: ManualNode }> = ({ node }) => {
+export const NodeRenderer: React.FC<{ node: ManualNode; language?: string }> = ({ node, language }) => {
   switch (node.type) {
     case 'html':
       return <HtmlBlock id={node.id} html={node.html} />;
@@ -39,7 +39,7 @@ export const NodeRenderer: React.FC<{ node: ManualNode }> = ({ node }) => {
         <div
           id={`node-${node.id}`}
           className="imv-node imv-content"
-          dangerouslySetInnerHTML={{ __html: sanitize(wrapCallout(node.variant, node.html)) }}
+          dangerouslySetInnerHTML={{ __html: sanitize(wrapCallout(node.variant, node.html, language)) }}
         />
       );
 

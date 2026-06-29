@@ -82,7 +82,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Box className="w-6 h-6 text-indigo-400" />
             OriginFlow
           </h1>
-          <p className="text-xs text-gray-400 mt-1 pl-8">Beta v1.3</p>
+          <p className="text-xs text-gray-400 mt-1 pl-8">Beta V1.5</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 mt-4">

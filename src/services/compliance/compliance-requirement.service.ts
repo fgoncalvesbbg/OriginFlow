@@ -170,6 +170,17 @@ export const assignAttributeToCategory = async (attributeId: string, categoryId:
 };
 
 /**
+ * Promote a category-scoped attribute to a global/predefined attribute.
+ * Clears its category_id so it applies to every category, keeping its group.
+ */
+export const makeAttributeGlobal = async (attributeId: string): Promise<void> => {
+    await runMutation(
+        supabase.from('category_attributes').update({ category_id: null }).eq('id', attributeId),
+        'makeAttributeGlobal'
+    );
+};
+
+/**
  * Remove a shared assignment of an attribute from a category
  */
 export const unassignAttributeFromCategory = async (attributeId: string, categoryId: string): Promise<void> => {
