@@ -237,7 +237,7 @@ const SupplierDashboard: React.FC = () => {
           retryApiCall(() => getComplianceRequestsBySupplierToken(token!, enteredAccessCode)),
           retryApiCall(() => getSupplierNotifications(supplier.id)),
           retryApiCall(() => getMissingDocumentsForSupplier(supplier.id)),
-          retryApiCall(() => getRFQsForSupplier(supplier.id)),
+          retryApiCall(() => getRFQsForSupplier(token!, enteredAccessCode)),
           retryApiCall(() => getSupplierProposals(token!, enteredAccessCode)),
           retryApiCall(() => getAttributeRequestsForSupplier(token!, enteredAccessCode))
         ]);
@@ -401,7 +401,7 @@ const SupplierDashboard: React.FC = () => {
         getComplianceRequestsBySupplierToken(token!, enteredAccessCode),
         getSupplierNotifications(supplier.id),
         getMissingDocumentsForSupplier(supplier.id),
-        getRFQsForSupplier(supplier.id),
+        getRFQsForSupplier(token!, enteredAccessCode),
         getSupplierProposals(token!, enteredAccessCode),
         getAttributeRequestsForSupplier(token!, enteredAccessCode)
       ]);
