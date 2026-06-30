@@ -30,6 +30,7 @@ import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { BindableField } from './project-im-generator/BindableField';
 import { AddProjectSection } from './project-im-generator/AddProjectSection';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
+import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 
 const ProjectIMGenerator: React.FC = () => {
   const { projectId, templateType: templateTypeParam } = useParams<{ projectId: string; templateType?: string }>();
@@ -1074,6 +1075,13 @@ const ProjectIMGenerator: React.FC = () => {
       );
   }
 
+  const metadata = normalizeIMTemplateMetadata(template?.metadata);
+  const pageBackground = metadata.assets?.backgroundAssetUrl
+    ? `url(${metadata.assets.backgroundAssetUrl}) center/cover no-repeat`
+    : undefined;
+  const watermark = metadata.assets?.watermarkAssetUrl
+    ? `url(${metadata.assets.watermarkAssetUrl}) center/55% no-repeat`
+    : undefined;
 
   const isSectionVisible = (section: IMSection): boolean => {
     const override = sectionVisibility[section.id];
@@ -1787,13 +1795,13 @@ const ProjectIMGenerator: React.FC = () => {
     ...DEFAULT_MASTER_PAGES,
     ...(template?.metadata?.masterPages || {})
   };
-  
+
   // Computed values for current language
   const displayTitle = formData['__cover_title'] !== undefined ? formData['__cover_title'] : (project?.name || 'Product Name');
   const displaySubtitle = formData['__cover_subtitle'] !== undefined ? formData['__cover_subtitle'] : 'INSTRUCTION MANUAL';
-  const displayLogo = formData['__custom_logo'] || template?.metadata?.companyLogoUrl;
-  const displayCoverImage = formData['__custom_cover_image'] || template?.metadata?.coverImageUrl;
-  const displayFooter = formData['__custom_footer'] !== undefined ? formData['__custom_footer'] : (template?.metadata?.footerText || '');
+  const displayLogo = formData['__custom_logo'] || metadata.companyLogoUrl;
+  const displayCoverImage = formData['__custom_cover_image'] || metadata.coverImageUrl;
+  const displayFooter = formData['__custom_footer'] !== undefined ? formData['__custom_footer'] : (metadata.footerText || '');
   // Version the next publish will stamp (current persisted version + 1).
   const previewVersion = (instance?.version ?? 0) + 1;
 
@@ -2378,28 +2386,30 @@ const ProjectIMGenerator: React.FC = () => {
                                </select>
                                <ChevronDown size={10} className="text-gray-400 -ml-3 z-0 pointer-events-none" />
                            </div>
-                           <span className="text-xs text-muted border-l pl-2 border-gray-300 flex items-center gap-1"><Printer size={12}/> A4</span>
+                           <span className="text-xs text-muted border-l pl-2 border-gray-300 flex items-center gap-1"><Printer size={12}/> {metadata.pageSize.toUpperCase()}</span>
+                           <span className="text-xs text-muted">{metadata.layout?.pageNumberingStyle}</span>
                        </div>
                    </div>
                    <div className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center" onClick={handlePreviewClick}>
-                       <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top">
+                       <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top" data-icon-set={metadata.assets?.iconSet}>
                           {/* COVER PAGE */}
-                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page" style={getBackgroundStyle(masterPages.cover)}>
+                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page" style={{ ...(getBackgroundStyle(masterPages.cover) || {}), ...(pageBackground ? { background: pageBackground } : {}) }} data-page-template={metadata.pages?.coverTemplate}>
                              {displayCoverImage && <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${displayCoverImage})` }} />}
                              <div className="flex-1 p-[20mm] flex flex-col justify-between">
                                 <div>
                                    {displayLogo && <img src={displayLogo} alt="Logo" className="h-12 object-contain mb-10" />}
-                                   <h1 className="text-4xl font-bold text-primary mb-4">{displayTitle}</h1>
-                                   <p className="text-xl text-muted uppercase tracking-widest font-light">{displaySubtitle}</p>
+                                   <h1 className="text-4xl font-bold text-primary mb-4" style={{ color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{displayTitle}</h1>
+                                   <p className="text-xl text-muted uppercase tracking-widest font-light" style={{ color: metadata.brand?.textColors.muted, fontFamily: metadata.brand?.fontFamilies.body }}>{displaySubtitle}</p>
                                 </div>
                                 <div className="border-t-4 pt-6" style={{ borderColor: 'var(--im-primary-color)' }}>
-                                   <p className="text-sm font-bold text-primary uppercase mb-1">{template?.metadata?.companyName || 'Company Name'}</p>
+                                   <p className="text-sm font-bold text-primary uppercase mb-1">{metadata.companyName || 'Company Name'}</p>
                                    <p className="text-xs text-muted">Original Instructions</p>
                                 </div>
                              </div>
                           </div>
                           {/* CONTENT */}
-                          <div className="p-[20mm] pb-[30mm] min-h-[297mm] bg-white relative">
+                          <div className="p-[20mm] pb-[30mm] min-h-[297mm] bg-white relative" style={{ background: pageBackground }} data-page-template={metadata.pages?.bodyTemplate}>
+                              {watermark && <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ background: watermark }} />}
                               <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
                                   {orderedSections.map(section => {
                                       const visible = isSectionVisible(section);
@@ -2410,8 +2420,8 @@ const ProjectIMGenerator: React.FC = () => {
                                               <span>⊘ Chapter excluded by condition</span>
                                             </div>
                                           )}
-                                          <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)' }}>{localizedSectionTitle(section, activeLang)}</h3>
-                                          <div className="im-content" dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
+                                          <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{localizedSectionTitle(section, activeLang)}</h3>
+                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
                                         </div>
                                       );
                                   })}
@@ -2426,12 +2436,12 @@ const ProjectIMGenerator: React.FC = () => {
                           </div>
 
                           {/* BACK PAGE */}
-                          {template?.metadata?.backPageContent && (
-                              <div className="min-h-[297mm] bg-light p-[20mm] flex flex-col justify-end mt-4 break-before-page">
+                          {metadata.backPageContent && (
+                              <div className="min-h-[297mm] bg-light p-[20mm] flex flex-col justify-end mt-4 break-before-page" style={pageBackground ? { background: pageBackground } : undefined} data-page-template={metadata.pages?.endPageVariants?.[0] || 'standard-end'}>
                                   <div className="border-t pt-8" style={{ borderColor: 'var(--im-primary-color)' }}>
-                                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(template.metadata.backPageContent) }} />
+                                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(metadata.backPageContent) }} />
                                       <div className="mt-10 text-xs text-gray-400 text-center">
-                                          &copy; {new Date().getFullYear()} {template.metadata.companyName || 'Company Name'}. All rights reserved.
+                                          &copy; {new Date().getFullYear()} {metadata.companyName || 'Company Name'}. All rights reserved.
                                       </div>
                                   </div>
                               </div>

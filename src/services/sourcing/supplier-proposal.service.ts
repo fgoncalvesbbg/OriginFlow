@@ -33,18 +33,18 @@ export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => 
 };
 
 /**
- * Get proposals for a specific supplier
+ * Get proposals for a supplier in the access-code-verified supplier portal.
+ * Uses the get_supplier_proposals SECURITY DEFINER RPC (validates the supplier's
+ * portal token + access code); the supplier_proposals table is not readable by the
+ * anonymous portal client under RLS.
  */
-export const getSupplierProposals = async (token: string, code: string): Promise<SupplierProposal[]> => {
-    if (!isLive) return [];
+export const getSupplierProposals = async (supplierToken: string, accessCode: string): Promise<SupplierProposal[]> => {
+    if (!isLive || !supplierToken || !accessCode) return [];
     const { data, error } = await portalClient.rpc('get_supplier_proposals', {
-        p_supplier_token: token,
-        p_code: code,
+        p_supplier_token: supplierToken,
+        p_code: accessCode,
     });
-    if (error) {
-        console.error('getSupplierProposals error:', error);
-        return [];
-    }
+    if (error) return [];
     return (data || []).map((p: any) => ({
         id: p.id,
         supplierId: p.supplier_id,
@@ -74,12 +74,15 @@ export const createEnhancedSupplierProposal = async (
     thumbnailUrl?: string,
     attachments?: RFQAttachment[]
 ): Promise<void> => {
+    // Insert via the create_supplier_proposal_secure SECURITY DEFINER RPC: it validates
+    // the supplier's portal token + access code, so the anonymous portal client never
+    // writes to the supplier_proposals table directly (which RLS would block).
     const { error } = await portalClient.rpc('create_supplier_proposal_secure', {
         p_supplier_token: supplierToken,
         p_code: accessCode,
         p_title: title,
         p_description: description,
-        p_category_id: categoryId || null,
+        p_category_id: categoryId || '',
         p_attributes: attributes || [],
         p_thumbnail_url: thumbnailUrl || null,
         p_attachments: attachments || [],

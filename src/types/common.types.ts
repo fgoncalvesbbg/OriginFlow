@@ -26,12 +26,7 @@ export interface Supplier {
   assignedPMNames?: string[];
   portalToken?: string;
   accessCode?: string;
-  /**
-   * Whether an access code is configured for this supplier. Set by the portal
-   * bootstrap RPC (get_supplier_by_token_safe) WITHOUT exposing the code itself.
-   * The actual code is never sent to the browser; verification happens server-side
-   * via verify_supplier_access.
-   */
+  /** True when the supplier has an access code configured. Set by the portal's safe token lookup, which never exposes the code itself. */
   hasAccessCode?: boolean;
 }
 

@@ -3,11 +3,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  getSupplierByToken, verifySupplierAccessCode, getProjectsBySupplierToken, getComplianceRequestsBySupplierToken,
+  getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierToken,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
-  getRFQsForSupplier, getProductionUpdatesForSupplier, saveProductionUpdate,
-  logAccessCodeAttempt, getSupplierProposals, addSupplierDocumentComment,
-  getAttributeRequestsForSupplier
+  getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
+  logAccessCodeAttempt, getSupplierProposals, addDocumentComment,
+  getAttributeRequestsForSupplier, verifySupplierPortalAccess
 } from '../services';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
@@ -42,8 +42,6 @@ const SupplierDashboard: React.FC = () => {
   // Access Code Verification
   const [isAccessVerified, setIsAccessVerified] = useState(false);
   const [enteredAccessCode, setEnteredAccessCode] = useState('');
-  // Held in memory only for the verified session; used to authorize token+code RPC reads.
-  const [verifiedCode, setVerifiedCode] = useState('');
   const [accessCodeError, setAccessCodeError] = useState('');
 
   // Search and Filtering
@@ -152,7 +150,6 @@ const SupplierDashboard: React.FC = () => {
       if (elapsed > SESSION_TIMEOUT) {
         setIsAccessVerified(false);
         setEnteredAccessCode('');
-        setVerifiedCode('');
         setError('Your session has expired. Please enter your access code again.');
       }
     }, 60000);
@@ -237,12 +234,12 @@ const SupplierDashboard: React.FC = () => {
         setDashboardError('');
         const results = await Promise.allSettled([
           retryApiCall(() => getProjectsBySupplierToken(token!)),
-          retryApiCall(() => getComplianceRequestsBySupplierToken(token!, verifiedCode)),
+          retryApiCall(() => getComplianceRequestsBySupplierToken(token!, enteredAccessCode)),
           retryApiCall(() => getSupplierNotifications(supplier.id)),
           retryApiCall(() => getMissingDocumentsForSupplier(supplier.id)),
-          retryApiCall(() => getRFQsForSupplier(token!, verifiedCode)),
-          retryApiCall(() => getSupplierProposals(token!, verifiedCode)),
-          retryApiCall(() => getAttributeRequestsForSupplier(token!, verifiedCode))
+          retryApiCall(() => getRFQsForSupplier(supplier.id)),
+          retryApiCall(() => getSupplierProposals(token!, enteredAccessCode)),
+          retryApiCall(() => getAttributeRequestsForSupplier(token!, enteredAccessCode))
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -296,20 +293,16 @@ const SupplierDashboard: React.FC = () => {
 
         if (projectsNeedingCheck.length > 0 && mounted && !controller.signal.aborted) {
           try {
-            // One token+code-scoped call for all the supplier's updates, grouped by project.
-            const allUpdates = await retryApiCall(() => getProductionUpdatesForSupplier(token!, verifiedCode));
-            const updatesByProject = new Map<string, typeof allUpdates>();
-            for (const u of allUpdates) {
-              const list = updatesByProject.get(u.projectId) || [];
-              list.push(u);
-              updatesByProject.set(u.projectId, list);
-            }
+            const updateResults = await Promise.allSettled(
+              projectsNeedingCheck.map(p => retryApiCall(() => getProductionUpdates(p.id)))
+            );
 
             if (!mounted || controller.signal.aborted) return;
 
             for (let i = 0; i < projectsNeedingCheck.length; i++) {
               const p = projectsNeedingCheck[i];
-              const updates = updatesByProject.get(p.id) || [];
+              const settled = updateResults[i];
+              const updates = settled.status === 'fulfilled' ? settled.value : [];
               const etd = new Date(p.milestones!.etd!);
               const today = new Date();
               const diffDays = Math.ceil((etd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -364,14 +357,14 @@ const SupplierDashboard: React.FC = () => {
       return;
     }
 
-    // Verify the code server-side. The correct code is never sent to the browser;
-    // the database compares it and returns the supplier only on a match.
+    // Verify server-side: the access code is validated in the database and never
+    // exposed to the browser.
     let verified: Supplier | undefined;
     try {
-      verified = await verifySupplierAccessCode(token, enteredAccessCode);
+      verified = await verifySupplierPortalAccess(token, enteredAccessCode);
     } catch (err: any) {
       console.error('Access verification failed:', err);
-      setAccessCodeError('Could not verify your code right now. Please try again.');
+      setAccessCodeError('Could not verify your code. Please try again.');
       return;
     }
 
@@ -393,9 +386,6 @@ const SupplierDashboard: React.FC = () => {
       return;
     }
 
-    // Adopt the verified supplier record (safe fields only) for the session.
-    setSupplier(verified!);
-    setVerifiedCode(enteredAccessCode);
     setAccessCodeError('');
     setSessionStartTime(Date.now());
     setIsAccessVerified(true);
@@ -408,12 +398,12 @@ const SupplierDashboard: React.FC = () => {
     try {
       const results = await Promise.allSettled([
         getProjectsBySupplierToken(token!),
-        getComplianceRequestsBySupplierToken(token!, verifiedCode),
+        getComplianceRequestsBySupplierToken(token!, enteredAccessCode),
         getSupplierNotifications(supplier.id),
         getMissingDocumentsForSupplier(supplier.id),
-        getRFQsForSupplier(token!, verifiedCode),
-        getSupplierProposals(token!, verifiedCode),
-        getAttributeRequestsForSupplier(token!, verifiedCode)
+        getRFQsForSupplier(supplier.id),
+        getSupplierProposals(token!, enteredAccessCode),
+        getAttributeRequestsForSupplier(token!, enteredAccessCode)
       ]);
 
       const pList = results[0].status === 'fulfilled' ? results[0].value : [];
@@ -468,7 +458,7 @@ const SupplierDashboard: React.FC = () => {
         isSupplierUpdate: true,
         updatedBy: 'Supplier',
         notes: 'Confirmed via Supplier Portal'
-      }, { token: token!, code: verifiedCode });
+      });
       setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== project.id));
       setToastMessage('ETD confirmed successfully!');
       setToastType('success');
@@ -491,7 +481,7 @@ const SupplierDashboard: React.FC = () => {
         notes: updateForm.notes,
         isSupplierUpdate: true,
         updatedBy: 'Supplier'
-      }, { token: token!, code: verifiedCode });
+      });
       setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== updatingProject.id));
       setIsUpdateModalOpen(false);
       setUpdatingProject(null);
@@ -594,7 +584,7 @@ const SupplierDashboard: React.FC = () => {
     setSubmittingComments({ ...submittingComments, [docId]: true });
 
     try {
-      await addSupplierDocumentComment(token!, verifiedCode, docId, comment, supplier?.name || 'Supplier');
+      await addDocumentComment(docId, comment, supplier?.name || 'Supplier', 'supplier');
 
       // Remove from missing docs
       setMissingDocs(prev => prev.filter(d => d.id !== docId));
@@ -903,7 +893,6 @@ const SupplierDashboard: React.FC = () => {
               onClick={() => {
                 setIsAccessVerified(false);
                 setEnteredAccessCode('');
-                setVerifiedCode('');
                 setSessionStartTime(null);
               }}
               className="px-4 py-2 text-sm text-muted hover:bg-gray-100 rounded-lg transition"
@@ -1716,12 +1705,12 @@ const SupplierDashboard: React.FC = () => {
       <SubmitProposalModal
         isOpen={isProposalModalOpen}
         onClose={() => setIsProposalModalOpen(false)}
-        supplierToken={token || ''}
-        accessCode={verifiedCode}
+        portalToken={token || ''}
+        accessCode={enteredAccessCode}
         onSuccess={() => {
           // Reload proposals after successful submission with error handling
-          if (supplier?.id) {
-            getSupplierProposals(token!, verifiedCode)
+          if (token) {
+            getSupplierProposals(token, enteredAccessCode)
               .then(setProposals)
               .catch(err => {
                 console.error('Error reloading proposals:', err);

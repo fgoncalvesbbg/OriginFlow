@@ -83,14 +83,14 @@ export const getAttributeRequestsByProject = async (projectId: string): Promise<
 };
 
 /**
- * Attribute-data requests for a project, addressed by the project portal token
- * (projects.supplier_link_token). Uses the SECURITY DEFINER RPC so anon never
- * reads the project_attribute_requests table directly.
+ * Attribute-data requests for a project, addressed by the project's supplier-link token
+ * (the public SupplierPortal). Uses the get_attribute_requests_by_project_token
+ * SECURITY DEFINER RPC: the project_attribute_requests table is not readable by the
+ * anonymous `anon` role the portal client runs as.
  */
 export const getAttributeRequestsByProjectPublic = async (projectToken: string): Promise<ProjectAttributeRequest[]> => {
-  if (!isLive) return [];
-  const { data, error } = await portalClient
-    .rpc('get_attribute_requests_by_project_token', { p_project_token: projectToken });
+  if (!isLive || !projectToken) return [];
+  const { data, error } = await portalClient.rpc('get_attribute_requests_by_project_token', { p_project_token: projectToken });
   if (error) {
     console.error('getAttributeRequestsByProjectPublic error:', error);
     return [];
@@ -99,13 +99,17 @@ export const getAttributeRequestsByProjectPublic = async (projectToken: string):
 };
 
 /**
- * All attribute-data requests across a supplier's active projects, for the logged-in
- * supplier dashboard. Uses portalClient (token/access-code context, no Supabase auth).
+ * All attribute-data requests across a supplier's projects, for the access-code-verified
+ * supplier dashboard. Uses the get_attribute_requests_by_supplier SECURITY DEFINER RPC
+ * (validates the supplier's portal token + access code) rather than a direct table read,
+ * which RLS blocks for the anonymous portal client.
  */
-export const getAttributeRequestsForSupplier = async (token: string, code: string): Promise<ProjectAttributeRequest[]> => {
-  if (!isLive) return [];
-  const { data, error } = await portalClient
-    .rpc('get_attribute_requests_by_supplier', { p_supplier_token: token, p_code: code });
+export const getAttributeRequestsForSupplier = async (supplierToken: string, accessCode: string): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive || !supplierToken || !accessCode) return [];
+  const { data, error } = await portalClient.rpc('get_attribute_requests_by_supplier', {
+    p_supplier_token: supplierToken,
+    p_code: accessCode,
+  });
   if (error) {
     console.error('getAttributeRequestsForSupplier error:', error);
     return [];
@@ -114,9 +118,11 @@ export const getAttributeRequestsForSupplier = async (token: string, code: strin
 };
 
 export const getAttributeRequestByToken = async (token: string): Promise<ProjectAttributeRequest | null> => {
-  if (!isLive) return null;
-  const { data, error } = await portalClient
-    .rpc('get_attribute_request_by_token', { p_token: token });
+  if (!isLive || !token) return null;
+  // The project_attribute_requests table is not readable by the anonymous `anon`
+  // role the portal client runs as, so go through the get_attribute_request_by_token
+  // SECURITY DEFINER RPC (granted to anon) instead of a direct table read.
+  const { data, error } = await portalClient.rpc('get_attribute_request_by_token', { p_token: token });
   if (error) {
     console.error('getAttributeRequestByToken error:', error);
     return null;
@@ -155,8 +161,12 @@ export const updateAttributeRequestData = async (id: string, submittedData: Subm
 
 export const submitAttributeRequest = async (token: string, submittedData: SubmittedValue[]): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { error } = await portalClient
-    .rpc('submit_attribute_request_secure', { p_token: token, p_data: submittedData });
+  // Submit via the submit_attribute_request_secure SECURITY DEFINER RPC: the anon
+  // portal client cannot UPDATE the table directly under RLS.
+  const { error } = await portalClient.rpc('submit_attribute_request_secure', {
+    p_token: token,
+    p_data: submittedData,
+  });
   if (error) {
     console.error('submitAttributeRequest error:', error);
     throw new Error(error.message || 'Failed to submit');

@@ -10,12 +10,13 @@ import { validateAttributeValue, getAttributesForCategory } from '../../utils';
 interface SubmitProposalModalProps {
   isOpen: boolean;
   onClose: () => void;
-  supplierToken: string;
+  /** Supplier portal token + verified access code, used to authorize the secure submit RPC. */
+  portalToken: string;
   accessCode: string;
   onSuccess: () => void;
 }
 
-const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClose, supplierToken, accessCode, onSuccess }) => {
+const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClose, portalToken, accessCode, onSuccess }) => {
   const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -150,7 +151,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
       const categoryParam = selectedCategory && selectedCategory !== '' ? selectedCategory : undefined;
 
       await createEnhancedSupplierProposal(
-        supplierToken,
+        portalToken,
         accessCode,
         title,
         description,

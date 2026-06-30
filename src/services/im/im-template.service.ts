@@ -7,6 +7,7 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { IMTemplate, IMTemplateType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 import { runMutation } from '../core/db';
 
 /**
@@ -24,7 +25,7 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
       languages: t.languages,
       isFinalized: t.is_finalized,
       finalizedAt: t.finalized_at,
-      metadata: t.metadata,
+      metadata: normalizeIMTemplateMetadata(t.metadata),
       updatedAt: t.updated_at,
       lastUpdatedBy: t.last_updated_by
     }));
@@ -45,7 +46,7 @@ export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefi
       languages: data.languages,
       isFinalized: data.is_finalized,
       finalizedAt: data.finalized_at,
-      metadata: data.metadata,
+      metadata: normalizeIMTemplateMetadata(data.metadata),
       updatedAt: data.updated_at,
       lastUpdatedBy: data.last_updated_by
     };
@@ -75,7 +76,7 @@ export const getIMTemplateByCategoryId = async (
       languages: data.languages,
       isFinalized: data.is_finalized,
       finalizedAt: data.finalized_at,
-      metadata: data.metadata,
+      metadata: normalizeIMTemplateMetadata(data.metadata),
       updatedAt: data.updated_at,
       lastUpdatedBy: data.last_updated_by
     };
@@ -108,7 +109,7 @@ export const createIMTemplate = async (
       languages: data.languages,
       isFinalized: data.is_finalized,
       finalizedAt: data.finalized_at,
-      metadata: data.metadata,
+      metadata: normalizeIMTemplateMetadata(data.metadata),
       updatedAt: data.updated_at,
       lastUpdatedBy: data.last_updated_by
     };
@@ -120,7 +121,7 @@ export const createIMTemplate = async (
 export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>): Promise<void> => {
     const payload: any = {};
     if (updates.name !== undefined) payload.name = updates.name;
-    if (updates.metadata !== undefined) payload.metadata = updates.metadata;
+    if (updates.metadata !== undefined) payload.metadata = JSON.parse(JSON.stringify(updates.metadata));
     if (updates.languages !== undefined) payload.languages = updates.languages;
     if (updates.lastUpdatedBy !== undefined) payload.last_updated_by = updates.lastUpdatedBy;
     if (updates.categoryId !== undefined) payload.category_id = updates.categoryId;
