@@ -47,7 +47,7 @@ const SupplierPortal: React.FC = () => {
         const [stepsData, docsData, attrReqsData] = await Promise.all([
           getProjectSteps(p.id),
           getProjectDocs(p.id),
-          getAttributeRequestsByProjectPublic(p.id)
+          getAttributeRequestsByProjectPublic(token)
         ]);
 
         if (!mounted || controller.signal.aborted) return;

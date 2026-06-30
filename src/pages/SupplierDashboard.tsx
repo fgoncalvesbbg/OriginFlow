@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierId,
+  getSupplierByToken, getProjectsBySupplierToken, getComplianceRequestsBySupplierToken,
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
   logAccessCodeAttempt, getSupplierProposals, addDocumentComment,
@@ -234,12 +234,12 @@ const SupplierDashboard: React.FC = () => {
         setDashboardError('');
         const results = await Promise.allSettled([
           retryApiCall(() => getProjectsBySupplierToken(token!)),
-          retryApiCall(() => getComplianceRequestsBySupplierId(supplier.id)),
+          retryApiCall(() => getComplianceRequestsBySupplierToken(token!, enteredAccessCode)),
           retryApiCall(() => getSupplierNotifications(supplier.id)),
           retryApiCall(() => getMissingDocumentsForSupplier(supplier.id)),
           retryApiCall(() => getRFQsForSupplier(supplier.id)),
-          retryApiCall(() => getSupplierProposals(supplier.id)),
-          retryApiCall(() => getAttributeRequestsForSupplier(supplier.id))
+          retryApiCall(() => getSupplierProposals(token!, enteredAccessCode)),
+          retryApiCall(() => getAttributeRequestsForSupplier(token!, enteredAccessCode))
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -398,12 +398,12 @@ const SupplierDashboard: React.FC = () => {
     try {
       const results = await Promise.allSettled([
         getProjectsBySupplierToken(token!),
-        getComplianceRequestsBySupplierId(supplier.id),
+        getComplianceRequestsBySupplierToken(token!, enteredAccessCode),
         getSupplierNotifications(supplier.id),
         getMissingDocumentsForSupplier(supplier.id),
         getRFQsForSupplier(supplier.id),
-        getSupplierProposals(supplier.id),
-        getAttributeRequestsForSupplier(supplier.id)
+        getSupplierProposals(token!, enteredAccessCode),
+        getAttributeRequestsForSupplier(token!, enteredAccessCode)
       ]);
 
       const pList = results[0].status === 'fulfilled' ? results[0].value : [];
@@ -1705,11 +1705,12 @@ const SupplierDashboard: React.FC = () => {
       <SubmitProposalModal
         isOpen={isProposalModalOpen}
         onClose={() => setIsProposalModalOpen(false)}
-        supplierId={supplier?.id || ''}
+        portalToken={token || ''}
+        accessCode={enteredAccessCode}
         onSuccess={() => {
           // Reload proposals after successful submission with error handling
-          if (supplier?.id) {
-            getSupplierProposals(supplier.id)
+          if (token) {
+            getSupplierProposals(token, enteredAccessCode)
               .then(setProposals)
               .catch(err => {
                 console.error('Error reloading proposals:', err);
