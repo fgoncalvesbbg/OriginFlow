@@ -6,7 +6,7 @@
 export {
   getComplianceRequests,
   getComplianceRequestById,
-  getComplianceRequestsBySupplierId,
+  getComplianceRequestsBySupplierCode,
   getComplianceRequestsBySupplierToken,
   createComplianceRequest,
   verifySupplierAccess,
