@@ -99,6 +99,7 @@ export {
   getComplianceRequests,
   getComplianceRequestById,
   getComplianceRequestsBySupplierId,
+  getComplianceRequestsBySupplierToken,
   createComplianceRequest,
   verifySupplierAccess,
   submitComplianceResponseSecure,

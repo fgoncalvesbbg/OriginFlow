@@ -4,9 +4,8 @@
  */
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { ProjectAttributeRequest, ProjectOverallStatus } from '../../types';
+import { ProjectAttributeRequest } from '../../types';
 import { generateUUID } from '../../utils';
-import { getProjectsBySupplierId } from './project.service';
 
 type SubmittedValue = { attributeId: string; name: string; value: string; type?: string };
 
@@ -83,14 +82,15 @@ export const getAttributeRequestsByProject = async (projectId: string): Promise<
   return (data || []).map(map);
 };
 
-export const getAttributeRequestsByProjectPublic = async (projectId: string): Promise<ProjectAttributeRequest[]> => {
-  if (!isLive) return [];
-  const { data, error } = await portalClient
-    .from('project_attribute_requests')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('step', { ascending: true })
-    .order('created_at', { ascending: true });
+/**
+ * Attribute-data requests for a project, addressed by the project's supplier-link token
+ * (the public SupplierPortal). Uses the get_attribute_requests_by_project_token
+ * SECURITY DEFINER RPC: the project_attribute_requests table is not readable by the
+ * anonymous `anon` role the portal client runs as.
+ */
+export const getAttributeRequestsByProjectPublic = async (projectToken: string): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive || !projectToken) return [];
+  const { data, error } = await portalClient.rpc('get_attribute_requests_by_project_token', { p_project_token: projectToken });
   if (error) {
     console.error('getAttributeRequestsByProjectPublic error:', error);
     return [];
@@ -99,21 +99,17 @@ export const getAttributeRequestsByProjectPublic = async (projectId: string): Pr
 };
 
 /**
- * All attribute-data requests across a supplier's active projects, for the logged-in
- * supplier dashboard. Uses portalClient (token/access-code context, no Supabase auth).
+ * All attribute-data requests across a supplier's projects, for the access-code-verified
+ * supplier dashboard. Uses the get_attribute_requests_by_supplier SECURITY DEFINER RPC
+ * (validates the supplier's portal token + access code) rather than a direct table read,
+ * which RLS blocks for the anonymous portal client.
  */
-export const getAttributeRequestsForSupplier = async (supplierId: string): Promise<ProjectAttributeRequest[]> => {
-  if (!isLive) return [];
-  const projects = await getProjectsBySupplierId(supplierId);
-  const activeProjects = projects.filter(p => p.status !== ProjectOverallStatus.ARCHIVED && p.status !== ProjectOverallStatus.CANCELLED && p.status !== ProjectOverallStatus.COMPLETED);
-  if (activeProjects.length === 0) return [];
-
-  const projectIds = activeProjects.map(p => p.id);
-  const { data, error } = await portalClient
-    .from('project_attribute_requests')
-    .select('*')
-    .in('project_id', projectIds)
-    .order('created_at', { ascending: false });
+export const getAttributeRequestsForSupplier = async (supplierToken: string, accessCode: string): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive || !supplierToken || !accessCode) return [];
+  const { data, error } = await portalClient.rpc('get_attribute_requests_by_supplier', {
+    p_supplier_token: supplierToken,
+    p_code: accessCode,
+  });
   if (error) {
     console.error('getAttributeRequestsForSupplier error:', error);
     return [];

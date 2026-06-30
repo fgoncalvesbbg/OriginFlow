@@ -33,11 +33,17 @@ export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => 
 };
 
 /**
- * Get proposals for a specific supplier
+ * Get proposals for a supplier in the access-code-verified supplier portal.
+ * Uses the get_supplier_proposals SECURITY DEFINER RPC (validates the supplier's
+ * portal token + access code); the supplier_proposals table is not readable by the
+ * anonymous portal client under RLS.
  */
-export const getSupplierProposals = async (supplierId: string): Promise<SupplierProposal[]> => {
-    if (!isLive) return [];
-    const { data, error } = await portalClient.from('supplier_proposals').select('*').eq('supplier_id', supplierId).order('created_at', { ascending: false });
+export const getSupplierProposals = async (supplierToken: string, accessCode: string): Promise<SupplierProposal[]> => {
+    if (!isLive || !supplierToken || !accessCode) return [];
+    const { data, error } = await portalClient.rpc('get_supplier_proposals', {
+        p_supplier_token: supplierToken,
+        p_code: accessCode,
+    });
     if (error) return [];
     return (data || []).map((p: any) => ({
         id: p.id,
@@ -59,7 +65,8 @@ export const getSupplierProposals = async (supplierId: string): Promise<Supplier
  * Create an enhanced supplier proposal with full RFQ structure
  */
 export const createEnhancedSupplierProposal = async (
-    supplierId: string,
+    supplierToken: string,
+    accessCode: string,
     title: string,
     description: string,
     categoryId?: string,
@@ -67,16 +74,18 @@ export const createEnhancedSupplierProposal = async (
     thumbnailUrl?: string,
     attachments?: RFQAttachment[]
 ): Promise<void> => {
-    const { error } = await portalClient.from('supplier_proposals').insert({
-        supplier_id: supplierId,
-        title,
-        description,
-        category_id: categoryId || null,
-        attributes: attributes || [],
-        thumbnail_url: thumbnailUrl || null,
-        attachments: attachments || [],
-        status: 'new',
-        created_at: new Date().toISOString()
+    // Insert via the create_supplier_proposal_secure SECURITY DEFINER RPC: it validates
+    // the supplier's portal token + access code, so the anonymous portal client never
+    // writes to the supplier_proposals table directly (which RLS would block).
+    const { error } = await portalClient.rpc('create_supplier_proposal_secure', {
+        p_supplier_token: supplierToken,
+        p_code: accessCode,
+        p_title: title,
+        p_description: description,
+        p_category_id: categoryId || '',
+        p_attributes: attributes || [],
+        p_thumbnail_url: thumbnailUrl || null,
+        p_attachments: attachments || [],
     });
     if (error) handleError(error, 'createEnhancedSupplierProposal');
 };
