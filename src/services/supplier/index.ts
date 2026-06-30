@@ -7,6 +7,7 @@ export {
   getSuppliers,
   getSupplierById,
   getSupplierByToken,
+  verifySupplierPortalAccess,
   createSupplier,
   updateSupplier,
   regenerateSupplierAccessCode,

@@ -7,7 +7,7 @@ import {
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
   logAccessCodeAttempt, getSupplierProposals, addDocumentComment,
-  getAttributeRequestsForSupplier
+  getAttributeRequestsForSupplier, verifySupplierPortalAccess
 } from '../services';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
@@ -112,7 +112,7 @@ const SupplierDashboard: React.FC = () => {
           return;
         }
 
-        if (!sup.accessCode) {
+        if (!sup.hasAccessCode) {
           setError('Portal setup incomplete. Please contact your Project Manager.');
           setLoading(false);
           return;
@@ -347,7 +347,7 @@ const SupplierDashboard: React.FC = () => {
     e.preventDefault();
     setAccessCodeError('');
 
-    if (!supplier?.accessCode) {
+    if (!supplier?.hasAccessCode || !token) {
       setAccessCodeError('Access code not configured. Please contact your Project Manager.');
       return;
     }
@@ -357,7 +357,18 @@ const SupplierDashboard: React.FC = () => {
       return;
     }
 
-    const isCorrect = enteredAccessCode === supplier.accessCode;
+    // Verify server-side: the access code is validated in the database and never
+    // exposed to the browser.
+    let verified: Supplier | undefined;
+    try {
+      verified = await verifySupplierPortalAccess(token, enteredAccessCode);
+    } catch (err: any) {
+      console.error('Access verification failed:', err);
+      setAccessCodeError('Could not verify your code. Please try again.');
+      return;
+    }
+
+    const isCorrect = !!verified;
 
     // Log the attempt (fire-and-forget with error handling)
     logAccessCodeAttempt(supplier.id, enteredAccessCode, 'unknown', isCorrect)
