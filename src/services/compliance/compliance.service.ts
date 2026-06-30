@@ -32,11 +32,18 @@ export const getComplianceRequestById = async (id: string): Promise<ComplianceRe
 };
 
 /**
- * Get all compliance requests for a specific supplier
+ * Compliance requests for a supplier in the standalone compliance portal
+ * (/compliance/supplier-portal), where the supplier authenticates with their supplier
+ * code + 6-digit portal access code. Uses the get_compliance_requests_by_supplier_code
+ * SECURITY DEFINER RPC, which validates code + access code server-side, so the data is
+ * only listed for someone who already holds the access code (no unauthenticated lookups).
  */
-export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
-    if (!isLive) return [];
-    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('supplier_id', supplierId);
+export const getComplianceRequestsBySupplierCode = async (code: string, accessCode: string): Promise<ComplianceRequest[]> => {
+    if (!isLive || !code || !accessCode) return [];
+    const { data, error } = await portalClient.rpc('get_compliance_requests_by_supplier_code', {
+        p_code: code,
+        p_access_code: accessCode,
+    });
     if (error) return [];
     return (data || []).map(mapComplianceRequest);
 };

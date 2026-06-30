@@ -1,13 +1,14 @@
 /** Supplier portal landing list of compliance requests addressed to the supplier. */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getComplianceRequestsBySupplierId, getCategories } from '../../services';
+import { getComplianceRequestsBySupplierCode, getCategories } from '../../services';
 import { ComplianceRequest, CategoryL3, ComplianceRequestStatus } from '../../types';
-import { Search, Clock, AlertCircle, CheckCircle, Loader2, Eye, Copy, Check } from 'lucide-react';
+import { Search, Clock, AlertCircle, CheckCircle, Loader2, Eye, Copy, Check, Lock } from 'lucide-react';
 
 const SupplierCompliancePortalList: React.FC = () => {
   const navigate = useNavigate();
   const [supplierId, setSupplierId] = useState('');
+  const [accessCode, setAccessCode] = useState('');
   const [requests, setRequests] = useState<ComplianceRequest[]>([]);
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -23,13 +24,20 @@ const SupplierCompliancePortalList: React.FC = () => {
       return;
     }
 
+    if (!accessCode.trim()) {
+      setError('Please enter your access code');
+      return;
+    }
+
     setError('');
     setLoading(true);
     setSearched(true);
 
     try {
-      // Fetch compliance requests for this supplier
-      const reqs = await getComplianceRequestsBySupplierId(supplierId.trim());
+      // Authenticate by supplier code + access code (validated server-side) and fetch
+      // this supplier's compliance requests. Returns nothing if the code/access code
+      // don't match, so requests are never listed without the access code.
+      const reqs = await getComplianceRequestsBySupplierCode(supplierId.trim(), accessCode.trim());
 
       // Fetch categories for mapping
       const cats = await getCategories();
@@ -44,11 +52,11 @@ const SupplierCompliancePortalList: React.FC = () => {
       setRequests(reqs);
 
       if (reqs.length === 0) {
-        setError('No TCF requests found for this Supplier ID.');
+        setError('No TCF requests found. Please check your Supplier ID and access code.');
       }
     } catch (err: any) {
       console.error('Failed to load requests:', err);
-      setError('Failed to load requests. Please check your Supplier ID and try again.');
+      setError('Failed to load requests. Please check your Supplier ID and access code and try again.');
       setRequests([]);
     } finally {
       setLoading(false);
@@ -138,9 +146,32 @@ const SupplierCompliancePortalList: React.FC = () => {
               </p>
             </div>
 
+            <div>
+              <label htmlFor="accessCode" className="block text-sm font-medium text-gray-700 mb-2">
+                Access Code
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
+                <input
+                  id="accessCode"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value)}
+                  placeholder="Your 6-digit access code"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  disabled={loading}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                The 6-digit access code from your supplier portal invitation
+              </p>
+            </div>
+
             <button
               type="submit"
-              disabled={loading || !supplierId.trim()}
+              disabled={loading || !supplierId.trim() || !accessCode.trim()}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
@@ -316,9 +347,8 @@ const SupplierCompliancePortalList: React.FC = () => {
           <h4 className="font-semibold text-gray-900 mb-3">How to complete your TCF request:</h4>
           <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700 mb-4">
             <li>Find your Supplier ID in your company information</li>
-            <li>Enter it above to see your TCF requests</li>
+            <li>Enter your Supplier ID and 6-digit access code above to see your TCF requests</li>
             <li>For <span className="font-semibold">pending requests</span>: Click "Open Request" to complete</li>
-            <li>Have your 6-digit access code ready (shown on the request card)</li>
             <li>Answer all compliance questions and submit</li>
             <li>Already submitted requests will show as "Submitted" with submission details</li>
           </ol>
