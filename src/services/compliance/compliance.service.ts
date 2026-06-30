@@ -42,6 +42,24 @@ export const getComplianceRequestsBySupplierId = async (supplierId: string): Pro
 };
 
 /**
+ * Compliance requests for the logged-in supplier portal, authorized by the
+ * supplier's portal token + access code. Uses the SECURITY DEFINER RPC so anon
+ * never reads compliance_requests (and their access codes) directly.
+ */
+export const getComplianceRequestsBySupplierToken = async (token: string, code: string): Promise<ComplianceRequest[]> => {
+    if (!isLive) return [];
+    const { data, error } = await portalClient.rpc('get_compliance_requests_by_supplier', {
+        p_supplier_token: token,
+        p_code: code,
+    });
+    if (error) {
+        console.error('getComplianceRequestsBySupplierToken error:', error);
+        return [];
+    }
+    return (data || []).map(mapComplianceRequest);
+};
+
+/**
  * Create a new compliance request
  */
 export const createComplianceRequest = async (

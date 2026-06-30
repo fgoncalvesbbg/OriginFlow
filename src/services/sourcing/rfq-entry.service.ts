@@ -11,14 +11,17 @@ import { runMutation } from '../core/db';
 /**
  * Get all RFQs available for a supplier
  */
-export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]> => {
+export const getRFQsForSupplier = async (token: string, code: string): Promise<RFQEntry[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('rfq_entries')
-        .select('*, rfqs!inner(*)')
-        .eq('supplier_id', supplierId)
-        .eq('rfqs.status', 'open');
+    const { data, error } = await portalClient.rpc('get_rfqs_for_supplier', {
+        p_supplier_token: token,
+        p_code: code,
+    });
 
-    if (error) return [];
+    if (error) {
+        console.error('getRFQsForSupplier error:', error);
+        return [];
+    }
 
     return (data || []).map((e: any) => ({
       id: e.id,
@@ -36,20 +39,19 @@ export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]
       attachments: e.attachments ?? [],
       submittedAt: e.submitted_at,
       createdAt: e.created_at,
-      supplierName: e.supplier?.name,
-      rfqTitle: e.rfqs?.title,
-      rfqIdentifier: e.rfqs?.rfq_id,
+      rfqTitle: e.rfq_title,
+      rfqIdentifier: e.rfq_identifier,
       attributeResponses: e.attribute_responses ?? []
     }));
 };
 
 /**
- * Submit an RFQ entry response from supplier
+ * Submit an RFQ entry response from a supplier, authorized by the entry's
+ * capability token. The SECURITY DEFINER RPC updates only the matching row, so
+ * anon can no longer update arbitrary entries by id.
  */
-export const submitRFQEntry = async (entryId: string, data: Partial<RFQEntry>): Promise<void> => {
-    const payload: any = {
-        status: 'submitted',
-        submitted_at: new Date().toISOString(),
+export const submitRFQEntry = async (token: string, data: Partial<RFQEntry>): Promise<void> => {
+    const payload = {
         unit_price: data.unitPrice,
         moq: data.moq,
         lead_time_weeks: data.leadTimeWeeks,
@@ -61,5 +63,5 @@ export const submitRFQEntry = async (entryId: string, data: Partial<RFQEntry>): 
         attribute_responses: data.attributeResponses ?? []
     };
 
-    await runMutation(portalClient.from('rfq_entries').update(payload).eq('id', entryId), 'submitRFQEntry');
+    await runMutation(portalClient.rpc('submit_rfq_entry_secure', { p_token: token, p_payload: payload }), 'submitRFQEntry');
 };

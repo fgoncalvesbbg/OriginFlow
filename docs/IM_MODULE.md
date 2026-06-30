@@ -318,12 +318,9 @@ The editor is a custom block-based system (`SimpleRichTextEditor`) that serializ
 - Insert Condition block
 - Insert Callout block (warning, caution, electric, info)
 - Insert Table
-- AI Translate (via Google Gemini)
 
 **Language Tabs:** en · de · fr · es · it · pt · nl · pl · zh · ja · tr · ru  
-Only languages enabled on the template are shown. New languages can be added from the Settings modal.
-
-**AI Translation:** The "Translate with AI" button sends the English HTML content to `gemini-3-flash-preview` (through a server-side proxy) with instructions to translate while preserving all HTML tags, placeholder chips, and condition elements. Requires `GEMINI_API_KEY` to be set in the server environment (see Environment Variables).
+Only languages enabled on the template are shown. New languages can be added from the Settings modal. Per-language content is authored manually.
 
 #### Settings Modal
 
@@ -496,9 +493,7 @@ Languages are stored per section in the `content` JSONB field as `{ langCode: ht
 | `tr` | Turkish |
 | `ru` | Russian |
 
-A template declares which languages it supports via the `languages: string[]` field. Only enabled languages are shown in the editor and generator.
-
-**AI Translation:** The editor calls Google Gemini (`gemini-3-flash-preview`) **via the server-side proxy** (`netlify/functions/gemini.ts`, through `src/services/ai/gemini.client.ts`) with the English HTML content, instructing the model to translate while preserving all HTML structure, `data-*` attributes, class names, and placeholder/condition elements. The API key stays on the server.
+A template declares which languages it supports via the `languages: string[]` field. Only enabled languages are shown in the editor and generator. Per-language content is authored manually in the editor's language tabs.
 
 ---
 
@@ -639,7 +634,6 @@ The uploaded PDF then appears in the project's document list like any other proj
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GEMINI_API_KEY` | Optional | Google Gemini API key for AI translation. **Server-side only** (no `VITE_` prefix) — consumed by the Netlify Function proxy (`netlify/functions/gemini.ts`), never exposed to the browser bundle. |
 | `VITE_IM_PDF_LEGACY_HTML2CANVAS` | Optional | Set to `"true"` to use the legacy html2canvas renderer instead of the iframe-based pipeline |
 
 ---
@@ -681,9 +675,7 @@ PM/Supplier → /project/:projectId/im-generator
 ```
 Admin (in Template Editor)
   → Select target language tab
-  → Click "Translate with AI"
-  → Request goes to the server-side proxy (netlify/functions/gemini.ts), which calls Google Gemini with the English HTML
-  → Translated HTML returned, preserving placeholders/conditions/tags
+  → Author the translated HTML for that language
   → Content saved on next section save (saveIMSection)
 ```
 
@@ -707,7 +699,6 @@ For each section with conditionFeatureId:
 |---------|---------|
 | `html2canvas` | Rasterize DOM sections for PDF embedding |
 | `jspdf` | Assemble rasterized pages into a PDF file |
-| `@google/genai` | Gemini API client for AI translation (used **server-side** in the Netlify proxy) |
 | `react-router-dom` | Navigation and route params |
 | `lucide-react` | UI icons throughout |
 | Supabase JS client | Database and storage operations |

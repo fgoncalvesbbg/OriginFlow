@@ -16,11 +16,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/1buDBiNMWeQPfX3MfF4WIsO
 1. Install dependencies:
    `npm install`
 2. (Optional) Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in [.env.local](.env.local) for live Supabase data
-3. (Optional) For AI features, set `GEMINI_API_KEY` — **server-side, no `VITE_` prefix**. It is read by the
-   Netlify Function proxy ([netlify/functions/gemini.ts](netlify/functions/gemini.ts)) and never shipped to the browser.
-4. Run the app:
-   - `npm start` — Vite dev server (everything except AI works)
-   - `npx netlify dev` — use this instead if you want the AI features to work locally (serves the Gemini proxy function)
+3. Run the app:
+   - `npm start` — Vite dev server
+   - `npx netlify dev` — use this if you need the server-side functions (PDF render, supplier file signed URLs), which require `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` in the environment
 
 Build with `npm run build`; run tests with `npm test`.
 

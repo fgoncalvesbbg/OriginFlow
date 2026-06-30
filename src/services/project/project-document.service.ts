@@ -79,9 +79,15 @@ export const removeDocument = async (id: string): Promise<void> => {
 };
 
 /**
- * Upload/update file for a document and create version history
+ * Upload/update file for a document and create version history.
+ *
+ * Supplier uploads (isSupplier=true) go through the SECURITY DEFINER RPC
+ * supplier_set_document_file, which validates that the document belongs to the
+ * project addressed by `projectToken` (projects.supplier_link_token). Anon no
+ * longer writes project_documents directly. PM uploads keep using the
+ * authenticated client and record version history.
  */
-export const uploadFile = async (docId: string, file: File, isSupplier: boolean): Promise<ProjectDocument> => {
+export const uploadFile = async (docId: string, file: File, isSupplier: boolean, projectToken?: string): Promise<ProjectDocument> => {
     const ext = file.name.split('.').pop() || 'bin';
     const storagePath = `project-documents/${docId}/${Date.now()}.${ext}`;
 
@@ -92,23 +98,31 @@ export const uploadFile = async (docId: string, file: File, isSupplier: boolean)
 
     const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(storagePath);
 
+    if (isSupplier) {
+        if (!projectToken) throw new Error('uploadFile: projectToken is required for supplier uploads');
+        const { data, error } = await portalClient.rpc('supplier_set_document_file', {
+            p_project_token: projectToken,
+            p_doc_id: docId,
+            p_file_url: publicUrl,
+        });
+        if (error) handleError(error, 'uploadFile');
+        const row = Array.isArray(data) ? data[0] : data;
+        return mapProjectDocument(row);
+    }
+
     const updates: Record<string, unknown> = {
         file_url: publicUrl,
-        status: isSupplier ? DocStatus.UPLOADED : DocStatus.APPROVED,
+        status: DocStatus.APPROVED,
         uploaded_at: new Date().toISOString(),
     };
-    // uploaded_by_supplier column has a DB default of false; only set explicitly when true
-    if (isSupplier) updates.uploaded_by_supplier = true;
-
-    const client = isSupplier ? portalClient : supabase;
-    const { data, error } = await client.from('project_documents').update(updates).eq('id', docId).select().single();
+    const { data, error } = await supabase.from('project_documents').update(updates).eq('id', docId).select().single();
 
     if (data) {
-        await client.from('document_versions').insert({
+        await supabase.from('document_versions').insert({
             document_id: docId,
             file_url: publicUrl,
             version_number: (data.versions?.length || 0) + 1,
-            uploaded_by_supplier: isSupplier,
+            uploaded_by_supplier: false,
             uploaded_at: new Date().toISOString()
         });
     }
@@ -118,20 +132,44 @@ export const uploadFile = async (docId: string, file: File, isSupplier: boolean)
 };
 
 /**
- * Upload a file ad-hoc, creating a new document if needed
+ * Upload a file ad-hoc, creating a new document if needed.
+ *
+ * Supplier uploads create the document via the supplier_add_adhoc_document RPC
+ * (token-scoped); PM uploads create it with the authenticated client.
  */
-export const uploadAdHocFile = async (projectId: string, step_number: number, file: File, isSupplier: boolean): Promise<ProjectDocument> => {
+export const uploadAdHocFile = async (projectId: string, step_number: number, file: File, isSupplier: boolean, projectToken?: string): Promise<ProjectDocument> => {
+    if (isSupplier) {
+        if (!projectToken) throw new Error('uploadAdHocFile: projectToken is required for supplier uploads');
+        const ext = file.name.split('.').pop() || 'bin';
+        const storagePath = `project-documents/adhoc/${Date.now()}.${ext}`;
+        const { error: storageError } = await supabase.storage
+            .from('documents')
+            .upload(storagePath, file, { upsert: true, contentType: file.type });
+        if (storageError) throw new Error(`Storage upload failed: ${storageError.message}`);
+        const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(storagePath);
+
+        const { data, error } = await portalClient.rpc('supplier_add_adhoc_document', {
+            p_project_token: projectToken,
+            p_step_number: step_number,
+            p_title: file.name,
+            p_file_url: publicUrl,
+        });
+        if (error) handleError(error, 'uploadAdHocFile');
+        const row = Array.isArray(data) ? data[0] : data;
+        return mapProjectDocument(row);
+    }
+
     const doc = await addDocument({
         projectId,
         stepNumber: step_number,
         title: file.name,
         description: 'ad-hoc',
-        responsibleParty: isSupplier ? ResponsibleParty.SUPPLIER : ResponsibleParty.INTERNAL,
+        responsibleParty: ResponsibleParty.INTERNAL,
         isVisibleToSupplier: true,
         isRequired: false,
         status: DocStatus.UPLOADED
     });
-    return uploadFile(doc.id, file, isSupplier);
+    return uploadFile(doc.id, file, false);
 };
 
 /**
@@ -160,6 +198,37 @@ export const addDocumentComment = async (docId: string, content: string, authorN
         authorName: data.author_name,
         authorRole: data.author_role,
         createdAt: data.created_at
+    };
+};
+
+/**
+ * Add a supplier comment to a document from the portal, authorized by the
+ * supplier's portal token + access code. Uses the SECURITY DEFINER RPC so anon
+ * can no longer insert/spoof comments directly.
+ */
+export const addSupplierDocumentComment = async (
+    supplierToken: string,
+    accessCode: string,
+    docId: string,
+    content: string,
+    authorName: string
+): Promise<DocumentComment> => {
+    const { data, error } = await portalClient.rpc('supplier_add_document_comment', {
+        p_supplier_token: supplierToken,
+        p_code: accessCode,
+        p_doc_id: docId,
+        p_content: content,
+        p_author_name: authorName,
+    });
+    if (error) handleError(error, 'addSupplierDocumentComment');
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+        id: row.id,
+        documentId: row.document_id,
+        content: row.content,
+        authorName: row.author_name,
+        authorRole: row.author_role,
+        createdAt: row.created_at
     };
 };
 

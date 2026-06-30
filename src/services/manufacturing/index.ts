@@ -5,6 +5,7 @@
 
 export {
   getProductionUpdates,
+  getProductionUpdatesForSupplier,
   getAllProductionUpdates,
   saveProductionUpdate
 } from './production.service';

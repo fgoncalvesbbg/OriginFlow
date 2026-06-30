@@ -12,13 +12,11 @@ import {
 import { CategoryL3, ComplianceRequirement, CategoryAttribute, FeatureConditionFields } from '../../types';
 import { getAttributesForCategory } from '../../utils';
 // Added comment above fix: Adding missing X icon to lucide-react imports
-import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, Sparkles, Loader2, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe } from 'lucide-react';
+import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe } from 'lucide-react';
 
 // Sentinel "category" id for the global requirements view — requirements stored with
 // categoryId = null apply to every category.
 const GLOBAL_VIEW = '__global__';
-import { Type } from "@google/genai";
-import { geminiGenerateContent } from "../../services/ai/gemini.client";
 
 /** Human-readable "applies if" description for a requirement's attribute condition, or null when unconditioned. */
 const describeRequirementCondition = (cond: FeatureConditionFields | null | undefined, attrs: CategoryAttribute[]): string | null => {
@@ -85,12 +83,6 @@ const ComplianceLibrary: React.FC = () => {
   
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiProductDesc, setAiProductDesc] = useState('');
-  const [isAiGenerating, setIsAiGenerating] = useState(false);
-  const [aiSuggestions, setAiSuggestions] = useState<Partial<ComplianceRequirement>[]>([]);
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
 
   const [newSectionName, setNewSectionName] = useState('');
 
@@ -244,85 +236,6 @@ const ComplianceLibrary: React.FC = () => {
       setExpandedSections(next);
   };
 
-  const handleAiGenerate = async () => {
-    if (!aiProductDesc.trim()) return;
-    setIsAiGenerating(true);
-    setAiSuggestions([]);
-
-    try {
-      const categoryName = categories.find(c => c.id === selectedCategoryForReqs)?.name || 'Unknown Category';
-
-      // Upgrade to gemini-3-pro-preview for complex regulatory reasoning
-      const response = await geminiGenerateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `Generate 5 key regulatory compliance requirements for a product in the category "${categoryName}". 
-        The product is described as: "${aiProductDesc}".
-        Consider safety standards (like IEC/EN), chemical restrictions (RoHS/REACH), and packaging rules.
-        Return a JSON array where each object has: title (string), description (string), section (string - e.g. "General", "Safety", "Chemical", "Mechanical"), isMandatory (boolean), referenceCode (string).`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                description: { type: Type.STRING },
-                section: { type: Type.STRING },
-                isMandatory: { type: Type.BOOLEAN },
-                referenceCode: { type: Type.STRING }
-              }
-            }
-          }
-        }
-      });
-
-      const jsonStr = response.text || '[]';
-      const parsed = JSON.parse(jsonStr);
-      setAiSuggestions(parsed);
-      
-      const allIndices = new Set<number>(parsed.map((_: any, i: number) => i));
-      setSelectedSuggestions(allIndices);
-
-    } catch (e: any) {
-      console.error(e);
-      showAlert('AI Error', "AI Generation failed: " + e.message);
-    } finally {
-      setIsAiGenerating(false);
-    }
-  };
-
-  const handleSaveAiSuggestions = async () => {
-    if (!selectedCategoryForReqs) return;
-    try {
-      const toSave = aiSuggestions.filter((_, i) => selectedSuggestions.has(i));
-      
-      await Promise.all(toSave.map(item => saveRequirement({
-        id: generateUUID(),
-        categoryId: selectedCategoryForReqs,
-        section: item.section || 'General',
-        title: item.title || 'New Req',
-        description: item.description || '',
-        isMandatory: item.isMandatory || false,
-        referenceCode: item.referenceCode,
-        appliesByDefault: true,
-        condition: null,
-        timingType: 'ETD',
-        timingWeeks: 0,
-        selfDeclarationAccepted: false,
-        testReportOrigin: 'third_party_mandatory'
-      })));
-
-      setIsAiModalOpen(false);
-      setAiSuggestions([]);
-      setAiProductDesc('');
-      loadData();
-    } catch (e) {
-      console.error(e);
-      showAlert('Error', "Failed to save suggestions.");
-    }
-  };
-
   // Built-in sections + user-defined ones + any already referenced by a requirement.
   // Order: built-ins first, then custom (creation order), then legacy free-text values.
   const usedSections = requirements.map(r => r.section).filter(Boolean) as string[];
@@ -468,12 +381,6 @@ const ComplianceLibrary: React.FC = () => {
                   title="Add standard template requirements"
                 >
                   <RefreshCw size={16} /> Preload Standard
-                </button>
-                <button
-                  onClick={() => setIsAiModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium shadow"
-                >
-                  <Sparkles size={16} /> AI Suggest
                 </button>
               </>
             )}
@@ -660,88 +567,6 @@ const ComplianceLibrary: React.FC = () => {
         {loading ? <div>Loading...</div> : renderRequirementsView()}
       </div>
 
-      {/* AI Suggestion Modal */}
-      {isAiModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-indigo-600 px-6 py-4 text-white flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Sparkles size={20} />
-                <h3 className="font-bold text-lg">AI Requirement Suggestion</h3>
-              </div>
-              {/* Added comment above fix: Fixing missing icon X import */}
-              <button onClick={() => setIsAiModalOpen(false)}><X size={20} /></button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto flex-1">
-              <p className="text-sm text-gray-600 mb-4">Describe the product in the <strong>{categories.find(c => c.id === selectedCategoryForReqs)?.name}</strong> category to get tailored compliance suggestions.</p>
-              
-              <div className="flex gap-2 mb-6">
-                <textarea 
-                  className="flex-1 border rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
-                  rows={3}
-                  placeholder="e.g. A battery-powered wireless kitchen scale with tempered glass top and Bluetooth connectivity."
-                  value={aiProductDesc}
-                  onChange={(e) => setAiProductDesc(e.target.value)}
-                />
-                <button 
-                  onClick={handleAiGenerate}
-                  disabled={isAiGenerating || !aiProductDesc.trim()}
-                  className="bg-indigo-600 text-white px-6 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50 flex flex-col items-center justify-center gap-1"
-                >
-                  {isAiGenerating ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
-                  <span className="text-[10px] uppercase">Analyze</span>
-                </button>
-              </div>
-
-              {aiSuggestions.length > 0 && (
-                <div className="space-y-3 animate-in slide-in-from-bottom-2">
-                  <h4 className="font-bold text-gray-700 text-sm uppercase tracking-wide">Suggested Requirements</h4>
-                  {aiSuggestions.map((suggestion, idx) => {
-                    const isSelected = selectedSuggestions.has(idx);
-                    return (
-                      <div 
-                        key={idx} 
-                        onClick={() => {
-                          const next = new Set(selectedSuggestions);
-                          if (next.has(idx)) next.delete(idx); else next.add(idx);
-                          setSelectedSuggestions(next);
-                        }}
-                        className={`p-4 rounded-xl border cursor-pointer transition-all ${isSelected ? 'bg-purple-50 border-indigo-300' : 'bg-white border-gray-200 hover:bg-light'}`}
-                      >
-                        <div className="flex justify-between items-start gap-4">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h5 className="font-bold text-primary text-sm">{suggestion.title}</h5>
-                              {suggestion.referenceCode && <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">{suggestion.referenceCode}</span>}
-                            </div>
-                            <p className="text-xs text-gray-600">{suggestion.description}</p>
-                            <div className="mt-2 text-[10px] font-bold text-indigo-600 uppercase">{suggestion.section || 'General'}</div>
-                          </div>
-                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300'}`}>
-                            {isSelected && <CheckCircle size={14} />}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 bg-light border-t flex justify-end gap-3">
-               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-gray-600">Cancel</button>
-               <button 
-                 onClick={handleSaveAiSuggestions}
-                 disabled={selectedSuggestions.size === 0}
-                 className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50"
-               >
-                 Add {selectedSuggestions.size} Selected
-               </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">

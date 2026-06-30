@@ -61,7 +61,8 @@ export const getRFQById = async (id: string): Promise<RFQ | undefined> => {
  */
 export const getRFQEntryByToken = async (token: string): Promise<{ rfq: RFQ, entry: RFQEntry } | undefined> => {
     if (!isLive) return undefined;
-    const { data: entryData, error } = await portalClient.from('rfq_entries').select('*').eq('token', token).maybeSingle();
+    const { data: entryRows, error } = await portalClient.rpc('get_rfq_entry_by_token', { p_token: token });
+    const entryData = Array.isArray(entryRows) ? entryRows[0] : entryRows;
     if (error || !entryData) {
         console.error("getRFQEntryByToken: Entry not found or error", error);
         return undefined;
@@ -89,12 +90,8 @@ export const getRFQEntryByToken = async (token: string): Promise<{ rfq: RFQ, ent
       attributeResponses: entryData.attribute_responses ?? []
     };
 
-    let { data: rfqData, error: rfqError } = await portalClient.from('rfqs').select('*, category_l3:categories_l3(name)').eq('id', entry.rfqId).maybeSingle();
-
-    if (rfqError || !rfqData) {
-        const { data: retryData } = await portalClient.from('rfqs').select('*').eq('id', entry.rfqId).maybeSingle();
-        rfqData = retryData;
-    }
+    const { data: rfqRows } = await portalClient.rpc('get_rfq_by_entry_token', { p_token: token });
+    const rfqData = Array.isArray(rfqRows) ? rfqRows[0] : rfqRows;
 
     if (!rfqData) return undefined;
 

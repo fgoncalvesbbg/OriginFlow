@@ -10,11 +10,12 @@ import { validateAttributeValue, getAttributesForCategory } from '../../utils';
 interface SubmitProposalModalProps {
   isOpen: boolean;
   onClose: () => void;
-  supplierId: string;
+  supplierToken: string;
+  accessCode: string;
   onSuccess: () => void;
 }
 
-const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClose, supplierId, onSuccess }) => {
+const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClose, supplierToken, accessCode, onSuccess }) => {
   const { success, error: showError } = useToast();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -149,7 +150,8 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
       const categoryParam = selectedCategory && selectedCategory !== '' ? selectedCategory : undefined;
 
       await createEnhancedSupplierProposal(
-        supplierId,
+        supplierToken,
+        accessCode,
         title,
         description,
         categoryParam,

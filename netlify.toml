@@ -5,8 +5,9 @@
 [build.environment]
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
 
-# Server-side functions (e.g. the Gemini proxy). Requires GEMINI_API_KEY to be set in the
-# Netlify site environment (server-only — do NOT use a VITE_ prefix).
+# Server-side functions (PDF render, supplier file signed-URL issuer). These read
+# SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY from the Netlify site environment
+# (server-only — do NOT use a VITE_ prefix).
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"

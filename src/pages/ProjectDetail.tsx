@@ -12,6 +12,7 @@ import {
   getProjectById,
   getProjectSteps,
   getProjectDocs,
+  openSignedDocument,
   getSupplierById,
   getSuppliers,
   getProfiles,
@@ -55,7 +56,6 @@ import {
   Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { ProjectAICopilot } from '../components/ProjectAICopilot';
 import AttributeInput from '../components/common/AttributeInput';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
@@ -983,8 +983,6 @@ const ProjectDetail: React.FC = () => {
         onCancel={() => setConfirmModal(prev => ({...prev, isOpen: false}))} 
       />
       
-      <ProjectAICopilot project={project} supplier={supplier} steps={steps} docs={docs} />
-
       {/* Hidden File Input */}
       <input 
         type="file" 
@@ -1401,9 +1399,9 @@ const ProjectDetail: React.FC = () => {
                           <div className="flex items-center gap-2">
                             {/* Actions */}
                             {hasFile && (
-                              <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded">
+                              <button type="button" onClick={() => doc.fileUrl && openSignedDocument(doc.fileUrl)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded">
                                 <Eye size={16} />
-                              </a>
+                              </button>
                             )}
                             
                             <button onClick={(e) => triggerUpload(e, doc.id)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" title="Upload File">
@@ -1440,9 +1438,9 @@ const ProjectDetail: React.FC = () => {
                                     <div key={v.id} className="flex justify-between items-center text-xs bg-light p-2 rounded border border-gray-100">
                                        <div className="flex items-center gap-2">
                                           <span className="font-mono bg-gray-200 px-1.5 rounded">v{v.versionNumber}</span>
-                                          <a href={v.fileUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline truncate max-w-[200px]">
+                                          <button type="button" onClick={() => openSignedDocument(v.fileUrl)} className="text-indigo-600 hover:underline truncate max-w-[200px]">
                                              View File
-                                          </a>
+                                          </button>
                                           <span className="text-gray-400">{new Date(v.uploadedAt).toLocaleString()}</span>
                                        </div>
                                        {/* Only show delete if it's not the only version or logic allows */}
@@ -2124,7 +2122,7 @@ const ProjectDetail: React.FC = () => {
             {reviewingDoc.fileUrl && (
                <div className="bg-light p-3 rounded border border-gray-200 mb-4 flex items-center justify-between">
                   <span className="text-xs font-mono text-muted truncate max-w-[200px]">{reviewingDoc.fileUrl}</span>
-                  <a href={reviewingDoc.fileUrl} target="_blank" rel="noreferrer" className="text-indigo-600 text-xs hover:underline font-bold">View File</a>
+                  <button type="button" onClick={() => reviewingDoc.fileUrl && openSignedDocument(reviewingDoc.fileUrl)} className="text-indigo-600 text-xs hover:underline font-bold">View File</button>
                </div>
             )}
 

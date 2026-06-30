@@ -35,10 +35,16 @@ export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => 
 /**
  * Get proposals for a specific supplier
  */
-export const getSupplierProposals = async (supplierId: string): Promise<SupplierProposal[]> => {
+export const getSupplierProposals = async (token: string, code: string): Promise<SupplierProposal[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('supplier_proposals').select('*').eq('supplier_id', supplierId).order('created_at', { ascending: false });
-    if (error) return [];
+    const { data, error } = await portalClient.rpc('get_supplier_proposals', {
+        p_supplier_token: token,
+        p_code: code,
+    });
+    if (error) {
+        console.error('getSupplierProposals error:', error);
+        return [];
+    }
     return (data || []).map((p: any) => ({
         id: p.id,
         supplierId: p.supplier_id,
@@ -59,7 +65,8 @@ export const getSupplierProposals = async (supplierId: string): Promise<Supplier
  * Create an enhanced supplier proposal with full RFQ structure
  */
 export const createEnhancedSupplierProposal = async (
-    supplierId: string,
+    supplierToken: string,
+    accessCode: string,
     title: string,
     description: string,
     categoryId?: string,
@@ -67,16 +74,15 @@ export const createEnhancedSupplierProposal = async (
     thumbnailUrl?: string,
     attachments?: RFQAttachment[]
 ): Promise<void> => {
-    const { error } = await portalClient.from('supplier_proposals').insert({
-        supplier_id: supplierId,
-        title,
-        description,
-        category_id: categoryId || null,
-        attributes: attributes || [],
-        thumbnail_url: thumbnailUrl || null,
-        attachments: attachments || [],
-        status: 'new',
-        created_at: new Date().toISOString()
+    const { error } = await portalClient.rpc('create_supplier_proposal_secure', {
+        p_supplier_token: supplierToken,
+        p_code: accessCode,
+        p_title: title,
+        p_description: description,
+        p_category_id: categoryId || null,
+        p_attributes: attributes || [],
+        p_thumbnail_url: thumbnailUrl || null,
+        p_attachments: attachments || [],
     });
     if (error) handleError(error, 'createEnhancedSupplierProposal');
 };

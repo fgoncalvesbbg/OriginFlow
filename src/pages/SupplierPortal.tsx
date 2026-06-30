@@ -2,7 +2,7 @@
 /** Token/code-based supplier portal entry for accessing a project's supplier workspace. */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic } from '../services';
+import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic, getPortalDocumentUrl } from '../services';
 import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload, ClipboardList, ExternalLink } from 'lucide-react';
@@ -47,7 +47,7 @@ const SupplierPortal: React.FC = () => {
         const [stepsData, docsData, attrReqsData] = await Promise.all([
           getProjectSteps(p.id),
           getProjectDocs(p.id),
-          getAttributeRequestsByProjectPublic(p.id)
+          getAttributeRequestsByProjectPublic(token)
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -80,6 +80,14 @@ const SupplierPortal: React.FC = () => {
     };
   }, [token]);
 
+  // Open a document via a short-lived signed URL (the documents bucket is private).
+  // Falls back to the stored URL while the bucket is still public.
+  const openDoc = async (doc: ProjectDocument) => {
+    if (!doc.fileUrl || !token) return;
+    const url = await getPortalDocumentUrl(doc.id, { projectToken: token, fallbackUrl: doc.fileUrl });
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const triggerUpload = (docId: string) => {
     setUploadingId(docId);
     setUploadType('standard');
@@ -103,7 +111,7 @@ const SupplierPortal: React.FC = () => {
         const file = e.target.files[0];
         if (uploadType === 'standard' && uploadingId) {
             try {
-                const updatedDoc = await uploadFile(uploadingId, file, true);
+                const updatedDoc = await uploadFile(uploadingId, file, true, token);
                 setDocs(docs.map(d => d.id === uploadingId ? updatedDoc : d));
             } catch (e) {
                 alert("Upload failed. Please try again.");
@@ -112,7 +120,7 @@ const SupplierPortal: React.FC = () => {
             }
         } else if (uploadType === 'adhoc' && project) {
             try {
-                const newDoc = await uploadAdHocFile(project.id, adHocStepNumber, file, true);
+                const newDoc = await uploadAdHocFile(project.id, adHocStepNumber, file, true, token);
                 setDocs([...docs, newDoc]);
             } catch (e) {
                 alert("Upload failed. Please try again.");
@@ -223,7 +231,7 @@ const SupplierPortal: React.FC = () => {
                                    <p className="text-sm font-bold">Document Approved</p>
                                    <p className="text-xs opacity-80 mt-1">No further changes allowed.</p>
                                    {doc.fileUrl && (
-                                     <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-emerald-700 underline">Download</a>
+                                     <button type="button" onClick={() => openDoc(doc)} className="mt-2 inline-block text-xs text-emerald-700 underline">Download</button>
                                    )}
                                 </div>
                               ) : doc.fileUrl && !isRejected ? (
@@ -244,9 +252,9 @@ const SupplierPortal: React.FC = () => {
                                      </label>
                                    )}
                                    {isAdHoc && (
-                                      <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="block w-full text-center py-2 px-4 border border-gray-300 rounded bg-white hover:bg-light text-sm transition-colors">
+                                      <button type="button" onClick={() => openDoc(doc)} className="block w-full text-center py-2 px-4 border border-gray-300 rounded bg-white hover:bg-light text-sm transition-colors">
                                         View File
-                                      </a>
+                                      </button>
                                    )}
                                 </div>
                               ) : (
@@ -273,7 +281,7 @@ const SupplierPortal: React.FC = () => {
                               <p className="text-sm">Internal Document</p>
                               <p className="text-xs opacity-70">(View Only)</p>
                               {doc.fileUrl && (
-                                <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-indigo-600 hover:underline">Download</a>
+                                <button type="button" onClick={() => openDoc(doc)} className="mt-2 inline-block text-xs text-indigo-600 hover:underline">Download</button>
                               )}
                             </div>
                           )}

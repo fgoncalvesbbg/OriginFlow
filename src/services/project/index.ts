@@ -29,6 +29,7 @@ export {
   uploadAdHocFile,
   deleteDocumentVersion,
   addDocumentComment,
+  addSupplierDocumentComment,
   getMissingDocumentsForSupplier
 } from './project-document.service';
 

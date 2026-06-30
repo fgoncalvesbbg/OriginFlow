@@ -4,9 +4,8 @@
  */
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { ProjectAttributeRequest, ProjectOverallStatus } from '../../types';
+import { ProjectAttributeRequest } from '../../types';
 import { generateUUID } from '../../utils';
-import { getProjectsBySupplierId } from './project.service';
 
 type SubmittedValue = { attributeId: string; name: string; value: string; type?: string };
 
@@ -83,14 +82,15 @@ export const getAttributeRequestsByProject = async (projectId: string): Promise<
   return (data || []).map(map);
 };
 
-export const getAttributeRequestsByProjectPublic = async (projectId: string): Promise<ProjectAttributeRequest[]> => {
+/**
+ * Attribute-data requests for a project, addressed by the project portal token
+ * (projects.supplier_link_token). Uses the SECURITY DEFINER RPC so anon never
+ * reads the project_attribute_requests table directly.
+ */
+export const getAttributeRequestsByProjectPublic = async (projectToken: string): Promise<ProjectAttributeRequest[]> => {
   if (!isLive) return [];
   const { data, error } = await portalClient
-    .from('project_attribute_requests')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('step', { ascending: true })
-    .order('created_at', { ascending: true });
+    .rpc('get_attribute_requests_by_project_token', { p_project_token: projectToken });
   if (error) {
     console.error('getAttributeRequestsByProjectPublic error:', error);
     return [];
@@ -102,18 +102,10 @@ export const getAttributeRequestsByProjectPublic = async (projectId: string): Pr
  * All attribute-data requests across a supplier's active projects, for the logged-in
  * supplier dashboard. Uses portalClient (token/access-code context, no Supabase auth).
  */
-export const getAttributeRequestsForSupplier = async (supplierId: string): Promise<ProjectAttributeRequest[]> => {
+export const getAttributeRequestsForSupplier = async (token: string, code: string): Promise<ProjectAttributeRequest[]> => {
   if (!isLive) return [];
-  const projects = await getProjectsBySupplierId(supplierId);
-  const activeProjects = projects.filter(p => p.status !== ProjectOverallStatus.ARCHIVED && p.status !== ProjectOverallStatus.CANCELLED && p.status !== ProjectOverallStatus.COMPLETED);
-  if (activeProjects.length === 0) return [];
-
-  const projectIds = activeProjects.map(p => p.id);
   const { data, error } = await portalClient
-    .from('project_attribute_requests')
-    .select('*')
-    .in('project_id', projectIds)
-    .order('created_at', { ascending: false });
+    .rpc('get_attribute_requests_by_supplier', { p_supplier_token: token, p_code: code });
   if (error) {
     console.error('getAttributeRequestsForSupplier error:', error);
     return [];
@@ -124,12 +116,13 @@ export const getAttributeRequestsForSupplier = async (supplierId: string): Promi
 export const getAttributeRequestByToken = async (token: string): Promise<ProjectAttributeRequest | null> => {
   if (!isLive) return null;
   const { data, error } = await portalClient
-    .from('project_attribute_requests')
-    .select('*')
-    .eq('token', token)
-    .single();
-  if (error || !data) return null;
-  return map(data);
+    .rpc('get_attribute_request_by_token', { p_token: token });
+  if (error) {
+    console.error('getAttributeRequestByToken error:', error);
+    return null;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? map(row) : null;
 };
 
 export const deleteAttributeRequest = async (id: string): Promise<void> => {
@@ -163,9 +156,7 @@ export const updateAttributeRequestData = async (id: string, submittedData: Subm
 export const submitAttributeRequest = async (token: string, submittedData: SubmittedValue[]): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
   const { error } = await portalClient
-    .from('project_attribute_requests')
-    .update({ status: 'submitted', submitted_data: submittedData, submitted_at: new Date().toISOString() })
-    .eq('token', token);
+    .rpc('submit_attribute_request_secure', { p_token: token, p_data: submittedData });
   if (error) {
     console.error('submitAttributeRequest error:', error);
     throw new Error(error.message || 'Failed to submit');

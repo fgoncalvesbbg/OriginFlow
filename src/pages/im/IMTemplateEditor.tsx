@@ -9,11 +9,10 @@ import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Sparkles, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
-import { geminiGenerateContent } from "../../services/ai/gemini.client";
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
@@ -68,7 +67,6 @@ const IMTemplateEditor: React.FC = () => {
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const [categoryAttributes, setCategoryAttributes] = useState<CategoryAttribute[]>([]);
-  const [isTranslating, setIsTranslating] = useState(false);
 
   const [activeSidebarTab, setActiveSidebarTab] = useState<'structure' | 'assets'>('structure');
   const [assets, setAssets] = useState<string[]>([]);
@@ -778,50 +776,6 @@ const IMTemplateEditor: React.FC = () => {
       }
   };
 
-  const handleAiTranslate = async () => {
-    if (activeLang === 'en') return;
-    const section = sections.find(s => s.id === selectedSectionId);
-    if (!section) return;
-    const englishContent = section.content['en'];
-    const hasContent = !!(englishContent && englishContent.trim());
-    // Allow translating placeholder sections too — they may have no content but still
-    // need their title localized. Only block when there's nothing at all to translate.
-    if (!hasContent && !section.title?.trim()) { alert("Please add an English title or content first."); return; }
-    setIsTranslating(true);
-    try {
-      const targetLangLabel = ALL_LANGUAGES.find(l => l.code === activeLang)?.label || activeLang;
-
-      // Translate the section title (plain text) so titles localize alongside content.
-      if (section.title?.trim()) {
-        const titleResp = await geminiGenerateContent({
-          model: 'gemini-3-flash-preview',
-          contents: { parts: [{ text: `Translate this short UI section title to ${targetLangLabel}. Return ONLY the translated text, no quotes or extra words. Title: ${section.title}` }] },
-        });
-        const translatedTitle = titleResp.text?.trim().replace(/^["']|["']$/g, '') || '';
-        if (translatedTitle) {
-          updateCurrentSection({ titleI18n: { ...(section.titleI18n ?? {}), [activeLang]: translatedTitle } });
-        }
-      }
-
-      // Translate the body HTML when present.
-      if (hasContent) {
-        const response = await geminiGenerateContent({
-          model: 'gemini-3-flash-preview',
-          contents: {
-            parts: [{ text: `Translate HTML to ${targetLangLabel}. Preserve HTML tags, classes, styles, bullet points, and placeholder spans exactly. Content: ${englishContent}` }]
-          }
-        });
-        const cleanText = response.text?.trim().replace(/^```html/, '').replace(/^```/, '').replace(/```$/, '') || '';
-        updateContent(cleanText);
-      }
-    } catch (e: any) {
-      alert("AI Translation failed: " + (e.message || e.toString()));
-    } finally {
-      setIsTranslating(false);
-    }
-  };
-
-
   const handleSectionLayoutChange = async (sectionId: string, layout: IMMasterLayoutName) => {
     if (!template) return;
 
@@ -1027,12 +981,6 @@ const IMTemplateEditor: React.FC = () => {
                            <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-muted hover:text-gray-700'}`}>{lang.label}</button>
                            ))}
                         </div>
-                        {activeLang !== 'en' && (
-                           <button onClick={handleAiTranslate} disabled={isTranslating} className="flex items-center gap-1.5 text-xs bg-purple-100 text-purple-700 px-3 py-1.5 rounded-md hover:bg-purple-200 font-medium transition-colors mr-2 disabled:opacity-60">
-                              {isTranslating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                              {isTranslating ? 'Translating...' : 'AI Translate'}
-                           </button>
-                        )}
                      </div>
 
                      {/* Row composer */}

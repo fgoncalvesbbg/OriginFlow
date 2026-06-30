@@ -7,6 +7,9 @@
 export { supabase, portalClient } from './core/supabase.client';
 export { isLive } from '../config/environment.config';
 
+// Storage (private-bucket signed URLs)
+export { getPortalDocumentUrl, getSignedDocumentUrl, openSignedDocument } from './storage/signed-url.service';
+
 // Auth module
 export {
   login,
@@ -38,6 +41,7 @@ export {
   uploadAdHocFile,
   deleteDocumentVersion,
   addDocumentComment,
+  addSupplierDocumentComment,
   getMissingDocumentsForSupplier,
   createAttributeRequest,
   getAttributeRequestsByProject,
@@ -67,6 +71,7 @@ export {
   getSuppliers,
   getSupplierById,
   getSupplierByToken,
+  verifySupplierAccessCode,
   createSupplier,
   updateSupplier,
   ensureSupplierToken,
@@ -80,6 +85,7 @@ export {
 // Manufacturing module
 export {
   getProductionUpdates,
+  getProductionUpdatesForSupplier,
   getAllProductionUpdates,
   saveProductionUpdate
 } from './manufacturing';
@@ -98,6 +104,7 @@ export {
   getComplianceRequests,
   getComplianceRequestById,
   getComplianceRequestsBySupplierId,
+  getComplianceRequestsBySupplierToken,
   createComplianceRequest,
   verifySupplierAccess,
   submitComplianceResponseSecure,

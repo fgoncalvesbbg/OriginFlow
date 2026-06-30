@@ -142,7 +142,7 @@ const SupplierRFQPortal: React.FC = () => {
               }))
               .filter(r => r.proposedValue !== '');
 
-          await submitRFQEntry(entry.id, {
+          await submitRFQEntry(token!, {
               unitPrice: parseFloat(formData.unitPrice),
               moq: formData.moq ? parseInt(formData.moq) : undefined,
               leadTimeWeeks: formData.leadTimeWeeks ? parseInt(formData.leadTimeWeeks) : undefined,

@@ -34,13 +34,41 @@ export const getSupplierById = async (id: string): Promise<Supplier | undefined>
 };
 
 /**
- * Get supplier by portal token
+ * Get supplier by portal token (public portal bootstrap).
+ *
+ * Uses the SECURITY DEFINER RPC get_supplier_by_token_safe, which returns
+ * non-secret fields only. The access code is intentionally NOT returned to the
+ * browser — use verifySupplierAccessCode() to validate it server-side.
  */
 export const getSupplierByToken = async (token: string): Promise<Supplier | undefined> => {
     if (!isLive) return undefined;
-    const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle();
-    if (error) return undefined;
-    return data ? mapSupplier(data) : undefined;
+    const { data, error } = await portalClient.rpc('get_supplier_by_token_safe', { p_token: token });
+    if (error) {
+        console.error('getSupplierByToken failed', error);
+        return undefined;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) return undefined;
+    return { ...mapSupplier(row), hasAccessCode: !!row.has_access_code };
+};
+
+/**
+ * Verify a supplier's portal access code server-side.
+ *
+ * Calls verify_supplier_access (SECURITY DEFINER), which compares token + code in
+ * the database and returns the supplier's safe fields only on a match. Returns
+ * undefined for an incorrect code. The code never reaches the client for comparison.
+ */
+export const verifySupplierAccessCode = async (token: string, code: string): Promise<Supplier | undefined> => {
+    if (!isLive) return undefined;
+    const { data, error } = await portalClient.rpc('verify_supplier_access', { p_token: token, p_code: code });
+    if (error) {
+        console.error('verifySupplierAccessCode failed', error);
+        return undefined;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) return undefined;
+    return { ...mapSupplier(row), hasAccessCode: true };
 };
 
 /**
