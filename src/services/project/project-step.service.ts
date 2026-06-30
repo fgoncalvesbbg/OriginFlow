@@ -7,6 +7,7 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ProjectStep, StepStatus } from '../../types';
 import { mapProjectStep } from '../../utils/mappers.utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all steps for a project
@@ -22,5 +23,5 @@ export const getProjectSteps = async (projectId: string): Promise<ProjectStep[]>
  * Update the status of a project step
  */
 export const updateStepStatus = async (stepId: string, status: StepStatus): Promise<void> => {
-    await supabase.from('project_steps').update({ status }).eq('id', stepId);
+    await runMutation(supabase.from('project_steps').update({ status }).eq('id', stepId), 'updateStepStatus');
 };

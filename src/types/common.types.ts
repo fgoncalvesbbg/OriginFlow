@@ -26,6 +26,8 @@ export interface Supplier {
   assignedPMNames?: string[];
   portalToken?: string;
   accessCode?: string;
+  /** True when the supplier has an access code configured. Set by the portal's safe token lookup, which never exposes the code itself. */
+  hasAccessCode?: boolean;
 }
 
 export interface DeadlineItem {

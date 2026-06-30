@@ -1,9 +1,14 @@
 
+/**
+ * Auth context: tracks the Supabase session and current user profile, exposes useAuth(), and
+ * subscribes to auth-state changes for the app.
+ */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
-import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services/apiService';
+import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services';
 import { supabase } from '../services/core/supabase.client';
 import { isLive } from '../config/environment.config';
+import { isPortalRoute } from '../config/routes.config';
 
 interface AuthContextType {
   user: User | null;
@@ -58,10 +63,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const initializeAuth = async () => {
       // Determine if we are on a public portal route
-      const isPortal = window.location.hash.includes('/supplier/') || 
-                       window.location.hash.includes('/compliance/supplier/') ||
-                       window.location.hash.includes('/sourcing/supplier/') ||
-                       window.location.hash.includes('/supplier-dashboard/');
+      const isPortal = isPortalRoute();
 
       try {
         // If on portal, we bypass session fetching to avoid Lock conflicts

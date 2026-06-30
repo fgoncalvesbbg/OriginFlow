@@ -12,7 +12,6 @@ export {
   login,
   signUp,
   logout,
-  getSessionUser,
   getProfiles,
   getUserProfile,
   updateUserRole
@@ -23,7 +22,6 @@ export {
   getProjects,
   getProjectById,
   getProjectByToken,
-  getProjectsBySupplierId,
   getProjectsBySupplierToken,
   createProject,
   updateProject,
@@ -39,23 +37,45 @@ export {
   uploadFile,
   uploadAdHocFile,
   deleteDocumentVersion,
-  getDocumentComments,
   addDocumentComment,
-  getMissingDocumentsForSupplier
+  getMissingDocumentsForSupplier,
+  createAttributeRequest,
+  getAttributeRequestsByProject,
+  getAttributeRequestsByProjectPublic,
+  getAttributeRequestsForSupplier,
+  getAttributeRequestByToken,
+  submitAttributeRequest,
+  updateAttributeRequestData,
+  deleteAttributeRequest,
+  MAX_SKUS_PER_PROJECT,
+  getProjectSkus,
+  createProjectSku,
+  updateProjectSku,
+  deleteProjectSku,
+  getEffectiveSkuValue,
+  collapseSkuAttributeValues,
+  getSkusByCategory,
+  getFlagsForSkus,
+  upsertSkuAttributeFlag,
+  setSkuAttributeFlagResolved,
+  deleteSkuAttributeFlag
 } from './project';
+export type { CategorySku } from './project';
 
 // Supplier module
 export {
   getSuppliers,
   getSupplierById,
   getSupplierByToken,
+  verifySupplierPortalAccess,
   createSupplier,
   updateSupplier,
   ensureSupplierToken,
   assignSupplierToPMs,
   getSupplierPMs,
   reassignProjectPM,
-  regenerateSupplierAccessCode
+  regenerateSupplierAccessCode,
+  logAccessCodeAttempt
 } from './supplier';
 
 // Manufacturing module
@@ -71,17 +91,13 @@ export {
   getNotifications,
   getSupplierNotifications,
   markNotificationRead,
-  triggerEmailNotification,
-  logAccessCodeAttempt,
-  getDocumentComments as getSharedDocumentComments,
-  addDocumentComment as addSharedDocumentComment
+  triggerEmailNotification
 } from './shared';
 
 // Compliance module
 export {
   getComplianceRequests,
   getComplianceRequestById,
-  getComplianceRequestByToken,
   getComplianceRequestsBySupplierId,
   createComplianceRequest,
   verifySupplierAccess,
@@ -90,20 +106,25 @@ export {
   deleteComplianceRequest,
   checkComplianceDeadlines,
   getCategories,
-  createCategory,
   saveCategory,
   deleteCategory,
-  getProductFeatures,
-  saveProductFeature,
-  deleteProductFeature,
+  assignPMToCategory,
   getComplianceRequirements,
   saveRequirement,
   deleteRequirement,
   addStandardRequirements,
+  getComplianceSections,
+  addComplianceSection,
+  deleteComplianceSection,
   getCategoryAttributes,
   saveCategoryAttribute,
   deleteCategoryAttribute,
-  COMPLIANCE_SECTIONS
+  assignAttributeToCategory,
+  unassignAttributeFromCategory,
+  makeAttributeGlobal,
+  COMPLIANCE_SECTIONS,
+  ATTRIBUTE_GROUPS,
+  PREDEFINED_ATTRIBUTE_GROUPS
 } from './compliance';
 
 // IM module
@@ -118,7 +139,35 @@ export {
   deleteIMSection,
   getProjectIM,
   saveProjectIM,
-  deleteProjectIM
+  deleteProjectIM,
+  getAllProjectIMs,
+  getIMBlocks,
+  saveIMBlock,
+  deleteIMBlock,
+  getIMBlockUsageCounts,
+  BlockInUseError,
+  resolveManual,
+  publishResolvedManuals,
+  normalizeResolverData,
+  getPublishedManifestUrl,
+  getStaleProjectIMDetails,
+  getProjectIMStaleReasons,
+  republishProjectIM,
+  stalenessKey,
+  requestPrintPdf,
+  getPrintPdfUrl,
+  getPrintRenders,
+  isPrintExportAvailable
+} from './im';
+export type {
+  PublishResult,
+  StaleReason,
+  StaleManual,
+  RequestPrintPdfParams,
+  PrintPdfResult,
+  PrintCoverInput,
+  PrintBackInput,
+  PrintRender
 } from './im';
 
 // Sourcing module
@@ -133,7 +182,6 @@ export {
   submitRFQEntry,
   getAllSupplierProposals,
   getSupplierProposals,
-  createSupplierProposal,
   createEnhancedSupplierProposal,
   convertProposalToRFQ
 } from './sourcing';

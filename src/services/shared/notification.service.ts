@@ -6,6 +6,7 @@
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { Notification } from '../../types';
+import { runMutation } from '../core/db';
 
 /**
  * Get all notifications for the current user
@@ -53,7 +54,7 @@ export const getSupplierNotifications = async (supplierId: string): Promise<Noti
  * Mark a notification as read
  */
 export const markNotificationRead = async (id: string): Promise<void> => {
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    await runMutation(supabase.from('notifications').update({ is_read: true }).eq('id', id), 'markNotificationRead');
 };
 
 /**
@@ -72,6 +73,7 @@ export const upsertSupplierNotification = async (payload: {
         .select('id')
         .eq('supplier_id', payload.supplierId)
         .eq('link', payload.link)
+        .limit(1)
         .maybeSingle();
 
     if (findError) {
@@ -93,7 +95,6 @@ export const upsertSupplierNotification = async (payload: {
     }
 
     const { error: insertError } = await supabase.from('notifications').insert({
-        user_id: payload.supplierId,
         supplier_id: payload.supplierId,
         message: payload.message,
         link: payload.link,

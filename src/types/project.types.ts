@@ -26,6 +26,7 @@ export interface Project {
   createdBy?: string;
   currentStep: number;
   status: ProjectOverallStatus;
+  categoryId?: string | null;
   milestones?: ProjectMilestones;
   supplierLinkToken?: string;
   createdAt: string;
@@ -83,6 +84,59 @@ export interface ProjectDocument {
   uploadedAt?: string;
   versions?: DocVersion[];
   supplierComment?: string;
+}
+
+export interface ProjectAttributeRequest {
+  id: string;
+  projectId: string;
+  projectIdCode: string;
+  categoryId: string | null;
+  projectName: string;
+  categoryName: string;
+  token: string;
+  step: 2 | 3;
+  skuNumber: string;
+  skuTitle: string;
+  status: 'pending' | 'submitted';
+  submittedData?: Array<{ attributeId: string; name: string; value: string; type?: string }> | null;
+  note?: string | null;
+  createdAt: string;
+  submittedAt?: string | null;
+}
+
+export interface SkuAttributeValue {
+  attributeId: string;
+  name: string;
+  value: string;
+  type?: string;
+}
+
+export interface ProjectSku {
+  id: string;
+  projectId: string;
+  skuNumber: string;
+  skuTitle: string;
+  attributeValues: SkuAttributeValue[];
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A review flag on a single (SKU, attribute) cell in the Attribute Viewer. One flag per cell;
+ * re-flagging updates the existing row. Flags are resolved rather than deleted to keep the trail.
+ */
+export interface SkuAttributeFlag {
+  id: string;
+  projectSkuId: string;
+  attributeId: string;
+  status: 'open' | 'resolved';
+  comment: string;
+  flaggedBy: string | null;
+  flaggedByName: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
 }
 
 export interface DocumentComment {

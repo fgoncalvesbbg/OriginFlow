@@ -1,4 +1,5 @@
 
+/** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject } from '../services';
@@ -7,6 +8,7 @@ import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
 import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useRefetchOnFocus } from '../hooks';
 
 const PMDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -35,7 +37,7 @@ const PMDashboard: React.FC = () => {
       ]);
       setProjects(pData);
       setSuppliers(sData);
-      setStats(statsData as any);
+      setStats(statsData);
     } catch (e: any) {
       console.error("Failed to load dashboard data", e);
       setErrorMsg(e.message || "Failed to load data.");
@@ -43,6 +45,8 @@ const PMDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(loadData);
 
   const filteredProjects = projects.filter(p => {
     if (!showArchived && p.status === ProjectOverallStatus.ARCHIVED) return false;

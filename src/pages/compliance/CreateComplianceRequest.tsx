@@ -1,9 +1,16 @@
+/** Form page for creating a new compliance request for a supplier/category. */
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getProjects, getSuppliers, getCategories, getProductFeatures, createComplianceRequest } from '../../services';
-import { Project, Supplier, CategoryL3, ProductFeature } from '../../types';
-import { AlertCircle, ArrowLeft, Loader2, Lock } from 'lucide-react';
+import {
+  getProjects, getSuppliers, getCategories, createComplianceRequest,
+  getComplianceRequirements, getCategoryAttributes,
+  getProjectSkus, getAttributeRequestsByProject, getEffectiveSkuValue,
+} from '../../services';
+import { Project, Supplier, CategoryL3, ComplianceRequirement, CategoryAttribute } from '../../types';
+import { getAttributesForCategory } from '../../utils';
+import AttributeInput from '../../components/common/AttributeInput';
+import { AlertCircle, ArrowLeft, Loader2, Lock, GitBranch } from 'lucide-react';
 
 const CreateComplianceRequest: React.FC = () => {
   const navigate = useNavigate();
@@ -13,10 +20,16 @@ const CreateComplianceRequest: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<CategoryL3[]>([]);
-  const [features, setFeatures] = useState<ProductFeature[]>([]);
+  const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
+  const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
+  // Attribute values captured to evaluate requirement conditions for this request.
+  const [condValues, setCondValues] = useState<Record<string, string>>({});
+  const [prefilledAttrIds, setPrefilledAttrIds] = useState<Set<string>>(new Set());
+  const [loadingConditions, setLoadingConditions] = useState(false);
+
   // Form State
   const [selectedProjectId, setSelectedProjectId] = useState(searchParams.get('projectId') || '');
   const [projectName, setProjectName] = useState('');
@@ -24,7 +37,6 @@ const CreateComplianceRequest: React.FC = () => {
   const [supplierId, setSupplierId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [deadline, setDeadline] = useState('');
-  const [featureValues, setFeatureValues] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -33,22 +45,19 @@ const CreateComplianceRequest: React.FC = () => {
         setLoading(true);
         // Load data in parallel. We wrap each in a catch to log errors but ideally allow others to succeed if possible,
         // though for this form most are critical.
-        const [pData, sData, cData, fData] = await Promise.all([
-           getProjects(), 
-           getSuppliers(), 
-           getCategories(), 
-           getProductFeatures()
+        const [pData, sData, cData, rData, aData] = await Promise.all([
+           getProjects(),
+           getSuppliers(),
+           getCategories(),
+           getComplianceRequirements(),
+           getCategoryAttributes(),
         ]);
-        
+
         setProjects(pData);
         setSuppliers(sData);
         setCategories(cData);
-        setFeatures(fData);
-        
-        // Init feature checkboxes
-        const initialFeats: Record<string, boolean> = {};
-        fData.forEach(feat => initialFeats[feat.id] = false);
-        setFeatureValues(initialFeats);
+        setRequirements(rData);
+        setAttributes(aData);
 
       } catch (err: any) {
         console.error("Critical load error", err);
@@ -74,6 +83,57 @@ const CreateComplianceRequest: React.FC = () => {
     }
   }, [projects, searchParams, selectedProjectId]); // Depend on projects loading
 
+  // ---------------------------------------------------------------------------
+  // Conditional requirements — which attributes must be known to gate them
+  // ---------------------------------------------------------------------------
+  const categoryReqs = requirements.filter(r =>
+    (r.categoryId == null || r.categoryId === categoryId) && r.condition && (r.condition.requires_feature || r.condition.requires_feature_absent));
+  const condAttrIds = Array.from(new Set(
+    categoryReqs.flatMap(r => [r.condition!.requires_feature, r.condition!.requires_feature_absent].filter(Boolean) as string[])
+  ));
+  // Attributes referenced by a "present" condition must have a value supplied; an
+  // "absent"-only attribute is fine left blank (blank IS the meaningful state).
+  const requiredAttrIds = new Set(categoryReqs.map(r => r.condition!.requires_feature).filter(Boolean) as string[]);
+  const condAttrs = condAttrIds
+    .map(id => attributes.find(a => a.id === id))
+    .filter((a): a is CategoryAttribute => !!a);
+  const missingRequired = Array.from(requiredAttrIds).some(id => !(condValues[id]?.trim()));
+
+  // Prefill condition attributes from existing project SKU / attribute-request data.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const reqs = requirements.filter(r =>
+        (r.categoryId == null || r.categoryId === categoryId) && r.condition && (r.condition.requires_feature || r.condition.requires_feature_absent));
+      const ids = Array.from(new Set(
+        reqs.flatMap(r => [r.condition!.requires_feature, r.condition!.requires_feature_absent].filter(Boolean) as string[])
+      ));
+      if (!categoryId || ids.length === 0 || !selectedProjectId) {
+        if (!cancelled) { setCondValues({}); setPrefilledAttrIds(new Set()); }
+        return;
+      }
+      setLoadingConditions(true);
+      try {
+        const [skus, attrReqs] = await Promise.all([
+          getProjectSkus(selectedProjectId),
+          getAttributeRequestsByProject(selectedProjectId),
+        ]);
+        const prefill: Record<string, string> = {};
+        const prefilled = new Set<string>();
+        for (const attrId of ids) {
+          // Only auto-prefill when every SKU agrees on a single value.
+          const vals = Array.from(new Set(skus.map(s => getEffectiveSkuValue(s, attrReqs, attrId)).filter(v => v && v.trim())));
+          if (vals.length === 1) { prefill[attrId] = vals[0]; prefilled.add(attrId); }
+        }
+        if (!cancelled) { setCondValues(prefill); setPrefilledAttrIds(prefilled); }
+      } finally {
+        if (!cancelled) setLoadingConditions(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [categoryId, selectedProjectId, requirements]);
+
   const handleProjectSelect = (pid: string) => {
     setSelectedProjectId(pid);
     const proj = projects.find(p => p.id === pid);
@@ -89,28 +149,18 @@ const CreateComplianceRequest: React.FC = () => {
     }
   };
 
-  const handleCategoryChange = (newCatId: string) => {
-      setCategoryId(newCatId);
-      // Reset features for new category
-      const initialFeats: Record<string, boolean> = {};
-      features.forEach(feat => initialFeats[feat.id] = false);
-      setFeatureValues(initialFeats);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (missingRequired) {
+        alert('Please provide values for the required product attributes before creating the request.');
+        return;
+    }
     setSubmitting(true);
-    
+
     try {
-        const featureList = Object.entries(featureValues)
-           .filter(([fid, val]) => val && features.find(f => f.id === fid)?.categoryId === categoryId)
-           .map(([featureId, value]) => ({ 
-              featureId, 
-              value: value as boolean 
-           }));
-        
-        // Ensure optional string fields are passed as undefined or handled by API service
-        await createComplianceRequest(selectedProjectId, projectName, requestId, supplierId, categoryId, featureList, deadline || undefined);
+        const conditionAttributes: Record<string, string> = {};
+        condAttrIds.forEach(id => { if (condValues[id]?.trim()) conditionAttributes[id] = condValues[id].trim(); });
+        await createComplianceRequest(selectedProjectId, projectName, requestId, supplierId, categoryId, [], deadline || undefined, conditionAttributes);
         
         if (selectedProjectId) {
            navigate(`/project/${selectedProjectId}`);
@@ -125,8 +175,6 @@ const CreateComplianceRequest: React.FC = () => {
         setSubmitting(false);
     }
   };
-
-  const availableFeatures = features.filter(f => f.categoryId === categoryId);
 
   if (loading) return (
       <Layout>
@@ -198,12 +246,12 @@ const CreateComplianceRequest: React.FC = () => {
              </div>
 
              <div>
-               <label className="block text-sm font-medium text-gray-700 mb-1">Product Category (TCF Template)</label>
-               <select required className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={categoryId} onChange={e => handleCategoryChange(e.target.value)}>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Product Category</label>
+               <select required className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={categoryId} onChange={e => setCategoryId(e.target.value)}>
                  <option value="">Select Category</option>
                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                </select>
-               {categories.length === 0 && <p className="text-xs text-red-500 mt-1">No categories found. Please create one in Admin/Compliance Library.</p>}
+               {categories.length === 0 && <p className="text-xs text-red-500 mt-1">No categories found. Please create one in Admin.</p>}
              </div>
 
              <div>
@@ -217,35 +265,53 @@ const CreateComplianceRequest: React.FC = () => {
              </div>
           </div>
 
-          {categoryId && (
-            <div className="border-t border-gray-100 pt-4 animate-in fade-in">
-              <h3 className="font-semibold text-gray-800 mb-3">Product Features</h3>
-              <p className="text-xs text-muted mb-3">Select features to automatically filter relevant compliance requirements.</p>
-              {availableFeatures.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {availableFeatures.map(feat => (
-                      <label key={feat.id} className="flex items-center p-3 border border-gray-200 rounded-xl hover:bg-light cursor-pointer transition-colors select-none group">
-                        <div className="relative flex items-center">
-                           <input 
-                              type="checkbox" 
-                              className="h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
-                              checked={featureValues[feat.id] || false}
-                              onChange={e => setFeatureValues({...featureValues, [feat.id]: e.target.checked})}
-                           />
-                        </div>
-                        <span className="ml-3 text-sm text-gray-700 group-hover:text-indigo-700 font-medium">{feat.name}</span>
-                      </label>
-                    ))}
-                  </div>
-              ) : (
-                  <div className="text-sm text-gray-400 italic border border-dashed border-gray-200 p-4 rounded text-center">No configurable features available for this category.</div>
-              )}
+          {/* Product attributes needed to decide which conditional requirements apply */}
+          {categoryId && condAttrs.length > 0 && (
+            <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-5 space-y-4">
+              <div className="flex items-start gap-2">
+                <GitBranch size={18} className="text-indigo-600 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-bold text-sm text-gray-800">Product Attributes</h3>
+                  <p className="text-xs text-gray-600">Some requirements in this category only apply under certain attribute values. Confirm or fill these so we include the right requirements. Values found on the project are prefilled.</p>
+                </div>
+                {loadingConditions && <Loader2 size={16} className="animate-spin text-indigo-500 ml-auto" />}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {condAttrs.map(attr => {
+                  const required = requiredAttrIds.has(attr.id);
+                  const prefilled = prefilledAttrIds.has(attr.id);
+                  const isNumeric = attr.dataType === 'integer' || attr.dataType === 'decimal';
+                  const missing = required && !(condValues[attr.id]?.trim());
+                  return (
+                    <div key={attr.id}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <label className="block text-sm font-medium text-gray-700">{attr.name}</label>
+                        {required
+                          ? <span className="text-[10px] font-bold text-rose-600 uppercase">Required</span>
+                          : <span className="text-[10px] font-bold text-gray-400 uppercase">Optional</span>}
+                        {prefilled && <span className="text-[10px] font-bold text-emerald-600 uppercase">Prefilled</span>}
+                      </div>
+                      <AttributeInput
+                        attribute={attr}
+                        value={condValues[attr.id] ?? ''}
+                        onChange={v => setCondValues(prev => ({ ...prev, [attr.id]: v }))}
+                        mode={isNumeric ? 'fixed' : 'text'}
+                        error={missing ? 'A value is required' : undefined}
+                      />
+                      {!required && (
+                        <p className="text-[11px] text-gray-400 mt-1">Leave blank if the product does not have this.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
           <div className="flex justify-end pt-4">
             <button type="button" onClick={() => navigate(-1)} className="px-6 py-2 text-gray-600 hover:bg-light mr-3 rounded">Cancel</button>
-            <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+            <button type="submit" disabled={submitting || missingRequired} className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
               {submitting && <Loader2 size={16} className="animate-spin" />}
               {submitting ? 'Creating...' : 'Create & Generate Code'}
             </button>

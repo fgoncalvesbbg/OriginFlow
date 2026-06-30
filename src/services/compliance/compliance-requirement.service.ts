@@ -5,8 +5,9 @@
 
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { ComplianceRequirement, CategoryAttribute } from '../../types';
+import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all compliance requirements
@@ -18,6 +19,7 @@ export const getComplianceRequirements = async (): Promise<ComplianceRequirement
     return (data || []).map((r: any) => ({
         ...r,
         categoryId: r.category_id,
+        condition: r.condition ?? null,
         conditionFeatureIds: r.condition_feature_ids,
         referenceCode: r.reference_code,
         isMandatory: r.is_mandatory,
@@ -42,21 +44,55 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
         is_mandatory: req.isMandatory,
         reference_code: req.referenceCode,
         applies_by_default: req.appliesByDefault,
-        condition_feature_ids: req.conditionFeatureIds,
+        condition: req.condition ?? null,
         timing_type: req.timingType,
         timing_weeks: req.timingWeeks,
         self_declaration_accepted: req.selfDeclarationAccepted,
         test_report_origin: req.testReportOrigin
     };
-    const { error } = await supabase.from('compliance_requirements').upsert(payload);
-    if (error) handleError(error, 'saveRequirement');
+    await runMutation(supabase.from('compliance_requirements').upsert(payload), 'saveRequirement');
 };
 
 /**
  * Delete a compliance requirement
  */
 export const deleteRequirement = async (id: string): Promise<void> => {
-    await supabase.from('compliance_requirements').delete().eq('id', id);
+    await runMutation(supabase.from('compliance_requirements').delete().eq('id', id), 'deleteRequirement');
+};
+
+/**
+ * Custom section groups (built-in sections live in COMPLIANCE_SECTIONS). Returns
+ * the user-defined section names so they can be offered for every category.
+ */
+export const getComplianceSections = async (): Promise<string[]> => {
+    if (!isLive) return [];
+    const { data, error } = await portalClient
+        .from('compliance_sections')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+    if (error) return [];
+    return (data || []).map((s: any) => s.name as string);
+};
+
+/**
+ * Define a new section group (no-op if it already exists). Once added it is
+ * offered for requirements in every category.
+ */
+export const addComplianceSection = async (name: string): Promise<void> => {
+    const clean = name.trim();
+    if (!clean) return;
+    const { error } = await supabase
+        .from('compliance_sections')
+        .upsert({ name: clean }, { onConflict: 'name' });
+    if (error) handleError(error, 'addComplianceSection');
+};
+
+/**
+ * Remove a custom section group (does not touch requirements already using it).
+ */
+export const deleteComplianceSection = async (name: string): Promise<void> => {
+    await runMutation(supabase.from('compliance_sections').delete().eq('name', name), 'deleteComplianceSection');
 };
 
 /**
@@ -79,9 +115,13 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
     if (error) return [];
     return (data || []).map((a: any) => ({
         id: a.id,
-        categoryId: a.category_id,
+        categoryId: a.category_id ?? null,
+        assignedCategoryIds: a.assigned_category_ids ?? [],
         name: a.name,
-        dataType: a.dataType
+        dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
+        validationRules: a.validation_rules ?? undefined,
+        group: a.group ?? 'Category Specific',
+        akeneoId: a.akeneo_id ?? undefined,
     }));
 };
 
@@ -89,19 +129,71 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
  * Save/update a category attribute
  */
 export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<void> => {
+    const isPredefinedGroup = attr.group && attr.group !== 'Category Specific';
     const payload = {
         id: attr.id,
-        category_id: attr.categoryId,
+        category_id: isPredefinedGroup ? null : (attr.categoryId ?? null),
+        assigned_category_ids: attr.assignedCategoryIds ?? [],
         name: attr.name,
-        dataType: attr.dataType
+        data_type: attr.dataType,
+        validation_rules: attr.validationRules ?? null,
+        group: attr.group ?? 'Category Specific',
+        akeneo_id: attr.akeneoId ?? null,
     };
-    const { error } = await supabase.from('category_attributes').upsert(payload);
-    if (error) handleError(error, 'saveCategoryAttribute');
+    await runMutation(supabase.from('category_attributes').upsert(payload), 'saveCategoryAttribute');
 };
 
 /**
  * Delete a category attribute
  */
 export const deleteCategoryAttribute = async (id: string): Promise<void> => {
-    await supabase.from('category_attributes').delete().eq('id', id);
+    await runMutation(supabase.from('category_attributes').delete().eq('id', id), 'deleteCategoryAttribute');
+};
+
+/**
+ * Assign an existing attribute to an additional category (shared assignment)
+ */
+export const assignAttributeToCategory = async (attributeId: string, categoryId: string): Promise<void> => {
+    const { data, error: fetchError } = await supabase
+        .from('category_attributes')
+        .select('assigned_category_ids')
+        .eq('id', attributeId)
+        .single();
+    if (fetchError) handleError(fetchError, 'assignAttributeToCategory');
+    const current: string[] = data?.assigned_category_ids ?? [];
+    if (current.includes(categoryId)) return;
+    const { error } = await supabase
+        .from('category_attributes')
+        .update({ assigned_category_ids: [...current, categoryId] })
+        .eq('id', attributeId);
+    if (error) handleError(error, 'assignAttributeToCategory');
+};
+
+/**
+ * Promote a category-scoped attribute to a global/predefined attribute.
+ * Clears its category_id so it applies to every category, keeping its group.
+ */
+export const makeAttributeGlobal = async (attributeId: string): Promise<void> => {
+    await runMutation(
+        supabase.from('category_attributes').update({ category_id: null }).eq('id', attributeId),
+        'makeAttributeGlobal'
+    );
+};
+
+/**
+ * Remove a shared assignment of an attribute from a category
+ */
+export const unassignAttributeFromCategory = async (attributeId: string, categoryId: string): Promise<void> => {
+    const { data, error: fetchError } = await supabase
+        .from('category_attributes')
+        .select('assigned_category_ids')
+        .eq('id', attributeId)
+        .single();
+    if (fetchError) handleError(fetchError, 'unassignAttributeFromCategory');
+    const current: string[] = data?.assigned_category_ids ?? [];
+    const { error } = await supabase
+        .from('category_attributes')
+        .update({ assigned_category_ids: current.filter(id => id !== categoryId) })
+        .eq('id', attributeId);
+    if (error) handleError(error, 'unassignAttributeFromCategory');
 };

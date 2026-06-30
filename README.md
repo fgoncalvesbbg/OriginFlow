@@ -15,17 +15,23 @@ View your app in AI Studio: https://ai.studio/apps/drive/1buDBiNMWeQPfX3MfF4WIsO
 
 1. Install dependencies:
    `npm install`
-2. Set the `VITE_GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. (Optional) Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` if you want live Supabase data
+2. (Optional) Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in [.env.local](.env.local) for live Supabase data
+3. (Optional) For AI features, set `GEMINI_API_KEY` — **server-side, no `VITE_` prefix**. It is read by the
+   Netlify Function proxy ([netlify/functions/gemini.ts](netlify/functions/gemini.ts)) and never shipped to the browser.
 4. Run the app:
-   `npm run dev`
+   - `npm start` — Vite dev server (everything except AI works)
+   - `npx netlify dev` — use this instead if you want the AI features to work locally (serves the Gemini proxy function)
 
-## Service Migration Checklist (apiService ➜ domain services)
+Build with `npm run build`; run tests with `npm test`.
 
-When adding or refactoring service calls, use this quick checklist to avoid reintroducing duplicate CRUD logic:
+## Service Layer Conventions
 
-- [ ] Import services from `src/services/index.ts` (or domain modules), not `src/services/apiService.ts`.
-- [ ] If a page still depends on a missing service export, add/re-export it in the relevant domain module first.
-- [ ] Keep `apiService.ts` as compatibility-only; annotate any temporary duplicate methods as deprecated.
-- [ ] After migration, verify no page imports `apiService.ts` (`rg "services/apiService" src/pages -n`).
-- [ ] Prefer adding new CRUD logic in domain-specific files (e.g., `src/services/project/*`) and export via `src/services/index.ts`.
+The legacy `apiService.ts` monolith has been **removed** — all service logic now lives in domain
+modules. When adding or refactoring service calls:
+
+- Import services from `src/services/index.ts` (the barrel) or directly from a domain module.
+- Add new CRUD logic in the domain-specific file (e.g., `src/services/project/*`) and export it via
+  `src/services/index.ts`.
+- Use the `runMutation` / `runQuery` helpers in `src/services/core/db.ts` for the standard
+  "throw on Supabase error" pattern instead of repeating `if (error) handleError(...)`.
+- Keep snake_case↔camelCase mapping in `src/utils/mappers.utils.ts` (the single source of truth).

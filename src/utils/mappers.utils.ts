@@ -35,6 +35,7 @@ export const mapProject = (p: any): Project => {
     pmId: p.pm_id,
     currentStep: p.current_step,
     status: p.status,
+    categoryId: p.category_id ?? null,
     milestones: p.milestones,
     supplierLinkToken: p.supplier_link_token,
     createdAt: p.created_at
@@ -89,7 +90,12 @@ export const mapSupplier = (s: any): Supplier => {
     code: s.code,
     email: s.email,
     portalToken: s.portal_token || s.token,
-    accessCode: s.access_code
+    accessCode: s.access_code,
+    // get_supplier_by_token_safe returns has_access_code (boolean) instead of the
+    // code itself; fall back to deriving it from access_code for authenticated reads.
+    hasAccessCode: typeof s.has_access_code === 'boolean'
+      ? s.has_access_code
+      : (s.access_code != null && s.access_code !== '')
   };
 };
 
@@ -106,6 +112,7 @@ export const mapComplianceRequest = (r: any): ComplianceRequest => {
     supplierId: r.supplier_id,
     categoryId: r.category_id,
     features: Array.isArray(r.features) ? r.features : [],
+    conditionAttributes: (r.condition_attributes && typeof r.condition_attributes === 'object') ? r.condition_attributes : {},
     status: r.status,
     responses: Array.isArray(r.responses) ? r.responses : [],
     token: r.token,

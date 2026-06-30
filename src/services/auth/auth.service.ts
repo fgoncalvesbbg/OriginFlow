@@ -44,13 +44,3 @@ export const signUp = async (email: string, pass: string, name: string): Promise
 export const logout = async (): Promise<void> => {
     await supabase.auth.signOut();
 };
-
-/**
- * Get current session user
- */
-export const getSessionUser = async (): Promise<User | null> => {
-    if (!isLive) return null;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return null;
-    return getUserProfile(session.user.id);
-};

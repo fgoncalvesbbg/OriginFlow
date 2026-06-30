@@ -54,7 +54,10 @@ export const DEFAULT_IM_TEMPLATE_METADATA: IMTemplateMetadata = {
     chapterOpenerTemplate: 'standard-chapter-opener',
     bodyTemplate: 'standard-body',
     endPageVariants: ['standard-end']
-  }
+  },
+  fontFamily: 'Inter',
+  masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {} },
+  sectionLayoutMap: {}
 };
 
 const asNumber = (value: unknown, fallback: number): number => {
@@ -128,6 +131,11 @@ export const normalizeIMTemplateMetadata = (
       endPageVariants: Array.isArray(raw.pages?.endPageVariants) && raw.pages?.endPageVariants.length > 0
         ? raw.pages.endPageVariants
         : [...DEFAULT_IM_TEMPLATE_METADATA.pages!.endPageVariants]
-    }
+    },
+    // Preserve master-page / section-layout authoring data so saving a normalized
+    // template never drops these fields.
+    fontFamily: raw.fontFamily || DEFAULT_IM_TEMPLATE_METADATA.fontFamily,
+    masterPages: { cover: {}, chapter: {}, body: {}, appendix: {}, end: {}, ...(raw.masterPages || {}) },
+    sectionLayoutMap: raw.sectionLayoutMap || {}
   };
 };

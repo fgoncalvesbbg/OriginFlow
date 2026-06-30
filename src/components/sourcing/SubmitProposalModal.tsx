@@ -1,8 +1,11 @@
+/** Modal for a supplier to submit a proposal (attributes, images, attachments). */
 import React, { useState, useEffect } from 'react';
 import { X, Loader2, Layers, Image as ImageIcon, Upload, FileText } from 'lucide-react';
-import { createEnhancedSupplierProposal, getCategories, getCategoryAttributes } from '../../services/apiService';
+import { createEnhancedSupplierProposal, getCategories, getCategoryAttributes } from '../../services';
 import { CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachment } from '../../types';
 import { useToast } from '../../hooks';
+import AttributeInput from '../common/AttributeInput';
+import { validateAttributeValue, getAttributesForCategory } from '../../utils';
 
 interface SubmitProposalModalProps {
   isOpen: boolean;
@@ -28,6 +31,7 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
   // Dynamic attributes state
   const [attributeValues, setAttributeValues] = useState<Record<string, string>>({});
   const [attributeTypes, setAttributeTypes] = useState<Record<string, 'fixed' | 'range' | 'text'>>({});
+  const [attributeErrors, setAttributeErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (isOpen) {
@@ -48,22 +52,23 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
 
   const handleCategoryChange = (catId: string) => {
     setSelectedCategory(catId);
-    const catAttrs = allAttributes.filter(a => a.categoryId === catId);
-    const initialTypes: Record<string, any> = {};
+    const catAttrs = getAttributesForCategory(allAttributes, catId);
+    const initialTypes: Record<string, 'fixed' | 'range' | 'text'> = {};
     const initialValues: Record<string, string> = {};
-
     catAttrs.forEach(attr => {
-      initialTypes[attr.id] = attr.dataType === 'number' ? 'fixed' : 'text';
+      const isNumeric = attr.dataType === 'integer' || attr.dataType === 'decimal' || attr.dataType === 'number' as any;
+      initialTypes[attr.id] = isNumeric ? 'fixed' : 'text';
       initialValues[attr.id] = '';
     });
-
     setAttributeTypes(initialTypes);
     setAttributeValues(initialValues);
+    setAttributeErrors({});
   };
 
   const handleAttributeTypeChange = (attrId: string, type: 'fixed' | 'range') => {
     setAttributeTypes(prev => ({ ...prev, [attrId]: type }));
     setAttributeValues(prev => ({ ...prev, [attrId]: '' }));
+    setAttributeErrors(prev => ({ ...prev, [attrId]: '' }));
   };
 
   const handleThumbnailUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,15 +112,26 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) {
-      showError('Please enter a proposal title.');
+    const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
+
+    // Validate attributes — all optional in a free proposal
+    const newErrors: Record<string, string> = {};
+    currentCatAttributes.forEach(attr => {
+      const attrForValidation = {
+        ...attr,
+        validationRules: attr.validationRules ? { ...attr.validationRules, required: false } : attr.validationRules
+      };
+      const err = validateAttributeValue(attrForValidation, attributeValues[attr.id] || '', attributeTypes[attr.id] as any || 'text');
+      if (err) newErrors[attr.id] = err;
+    });
+    if (Object.keys(newErrors).length > 0) {
+      setAttributeErrors(newErrors);
       return;
     }
 
     setSubmitting(true);
 
     const attributesPayload: RFQAttributeValue[] = [];
-    const currentCatAttributes = allAttributes.filter(a => a.categoryId === selectedCategory);
 
     currentCatAttributes.forEach(attr => {
       const val = attributeValues[attr.id];
@@ -163,9 +179,10 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
     setAttachments([]);
     setAttributeValues({});
     setAttributeTypes({});
+    setAttributeErrors({});
   };
 
-  const currentCatAttributes = allAttributes.filter(a => a.categoryId === selectedCategory);
+  const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
 
   if (!isOpen) return null;
 
@@ -187,10 +204,9 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
           {/* Basic Info */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Proposal Title <span className="text-rose-600">*</span>
+              Proposal Title
             </label>
             <input
-              required
               type="text"
               className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 outline-none"
               placeholder="e.g., New Ultra-Fast Wireless Charger"
@@ -267,38 +283,17 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
               <div className="mt-4 space-y-4 pt-4 border-t border-indigo-200">
                 {currentCatAttributes.map(attr => (
                   <div key={attr.id}>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">{attr.name}</label>
-
-                    {attr.dataType === 'number' && (
-                      <div className="flex gap-2 mb-2">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="radio"
-                            checked={attributeTypes[attr.id] === 'fixed'}
-                            onChange={() => handleAttributeTypeChange(attr.id, 'fixed')}
-                            disabled={submitting}
-                          />
-                          Fixed Value
-                        </label>
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="radio"
-                            checked={attributeTypes[attr.id] === 'range'}
-                            onChange={() => handleAttributeTypeChange(attr.id, 'range')}
-                            disabled={submitting}
-                          />
-                          Range (Min-Max)
-                        </label>
-                      </div>
-                    )}
-
-                    <input
-                      type={attr.dataType === 'number' ? 'text' : 'text'}
-                      className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                      placeholder={attr.dataType === 'number' && attributeTypes[attr.id] === 'range' ? 'e.g., 100-200' : 'Enter value'}
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {attr.name}
+                    </label>
+                    <AttributeInput
+                      attribute={attr}
                       value={attributeValues[attr.id] || ''}
-                      onChange={(e) => setAttributeValues(prev => ({ ...prev, [attr.id]: e.target.value }))}
+                      onChange={v => setAttributeValues(prev => ({ ...prev, [attr.id]: v }))}
+                      mode={attributeTypes[attr.id] as 'fixed' | 'range' | 'text' || 'text'}
+                      onModeChange={type => handleAttributeTypeChange(attr.id, type)}
                       disabled={submitting}
+                      error={attributeErrors[attr.id]}
                     />
                   </div>
                 ))}

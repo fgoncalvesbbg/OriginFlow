@@ -6,7 +6,6 @@
 export {
   getComplianceRequests,
   getComplianceRequestById,
-  getComplianceRequestByToken,
   getComplianceRequestsBySupplierId,
   createComplianceRequest,
   verifySupplierAccess,
@@ -18,12 +17,9 @@ export {
 
 export {
   getCategories,
-  createCategory,
   saveCategory,
   deleteCategory,
-  getProductFeatures,
-  saveProductFeature,
-  deleteProductFeature
+  assignPMToCategory
 } from './compliance-category.service';
 
 export {
@@ -31,9 +27,15 @@ export {
   saveRequirement,
   deleteRequirement,
   addStandardRequirements,
+  getComplianceSections,
+  addComplianceSection,
+  deleteComplianceSection,
   getCategoryAttributes,
   saveCategoryAttribute,
-  deleteCategoryAttribute
+  deleteCategoryAttribute,
+  assignAttributeToCategory,
+  unassignAttributeFromCategory,
+  makeAttributeGlobal
 } from './compliance-requirement.service';
 
-export { COMPLIANCE_SECTIONS } from '../apiService';
+export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';

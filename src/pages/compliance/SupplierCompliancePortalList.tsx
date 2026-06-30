@@ -1,3 +1,4 @@
+/** Supplier portal landing list of compliance requests addressed to the supplier. */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getComplianceRequestsBySupplierId, getCategories } from '../../services';

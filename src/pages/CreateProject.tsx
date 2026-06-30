@@ -1,9 +1,10 @@
 
+/** New-project creation form page. */
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { getSuppliers, createProject, getProfiles } from '../services';
-import { Supplier, User } from '../types';
+import { getSuppliers, createProject, getProfiles, getCategories } from '../services';
+import { Supplier, User, CategoryL3 } from '../types';
 import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -12,32 +13,33 @@ const CreateProject: React.FC = () => {
   const { user } = useAuth();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     projectId: '',
     supplierId: '',
     pmId: '',
+    categoryId: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
 
   useEffect(() => {
+    let mounted = true;
+    const errs: string[] = [];
     Promise.all([
-      getSuppliers().catch(err => {
-        console.error('Error loading suppliers:', err);
-        setLoadError('Failed to load suppliers. Please refresh the page.');
-        return [];
-      }),
-      getProfiles().catch(err => {
-        console.error('Error loading users:', err);
-        setLoadError('Failed to load team members. Please refresh the page.');
-        return [];
-      })
-    ]).then(([suppliersData, usersData]) => {
+      getSuppliers().catch(err => { errs.push(`Suppliers: ${err.message}`); return [] as Supplier[]; }),
+      getProfiles().catch(err => { errs.push(`Team members: ${err.message}`); return [] as User[]; }),
+      getCategories().catch(err => { errs.push(`Categories: ${err.message}`); return [] as CategoryL3[]; }),
+    ]).then(([suppliersData, usersData, catsData]) => {
+      if (!mounted) return;
       setSuppliers(suppliersData);
       setUsers(usersData);
+      setCategories(catsData);
+      if (errs.length) setLoadErrors(errs);
     });
+    return () => { mounted = false; };
   }, []);
 
   // Default PM to current user if available
@@ -52,16 +54,21 @@ const CreateProject: React.FC = () => {
     setSubmitting(true);
     setError(null);
     try {
-      const project = await createProject(formData.name, formData.supplierId, formData.projectId, formData.pmId);
+      const project = await createProject(
+        formData.name,
+        formData.supplierId,
+        formData.projectId,
+        formData.pmId,
+        formData.categoryId || undefined
+      );
       navigate(`/project/${project.id}`);
     } catch (err: any) {
       console.error(err);
-      // Handle Supabase error messages
       const msg = err.message || JSON.stringify(err);
       if (msg.includes('project_id_code')) {
-          setError("Database Schema Error: Column 'project_id_code' not found. Please run migration script '25_fix_project_creation_error.txt'.");
+        setError("Database Schema Error: Column 'project_id_code' not found. Please run migration script '25_fix_project_creation_error.txt'.");
       } else {
-          setError(msg);
+        setError(msg);
       }
       setSubmitting(false);
     }
@@ -73,16 +80,17 @@ const CreateProject: React.FC = () => {
         <button onClick={() => navigate('/')} className="flex items-center text-muted hover:text-gray-800 mb-6 text-sm">
           <ArrowLeft size={16} className="mr-1" /> Back to Dashboard
         </button>
-        
+
         <div className="bg-white rounded-xl shadow border border-gray-200 p-8">
           <h1 className="text-3xl font-bold text-primary mb-6">Create New Project</h1>
 
-          {loadError && (
+          {loadErrors.length > 0 && (
             <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded flex items-start gap-3">
               <AlertTriangle className="text-yellow-600 shrink-0 mt-0.5" size={18} />
               <div>
-                <h3 className="text-sm font-bold text-yellow-800">Data Load Error</h3>
-                <p className="text-sm text-yellow-700 mt-1">{loadError}</p>
+                <h3 className="text-sm font-bold text-yellow-800">Some data failed to load</h3>
+                {loadErrors.map((e, i) => <p key={i} className="text-sm text-yellow-700 mt-1">{e}</p>)}
+                <p className="text-xs text-yellow-600 mt-2">Check browser console and run migration 42 if dropdowns are empty.</p>
               </div>
             </div>
           )}
@@ -135,6 +143,7 @@ const CreateProject: React.FC = () => {
                   <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                 ))}
               </select>
+              {suppliers.length === 0 && <p className="text-xs text-amber-600 mt-1">No suppliers loaded — check console or run migration 42.</p>}
             </div>
 
             <div>
@@ -150,6 +159,25 @@ const CreateProject: React.FC = () => {
                   <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
                 ))}
               </select>
+              {users.length === 0 && <p className="text-xs text-amber-600 mt-1">No team members loaded — check console or run migration 42.</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Product Category
+                <span className="text-gray-400 font-normal ml-1">(optional)</span>
+              </label>
+              <select
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                value={formData.categoryId}
+                onChange={e => setFormData({...formData, categoryId: e.target.value})}
+              >
+                <option value="">— Select a category —</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">Used to pre-select attributes and templates throughout the project lifecycle.</p>
             </div>
 
             <div className="pt-4 flex gap-4">

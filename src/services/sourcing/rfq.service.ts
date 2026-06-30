@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { RFQ, RFQEntry, RFQStatus, RFQEntryStatus, RFQAttributeValue, RFQAttachment } from '../../types';
 import { mapRFQ } from '../../utils/mappers.utils';
 import { handleError, generateUUID } from '../../utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all RFQs
@@ -43,11 +44,13 @@ export const getRFQById = async (id: string): Promise<RFQ | undefined> => {
           currency: e.currency,
           supplierNotes: e.supplier_notes,
           quoteFileUrl: e.quote_file_url,
+          attachments: e.attachments ?? [],
           submittedAt: e.submitted_at,
           createdAt: e.created_at,
           supplierName: e.supplier?.name,
           rfqTitle: e.rfqs?.title,
-          rfqIdentifier: e.rfqs?.rfq_id
+          rfqIdentifier: e.rfqs?.rfq_id,
+          attributeResponses: e.attribute_responses ?? []
         }));
     }
     return rfq;
@@ -77,11 +80,13 @@ export const getRFQEntryByToken = async (token: string): Promise<{ rfq: RFQ, ent
       currency: entryData.currency,
       supplierNotes: entryData.supplier_notes,
       quoteFileUrl: entryData.quote_file_url,
+      attachments: entryData.attachments ?? [],
       submittedAt: entryData.submitted_at,
       createdAt: entryData.created_at,
       supplierName: entryData.supplier?.name,
       rfqTitle: entryData.rfqs?.title,
-      rfqIdentifier: entryData.rfqs?.rfq_id
+      rfqIdentifier: entryData.rfqs?.rfq_id,
+      attributeResponses: entryData.attribute_responses ?? []
     };
 
     let { data: rfqData, error: rfqError } = await portalClient.from('rfqs').select('*, category_l3:categories_l3(name)').eq('id', entry.rfqId).maybeSingle();
@@ -147,8 +152,7 @@ export const createRFQ = async (
  * Delete an RFQ
  */
 export const deleteRFQ = async (id: string): Promise<void> => {
-    const { error } = await supabase.from('rfqs').delete().eq('id', id);
-    if (error) handleError(error, 'deleteRFQ');
+    await runMutation(supabase.from('rfqs').delete().eq('id', id), 'deleteRFQ');
 };
 
 /**

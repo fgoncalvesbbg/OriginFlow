@@ -1,3 +1,4 @@
+/** Compliance dashboard: overview of compliance requests and their statuses. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';
@@ -5,6 +6,7 @@ import { getComplianceRequests, getSuppliers, getCategories, getProjects, delete
 import { ComplianceRequest, Supplier, CategoryL3, ComplianceRequestStatus, Project, UserRole } from '../../types';
 import { Plus, Search, Filter, ShieldCheck, ChevronRight, Calendar, BookOpen, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useRefetchOnFocus } from '../../hooks';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -47,18 +49,25 @@ const ComplianceDashboard: React.FC = () => {
 
   const load = async () => {
     setLoading(true);
-    const [reqs, supps, cats, projs] = await Promise.all([
-      getComplianceRequests(),
-      getSuppliers(),
-      getCategories(),
-      getProjects()
-    ]);
-    setRequests(reqs);
-    setSuppliers(supps);
-    setCategories(cats);
-    setProjects(projs);
-    setLoading(false);
+    try {
+      const [reqs, supps, cats, projs] = await Promise.all([
+        getComplianceRequests(),
+        getSuppliers(),
+        getCategories(),
+        getProjects()
+      ]);
+      setRequests(reqs);
+      setSuppliers(supps);
+      setCategories(cats);
+      setProjects(projs);
+    } catch (e) {
+      console.error('Failed to load compliance data', e);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useRefetchOnFocus(load);
 
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';
   const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || 'Unknown';

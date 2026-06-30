@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-06T00:00:00Z",
+  "title": "Design System: OriginFlow PLM",
+  "extensions": {
+    "colorMeta": {
+      "primary":   { "role": "primary", "displayName": "Control-Room Ink", "canonical": "#1a1f35", "tonalRamp": ["#0d1020", "#141829", "#1a1f35", "#2a3050", "#3d4569", "#5b6489", "#8b93b0", "#c7ccdd"] },
+      "accent":    { "role": "secondary", "displayName": "Action Indigo", "canonical": "#4f46e5", "tonalRamp": ["#312e81", "#3730a3", "#4338ca", "#4f46e5", "#6366f1", "#818cf8", "#a5b4fc", "#e0e7ff"] },
+      "success":   { "role": "tertiary", "displayName": "Progress Emerald", "canonical": "#047857", "tonalRamp": ["#064e3b", "#065f46", "#047857", "#059669", "#10b981", "#34d399", "#6ee7b7", "#d1fae5"] },
+      "danger":    { "role": "tertiary", "displayName": "Blocked Rose", "canonical": "#be123c", "tonalRamp": ["#881337", "#9f1239", "#be123c", "#e11d48", "#f43f5e", "#fb7185", "#fda4af", "#ffe4e6"] },
+      "warning":   { "role": "tertiary", "displayName": "Pending Amber", "canonical": "#b45309", "tonalRamp": ["#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fbbf24", "#fcd34d", "#fef3c7"] },
+      "neutral":   { "role": "neutral", "displayName": "Neutral Gray", "canonical": "#6b7280", "tonalRamp": ["#111827", "#1f2937", "#374151", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f9fafb"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Page titles and primary section headers." },
+      "title":    { "displayName": "Title", "purpose": "Card headers, modal titles, panel headings." },
+      "body":     { "displayName": "Body", "purpose": "Default for nearly all content and form fields." },
+      "label":    { "displayName": "Label", "purpose": "Badges, metadata, table headers, button text." }
+    },
+    "shadows": [
+      { "name": "resting-card", "value": "0 1px 2px rgba(16,24,40,0.05)", "purpose": "Cards and panels at rest (often paired with or replaced by a 1px border)." },
+      { "name": "sticky-bar", "value": "0 1px 3px rgba(16,24,40,0.10)", "purpose": "Top bar pinned over scrolling content." },
+      { "name": "rail", "value": "0 10px 15px -3px rgba(16,24,40,0.10), 0 4px 6px -4px rgba(16,24,40,0.10)", "purpose": "Fixed sidebar separation from the canvas (shadow-lg)." },
+      { "name": "floating-overlay", "value": "0 20px 25px -5px rgba(16,24,40,0.12), 0 8px 10px -6px rgba(16,24,40,0.10)", "purpose": "Dropdowns, popovers, and modals (shadow-xl)." }
+    ],
+    "motion": [
+      { "name": "duration-fast", "value": "150ms", "purpose": "Hover/active state changes and color transitions." },
+      { "name": "duration-base", "value": "200ms", "purpose": "Default for menus, modals, and feedback." },
+      { "name": "duration-enter", "value": "300ms", "purpose": "Entrance animations (toast slide-in, dropdown scale-in)." },
+      { "name": "ease-out", "value": "cubic-bezier(0, 0, 0.2, 1)", "purpose": "Default easing for entrances and state changes." },
+      { "name": "shimmer", "value": "shimmer 2s linear infinite", "purpose": "Skeleton loading placeholders, not spinners." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary action: save, create, confirm.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { font-family: Inter, system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; color: #ffffff; background: #4f46e5; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.2,1); } .ds-btn-primary:hover { background: #4338ca; } .ds-btn-primary:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; } .ds-btn-primary:disabled { background: #c7d2fe; cursor: not-allowed; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive confirmation: delete, remove, cancel a launch.",
+      "html": "<button class=\"ds-btn-danger\">Delete project</button>",
+      "css": ".ds-btn-danger { font-family: Inter, system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; color: #ffffff; background: #e11d48; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.2,1); } .ds-btn-danger:hover { background: #be123c; } .ds-btn-danger:focus-visible { outline: 2px solid #e11d48; outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary / cancel action with no fill.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { font-family: Inter, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #6b7280; background: transparent; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.2,1); } .ds-btn-ghost:hover { background: #f3f4f6; color: #374151; } .ds-btn-ghost:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard form field; amber border variant signals a required/empty value.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Enter value…\" />",
+      "css": ".ds-input { font-family: Inter, system-ui, sans-serif; font-size: 0.875rem; color: #1a1f35; background: #ffffff; border: 1px solid #d1d5db; border-radius: 4px; padding: 8px; outline: none; transition: border-color 150ms, box-shadow 150ms; } .ds-input::placeholder { color: #6b7280; } .ds-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.35); }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "status-badge",
+      "description": "Status pill: hue plus text label (never color alone). Emerald = completed shown; same shape for indigo/rose/gray families.",
+      "html": "<span class=\"ds-badge ds-badge-success\"><svg viewBox=\"0 0 16 16\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M13 4L6 11l-3-3\"/></svg>Completed</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; gap: 4px; font-family: Inter, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; border-radius: 12px; padding: 4px 10px; white-space: nowrap; } .ds-badge-success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }"
+    },
+    {
+      "name": "Nav Item (active)",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Rail navigation row in its active state (indigo fill). Inactive rows are gray-400 text on the dark rail and brighten to white on hover.",
+      "html": "<div class=\"ds-rail\"><a class=\"ds-nav-item ds-nav-item-active\" href=\"#\">Projects</a><a class=\"ds-nav-item\" href=\"#\">Suppliers</a></div>",
+      "css": ".ds-rail { background: #1a1f35; padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 8px; width: 220px; } .ds-nav-item { font-family: Inter, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #9ca3af; padding: 12px 16px; border-radius: 12px; text-decoration: none; transition: background 150ms, color 150ms; } .ds-nav-item:hover { background: #1f2937; color: #ffffff; } .ds-nav-item-active { background: #4f46e5; color: #ffffff; box-shadow: 0 1px 2px rgba(16,24,40,0.2); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Resting content surface on the canvas. Border OR shadow, never both; no nested cards.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Launch summary</h3><p class=\"ds-card-body\">Three of five steps complete. Final IM awaiting supplier upload.</p></div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; } .ds-card-title { font-family: Inter, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; color: #1a1f35; margin: 0 0 8px; } .ds-card-body { font-family: Inter, system-ui, sans-serif; font-size: 0.875rem; line-height: 1.5; color: #374151; margin: 0; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Control Room",
+    "overview": "OriginFlow is the room a product manager runs many launches from: a calm, fixed dark navigation rail framing a bright, uncluttered work canvas, where the status of every project, document, and compliance request is legible at a glance. Color is spent almost entirely on state and on the single indigo accent that marks the current selection or primary action. The personality is calm, precise, and trustworthy. Built for internal power users who live here all day, it favors density with hierarchy: it shows a lot, but always ranked. It rejects the generic SaaS template and consumer-flashy decoration alike.",
+    "keyCharacteristics": [
+      "Dark fixed rail + bright canvas; a two-layer neutral system, not a flat single surface.",
+      "Indigo accent reserved for action, selection, and active state, never decoration.",
+      "A consistent four-hue status vocabulary (indigo / emerald / rose / gray) used everywhere.",
+      "Dense but ranked: small type, tight spacing, clear hierarchy.",
+      "Inter only. No display face, no second family."
+    ],
+    "rules": [
+      { "name": "The State-Not-Decoration Rule", "body": "Saturated color is earned by meaning. If a color isn't carrying a status (emerald/rose/amber) or marking action/selection (indigo), it is gray.", "section": "colors" },
+      { "name": "The Color-Plus-Shape Rule", "body": "Status is never conveyed by color alone. Every status pill pairs its hue with a text label (and icon where space allows).", "section": "colors" },
+      { "name": "The One-Voice Rule", "body": "Inter only. No display serif, no second sans, no mono affectation. If a screen feels like it needs a second typeface, it needs better weight/size hierarchy.", "section": "typography" },
+      { "name": "The One-Border-Or-One-Shadow Rule", "body": "A surface gets a hairline border or a soft shadow to define it, not a 1px border and a wide blurred shadow on the same element.", "section": "elevation" },
+      { "name": "The Lift-On-Float Rule", "body": "Elevation grows only as an element leaves the page plane (rest -> sticky -> rail -> overlay). Resting content stays low.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do reserve Action Indigo (#4f46e5) for primary action, current selection, and active state. Everything non-active is gray.",
+      "Do convey every status with hue and a text label (and icon where space allows), never color alone.",
+      "Do keep card corners at 12px (rounded-xl) and control corners at 4-8px.",
+      "Do define a surface with either a hairline border or a soft shadow, and pick elevation by layer (rest -> sticky -> rail -> overlay).",
+      "Do use Inter at heavier weights and larger sizes for hierarchy; sentence case for headings and buttons.",
+      "Do give every interactive control all its states: default, hover, focus-visible, active, disabled, loading (shimmer skeletons), and error.",
+      "Do keep motion to 150-250ms ease-out for state and feedback; honor prefers-reduced-motion."
+    ],
+    "donts": [
+      "Don't ship the generic SaaS template: no identical icon-heading-text card grids, no gradient hero-metric blocks, no tracked uppercase eyebrow above every section.",
+      "Don't go consumer-flashy: no decorative gradients, no gradient text, no animation for its own sake, no playful/sketchy illustration.",
+      "Don't pair a 1px border with a wide (>=16px blur) drop shadow on the same element.",
+      "Don't round cards/sections past 16px, and don't nest cards inside cards.",
+      "Don't use a border-left/border-right color stripe as an accent on cards, list items, or alerts.",
+      "Don't introduce a second typeface or a display font for UI labels, buttons, or data.",
+      "Don't let muted gray text fall below 4.5:1 on its background; bump toward Control-Room Ink before reaching for lighter gray.",
+      "Don't reach for a modal as the first thought; exhaust inline and progressive disclosure first."
+    ]
+  }
+}

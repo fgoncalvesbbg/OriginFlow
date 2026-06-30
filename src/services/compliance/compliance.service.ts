@@ -7,7 +7,8 @@ import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequest, ComplianceResponseItem, ComplianceRequestStatus } from '../../types';
 import { mapComplianceRequest } from '../../utils/mappers.utils';
-import { handleError, generateUUID } from '../../utils';
+import { handleError, generateUUID, generateNumericCode } from '../../utils';
+import { runMutation } from '../core/db';
 import { upsertSupplierNotification } from '../shared/notification.service';
 
 /**
@@ -31,17 +32,6 @@ export const getComplianceRequestById = async (id: string): Promise<ComplianceRe
 };
 
 /**
- * Get compliance request by token (for supplier portal)
- */
-export const getComplianceRequestByToken = async (token: string): Promise<ComplianceRequest | undefined> => {
-    if (!isLive) return undefined;
-    const { data, error } = await portalClient.from('compliance_requests').select('*').eq('token', token).maybeSingle();
-    if (error) return undefined;
-    if (!data) return undefined;
-    return mapComplianceRequest(data);
-};
-
-/**
  * Get all compliance requests for a specific supplier
  */
 export const getComplianceRequestsBySupplierId = async (supplierId: string): Promise<ComplianceRequest[]> => {
@@ -56,10 +46,11 @@ export const getComplianceRequestsBySupplierId = async (supplierId: string): Pro
  */
 export const createComplianceRequest = async (
   projectId: string, projectName: string, requestIdCode: string, supplierId: string,
-  categoryId: string, features: { featureId: string; value: boolean }[], deadline?: string
+  categoryId: string, features: { featureId: string; value: boolean }[], deadline?: string,
+  conditionAttributes: Record<string, string> = {}
 ): Promise<ComplianceRequest> => {
   const token = generateUUID();
-  const accessCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const accessCode = generateNumericCode(6);
 
   const { data, error } = await supabase.from('compliance_requests').insert({
     project_id: projectId || null,
@@ -68,6 +59,7 @@ export const createComplianceRequest = async (
     supplier_id: supplierId,
     category_id: categoryId,
     features,
+    condition_attributes: conditionAttributes,
     status: ComplianceRequestStatus.PENDING_SUPPLIER,
     token,
     access_code: accessCode,
@@ -129,14 +121,14 @@ export const submitComplianceResponse = async (reqId: string, responses: Complia
     if (status === ComplianceRequestStatus.APPROVED) updates.completed_at = new Date().toISOString();
     if (user) updates.updated_by = user;
 
-    await supabase.from('compliance_requests').update(updates).eq('id', reqId);
+    await runMutation(supabase.from('compliance_requests').update(updates).eq('id', reqId), 'submitComplianceResponse');
 };
 
 /**
  * Delete a compliance request
  */
 export const deleteComplianceRequest = async (id: string): Promise<void> => {
-    await supabase.from('compliance_requests').delete().eq('id', id);
+    await runMutation(supabase.from('compliance_requests').delete().eq('id', id), 'deleteComplianceRequest');
 };
 
 /**

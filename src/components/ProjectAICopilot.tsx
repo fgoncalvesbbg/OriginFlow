@@ -1,6 +1,7 @@
 
+/** Project AI copilot panel — chat assistant scoped to a project's data (uses Gemini). */
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { geminiGenerateContent } from "../services/ai/gemini.client";
 import { Project, ProjectStep, ProjectDocument, Supplier } from '../types';
 import { Sparkles, Send, X, Loader2, Bot, ChevronDown, User, FileText } from 'lucide-react';
 
@@ -60,25 +61,28 @@ export const ProjectAICopilot: React.FC<Props> = ({ project, supplier, steps, do
     setLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const context = buildContext();
-      
-      const systemInstruction = `You are an expert Project Management assistant for a product launch platform called OriginFlow. 
-      You are assisting a PM with the project described below. 
-      Be concise, professional, and helpful. 
+
+      const systemInstruction = `You are an expert Project Management assistant for a product launch platform called OriginFlow.
+      You are assisting a PM with the project described below.
+      Be concise, professional, and helpful.
       When drafting emails, use placeholders like [Name] where necessary.
-      
+
       CONTEXT:
       ${context}`;
 
-      // Complex Reasoning Task: Use gemini-3-pro-preview
-      const chat = ai.chats.create({
-        model: 'gemini-3-pro-preview',
-        config: { systemInstruction },
-        history: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
-      });
+      // Complex Reasoning Task: Use gemini-3-pro-preview. Chat history + the new message are sent
+      // as `contents`; the system prompt goes in `config.systemInstruction`.
+      const contents = [
+        ...messages.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+        { role: 'user', parts: [{ text: userMsg }] },
+      ];
 
-      const result = await chat.sendMessage({ message: userMsg });
+      const result = await geminiGenerateContent({
+        model: 'gemini-3-pro-preview',
+        contents,
+        config: { systemInstruction },
+      });
       const responseText = result.text;
 
       setMessages(prev => [...prev, { role: 'model', text: responseText }]);

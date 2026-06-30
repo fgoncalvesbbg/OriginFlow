@@ -1,11 +1,12 @@
+/** Sourcing dashboard: overview of RFQs and supplier proposals. */
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getRFQs, getAllSupplierProposals, deleteRFQ } from '../../services';
-import { RFQ, RFQStatus, SupplierProposal, UserRole } from '../../types';
+import { getRFQs, getAllSupplierProposals, deleteRFQ, getCategories } from '../../services';
+import { RFQ, RFQStatus, SupplierProposal, UserRole, CategoryL3 } from '../../types';
 import { ShoppingBag, Plus, Search, ChevronRight, Clock, FileText, Paperclip, Download, Trash2, MoreHorizontal, Image as ImageIcon, Eye, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useToast } from '../../hooks';
+import { useToast, useRefetchOnFocus } from '../../hooks';
 import ConvertProposalModal from '../../components/sourcing/ConvertProposalModal';
 
 const ConfirmationModal: React.FC<{
@@ -33,12 +34,13 @@ const ConfirmationModal: React.FC<{
 const SourcingDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { showToast } = useToast();
+  const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<'rfq' | 'proposals'>('rfq');
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [proposals, setProposals] = useState<SupplierProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [myCategoryIds, setMyCategoryIds] = useState<Set<string> | null>(null); // null = no filter (admin)
 
   // Deletion State
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -54,10 +56,24 @@ const SourcingDashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [rfqData, proposalData] = await Promise.all([
+      const [rfqData, proposalData, categoryData] = await Promise.all([
           getRFQs(),
-          getAllSupplierProposals()
+          getAllSupplierProposals(),
+          getCategories()
       ]);
+
+      // Determine which categories this PM owns (admins have no restriction)
+      if (user && user.role !== UserRole.ADMIN) {
+          const ownedIds = new Set(
+              categoryData
+                  .filter(c => c.pmId === user.id)
+                  .map(c => c.id)
+          );
+          setMyCategoryIds(ownedIds);
+      } else {
+          setMyCategoryIds(null); // admin: no filter
+      }
+
       setRfqs(rfqData);
       setProposals(proposalData);
     } catch (e) {
@@ -66,6 +82,8 @@ const SourcingDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(loadData);
 
   const handleDeleteRFQ = async () => {
     if (!rfqToDelete) return;
@@ -85,12 +103,21 @@ const SourcingDashboard: React.FC = () => {
     setDeleteModalOpen(true);
   };
 
-  const filteredRfqs = rfqs.filter(r => 
+  // Apply category-based PM scoping (null myCategoryIds = admin, sees all)
+  const categoryFilteredRfqs = myCategoryIds === null
+      ? rfqs
+      : rfqs.filter(r => r.categoryId && myCategoryIds.has(r.categoryId));
+
+  const categoryFilteredProposals = myCategoryIds === null
+      ? proposals
+      : proposals.filter(p => !p.categoryId || myCategoryIds.has(p.categoryId));
+
+  const filteredRfqs = categoryFilteredRfqs.filter(r =>
     r.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.rfqId.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredProposals = proposals.filter(p => 
+  const filteredProposals = categoryFilteredProposals.filter(p =>
     p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (p.supplierName || '').toLowerCase().includes(searchTerm.toLowerCase())
   );

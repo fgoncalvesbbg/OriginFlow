@@ -1,13 +1,12 @@
 
+/** Root application component: defines the route table and wraps pages in providers/guards. */
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider, ToastContext } from '../context/ToastContext';
-import { ModalProvider, ModalContext } from '../context/ModalContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminRoute from '../components/AdminRoute';
 import { ToastContainer } from '../components/common/Toast';
-import { ModalContainer } from '../components/common/Modal';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { checkComplianceDeadlines } from '../services';
 
@@ -22,6 +21,7 @@ import AdminDashboard from '../pages/AdminDashboard';
 import AdminTestEmail from '../pages/AdminTestEmail';
 import SupplierDashboard from '../pages/SupplierDashboard';
 import SuppliersList from '../pages/SuppliersList';
+import AttributeViewer from '../pages/products/AttributeViewer';
 
 // Compliance Pages
 import ComplianceDashboard from '../pages/compliance/ComplianceDashboard';
@@ -35,6 +35,7 @@ import ComplianceLibrary from '../pages/compliance/ComplianceLibrary';
 import IMDashboard from '../pages/im/IMDashboard';
 import IMTemplateEditor from '../pages/im/IMTemplateEditor';
 import IMPreview from '../pages/im/IMPreview';
+import IMBlockLibrary from '../pages/im/IMBlockLibrary';
 import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
 // Sourcing Pages
@@ -42,6 +43,7 @@ import SourcingDashboard from '../pages/sourcing/SourcingDashboard';
 import CreateRFQ from '../pages/sourcing/CreateRFQ';
 import RFQDetail from '../pages/sourcing/RFQDetail';
 import SupplierRFQPortal from '../pages/sourcing/SupplierRFQPortal';
+import SupplierAttributePortal from '../pages/SupplierAttributePortal';
 
 const AppContent: React.FC = () => {
   // Trigger background checks for deadlines on app mount
@@ -50,7 +52,6 @@ const AppContent: React.FC = () => {
   }, []);
 
   const toastContext = React.useContext(ToastContext);
-  const modalContext = React.useContext(ModalContext);
 
   return (
     <>
@@ -64,6 +65,7 @@ const AppContent: React.FC = () => {
           <Route path="/compliance/supplier-portal" element={<SupplierCompliancePortalList />} />
           <Route path="/sourcing/supplier/:token" element={<SupplierRFQPortal />} />
           <Route path="/im/preview/:templateId" element={<IMPreview />} />
+          <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
 
           {/* Protected PM Routes */}
           <Route path="/" element={
@@ -95,6 +97,12 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           } />
 
+          <Route path="/attributes" element={
+            <ProtectedRoute>
+              <AttributeViewer />
+            </ProtectedRoute>
+          } />
+
           {/* Sourcing Module */}
           <Route path="/sourcing" element={
             <ProtectedRoute>
@@ -113,7 +121,7 @@ const AppContent: React.FC = () => {
           } />
 
           {/* Project IM Generator */}
-          <Route path="/project/:projectId/im-generator" element={
+          <Route path="/project/:projectId/im-generator/:templateType?" element={
             <ProtectedRoute>
               <ProjectIMGenerator />
             </ProtectedRoute>
@@ -147,9 +155,14 @@ const AppContent: React.FC = () => {
               <IMDashboard />
             </ProtectedRoute>
           } />
-          <Route path="/im/template/:categoryId" element={
+          <Route path="/im/template/:categoryId/:templateType?" element={
             <ProtectedRoute>
               <IMTemplateEditor />
+            </ProtectedRoute>
+          } />
+          <Route path="/im/library" element={
+            <ProtectedRoute>
+              <IMBlockLibrary />
             </ProtectedRoute>
           } />
 
@@ -175,7 +188,6 @@ const AppContent: React.FC = () => {
         </Routes>
       </Router>
       {toastContext && <ToastContainer toasts={toastContext.toasts} onClose={toastContext.removeToast} />}
-      {modalContext && <ModalContainer modals={modalContext.modals} onClose={modalContext.close} />}
     </>
   );
 };
@@ -185,9 +197,7 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <AuthProvider>
         <ToastProvider>
-          <ModalProvider>
-            <AppContent />
-          </ModalProvider>
+          <AppContent />
         </ToastProvider>
       </AuthProvider>
     </ErrorBoundary>

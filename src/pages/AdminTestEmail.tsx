@@ -1,4 +1,5 @@
 
+/** Admin utility page for sending a test email to verify email delivery. */
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
 import { triggerEmailNotification } from '../services';

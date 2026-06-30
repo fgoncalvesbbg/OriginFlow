@@ -7,8 +7,13 @@ export {
   getSuppliers,
   getSupplierById,
   getSupplierByToken,
+  verifySupplierPortalAccess,
   createSupplier,
-  updateSupplier
+  updateSupplier,
+  regenerateSupplierAccessCode,
+  ensureSupplierToken,
+  assignSupplierToPMs,
+  getSupplierPMs,
+  reassignProjectPM,
+  logAccessCodeAttempt
 } from './supplier.service';
-
-export { ensureSupplierToken, assignSupplierToPMs, getSupplierPMs, reassignProjectPM, regenerateSupplierAccessCode } from '../apiService';

@@ -1,11 +1,12 @@
 
+/** App shell: sidebar/topbar navigation, notifications, and the routed page outlet. */
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2 } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
-import { getNotifications, markNotificationRead, getDashboardStats } from '../services/apiService';
+import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -63,9 +64,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     navigate('/login');
   };
 
-  const isActive = (path: string) => {
-    return location.pathname === path ? "bg-indigo-600 text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white";
-  };
+  // One nav vocabulary for every rail item: active = Action Indigo fill; inactive = soft gray that
+  // brightens on hover. Keyboard focus is always visible (ring), never silently removed.
+  const navItemClass = (active: boolean) =>
+    `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+      active ? "bg-accent text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+    }`;
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -78,46 +82,51 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Box className="w-6 h-6 text-indigo-400" />
             OriginFlow
           </h1>
-          <p className="text-xs text-gray-500 mt-1 pl-8">Beta v1.3</p>
+          <p className="text-xs text-gray-400 mt-1 pl-8">Beta V1.5</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 mt-4">
-          <Link to="/" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/')}`}>
+          <Link to="/" className={navItemClass(location.pathname === '/')}>
             <LayoutDashboard size={18} />
             Dashboard
           </Link>
-          
-          <Link to="/timeline" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/timeline')}`}>
+
+          <Link to="/timeline" className={navItemClass(location.pathname === '/timeline')}>
             <CalendarClock size={18} />
             Timeline
           </Link>
 
-          <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Modules</div>
-          
-          <Link to="/sourcing" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${location.pathname.startsWith('/sourcing') ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
+          <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Modules</div>
+
+          <Link to="/sourcing" className={navItemClass(location.pathname.startsWith('/sourcing'))}>
             <ShoppingBag size={18} />
             Sourcing & RFQ
           </Link>
 
-          <Link to="/suppliers" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/suppliers')}`}>
+          <Link to="/suppliers" className={navItemClass(location.pathname === '/suppliers')}>
             <Truck size={18} />
             Suppliers
           </Link>
 
-          <Link to="/compliance" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${location.pathname.startsWith('/compliance') ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
+          <Link to="/compliance" className={navItemClass(location.pathname.startsWith('/compliance'))}>
             <ShieldCheck size={18} />
             Compliance
           </Link>
 
-          <Link to="/im" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${location.pathname.startsWith('/im') ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
+          <Link to="/im" className={navItemClass(location.pathname.startsWith('/im'))}>
             <BookOpen size={18} />
             Instruction Manuals
           </Link>
 
+          <Link to="/attributes" className={navItemClass(location.pathname.startsWith('/attributes'))}>
+            <Table2 size={18} />
+            Attribute Viewer
+          </Link>
+
           {user?.role === UserRole.ADMIN && (
             <>
-              <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Admin</div>
-              <Link to="/admin" className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive('/admin')}`}>
+              <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Admin</div>
+              <Link to="/admin" className={navItemClass(location.pathname === '/admin')}>
                 <Lock size={18} />
                 Admin Panel
               </Link>
@@ -127,7 +136,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         <div className="p-4 border-t border-gray-700">
           <div className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl mb-4">
-             <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold text-white">
+             <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-white">
                 {user?.name?.charAt(0) || 'U'}
              </div>
              <div className="overflow-hidden">
@@ -135,7 +144,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <div className="text-[10px] text-gray-400">{user?.role}</div>
              </div>
           </div>
-          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-2 w-full text-left text-xs font-medium text-gray-400 hover:text-red-400 transition-colors">
+          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-2 w-full text-left text-xs font-medium text-gray-400 rounded-lg hover:text-rose-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
             <LogOut size={16} />
             Sign Out
           </button>
@@ -152,7 +161,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {/* Notification Center */}
           <div className="relative flex items-center gap-4" ref={notifRef}>
             {overdueCount > 0 && (
-              <Link to="/timeline" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-100 transition-colors border border-rose-200">
+              <Link to="/timeline" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-100 transition-colors border border-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
                 <AlertCircle size={14} />
                 {overdueCount} Overdue
               </Link>
@@ -160,7 +169,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`relative p-2 rounded-full transition-colors focus:outline-none ${unreadCount > 0 || overdueCount > 0 ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'text-gray-500 hover:bg-gray-100'}`}
+              aria-label="Notifications"
+              aria-expanded={showNotifications}
+              className={`relative p-2 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${unreadCount > 0 || overdueCount > 0 ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'text-gray-500 hover:bg-gray-100'}`}
             >
               <Bell size={20} className={overdueCount > 0 ? 'animate-pulse' : ''} />
               {(unreadCount > 0 || overdueCount > 0) && (
@@ -203,9 +214,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                           {!notif.isRead && (
                             <button
                               onClick={() => handleMarkRead(notif.id)}
-                              className="text-indigo-600 hover:text-indigo-800"
+                              aria-label="Mark notification as read"
+                              className="rounded-full p-1 -m-1 text-indigo-600 hover:text-indigo-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                             >
-                              <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>
+                              <div className="w-2 h-2 bg-indigo-600 rounded-full" aria-hidden="true"></div>
                             </button>
                           )}
                         </div>

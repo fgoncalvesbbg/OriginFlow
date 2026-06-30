@@ -1,4 +1,5 @@
 
+/** Route guard that renders children only for admin users; redirects others. */
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';

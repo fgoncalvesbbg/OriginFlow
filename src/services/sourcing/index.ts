@@ -20,7 +20,6 @@ export {
 export {
   getAllSupplierProposals,
   getSupplierProposals,
-  createSupplierProposal,
   createEnhancedSupplierProposal,
   convertProposalToRFQ
 } from './supplier-proposal.service';

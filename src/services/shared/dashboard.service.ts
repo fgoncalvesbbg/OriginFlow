@@ -11,17 +11,24 @@ import { DashboardStats, DeadlineItem, ProjectOverallStatus } from '../../types'
  * Get dashboard statistics including active projects, pending reviews, overdue items, and upcoming deadlines
  */
 export const getDashboardStats = async (): Promise<DashboardStats & { newProposals: number }> => {
-    if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 } as any;
+    if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 };
 
     const today = new Date();
     const nextPeriod = new Date();
     nextPeriod.setDate(today.getDate() + 14);
 
-    const [projectsRes, docsRes, proposalsRes, tcfRes] = await Promise.all([
-        supabase.from('projects').select('status'),
-        supabase.from('project_documents').select('*, projects!inner(name)').eq('status', 'uploaded'),
-        supabase.from('supplier_proposals').select('id').eq('status', 'new'),
-        supabase.from('compliance_requests').select('*, projects!inner(name)').eq('status', 'pending_supplier')
+    const [projectsRes, docsRes, proposalsRes, tcfRes, deadlineDocsRes] = await Promise.all([
+        supabase.from('projects').select('status').limit(1000),
+        supabase.from('project_documents').select('*, projects!inner(name)').eq('status', 'uploaded').limit(500),
+        supabase.from('supplier_proposals').select('id').eq('status', 'new').limit(500),
+        supabase.from('compliance_requests').select('*, projects!inner(name)').eq('status', 'pending_supplier').limit(500),
+        supabase.from('project_documents')
+            .select('*, projects!inner(name)')
+            .not('deadline', 'is', null)
+            .neq('status', 'approved')
+            .lte('deadline', nextPeriod.toISOString())
+            .order('deadline')
+            .limit(500)
     ]);
 
     const projects = projectsRes.data || [];
@@ -29,15 +36,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
     const pendingReviews = (docsRes.data || []).length;
     const newProposals = (proposalsRes.data || []).length;
 
-    // Fetch all docs with deadlines
-    const { data: deadlineDocs } = await supabase.from('project_documents')
-        .select('*, projects!inner(name)')
-        .not('deadline', 'is', null)
-        .neq('status', 'approved')
-        .lte('deadline', nextPeriod.toISOString())
-        .order('deadline');
-
-    // Fetch all TCF requests with deadlines
+    // Process TCF deadlines
     const tcfDeadlines = (tcfRes.data || []).filter(r => r.deadline).map(r => {
         const dDate = new Date(r.deadline);
         const diff = Math.ceil((dDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
@@ -52,7 +51,7 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
         } as DeadlineItem;
     });
 
-    const docDeadlines = (deadlineDocs || []).map((d: any) => {
+    const docDeadlines = (deadlineDocsRes.data || []).map((d: any) => {
         const dDate = new Date(d.deadline);
         const diff = Math.ceil((dDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
         return {
@@ -75,5 +74,5 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
         overdueCount,
         upcomingDeadlines: combined,
         newProposals
-    } as any;
+    };
 };

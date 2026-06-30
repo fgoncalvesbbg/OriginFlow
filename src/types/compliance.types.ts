@@ -2,6 +2,8 @@
  * Compliance module types (Technical Compliance Framework)
  */
 
+import { FeatureConditionFields } from './im.types';
+
 export enum ComplianceRequestStatus {
   PENDING_SUPPLIER = 'pending_supplier',
   SUBMITTED = 'submitted',
@@ -22,6 +24,8 @@ export interface CategoryL3 {
   active: boolean;
   isFinalized: boolean;
   finalizedAt?: string | null;
+  pmId?: string | null;    // PM assigned to own this category
+  pmName?: string | null;  // Denormalised for display
 }
 
 export interface ProductFeature {
@@ -33,14 +37,22 @@ export interface ProductFeature {
 
 export interface ComplianceRequirement {
   id: string;
-  categoryId: string;
+  /** null = global requirement that applies to every category (shown locked per-category). */
+  categoryId: string | null;
   section?: string;
   title: string;
   description: string;
   isMandatory: boolean;
   referenceCode?: string;
   appliesByDefault: boolean;
-  conditionFeatureIds: string[];
+  /**
+   * Attribute-based applicability gate (mirrors IM block refs). When set, the
+   * requirement only applies if the captured project attribute values satisfy
+   * this condition (evaluated via passesFeatureGate). Null/absent = no gate.
+   */
+  condition?: FeatureConditionFields | null;
+  /** @deprecated superseded by `condition`; kept for back-compat reads only. */
+  conditionFeatureIds?: string[];
   timingType?: string; // 'ETD' | 'POST_ETD'
   timingWeeks?: number;
   selfDeclarationAccepted?: boolean;
@@ -66,7 +78,14 @@ export interface ComplianceRequest {
   projectName: string;
   supplierId: string;
   categoryId: string;
+  /** @deprecated legacy product-feature toggles; superseded by conditionAttributes. */
   features: { featureId: string; value: boolean }[];
+  /**
+   * Attribute values captured at request creation, used to gate which
+   * requirements apply. Keyed by attribute id. Mirrors the placeholderData
+   * map passed to passesFeatureGate.
+   */
+  conditionAttributes?: Record<string, string>;
   status: ComplianceRequestStatus;
   responses: ComplianceResponseItem[];
   token: string;
@@ -81,9 +100,26 @@ export interface ComplianceRequest {
   respondentPosition?: string;
 }
 
+export type AttributeDataType = 'text' | 'integer' | 'decimal' | 'boolean' | 'enum' | 'image';
+
+export interface AttributeValidationRules {
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  allowRange?: boolean;
+  enumOptions?: string[];
+  placeholder?: string;
+  required?: boolean;
+}
+
 export interface CategoryAttribute {
   id: string;
-  categoryId: string;
+  categoryId: string | null; // null = global (predefined groups, shared across all categories)
+  assignedCategoryIds?: string[]; // additional categories this attribute is shared into
   name: string;
-  dataType: 'text' | 'number';
+  dataType: AttributeDataType;
+  validationRules?: AttributeValidationRules;
+  group?: string;
+  akeneoId?: string;
 }

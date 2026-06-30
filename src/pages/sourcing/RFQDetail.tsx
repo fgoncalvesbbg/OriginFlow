@@ -1,10 +1,12 @@
+/** RFQ detail page: view entries/quotes and award the RFQ. */
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getRFQById, awardRFQ, deleteRFQ } from '../../services';
 import { RFQ, RFQEntry, RFQEntryStatus, RFQStatus, UserRole } from '../../types';
-import { ArrowLeft, Link as LinkIcon, Award, CheckCircle, DollarSign, Package, Truck, Wrench, Plus, Copy, List, Paperclip, FileText, Download, Trash2 } from 'lucide-react';
+import { ArrowLeft, Link as LinkIcon, Award, CheckCircle, DollarSign, Package, Truck, Wrench, Plus, Copy, List, Paperclip, FileText, Download, Trash2, Eye, X, Sliders } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useRefetchOnFocus } from '../../hooks';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -37,6 +39,7 @@ const RFQDetail: React.FC = () => {
   const [awarding, setAwarding] = useState(false);
   const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [drawerEntry, setDrawerEntry] = useState<RFQEntry | null>(null);
 
   useEffect(() => {
     if (id) loadData();
@@ -53,6 +56,8 @@ const RFQDetail: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useRefetchOnFocus(() => { if (id) loadData(); });
 
   const handleCopyLink = (entry: RFQEntry) => {
       const url = `${window.location.origin}/#/sourcing/supplier/${entry.token}`;
@@ -135,6 +140,140 @@ const RFQDetail: React.FC = () => {
          </div>
       </div>
 
+      {/* Supplier submission drawer */}
+      {drawerEntry && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+              {/* Backdrop */}
+              <div className="absolute inset-0 bg-black/30" onClick={() => setDrawerEntry(null)} />
+              {/* Panel */}
+              <div className="relative w-full max-w-md bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-indigo-600">
+                      <div>
+                          <h2 className="text-lg font-bold text-white">{drawerEntry.supplierName}</h2>
+                          <p className="text-indigo-200 text-xs capitalize">{drawerEntry.status} submission</p>
+                      </div>
+                      <button onClick={() => setDrawerEntry(null)} className="text-indigo-200 hover:text-white p-1 rounded">
+                          <X size={20} />
+                      </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                      {/* Pricing */}
+                      <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3 flex items-center gap-2">
+                              <DollarSign size={13} /> Pricing & Logistics
+                          </h3>
+                          <div className="grid grid-cols-2 gap-3">
+                              {[
+                                  { label: 'Unit Price', value: drawerEntry.unitPrice != null ? `${drawerEntry.currency ?? 'USD'} ${drawerEntry.unitPrice}` : null },
+                                  { label: 'MOQ', value: drawerEntry.moq != null ? `${drawerEntry.moq} units` : null },
+                                  { label: 'Lead Time', value: drawerEntry.leadTimeWeeks != null ? `${drawerEntry.leadTimeWeeks} weeks` : null },
+                                  { label: 'Tooling Cost', value: drawerEntry.toolingCost != null && drawerEntry.toolingCost > 0 ? `${drawerEntry.currency ?? 'USD'} ${drawerEntry.toolingCost}` : null },
+                              ].map(({ label, value }) => (
+                                  <div key={label} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                                      <p className="text-sm font-semibold text-gray-800">{value ?? '—'}</p>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+
+                      {/* Proposed Specifications */}
+                      {drawerEntry.attributeResponses && drawerEntry.attributeResponses.length > 0 && (
+                          <div>
+                              <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3 flex items-center gap-2">
+                                  <Sliders size={13} /> Proposed Specifications
+                              </h3>
+                              <div className="space-y-2">
+                                  {drawerEntry.attributeResponses.map((resp, idx) => {
+                                      // Find the matching RFQ attribute to show the requirement alongside
+                                      const rfqAttr = rfq?.attributes.find(a => a.attributeId === resp.attributeId);
+                                      return (
+                                          <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                              <p className="text-xs text-gray-400 mb-1">{resp.name}</p>
+                                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                  <span className="text-sm font-semibold text-indigo-700">{resp.proposedValue}</span>
+                                                  {rfqAttr && (
+                                                      <span className="text-xs text-gray-400">
+                                                          {rfqAttr.type === 'range'
+                                                              ? `Req: ${rfqAttr.value.replace('-', ' – ')}`
+                                                              : rfqAttr.type === 'multi-select' && rfqAttr.values?.length
+                                                              ? `Options: ${rfqAttr.values.join(', ')}`
+                                                              : `Req: ${rfqAttr.value}`}
+                                                      </span>
+                                                  )}
+                                              </div>
+                                          </div>
+                                      );
+                                  })}
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Notes */}
+                      {drawerEntry.supplierNotes && (
+                          <div>
+                              <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3 flex items-center gap-2">
+                                  <FileText size={13} /> Notes / Conditions
+                              </h3>
+                              <div className="bg-gray-50 rounded-lg p-3 border border-gray-100 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                                  {drawerEntry.supplierNotes}
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Quote Files */}
+                      {(() => {
+                          const files = drawerEntry.attachments?.length
+                              ? drawerEntry.attachments
+                              : (drawerEntry.quoteFileUrl ? [{ name: 'Quote file', url: drawerEntry.quoteFileUrl, type: '' }] : []);
+                          if (files.length === 0) return null;
+                          return (
+                              <div>
+                                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3 flex items-center gap-2">
+                                      <Paperclip size={13} /> Quote {files.length > 1 ? 'Files' : 'File'}
+                                  </h3>
+                                  <div className="space-y-2">
+                                      {files.map((f, idx) => (
+                                          <a
+                                              key={idx}
+                                              href={f.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-3 rounded-lg border border-indigo-100 font-medium"
+                                          >
+                                              <Download size={14} /> <span className="truncate">{f.name || 'Download quote file'}</span>
+                                          </a>
+                                      ))}
+                                  </div>
+                              </div>
+                          );
+                      })()}
+
+                      {drawerEntry.status === RFQEntryStatus.PENDING && (
+                          <div className="bg-amber-50 border border-amber-100 rounded-lg p-4 text-sm text-amber-700">
+                              This supplier has not submitted their quote yet.
+                          </div>
+                      )}
+                  </div>
+
+                  {/* Footer — Award button */}
+                  {!isClosed && drawerEntry.status === RFQEntryStatus.SUBMITTED && (
+                      <div className="px-6 py-4 border-t border-gray-200">
+                          <button
+                              onClick={() => { handleAward(drawerEntry); setDrawerEntry(null); }}
+                              disabled={awarding}
+                              className="w-full bg-emerald-600 text-white py-2.5 rounded-xl font-bold hover:bg-emerald-700 flex items-center justify-center gap-2 shadow"
+                          >
+                              <Award size={16} /> Award to {drawerEntry.supplierName}
+                          </button>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           {/* Specs Panel */}
           <div className="lg:col-span-1 space-y-6">
@@ -173,12 +312,22 @@ const RFQDetail: React.FC = () => {
                       </h3>
                       <div className="space-y-3">
                           {rfq.attributes.map((attr, idx) => (
-                              <div key={idx} className="flex justify-between text-sm border-b border-slate-50 pb-2 last:border-0">
-                                  <span className="text-muted">{attr.name}</span>
-                                  <span className="font-medium text-gray-800">
-                                      {attr.value}
-                                      {attr.type === 'range' && <span className="text-xs text-gray-400 ml-1">(Range)</span>}
-                                  </span>
+                              <div key={idx} className="flex justify-between items-start text-sm border-b border-slate-50 pb-2 last:border-0 flex-wrap gap-2">
+                                  <span className="text-muted shrink-0">{attr.name}</span>
+                                  {attr.type === 'multi-select' && attr.values?.length ? (
+                                      <div className="flex flex-wrap gap-1 justify-end">
+                                          {attr.values.map(v => (
+                                              <span key={v} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-200">{v}</span>
+                                          ))}
+                                      </div>
+                                  ) : attr.type === 'range' ? (
+                                      <span className="font-medium text-gray-800">
+                                          {attr.value.replace('-', ' – ')}
+                                          <span className="text-xs text-gray-400 font-normal ml-1">(range)</span>
+                                      </span>
+                                  ) : (
+                                      <span className="font-medium text-gray-800">{attr.value}</span>
+                                  )}
                               </div>
                           ))}
                       </div>
@@ -251,15 +400,24 @@ const RFQDetail: React.FC = () => {
                                           ) : '-'}
                                       </td>
                                       <td className="px-4 py-3 text-right">
-                                          {!isClosed && entry.status === RFQEntryStatus.SUBMITTED && (
-                                              <button 
-                                                onClick={() => handleAward(entry)}
-                                                disabled={awarding}
-                                                className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 shadow flex items-center gap-1 ml-auto"
+                                          <div className="flex items-center justify-end gap-2">
+                                              <button
+                                                  onClick={() => setDrawerEntry(entry)}
+                                                  className="text-gray-400 hover:text-indigo-600 p-1 rounded hover:bg-indigo-50 transition-colors"
+                                                  title="View submission details"
                                               >
-                                                  <Award size={12} /> Award
+                                                  <Eye size={15} />
                                               </button>
-                                          )}
+                                              {!isClosed && entry.status === RFQEntryStatus.SUBMITTED && (
+                                                  <button
+                                                    onClick={() => handleAward(entry)}
+                                                    disabled={awarding}
+                                                    className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 shadow flex items-center gap-1"
+                                                  >
+                                                      <Award size={12} /> Award
+                                                  </button>
+                                              )}
+                                          </div>
                                       </td>
                                   </tr>
                               );

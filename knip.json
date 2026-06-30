@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/app/main.tsx",
+    "netlify/functions/*.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "netlify/**/*.ts"
+  ],
+  "ignore": [
+    "src/vite-env.d.ts",
+    "src/modules/im-viewer/**"
+  ]
+}

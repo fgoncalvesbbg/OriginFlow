@@ -6,7 +6,7 @@
 import { portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { RFQEntry } from '../../types';
-import { handleError } from '../../utils/error.utils';
+import { runMutation } from '../core/db';
 
 /**
  * Get all RFQs available for a supplier
@@ -33,11 +33,13 @@ export const getRFQsForSupplier = async (supplierId: string): Promise<RFQEntry[]
       currency: e.currency,
       supplierNotes: e.supplier_notes,
       quoteFileUrl: e.quote_file_url,
+      attachments: e.attachments ?? [],
       submittedAt: e.submitted_at,
       createdAt: e.created_at,
       supplierName: e.supplier?.name,
       rfqTitle: e.rfqs?.title,
-      rfqIdentifier: e.rfqs?.rfq_id
+      rfqIdentifier: e.rfqs?.rfq_id,
+      attributeResponses: e.attribute_responses ?? []
     }));
 };
 
@@ -52,10 +54,12 @@ export const submitRFQEntry = async (entryId: string, data: Partial<RFQEntry>): 
         moq: data.moq,
         lead_time_weeks: data.leadTimeWeeks,
         tooling_cost: data.toolingCost,
+        currency: data.currency,
         supplier_notes: data.supplierNotes,
-        quote_file_url: data.quoteFileUrl
+        quote_file_url: data.quoteFileUrl,
+        attachments: data.attachments ?? [],
+        attribute_responses: data.attributeResponses ?? []
     };
 
-    const { error } = await portalClient.from('rfq_entries').update(payload).eq('id', entryId);
-    if (error) handleError(error, 'submitRFQEntry');
+    await runMutation(portalClient.from('rfq_entries').update(payload).eq('id', entryId), 'submitRFQEntry');
 };
