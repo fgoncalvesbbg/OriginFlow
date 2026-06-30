@@ -122,14 +122,17 @@ export const getAttributeRequestsForSupplier = async (supplierId: string): Promi
 };
 
 export const getAttributeRequestByToken = async (token: string): Promise<ProjectAttributeRequest | null> => {
-  if (!isLive) return null;
-  const { data, error } = await portalClient
-    .from('project_attribute_requests')
-    .select('*')
-    .eq('token', token)
-    .single();
-  if (error || !data) return null;
-  return map(data);
+  if (!isLive || !token) return null;
+  // The project_attribute_requests table is not readable by the anonymous `anon`
+  // role the portal client runs as, so go through the get_attribute_request_by_token
+  // SECURITY DEFINER RPC (granted to anon) instead of a direct table read.
+  const { data, error } = await portalClient.rpc('get_attribute_request_by_token', { p_token: token });
+  if (error) {
+    console.error('getAttributeRequestByToken error:', error);
+    return null;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? map(row) : null;
 };
 
 export const deleteAttributeRequest = async (id: string): Promise<void> => {
@@ -162,10 +165,12 @@ export const updateAttributeRequestData = async (id: string, submittedData: Subm
 
 export const submitAttributeRequest = async (token: string, submittedData: SubmittedValue[]): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { error } = await portalClient
-    .from('project_attribute_requests')
-    .update({ status: 'submitted', submitted_data: submittedData, submitted_at: new Date().toISOString() })
-    .eq('token', token);
+  // Submit via the submit_attribute_request_secure SECURITY DEFINER RPC: the anon
+  // portal client cannot UPDATE the table directly under RLS.
+  const { error } = await portalClient.rpc('submit_attribute_request_secure', {
+    p_token: token,
+    p_data: submittedData,
+  });
   if (error) {
     console.error('submitAttributeRequest error:', error);
     throw new Error(error.message || 'Failed to submit');
