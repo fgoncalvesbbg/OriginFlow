@@ -34,13 +34,40 @@ export const getSupplierById = async (id: string): Promise<Supplier | undefined>
 };
 
 /**
- * Get supplier by portal token
+ * Get supplier by portal token (public supplier portal).
+ *
+ * Uses the get_supplier_by_token_safe SECURITY DEFINER RPC rather than a direct
+ * table read: the suppliers table is not readable by the anonymous `anon` role
+ * the portal client runs as, and the RPC returns has_access_code instead of the
+ * access code itself so the secret is never exposed to the browser.
  */
 export const getSupplierByToken = async (token: string): Promise<Supplier | undefined> => {
-    if (!isLive) return undefined;
-    const { data, error } = await portalClient.from('suppliers').select('*').eq('portal_token', token).maybeSingle();
-    if (error) return undefined;
-    return data ? mapSupplier(data) : undefined;
+    if (!isLive || !token) return undefined;
+    const { data, error } = await portalClient.rpc('get_supplier_by_token_safe', { p_token: token });
+    if (error) {
+        console.error('getSupplierByToken failed', error);
+        return undefined;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return row ? mapSupplier(row) : undefined;
+};
+
+/**
+ * Verify a supplier's access code against the portal token (server-side).
+ *
+ * Uses the verify_supplier_access SECURITY DEFINER RPC so the access code is
+ * validated in the database and never sent to or compared in the browser.
+ * Returns the supplier on success, or undefined when the code is incorrect.
+ */
+export const verifySupplierPortalAccess = async (token: string, code: string): Promise<Supplier | undefined> => {
+    if (!isLive || !token || !code) return undefined;
+    const { data, error } = await portalClient.rpc('verify_supplier_access', { p_token: token, p_code: code });
+    if (error) {
+        console.error('verifySupplierAccess failed', error);
+        return undefined;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return row ? mapSupplier(row) : undefined;
 };
 
 /**

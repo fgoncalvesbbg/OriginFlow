@@ -90,7 +90,12 @@ export const mapSupplier = (s: any): Supplier => {
     code: s.code,
     email: s.email,
     portalToken: s.portal_token || s.token,
-    accessCode: s.access_code
+    accessCode: s.access_code,
+    // get_supplier_by_token_safe returns has_access_code (boolean) instead of the
+    // code itself; fall back to deriving it from access_code for authenticated reads.
+    hasAccessCode: typeof s.has_access_code === 'boolean'
+      ? s.has_access_code
+      : (s.access_code != null && s.access_code !== '')
   };
 };
 
