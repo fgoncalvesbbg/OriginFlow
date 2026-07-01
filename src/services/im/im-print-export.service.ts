@@ -155,5 +155,9 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     throw new Error(message);
   }
 
-  return res.json();
+  // The function returns the freshly-inserted DB row (snake_case) under `render`.
+  // Normalize it through mapRender so callers get a proper camelCase PrintRender —
+  // otherwise `render.pageSize` etc. are undefined and crash the history list.
+  const body = (await res.json()) as PrintPdfResult & { render?: unknown };
+  return { ...body, render: body.render ? mapRender(body.render) : null };
 };

@@ -432,7 +432,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                 {renders.map((r) => (
                   <div key={r.id} className="flex items-center justify-between px-3 py-2 text-xs">
                     <span className="text-gray-600">
-                      <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize.toUpperCase()}
+                      <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize?.toUpperCase()}
                       {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
                       {r.createdBy && <> · {r.createdBy}</>}
                     </span>
