@@ -5,9 +5,11 @@
 [build.environment]
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
 
-# Server-side functions (PDF render, supplier file signed-URL issuer). These read
-# SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY from the Netlify site environment
-# (server-only — do NOT use a VITE_ prefix).
+# Server-side functions (PDF render, supplier file signed-URL issuer, IM
+# translation proxy). These read secrets from the Netlify site environment
+# (server-only — do NOT use a VITE_ prefix):
+#   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  — storage + data access
+#   ANTHROPIC_API_KEY                          — translate.ts (IM AI translation)
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"

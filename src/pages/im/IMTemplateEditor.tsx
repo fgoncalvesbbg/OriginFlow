@@ -8,8 +8,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
-import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe } from 'lucide-react';
+import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon } from 'lucide-react';
+import { translateHtml } from '../../services/ai/translation.service';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
@@ -74,6 +75,13 @@ const IMTemplateEditor: React.FC = () => {
 
   const [isLangModalOpen, setIsLangModalOpen] = useState(false);
   const [langDraft, setLangDraft] = useState<string[]>(['en']);
+
+  // AI translation ("Translate" button) — target language + live progress.
+  const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
+  const [translateTarget, setTranslateTarget] = useState<string>('');
+  const [translateSkipExisting, setTranslateSkipExisting] = useState(true);
+  const [translating, setTranslating] = useState(false);
+  const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isPlaceholderModalOpen, setIsPlaceholderModalOpen] = useState(false);
@@ -743,6 +751,138 @@ const IMTemplateEditor: React.FC = () => {
     }
   };
 
+  const openTranslateModal = () => {
+    // Default the target to the first enabled non-English language, else German.
+    const firstOther = templateLanguages.find(c => c !== 'en');
+    setTranslateTarget(firstOther || 'de');
+    setTranslateSkipExisting(true);
+    setTranslateProgress({ done: 0, total: 0 });
+    setIsTranslateModalOpen(true);
+  };
+
+  /**
+   * Fill `translateTarget` across the whole template from the English source.
+   * Translates every inline block's content + each section title + sku-slot
+   * labels via the AI proxy (chips preserved by translation.service), then
+   * persists the changed sections and enables the language on the template.
+   * Shared blocks (kind:'block') are intentionally skipped — they're shared
+   * across templates and translated from the block library instead.
+   */
+  const handleTranslate = async () => {
+    if (!template || !translateTarget || translating) return;
+    const target = translateTarget;
+    const source = 'en';
+    const skip = translateSkipExisting;
+    const needs = (map: Record<string, string> | undefined, src: string | undefined) =>
+      !!src && !!src.trim() && (!skip || !(map?.[target]?.trim()));
+
+    // Work on deep-ish copies so a mid-run failure never leaves torn state; we
+    // only commit via setSections once the pass finishes.
+    const working: IMSection[] = sections.map(s => ({
+      ...s,
+      content: { ...s.content },
+      titleI18n: { ...(s.titleI18n ?? {}) },
+      blockRefs: (s.blockRefs ?? []).map(r =>
+        r.kind === 'inline' ? { ...r, content: { ...r.content } }
+        : r.kind === 'sku_slot' ? { ...r, label: { ...r.label } }
+        : { ...r }),
+    }));
+
+    // Build the task list up front so we can show a real progress total.
+    const tasks: Array<() => Promise<void>> = [];
+    const changed = new Set<string>();
+    const failures: string[] = [];
+
+    for (const s of working) {
+      const titleSrc = s.titleI18n?.[source] ?? s.title;
+      if (needs(s.titleI18n, titleSrc)) {
+        tasks.push(async () => {
+          try { s.titleI18n = { ...s.titleI18n, [target]: await translateHtml(titleSrc!, source, target) }; changed.add(s.id); }
+          catch { failures.push(`title “${s.title}”`); }
+        });
+      }
+      const refs = s.blockRefs ?? [];
+      let firstInlineMirror = true;
+      refs.forEach((ref, idx) => {
+        if (ref.kind === 'inline' && needs(ref.content, ref.content?.[source])) {
+          const src = ref.content[source];
+          const mirror = firstInlineMirror; firstInlineMirror = false;
+          tasks.push(async () => {
+            try {
+              const out = await translateHtml(src, source, target);
+              (s.blockRefs![idx] as InlineBlockRef).content = { ...(s.blockRefs![idx] as InlineBlockRef).content, [target]: out };
+              // Mirror the first inline row into section.content for the legacy renderer path.
+              if (mirror) s.content = { ...s.content, [target]: out };
+              changed.add(s.id);
+            } catch { failures.push(`section “${s.title}”`); }
+          });
+        } else if (ref.kind === 'sku_slot' && needs(ref.label, ref.label?.[source])) {
+          const src = ref.label[source];
+          tasks.push(async () => {
+            try { (s.blockRefs![idx] as SKUSlotRef).label = { ...(s.blockRefs![idx] as SKUSlotRef).label, [target]: await translateHtml(src, source, target) }; changed.add(s.id); }
+            catch { failures.push(`field in “${s.title}”`); }
+          });
+        }
+      });
+      // Section with legacy content but no inline rows (rare after normalization).
+      if (refs.length === 0 && needs(s.content, s.content?.[source])) {
+        tasks.push(async () => {
+          try { s.content = { ...s.content, [target]: await translateHtml(s.content[source], source, target) }; changed.add(s.id); }
+          catch { failures.push(`section “${s.title}”`); }
+        });
+      }
+    }
+
+    if (tasks.length === 0) {
+      alert(`Nothing to translate — every fragment already has ${target.toUpperCase()} content. Uncheck “skip already-translated” to overwrite.`);
+      return;
+    }
+
+    setTranslating(true);
+    setTranslateProgress({ done: 0, total: tasks.length });
+    let done = 0;
+    // Small concurrency pool so a large template doesn't run one call at a time.
+    const CONCURRENCY = 4;
+    let cursor = 0;
+    const runner = async () => {
+      while (cursor < tasks.length) {
+        const t = tasks[cursor++];
+        await t();
+        done += 1;
+        setTranslateProgress({ done, total: tasks.length });
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, runner));
+
+      // Commit UI state, then persist only the sections we actually changed.
+      setSections(working);
+      const changedSections = working.filter(s => changed.has(s.id));
+      if (changedSections.length) await persistSections(changedSections);
+
+      // Enable the language on the template if it isn't already.
+      if (!templateLanguages.includes(target)) {
+        const ordered = ALL_LANGUAGES.map(l => l.code).filter(c => c === 'en' || templateLanguages.includes(c) || c === target);
+        try {
+          await updateIMTemplate(template.id, { languages: ordered, lastUpdatedBy: user?.name });
+          setTemplateLanguages(ordered);
+          setTemplate(prev => prev ? ({ ...prev, languages: ordered }) : prev);
+        } catch (e) { console.error('Failed to enable language after translate', e); }
+      }
+
+      setIsTranslateModalOpen(false);
+      const langLabel = ALL_LANGUAGES.find(l => l.code === target)?.label ?? target.toUpperCase();
+      if (failures.length) {
+        alert(`Translated to ${langLabel} with ${failures.length} fragment(s) skipped due to errors (left untranslated):\n\n• ${failures.slice(0, 12).join('\n• ')}${failures.length > 12 ? `\n…and ${failures.length - 12} more` : ''}`);
+      }
+    } catch (e) {
+      console.error('Translation run failed', e);
+      alert('Translation failed — see console for details. No partial changes were saved.');
+    } finally {
+      setTranslating(false);
+    }
+  };
+
   const handleSaveMetadata = async () => {
       if (!template) return;
       setSaving(true);
@@ -859,6 +999,7 @@ const IMTemplateEditor: React.FC = () => {
             <div className="flex gap-3 items-center">
                <button onClick={openLangModal} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Globe size={16} /> Languages <span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span></button>
                <button onClick={() => setIsSettingsModalOpen(true)} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Settings size={16} /> Settings</button>
+               <button onClick={openTranslateModal} disabled={translating} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-70">{translating ? <Loader2 size={16} className="animate-spin" /> : <LanguagesIcon size={16} />} Translate</button>
                <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
             </div>
           </div>
@@ -1393,6 +1534,53 @@ const IMTemplateEditor: React.FC = () => {
                           <button onClick={() => setIsLangModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
                           <button onClick={handleSaveLanguages} disabled={saving} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
                               {saving ? 'Saving…' : 'Save Languages'}
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          )}
+          {isTranslateModalOpen && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="font-bold text-lg flex items-center gap-2"><LanguagesIcon size={18} className="text-indigo-500" /> AI Translate Template</h3>
+                          <button onClick={() => !translating && setIsTranslateModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                      </div>
+                      <p className="text-xs text-muted mb-4">
+                          Translates every section title and content row from <strong>English</strong> into the target language using AI. Placeholders, images and formatting are preserved automatically. Review the result before publishing.
+                      </p>
+                      <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Translate to</label>
+                          <select
+                            className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                            value={translateTarget}
+                            disabled={translating}
+                            onChange={e => setTranslateTarget(e.target.value)}
+                          >
+                              {ALL_LANGUAGES.filter(l => l.code !== 'en').map(l => (
+                                <option key={l.code} value={l.code}>{l.label}{templateLanguages.includes(l.code) ? '' : ' — will be enabled'}</option>
+                              ))}
+                          </select>
+                      </div>
+                      <label className={`flex items-center gap-2 text-sm mb-4 ${translating ? 'opacity-60' : 'cursor-pointer'}`}>
+                          <input type="checkbox" className="rounded accent-indigo-600" checked={translateSkipExisting} disabled={translating} onChange={e => setTranslateSkipExisting(e.target.checked)} />
+                          Skip fragments already translated (uncheck to overwrite)
+                      </label>
+                      <p className="text-[11px] text-muted mb-4 bg-amber-50 border border-amber-100 rounded p-2">
+                          Note: text inside conditional chips isn't auto-translated — edit those by hand afterwards.
+                      </p>
+                      {translating && (
+                        <div className="mb-4">
+                          <div className="flex justify-between text-xs text-muted mb-1"><span>Translating…</span><span>{translateProgress.done} / {translateProgress.total}</span></div>
+                          <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-indigo-500 transition-all" style={{ width: `${translateProgress.total ? Math.round((translateProgress.done / translateProgress.total) * 100) : 0}%` }} />
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                          <button onClick={() => setIsTranslateModalOpen(false)} disabled={translating} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm disabled:opacity-50">Cancel</button>
+                          <button onClick={handleTranslate} disabled={translating || !translateTarget} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                              {translating ? <><Loader2 size={14} className="animate-spin" /> Translating…</> : <><LanguagesIcon size={14} /> Translate</>}
                           </button>
                       </div>
                   </div>

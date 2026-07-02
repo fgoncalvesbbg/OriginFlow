@@ -100,6 +100,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
+  const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const initializingRef = useRef(false);
   const isUserEditingRef = useRef(false);
   const lastEmittedHtmlRef = useRef<string>('');
@@ -109,6 +110,17 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const savedRangeRef = useRef<Range | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  // Auto-grow the raw-HTML textarea to fit its content so the source view expands
+  // with the text like the WYSIWYG surface. The wrapper's manual resize still wins:
+  // when dragged shorter than the content, the scroll container above clips + scrolls.
+  useEffect(() => {
+    if (mode !== 'html') return;
+    const ta = htmlTextareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [mode, htmlDraft]);
 
   /** Insert HTML at the saved caret position (falling back to the end, never the start). */
   const insertHtmlAtCursor = useCallback((htmlString: string) => {
@@ -456,7 +468,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   }, [insertHtmlAtCursor]);
 
   return (
-    <div className={`flex flex-col h-full border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
+    <div className={`flex flex-col flex-1 min-h-0 border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
 
       <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
         {mode === 'rich' && (
@@ -511,15 +523,17 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         </button>
       </div>
 
-      <div className="flex-1 relative bg-white cursor-text" onClick={() => { if (mode === 'rich') contentRef.current?.focus(); }}>
+      <div className="flex-1 min-h-0 relative bg-white cursor-text overflow-y-auto" onClick={() => { if (mode === 'rich') contentRef.current?.focus(); }}>
         {mode === 'html' ? (
           <textarea
+            ref={htmlTextareaRef}
             value={htmlDraft}
             onChange={handleHtmlChange}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             spellCheck={false}
-            className="absolute inset-0 w-full h-full p-4 outline-none resize-none font-mono text-xs text-gray-800 bg-gray-50"
+            rows={1}
+            className="block w-full min-h-[160px] p-4 outline-none resize-none overflow-hidden font-mono text-xs text-gray-800 bg-gray-50"
             placeholder={placeholder ? `${placeholder} (HTML)` : '<p>Enter HTML…</p>'}
           />
         ) : (
@@ -527,19 +541,17 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             {!initialContent && !isFocused && placeholder && (
                <div className="absolute top-4 left-4 text-gray-400 pointer-events-none select-none z-10">{placeholder}</div>
             )}
-            <div className="absolute inset-0 overflow-y-auto">
-              <div
-                ref={contentRef}
-                className="min-h-full p-4 outline-none im-content max-w-none font-sans"
-                contentEditable
-                onInput={handleChange}
-                onClick={handleEditorClick}
-                onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
-                onBlur={() => { setIsFocused(false); saveSelection(); }}
-                onMouseUp={saveSelection}
-                onKeyUp={saveSelection}
-              />
-            </div>
+            <div
+              ref={contentRef}
+              className="min-h-[160px] p-4 outline-none im-content max-w-none font-sans"
+              contentEditable
+              onInput={handleChange}
+              onClick={handleEditorClick}
+              onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
+              onBlur={() => { setIsFocused(false); saveSelection(); }}
+              onMouseUp={saveSelection}
+              onKeyUp={saveSelection}
+            />
           </>
         )}
       </div>
@@ -633,7 +645,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
   }, []);
 
   return (
-    <div className="flex flex-col gap-2 p-3" style={{ height: '440px' }}>
+    <div className="flex flex-col gap-2 p-3 resize-y overflow-hidden min-h-[280px]">
       {/* Callout box selector — wraps the ENTIRE row content in this ISO sign box on render */}
       <div className="flex items-center gap-1.5 flex-wrap shrink-0">
         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mr-0.5">Box:</span>
@@ -682,15 +694,15 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
       </div>
 
       {/* Editor — when a variant is set, the surface is framed to show everything inside is wrapped */}
-      <div className={`flex-1 min-h-0 ${variantCfg ? `border-l-4 rounded-r ${variantCfg.frame} pl-2` : ''}`}>
+      <div className={`flex-1 min-h-0 flex flex-col ${variantCfg ? `border-l-4 rounded-r ${variantCfg.frame} pl-2` : ''}`}>
         {variantCfg && (
-          <div className="flex items-center gap-2 px-1 py-1.5">
+          <div className="flex items-center gap-2 px-1 py-1.5 shrink-0">
             <span className="w-6 h-6 shrink-0" dangerouslySetInnerHTML={{ __html: CALLOUT_ICONS[variantCfg.value] }} />
             <span className="text-[11px] font-extrabold tracking-wide text-gray-700">{getCalloutTitle(variantCfg.value, activeCode)}</span>
             <span className="text-[10px] text-gray-400 italic">— everything below renders inside this box</span>
           </div>
         )}
-        <div className={variantCfg ? 'h-[calc(100%-2.25rem)]' : 'h-full'}>
+        <div className="flex-1 min-h-0 flex flex-col">
           <SimpleRichTextEditor
             key={`${sectionId}-inline-${index}-${activeCode}`}
             initialContent={content[activeCode] || ''}
