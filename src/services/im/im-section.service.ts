@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { IMSection } from '../../types';
 import { generateUUID } from '../../utils';
 import { runMutation, runQuery } from '../core/db';
+import { withTimeout } from '../core/with-timeout';
 
 /**
  * Get all sections for an IM template
@@ -58,7 +59,9 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
 
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
-    const data = await runQuery(supabase.from('im_sections').upsert(payload).select().single(), 'saveIMSection');
+    // Bound the write so a stalled request can't hang the editor's autosave
+    // forever (see with-timeout.ts). On timeout this rejects and the caller retries.
+    const data = await withTimeout(runQuery(supabase.from('im_sections').upsert(payload).select().single(), 'saveIMSection'));
     return {
       id: data.id,
       templateId: data.template_id,

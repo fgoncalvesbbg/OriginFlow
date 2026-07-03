@@ -7,20 +7,9 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { IMBlock } from '../../types';
 import { handleError, generateUUID } from '../../utils';
+import { withTimeout } from '../core/with-timeout';
 
 const TAG = '[im-block.service]';
-
-/**
- * Reject if a Supabase call hasn't resolved within ms milliseconds.
- * Accepts PromiseLike (Supabase builders are thenable but not full Promises).
- */
-const withTimeout = <T>(thenable: PromiseLike<T>, ms = 12000): Promise<T> =>
-  Promise.race([
-    Promise.resolve(thenable),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Request timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
 
 const mapRow = (r: any): IMBlock => ({
   id: r.id,

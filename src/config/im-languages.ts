@@ -58,8 +58,8 @@ export const IM_TEMPLATE_LANGUAGE_OPTIONS = IM_LANGUAGES.map(l => ({
 /** Options for the preview language switcher: plain English names. */
 export const IM_PREVIEW_LANGUAGE_OPTIONS = IM_LANGUAGES.map(l => ({ code: l.code, label: l.name }));
 
-/** Compact per-language tabs (block library): uppercase code, e.g. "DE". */
-export const IM_LANGUAGE_TABS = IM_LANGUAGES.map(l => ({ code: l.code, label: l.code.toUpperCase() }));
+/** Compact per-language tabs (block library): uppercase code "DE" + full name for tooltips. */
+export const IM_LANGUAGE_TABS = IM_LANGUAGES.map(l => ({ code: l.code, label: l.code.toUpperCase(), name: l.name }));
 
 /** code → English name, for building translation prompts. */
 export const IM_LANGUAGE_NAMES: Record<string, string> = Object.fromEntries(

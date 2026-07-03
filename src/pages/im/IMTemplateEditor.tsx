@@ -9,7 +9,7 @@ import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
@@ -48,6 +48,12 @@ const IMTemplateEditor: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  // A save that timed out / failed — surfaces an honest status instead of a stuck
+  // "Saving…" and lets the user know autosave is still retrying in the background.
+  const [saveError, setSaveError] = useState(false);
+  // Unsaved edits recovered from localStorage on load (see draft backup below).
+  // While set, we pause autosave and keep the stored draft until the user decides.
+  const [pendingDraft, setPendingDraft] = useState<{ savedAt: string; sections: IMSection[] } | null>(null);
 
   // Snapshot of each section as last persisted — diffing against it tells us
   // which sections have unsaved edits, so both manual Save and autosave only
@@ -156,6 +162,22 @@ const IMTemplateEditor: React.FC = () => {
         if (normalizedSecs.length > 0 && !selectedSectionId) {
            setSelectedSectionId(normalizedSecs[0].id);
         }
+        // Recover unsaved edits from a previous session. A draft only exists when
+        // there was unsaved work (it's cleared on every successful save), so if one
+        // is present we OFFER to restore it — we never silently clobber the
+        // freshly-loaded DB data, so the user decides. Its timestamp is shown in
+        // the banner for context.
+        try {
+          const raw = localStorage.getItem(`im-draft:${temp.id}`);
+          if (raw) {
+            const draft = JSON.parse(raw);
+            if (Array.isArray(draft?.sections) && draft.sections.length && draft.savedAt) {
+              setPendingDraft(draft);
+            } else {
+              localStorage.removeItem(`im-draft:${temp.id}`);
+            }
+          }
+        } catch { /* ignore malformed draft */ }
       }
     } catch (e) {
       console.error('Failed to load template data', e);
@@ -386,14 +408,21 @@ const IMTemplateEditor: React.FC = () => {
       pending.forEach(p => savedSnapshot.current.set(p.id, p.key));
       setTemplate(prev => prev ? ({ ...prev, lastUpdatedBy: user?.name || 'User', updatedAt: new Date().toISOString() }) : null);
       setLastSaved(new Date());
+      setSaveError(false);
       return true;
     } catch (e) {
+      // Leave the sections dirty (snapshots untouched) so the next autosave retries.
+      // The local draft (written on every edit) still holds the work regardless.
       console.error('Failed to save sections', e);
+      setSaveError(true);
       return false;
     } finally {
       setSaving(false);
     }
   }, [user]);
+
+  /** localStorage key holding this template's unsaved-edit draft. */
+  const draftKey = template ? `im-draft:${template.id}` : null;
 
   const handleSaveAll = async () => {
     if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
@@ -403,15 +432,39 @@ const IMTemplateEditor: React.FC = () => {
     if (!ok) alert('Error saving sections — see console for details.');
   };
 
-  // Debounced autosave — persist dirty sections ~2.5s after the last edit.
+  // Draft backup + debounced autosave.
+  //
+  // The draft is written to localStorage IMMEDIATELY on every edit (not on the
+  // 2.5s debounce), so closing the tab, a crash, or a total save outage never
+  // loses work — it's recovered on next load. The network autosave stays
+  // debounced. While a recovered draft is awaiting the user's restore decision
+  // we pause both (and keep the stored draft intact).
   useEffect(() => {
-    if (loading || saving) return;
+    if (loading || pendingDraft || !draftKey) return;
     const dirty = getDirtySections();
-    if (dirty.length === 0) return;
+    try {
+      if (dirty.length > 0) localStorage.setItem(draftKey, JSON.stringify({ savedAt: new Date().toISOString(), sections }));
+      else localStorage.removeItem(draftKey);
+    } catch { /* quota / private mode — best-effort, the network save still runs */ }
+
+    if (saving || dirty.length === 0) return;
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     autosaveTimer.current = setTimeout(() => { persistSections(dirty); }, 2500);
     return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
-  }, [sections, loading, saving, getDirtySections, persistSections]);
+  }, [sections, loading, saving, draftKey, pendingDraft, getDirtySections, persistSections]);
+
+  const restoreDraft = () => {
+    if (!pendingDraft) return;
+    // Restore into state but leave savedSnapshot at the DB baseline, so the
+    // restored edits register as dirty and autosave persists them.
+    setSections(pendingDraft.sections);
+    setPendingDraft(null);
+  };
+
+  const discardDraft = () => {
+    if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
+    setPendingDraft(null);
+  };
 
   // Warn before leaving with unsaved edits (e.g. a slow/failed autosave).
   useEffect(() => {
@@ -974,6 +1027,8 @@ const IMTemplateEditor: React.FC = () => {
                     {template.lastUpdatedBy && <span className="flex items-center gap-1"><User size={12} /> By: {template.lastUpdatedBy}</span>}
                     {saving ? (
                       <span className="text-indigo-600 flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-full font-medium"><Loader2 size={10} className="animate-spin" /> Saving…</span>
+                    ) : saveError ? (
+                      <span className="text-red-600 flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full font-medium" title="A save didn't go through. Your work is backed up locally and autosave is retrying."><AlertTriangle size={10} /> Save failed — retrying</span>
                     ) : unsavedCount > 0 ? (
                       <span className="text-amber-600 flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-full font-medium"><Clock size={10} /> {unsavedCount} unsaved</span>
                     ) : lastSaved ? (
@@ -990,6 +1045,18 @@ const IMTemplateEditor: React.FC = () => {
                <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
             </div>
           </div>
+
+          {pendingDraft && (
+            <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900">
+              <RotateCcw size={18} className="shrink-0 text-amber-600" />
+              <div className="text-sm flex-1">
+                <span className="font-semibold">Unsaved changes recovered.</span>{' '}
+                We found edits from {new Date(pendingDraft.savedAt).toLocaleString()} that didn't finish saving. Restore them?
+              </div>
+              <button onClick={restoreDraft} className="flex items-center gap-1.5 bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-amber-700"><RotateCcw size={14} /> Restore</button>
+              <button onClick={discardDraft} className="px-3 py-1.5 rounded-lg text-sm font-medium text-amber-700 hover:bg-amber-100">Discard</button>
+            </div>
+          )}
 
           <div className="flex flex-1 gap-6 overflow-hidden">
              {/* Sidebar */}

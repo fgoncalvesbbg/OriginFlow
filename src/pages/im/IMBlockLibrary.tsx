@@ -9,8 +9,9 @@ import { sanitizeHtml } from '../../utils';
 import {
   Layers, Plus, Search, CheckCircle2, Clock, Edit2, Trash2, X,
   ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame,
-  Code, Bold, Italic, Underline
+  Code, Bold, Italic, Underline, Languages as LanguagesIcon
 } from 'lucide-react';
+import { translateHtml } from '../../services/ai/translation.service';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,6 +111,50 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
       setContent(activeLang, next);
     } else {
       setContent(activeLang, (draft.content?.[activeLang] ?? '') + html);
+    }
+  };
+
+  // --- AI translation (EN → all / specific language) ---
+  const [translateTarget, setTranslateTarget] = useState('all');
+  const [translating, setTranslating] = useState(false);
+  const [translateProgress, setTranslateProgress] = useState({ done: 0, total: 0 });
+
+  // Translate the block's English content into the chosen target(s). Placeholders/
+  // formatting are preserved by translation.service. Results populate the language
+  // tabs; the user still reviews and clicks Save. For "all" we skip languages that
+  // already have content; a specific pick overwrites that language.
+  const handleTranslateBlock = async () => {
+    const source = (draft.content?.['en'] ?? '').trim();
+    if (!source) { alert('Add English content first — translation uses EN as the source.'); return; }
+    const targets = translateTarget === 'all'
+      ? LANGUAGES.filter(l => l.code !== 'en').map(l => l.code)
+      : [translateTarget];
+
+    setTranslating(true);
+    setTranslateProgress({ done: 0, total: targets.length });
+    const nextContent: Record<string, string> = { ...(draft.content ?? {}) };
+    const failures: string[] = [];
+    let idx = 0, done = 0;
+    const worker = async () => {
+      while (idx < targets.length) {
+        const code = targets[idx++];
+        const skip = translateTarget === 'all' && !!(nextContent[code] ?? '').trim();
+        if (!skip) {
+          try { nextContent[code] = await translateHtml(source, 'en', code); }
+          catch { failures.push(code.toUpperCase()); }
+        }
+        done += 1;
+        setTranslateProgress({ done, total: targets.length });
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
+      set({ content: nextContent });
+      // Reseed the visual surface if the currently-shown language was translated.
+      if (contentMode === 'visual' && visualRef.current) visualRef.current.innerHTML = nextContent[activeLang] ?? '';
+      if (failures.length) alert(`Translated with ${failures.length} language(s) skipped due to errors: ${failures.join(', ')}`);
+    } finally {
+      setTranslating(false);
     }
   };
 
@@ -292,14 +337,44 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
 
           {/* Content per language */}
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Content</label>
-            {/* Language tabs */}
-            <div className="flex gap-1 mb-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Content</label>
+              {/* AI translate the EN source into all / a specific language */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-400 uppercase tracking-wide">AI translate EN →</span>
+                <select
+                  value={translateTarget}
+                  onChange={e => setTranslateTarget(e.target.value)}
+                  disabled={translating}
+                  className="border border-indigo-200 rounded px-2 py-1 text-xs bg-indigo-50 text-indigo-700 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-60"
+                >
+                  <option value="all">All languages</option>
+                  {LANGUAGES.filter(l => l.code !== 'en').map(l => (
+                    <option key={l.code} value={l.code}>{l.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleTranslateBlock}
+                  disabled={translating}
+                  title="Translate the English content; placeholders and formatting are preserved"
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {translating
+                    ? <><Loader2 size={12} className="animate-spin" /> {translateProgress.done}/{translateProgress.total}</>
+                    : <><LanguagesIcon size={12} /> Translate</>}
+                </button>
+              </div>
+            </div>
+            {/* Language tabs — wrap across rows so all 28 languages fit; hover shows the full name */}
+            <div className="flex flex-wrap gap-1 mb-2">
               {LANGUAGES.map(l => (
                 <button
                   key={l.code}
                   type="button"
                   onClick={() => setActiveLang(l.code)}
+                  title={l.name}
+                  aria-label={l.name}
                   className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                     activeLang === l.code
                       ? 'bg-indigo-600 text-white'
