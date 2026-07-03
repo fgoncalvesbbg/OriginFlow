@@ -10,20 +10,7 @@ import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.ut
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 
-const ALL_LANGUAGES = [
-  { code: 'en', label: 'English' },
-  { code: 'de', label: 'German' },
-  { code: 'fr', label: 'French' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'it', label: 'Italian' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'nl', label: 'Dutch' },
-  { code: 'pl', label: 'Polish' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'tr', label: 'Turkish' },
-  { code: 'ru', label: 'Russian' }
-];
+import { IM_PREVIEW_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
 
 
 const DEFAULT_MASTER_PAGES: Record<IMMasterLayoutName, IMMasterPageOverride> = {

@@ -26,11 +26,7 @@ const BLOCK_TYPES = [
   { value: 'legacy_html', label: 'Legacy',    color: 'bg-gray-100 text-gray-600' },
 ] as const;
 
-const LANGUAGES = [
-  { code: 'en', label: 'EN' }, { code: 'de', label: 'DE' }, { code: 'fr', label: 'FR' },
-  { code: 'es', label: 'ES' }, { code: 'it', label: 'IT' }, { code: 'pt', label: 'PT' },
-  { code: 'nl', label: 'NL' }, { code: 'pl', label: 'PL' },
-];
+import { IM_LANGUAGE_TABS as LANGUAGES } from '../../config/im-languages';
 
 type BlockTypeValue = typeof BLOCK_TYPES[number]['value'];
 

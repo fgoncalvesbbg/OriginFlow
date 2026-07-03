@@ -20,20 +20,7 @@ import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 
-const ALL_LANGUAGES = [
-  { code: 'en', label: 'English (Default)' },
-  { code: 'de', label: 'German (DE)' },
-  { code: 'fr', label: 'French (FR)' },
-  { code: 'es', label: 'Spanish (ES)' },
-  { code: 'it', label: 'Italian (IT)' },
-  { code: 'pt', label: 'Portuguese (PT)' },
-  { code: 'nl', label: 'Dutch (NL)' },
-  { code: 'pl', label: 'Polish (PL)' },
-  { code: 'zh', label: 'Chinese (Simplified)' },
-  { code: 'ja', label: 'Japanese (JP)' },
-  { code: 'tr', label: 'Turkish (TR)' },
-  { code: 'ru', label: 'Russian (RU)' }
-];
+import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
 
 const SECTION_LAYOUT_OPTIONS: { value: IMMasterLayoutName; label: string }[] = [
   { value: 'chapter', label: 'Chapter' },
