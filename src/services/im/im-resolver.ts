@@ -60,6 +60,7 @@ import {
   ResolvedLegendTableNode,
   ResolvedStepSequenceNode,
   IMMasterLayoutName,
+  CategoryAttribute,
   RESOLVED_MANUAL_SCHEMA_VERSION,
 } from '../../types';
 
@@ -168,7 +169,14 @@ const isSectionVisible = (
   section: IMSection,
   placeholderData: Record<string, string>,
   conditions: Record<string, boolean | string>,
+  attributesById: Record<string, CategoryAttribute> = {},
 ): boolean => {
+  // Manual per-project override (persisted as secvis_<id>, normalized to the bare
+  // section-id key) wins for ANY section — this is how a PM hides a standardized
+  // section that doesn't apply, or force-includes an attribute-conditioned one.
+  const manual = conditions[section.id];
+  if (manual === false) return false;
+  if (manual === true) return true;
   if (!section.conditionFeatureId) return true;
   if (section.conditionFeatureId === 'manual') {
     return conditions[section.id] !== false;
@@ -176,6 +184,11 @@ const isSectionVisible = (
   const actual = placeholderData[section.conditionFeatureId] ?? conditions[section.conditionFeatureId];
   if (actual === undefined) return false;
   if (!section.conditionLabel || section.conditionLabel === 'any') return true;
+  // Data-type-aware match (enum multi-value, boolean Yes/No, numeric range) so the published
+  // output agrees with the generator preview/PDF. Falls back to exact-string equality when the
+  // attribute definition isn't supplied (e.g. template preview with no project context).
+  const attr = attributesById[section.conditionFeatureId];
+  if (attr) return matchesConditionValue(String(actual), section.conditionLabel, attr);
   return String(actual) === section.conditionLabel;
 };
 
@@ -186,7 +199,7 @@ const isSectionVisible = (
 // passesFeatureGate / isFalsy now live in src/utils/attribute-condition.utils.ts so the
 // compliance module can reuse the same attribute-condition logic. Re-exported here to
 // keep existing IM imports (and tests) working unchanged.
-import { passesFeatureGate } from '../../utils/attribute-condition.utils';
+import { passesFeatureGate, matchesConditionValue } from '../../utils/attribute-condition.utils';
 export { passesFeatureGate };
 
 const resolveInlineRef = (
@@ -323,6 +336,10 @@ export const resolveManual = (
   projectIM: (Omit<ProjectIM, 'templateType'> & { templateType?: ProjectIM['templateType']; skuContent?: Record<string, SKUContentValue> }) | null,
   language: string,
   projectSkus: Array<{ id: string; skuNumber: string }> = [],
+  // Attribute definitions keyed by id, so section conditions are matched with the same
+  // data-type-aware logic as the generator. Optional: omit for template preview / tests,
+  // where visibility falls back to exact-string equality.
+  attributesById: Record<string, CategoryAttribute> = {},
 ): ResolvedManual => {
   nodeCounter = 0; // reset per resolve call so IDs are stable for the same inputs
 
@@ -395,7 +412,7 @@ export const resolveManual = (
   const resolvedSections: ResolvedSection[] = [];
 
   const walkSection = (section: IMSection) => {
-    if (!isSectionVisible(section, placeholderData, conditions)) return;
+    if (!isSectionVisible(section, placeholderData, conditions, attributesById)) return;
 
     // A chapter scoped to specific SKUs, none of which are bound, doesn't apply here.
     const skuScope = resolveSkuScope(section.id);
@@ -459,8 +476,15 @@ export const resolveManual = (
       const refKey = `${section.id}:${i}`;
       const refOverride = typeof conditions[refKey] === 'boolean' ? (conditions[refKey] as boolean) : undefined;
 
-      if (ref.kind === 'inline') {
-        node = resolveInlineRef(ref, language, placeholderData, conditions, warnings, refOverride);
+      // Per-project inline block override (e.g. an edited table): replace this template
+      // inline ref with the project's version. Only inline refs are overridable — shared
+      // and sku_slot refs are never touched. Not applied to section overrides (which are
+      // already the project's own content).
+      const inlineOverride = !override ? projectIM?.blockOverrides?.[section.id]?.[String(i)] : undefined;
+      const effectiveRef: BlockRef = (ref.kind === 'inline' && inlineOverride) ? inlineOverride : ref;
+
+      if (effectiveRef.kind === 'inline') {
+        node = resolveInlineRef(effectiveRef, language, placeholderData, conditions, warnings, refOverride);
       } else if (ref.kind === 'block') {
         node = resolveSharedBlockRef(ref, blocksById, language, placeholderData, conditions, warnings, refOverride);
       } else if (ref.kind === 'sku_slot') {

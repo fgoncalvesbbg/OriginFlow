@@ -16,6 +16,14 @@ import type { IMTemplateType } from '../../types';
 const BUCKET = 'im-print';
 const ENDPOINT = '/.netlify/functions/render-print-pdf';
 
+/**
+ * Client-side ceiling for a print render. The render-print-pdf Netlify Function runs
+ * synchronously (default ~10s, max 26s on Netlify) — past that the platform kills it,
+ * but the browser fetch can hang with no response. We abort a hair past that ceiling so
+ * a stalled render fails with a clear message instead of spinning forever.
+ */
+const RENDER_TIMEOUT_MS = 28_000;
+
 /** Whether the print-PDF export feature is enabled (server secrets configured). */
 export const isPrintExportAvailable = (): boolean =>
   (import.meta.env.VITE_PRINT_EXPORT_ENABLED as string | undefined) === 'true';
@@ -138,13 +146,37 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
   const token = session?.access_token;
   if (!token) throw new Error('You must be signed in to generate a print PDF.');
 
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(params),
-  });
+  let res: Response;
+  try {
+    res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
+    });
+  } catch (e) {
+    // AbortSignal.timeout fires a TimeoutError; a dropped connection fires a plain AbortError/TypeError.
+    if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+      throw new Error(
+        `Print render timed out after ${Math.round(RENDER_TIMEOUT_MS / 1000)}s. This usually means the manual is too large to render in one pass — try fewer languages or split the booklet.`,
+      );
+    }
+    throw new Error(e instanceof Error ? `Print render request failed: ${e.message}` : 'Print render request failed.');
+  }
 
   if (!res.ok) {
+    // A 404 means the render function endpoint itself wasn't reached (it only ever
+    // returns 405/500/200). That's the tell-tale sign the Netlify function isn't being
+    // served — e.g. the app is running under plain `vite` (npm run start), which doesn't
+    // serve /.netlify/functions/*. Give an actionable message instead of a bare code.
+    if (res.status === 404) {
+      throw new Error(
+        'Print render service not found (404). This feature runs as a Netlify function — ' +
+        'run the app with `netlify dev` locally (plain `vite`/`npm run start` does not serve ' +
+        'functions), or use the deployed site. To hide the button in this environment, set ' +
+        'VITE_PRINT_EXPORT_ENABLED=false.',
+      );
+    }
     let message = `Print render failed (${res.status})`;
     try {
       const body = await res.json();

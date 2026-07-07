@@ -5,7 +5,12 @@
  * so they live here as standalone, testable functions.
  */
 
-import { CategoryAttribute, BlockRef, FeatureConditionFields } from '../../../types';
+import { BlockRef, FeatureConditionFields } from '../../../types';
+
+// matchesConditionValue now lives in the shared attribute-condition utils so the resolver
+// (published JSON) and this generator (preview/PDF) decide chapter visibility identically.
+// Re-exported here to keep existing imports from this module working unchanged.
+export { matchesConditionValue } from '../../../utils/attribute-condition.utils';
 
 /** Escape a string for safe inclusion in XML output. */
 export const escapeXml = (unsafe: string): string => {
@@ -29,30 +34,6 @@ export const getTokensInFragment = (html: string): string[] => {
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) out.push(m[1].trim());
   return out;
-};
-
-/** Whether a submitted attribute `value` satisfies a section/ref condition label, per the attribute's data type. */
-export const matchesConditionValue = (value: string, conditionLabel: string, attr: CategoryAttribute): boolean => {
-  const v = value.trim();
-  const cv = conditionLabel.trim();
-  switch (attr.dataType) {
-    case 'boolean':
-      return (v === 'true' && cv === 'Yes') || (v === 'false' && cv === 'No');
-    case 'enum':
-      return cv.split(',').map(s => s.trim()).includes(v);
-    case 'integer':
-    case 'decimal': {
-      const num = parseFloat(v);
-      if (isNaN(num)) return false;
-      const rangeMatch = cv.match(/^([\d.]+)\s*[–\-]\s*([\d.]+)/);
-      if (rangeMatch) return num >= parseFloat(rangeMatch[1]) && num <= parseFloat(rangeMatch[2]);
-      return parseFloat(cv.replace(/[^\d.]/g, '')) === num;
-    }
-    case 'text':
-      return v.toLowerCase() === cv.toLowerCase();
-    default:
-      return true;
-  }
 };
 
 /** A ref carries a condition when it requires (or requires the absence of) an attribute. */

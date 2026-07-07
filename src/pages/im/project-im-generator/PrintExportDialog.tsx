@@ -68,6 +68,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
   const [uploading, setUploading] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PrintPdfResult | null>(null);
 
@@ -85,6 +86,14 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       alive = false;
     };
   }, [projectId, templateType]);
+
+  // Tick an elapsed-seconds counter while a render is in flight, so a slow/stuck
+  // render visibly progresses instead of showing a static spinner.
+  useEffect(() => {
+    if (!busy) return;
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
 
   const sameSet = (a: string[], b: string[]) =>
     a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
@@ -144,6 +153,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
   const handleGenerate = async () => {
     setBusy(true);
+    setElapsed(0);
     setError(null);
     setResult(null);
     try {
@@ -473,7 +483,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             className="text-sm px-4 py-2 bg-primary text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
-            {busy ? 'Rendering…' : status === 'outdated' ? 'Generate updated PDF' : 'Generate print PDF'}
+            {busy ? `Rendering… ${elapsed}s` : status === 'outdated' ? 'Generate updated PDF' : 'Generate print PDF'}
           </button>
         </div>
       </div>

@@ -191,6 +191,32 @@ describe('resolveManual', () => {
     expect(result.sections[0].id).toBe('s5');
   });
 
+  it('section condition uses data-type-aware matching when attribute definitions are supplied', () => {
+    // A multi-value enum condition ("A, B") — an exact-string compare against the actual
+    // value "B" would fail, but the enum-aware matcher includes it. Mirrors the generator.
+    const section = makeSection({
+      id: 's-enum',
+      content: { en: '<p>Applies to A or B</p>' },
+      conditionFeatureId: 'attr-install',
+      conditionLabel: 'Standalone/Table Top, Freestanding',
+    });
+    const projectIM = {
+      id: 'p', templateId: 'tmpl-1',
+      placeholderData: { 'attr-install': 'Standalone/Table Top' },
+      skuContent: {}, status: 'draft' as const, updatedAt: '2026-01-01T00:00:00Z',
+    };
+    const enumAttr = { id: 'attr-install', name: 'Installation Type', dataType: 'enum' as const };
+
+    // Without attribute defs: exact-string compare fails → section hidden (legacy fallback).
+    const fallback = resolveManual(baseTemplate, [section], {}, projectIM, 'en');
+    expect(fallback.sections).toHaveLength(0);
+
+    // With attribute defs: enum membership matches → section shown (matches the app).
+    const aware = resolveManual(baseTemplate, [section], {}, projectIM, 'en', [], { 'attr-install': enumAttr as any });
+    expect(aware.sections).toHaveLength(1);
+    expect(aware.sections[0].id).toBe('s-enum');
+  });
+
   it('token substitution replaces {{ token }} in html body', () => {
     const section = makeSection({
       id: 's7',
@@ -681,5 +707,104 @@ describe('resolveManual — per-chapter SKU scope', () => {
       mkIM({ boundSkuIds: [], sectionSkus: { sc3: ['sku-c'] } }), 'en', skus,
     );
     expect(result.sections[0].skuScope).toEqual(['10035296']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-project inline block overrides (e.g. an edited table)
+// ---------------------------------------------------------------------------
+
+describe('resolveManual — per-project block overrides', () => {
+  const mkIM = (overrides: any = {}) => ({
+    id: 'proj-bo', templateId: 'tmpl-1',
+    placeholderData: {}, skuContent: {}, status: 'draft' as const, updatedAt: '',
+    ...overrides,
+  });
+
+  it('overrides an inline table block with the project version', () => {
+    const section = makeSection({
+      id: 'bo1',
+      blockRefs: [{ kind: 'inline', content: { en: '<table class="im-table"><tr><td>template</td></tr></table>' } }],
+    });
+    const projectIM = mkIM({
+      blockOverrides: { bo1: { '0': { kind: 'inline', content: { en: '<table class="im-table"><tr><td>project</td></tr></table>' } } } },
+    });
+    const result = resolveManual(baseTemplate, [section], {}, projectIM, 'en');
+    expect((result.sections[0].nodes[0] as any).html).toContain('project');
+    expect((result.sections[0].nodes[0] as any).html).not.toContain('template');
+  });
+
+  it('falls back to the template block when there is no override', () => {
+    const section = makeSection({
+      id: 'bo2',
+      blockRefs: [{ kind: 'inline', content: { en: '<p>Template A</p>' } }],
+    });
+    const result = resolveManual(baseTemplate, [section], {}, mkIM(), 'en');
+    expect((result.sections[0].nodes[0] as any).html).toBe('<p>Template A</p>');
+  });
+
+  it('never overrides a shared block ref (compliance content stays locked)', () => {
+    const block = makeBlock({ id: 'blk-x', slug: 'shared', content: { en: '<p>Approved shared</p>' } });
+    const section = makeSection({ id: 'bo3', blockRefs: [{ kind: 'block', block_id: 'blk-x' }] });
+    // An override keyed at the shared block's index must be ignored.
+    const projectIM = mkIM({ blockOverrides: { bo3: { '0': { kind: 'inline', content: { en: '<p>Hacked</p>' } } } } });
+    const result = resolveManual(baseTemplate, [section], { 'blk-x': block }, projectIM, 'en');
+    expect((result.sections[0].nodes[0] as any).html).toBe('<p>Approved shared</p>');
+  });
+
+  it('applies the override only at its ref index', () => {
+    const section = makeSection({
+      id: 'bo4',
+      blockRefs: [
+        { kind: 'inline', content: { en: '<p>First</p>' } },
+        { kind: 'inline', content: { en: '<p>Second</p>' } },
+      ],
+    });
+    const projectIM = mkIM({ blockOverrides: { bo4: { '1': { kind: 'inline', content: { en: '<p>Edited second</p>' } } } } });
+    const result = resolveManual(baseTemplate, [section], {}, projectIM, 'en');
+    const htmls = result.sections[0].nodes.map(n => (n as any).html);
+    expect(htmls).toEqual(['<p>First</p>', '<p>Edited second</p>']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Manual per-project section hide (secvis_ → conditions[section.id])
+// ---------------------------------------------------------------------------
+
+describe('resolveManual — manual per-section hide', () => {
+  const mkIM = (placeholderData: Record<string, string>) => ({
+    id: 'proj-hide', templateId: 'tmpl-1',
+    placeholderData, skuContent: {}, status: 'draft' as const, updatedAt: '',
+  });
+
+  it('excludes a plain section (no condition) when manually hidden', () => {
+    const a = makeSection({ id: 'ha', order: 0, content: { en: '<p>A</p>' } });
+    const b = makeSection({ id: 'hb', order: 1, content: { en: '<p>B</p>' } });
+    // secvis_ is expanded to the bare section-id key upstream (normalizeResolverData);
+    // the resolver turns 'false' into conditions['hb'] === false.
+    const result = resolveManual(baseTemplate, [a, b], {}, mkIM({ hb: 'false' }), 'en');
+    expect(result.sections.map(s => s.id)).toEqual(['ha']);
+  });
+
+  it('keeps a plain section when not hidden', () => {
+    const a = makeSection({ id: 'ha2', content: { en: '<p>A</p>' } });
+    const result = resolveManual(baseTemplate, [a], {}, mkIM({}), 'en');
+    expect(result.sections.map(s => s.id)).toEqual(['ha2']);
+  });
+
+  it('force-includes an attribute-conditioned section when manually set true', () => {
+    // Condition would normally exclude it (attr-x absent), but a manual include wins.
+    const s = makeSection({ id: 'hc', content: { en: '<p>C</p>' }, conditionFeatureId: 'attr-x', conditionLabel: 'yes' });
+    const hidden = resolveManual(baseTemplate, [s], {}, mkIM({}), 'en');
+    expect(hidden.sections).toHaveLength(0);
+    const shown = resolveManual(baseTemplate, [s], {}, mkIM({ hc: 'true' }), 'en');
+    expect(shown.sections.map(x => x.id)).toEqual(['hc']);
+  });
+
+  it('hiding a parent chapter drops its subsections too', () => {
+    const parent = makeSection({ id: 'hp', order: 0, content: { en: '<p>Parent</p>' } });
+    const child = makeSection({ id: 'hcld', parentId: 'hp', order: 0, content: { en: '<p>Child</p>' } });
+    const result = resolveManual(baseTemplate, [parent, child], {}, mkIM({ hp: 'false' }), 'en');
+    expect(result.sections).toHaveLength(0);
   });
 });

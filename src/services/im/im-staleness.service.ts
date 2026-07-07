@@ -26,13 +26,13 @@
 
 import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { IMBlock, IMSection, IMTemplate, IMTemplateType } from '../../types';
+import { IMBlock, IMSection, IMTemplate, IMTemplateType, CategoryAttribute } from '../../types';
 import { getIMTemplates, getIMTemplateById } from './im-template.service';
 import { getIMSections } from './im-section.service';
 import { getIMBlocks } from './im-block.service';
 import { getGeneratedProjectIMs, getProjectIM } from './project-im.service';
 import { getProjectSkus } from '../project/project-sku.service';
-import { getProjectRequiredLanguages, resolveContentHash, publishResolvedManuals, PublishResult } from './im-publish.service';
+import { getProjectRequiredLanguages, resolveContentHash, publishResolvedManuals, getAttributesById, PublishResult } from './im-publish.service';
 
 export const stalenessKey = (projectId: string, templateType: IMTemplateType) => `${projectId}::${templateType}`;
 
@@ -114,13 +114,16 @@ const isStale = async (
   projectIM: Parameters<typeof resolveContentHash>[3],
   projectId: string,
   hashes: Map<string, string>,
+  // Attribute definitions, so the re-resolved hash uses the SAME section-condition matching
+  // as publish. Must be passed here or every manual falsely reports stale.
+  attributesById: Record<string, CategoryAttribute>,
 ): Promise<boolean> => {
   const langs = getProjectRequiredLanguages(template, projectIM.placeholderData);
   // Same SKU context publish uses, so re-resolved hashes match the published output.
   const projectSkus = (await getProjectSkus(projectId)).map(s => ({ id: s.id, skuNumber: s.skuNumber }));
   for (const lang of langs) {
     const published = hashes.get(`${projectId}::${projectIM.templateType}::${lang}`);
-    const { contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, lang, projectSkus);
+    const { contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, lang, projectSkus, attributesById);
     if (!published || published !== contentHash) return true;
   }
   return false;
@@ -137,10 +140,11 @@ export const getStaleProjectIMDetails = async (): Promise<Map<string, StaleManua
   const generated = await getGeneratedProjectIMs();
   if (!generated.length) return result;
 
-  const [templates, blocks, snapshots] = await Promise.all([
+  const [templates, blocks, snapshots, attributesById] = await Promise.all([
     getIMTemplates(),
     getIMBlocks(),
     loadSnapshots(),
+    getAttributesById(),
   ]);
   const templateById = new Map(templates.map((t) => [t.id, t]));
   const blocksById = blocksByIdMap(blocks);
@@ -155,7 +159,7 @@ export const getStaleProjectIMDetails = async (): Promise<Map<string, StaleManua
     const template = templateById.get(im.templateId);
     if (!template) continue;
     const sections = sectionsByTemplate.get(im.templateId) ?? [];
-    if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes))) continue;
+    if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes, attributesById))) continue;
     const reasons = computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, im.templateType)));
     result.set(stalenessKey(projectId, im.templateType), { projectId, templateType: im.templateType, reasons });
   }
@@ -173,13 +177,14 @@ export const getProjectIMStaleReasons = async (
   const template = await getIMTemplateById(im.templateId);
   if (!template) return [];
 
-  const [sections, blocks, snapshots] = await Promise.all([
+  const [sections, blocks, snapshots, attributesById] = await Promise.all([
     getIMSections(im.templateId),
     getIMBlocks(),
     loadSnapshots(projectId),
+    getAttributesById(),
   ]);
   const blocksById = blocksByIdMap(blocks);
-  if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes))) return [];
+  if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes, attributesById))) return [];
   return computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, templateType)));
 };
 

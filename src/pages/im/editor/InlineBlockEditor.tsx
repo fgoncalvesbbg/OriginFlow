@@ -369,12 +369,38 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
   }, []);
 
+  // --- Table row/column editing -------------------------------------------
+  // Locate the caret's table cell within this editor: which table (by DOM order),
+  // and the row/column index of the cell. Null when the caret isn't in a table.
+  const getTableContext = (): { tableIdx: number; row: number; col: number } | null => {
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0) return null;
+    let node: Node | null = sel.getRangeAt(0).startContainer;
+    let cell: HTMLElement | null = null;
+    while (node && node !== el) {
+      if (node instanceof HTMLElement && (node.tagName === 'TD' || node.tagName === 'TH')) { cell = node; break; }
+      node = node.parentNode;
+    }
+    const table = cell?.closest('table');
+    const tr = cell?.parentElement;
+    if (!cell || !tr || !table || !el.contains(table)) return null;
+    const tableIdx = Array.from(el.querySelectorAll('table')).indexOf(table as HTMLTableElement);
+    const row = Array.from(table.querySelectorAll('tr')).indexOf(tr as HTMLTableRowElement);
+    const col = Array.from(tr.children).indexOf(cell);
+    return tableIdx >= 0 && row >= 0 && col >= 0 ? { tableIdx, row, col } : null;
+  };
+
+  const [caretInTable, setCaretInTable] = useState(false);
+  const refreshCaretTable = useCallback(() => setCaretInTable(!!getTableContext()), []);
+
   const handleChange = useCallback((event: React.FormEvent<HTMLDivElement>) => {
     isUserEditingRef.current = true;
     saveSelection();
+    refreshCaretTable();
     const next = deserializeHtmlToBlocks(event.currentTarget.innerHTML);
     setBlocks(next);
-  }, [deserializeHtmlToBlocks, saveSelection]);
+  }, [deserializeHtmlToBlocks, saveSelection, refreshCaretTable]);
 
   // Click an image to select it (shows the resize buttons); clicking anything
   // else deselects. The selection outline is DOM-only — `parseInlineNodes` reads
@@ -391,7 +417,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       selectedImgRef.current = null;
       setImgSelected(false);
     }
-  }, []);
+    refreshCaretTable();
+  }, [refreshCaretTable]);
 
   // Resize the selected image. Setting the DOM width then re-parsing persists the
   // width into blocks (and the emitted HTML) while keeping the live node in place.
@@ -424,6 +451,46 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setBlocks((prev) => [...prev, newBlock]);
     setSelectedBlockId(newBlock.id);
   };
+
+  // Apply a structural change to the table the caret is in. Reads the live DOM first
+  // (like switchToHtml) so in-progress typing isn't lost, mutates the matching table
+  // block's `rows`, then lets the render effect rewrite the DOM + emit onChange.
+  const mutateCaretTable = (
+    fn: (rows: InlineNode[][][], ctx: { row: number; col: number }) => InlineNode[][][],
+  ) => {
+    const el = contentRef.current;
+    if (!el) return;
+    const ctx = getTableContext();
+    const fresh = deserializeHtmlToBlocks(el.innerHTML);
+    let seen = -1;
+    let targetId: string | null = null;
+    for (const b of fresh) {
+      if (b.type === 'table') { seen++; if (seen === (ctx?.tableIdx ?? 0)) { targetId = b.id; break; } }
+    }
+    if (!targetId) return;
+    const next = fresh.map((b) => {
+      if (b.id !== targetId || b.type !== 'table') return b;
+      const cols = b.rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
+      return { ...b, rows: fn(b.rows, { row: ctx?.row ?? b.rows.length - 1, col: ctx?.col ?? cols - 1 }) };
+    });
+    isUserEditingRef.current = false; // force the render effect to rewrite the DOM
+    setBlocks(next);
+  };
+
+  const tableColCount = (rows: InlineNode[][][]) => rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
+  const addTableRow = () => mutateCaretTable((rows, { row }) => {
+    const cols = tableColCount(rows);
+    const newRow = Array.from({ length: cols }, () => textCell(''));
+    const at = Math.min(row + 1, rows.length);
+    return [...rows.slice(0, at), newRow, ...rows.slice(at)];
+  });
+  const addTableColumn = () => mutateCaretTable((rows, { col }) => rows.map((r) => {
+    const at = Math.min(col + 1, r.length);
+    return [...r.slice(0, at), textCell(''), ...r.slice(at)];
+  }));
+  // Never remove the header row (index 0) or the last remaining row.
+  const removeTableRow = () => mutateCaretTable((rows, { row }) => (rows.length <= 1 || row === 0 ? rows : rows.filter((_, i) => i !== row)));
+  const removeTableColumn = () => mutateCaretTable((rows, { col }) => (tableColCount(rows) <= 1 ? rows : rows.map((r) => r.filter((_, i) => i !== col))));
 
   // Mode switching. Going to HTML seeds the textarea from the current blocks;
   // returning to rich re-parses whatever HTML the user typed back into blocks.
@@ -489,6 +556,14 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
             {/* Callout boxes are now applied to the whole row via the row's Box selector. */}
             <button onMouseDown={(e) => { e.preventDefault(); insertBlock('table'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Insert Table"><TableIcon size={16} /></button>
+            {caretInTable && (
+              <>
+                <button onMouseDown={(e) => { e.preventDefault(); addTableRow(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded" title="Add a row below the current one">+ Row</button>
+                <button onMouseDown={(e) => { e.preventDefault(); addTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded" title="Add a column after the current one">+ Col</button>
+                <button onMouseDown={(e) => { e.preventDefault(); removeTableRow(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current row (header can't be removed)">− Row</button>
+                <button onMouseDown={(e) => { e.preventDefault(); removeTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current column">− Col</button>
+              </>
+            )}
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
             <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('text'); }} className="flex items-center gap-1 px-2 py-1 bg-amber-50 text-yellow-700 hover:bg-amber-100 rounded text-xs font-medium border border-amber-200" title="Insert User Input Field"><Type size={14} /> Text</button>
             <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('image'); }} className="flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-xs font-medium border border-indigo-200" title="Insert Image Upload Field"><ImageIcon size={14} /> Img</button>
@@ -549,8 +624,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onClick={handleEditorClick}
               onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
               onBlur={() => { setIsFocused(false); saveSelection(); }}
-              onMouseUp={saveSelection}
-              onKeyUp={saveSelection}
+              onMouseUp={() => { saveSelection(); refreshCaretTable(); }}
+              onKeyUp={() => { saveSelection(); refreshCaretTable(); }}
             />
           </>
         )}

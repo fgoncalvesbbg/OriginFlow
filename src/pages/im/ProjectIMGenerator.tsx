@@ -20,7 +20,7 @@ import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult } from '../../services';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate } from 'lucide-react';
 import { InlineBlockEditor } from './editor/InlineBlockEditor';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
@@ -29,7 +29,6 @@ import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './proj
 import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition } from './project-im-generator/im-content.utils';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { BindableField } from './project-im-generator/BindableField';
-import { AddProjectSection } from './project-im-generator/AddProjectSection';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 
@@ -67,6 +66,11 @@ const ProjectIMGenerator: React.FC = () => {
   // Per-chapter SKU scope: sectionId → project_skus.id[]. Empty = applies to all bound
   // SKUs (no "Applies to: …" header). Drives SKU-specific chapter variants.
   const [sectionSkus, setSectionSkus] = useState<Record<string, string[]>>({});
+  // Add-content tab: the section whose editor is shown in the right pane (tree selection).
+  const [selectedContentSectionId, setSelectedContentSectionId] = useState<string | null>(null);
+  // Per-project override of a single inline template block (e.g. an edited table),
+  // keyed by sectionId → refIndex → replacement inline block. Template stays untouched.
+  const [blockOverrides, setBlockOverrides] = useState<Record<string, Record<string, InlineBlockRef>>>({});
   // Left panel mode: fill placeholder values, or author project-specific content.
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
   const [availableBlocks, setAvailableBlocks] = useState<Record<string, { content: Record<string, string>; blockType: string }>>({});
@@ -181,6 +185,7 @@ const ProjectIMGenerator: React.FC = () => {
             if (existingInstance.extraSections) setExtraSections(existingInstance.extraSections);
             if (existingInstance.sectionOverrides) setSectionOverrides(existingInstance.sectionOverrides);
             if (existingInstance.sectionSkus) setSectionSkus(existingInstance.sectionSkus);
+            if (existingInstance.blockOverrides) setBlockOverrides(existingInstance.blockOverrides);
             
             // Restore conditions from saved data
             const loadedConds: Record<string, boolean> = {};
@@ -386,7 +391,7 @@ const ProjectIMGenerator: React.FC = () => {
       dataToSave['__field_bindings'] = JSON.stringify(fieldBindings);
 
       try {
-          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, undefined, boundSkuIds, sectionSkus);
+          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, undefined, boundSkuIds, sectionSkus, blockOverrides);
           setInstance(saved);
           alert("Draft saved successfully!");
       } catch (e) {
@@ -423,6 +428,7 @@ const ProjectIMGenerator: React.FC = () => {
           setExtraSections([]);
           setSectionOverrides({});
           setSectionSkus({});
+          setBlockOverrides({});
           setEditorMode('fill');
           setTemplate(null);
           setSections([]);
@@ -462,7 +468,7 @@ const ProjectIMGenerator: React.FC = () => {
           // section bodies (so project text/blocks render). `order: i` keeps the
           // renderer's flat sort in the same hierarchical order as the preview.
           const renderSections = orderedSections
-              .filter(s => isSectionVisible(s) && isSectionInSkuScope(s.id))
+              .filter(s => isSectionEffectivelyVisible(s) && isSectionInSkuScope(s.id))
               .map((s, i) => ({ ...s, order: i, title: localizedSectionTitle(s, activeLang), content: { ...s.content, [activeLang]: buildSectionHtml(s) } }));
 
           const pdfBlob = await renderProjectIMPdf({
@@ -510,7 +516,7 @@ const ProjectIMGenerator: React.FC = () => {
           dataToSave['__meta_language'] = activeLang;
           dataToSave['__field_bindings'] = JSON.stringify(fieldBindings);
 
-          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, nextVersion, boundSkuIds, sectionSkus);
+          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, nextVersion, boundSkuIds, sectionSkus, blockOverrides);
           setInstance(savedIM);
 
           // Publish the structured ResolvedManual (one JSON per language + manifest) to the
@@ -763,6 +769,49 @@ const ProjectIMGenerator: React.FC = () => {
           return next;
       });
 
+  // --- Per-project overrides of individual inline template blocks (e.g. tables) ---
+  // True when an inline ref's content contains a table in any language — the only case
+  // where we surface the per-project "Edit table" action.
+  const refHasTable = (ref: BlockRef): boolean =>
+      ref.kind === 'inline' && Object.values((ref as InlineBlockRef).content || {}).some(h => /<table/i.test(h || ''));
+
+  // Start a per-project edit of a template inline block: seed the override from the
+  // template ref (deep-copied so edits never mutate the template) and store it by index.
+  const editBlockForProject = (sectionId: string, i: number, ref: InlineBlockRef) => {
+      setBlockOverrides(prev => ({
+          ...prev,
+          [sectionId]: { ...(prev[sectionId] ?? {}), [String(i)]: { ...ref, content: { ...ref.content } } },
+      }));
+  };
+
+  const updateBlockOverride = (sectionId: string, i: number, lang: string, html: string) => {
+      setBlockOverrides(prev => {
+          const cur = prev[sectionId]?.[String(i)];
+          if (!cur) return prev;
+          return { ...prev, [sectionId]: { ...prev[sectionId], [String(i)]: { ...cur, content: { ...cur.content, [lang]: html } } } };
+      });
+  };
+
+  const setBlockOverrideVariant = (sectionId: string, i: number, variant: CalloutVariant | undefined) => {
+      setBlockOverrides(prev => {
+          const cur = prev[sectionId]?.[String(i)];
+          if (!cur) return prev;
+          return { ...prev, [sectionId]: { ...prev[sectionId], [String(i)]: { ...cur, variant } } };
+      });
+  };
+
+  // Drop a block override → the section falls back to the template block. Clears the
+  // section key when no overrides remain under it.
+  const resetBlockOverride = (sectionId: string, i: number) => {
+      setBlockOverrides(prev => {
+          const forSection = { ...(prev[sectionId] ?? {}) };
+          delete forSection[String(i)];
+          const next = { ...prev };
+          if (Object.keys(forSection).length) next[sectionId] = forSection; else delete next[sectionId];
+          return next;
+      });
+  };
+
   // ---------------- EXPORT HELPERS ----------------
 
 
@@ -859,11 +908,14 @@ const ProjectIMGenerator: React.FC = () => {
               sectionOverrides,
               boundSkuIds,
               sectionSkus,
+              blockOverrides,
           };
           const blocks = await getIMBlocks();
           const blocksById: Record<string, any> = {};
           for (const b of blocks) blocksById[b.id] = b;
-          const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang, projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })));
+          // Attribute definitions so section conditions resolve identically to the published file.
+          const attributesById = allAttributes.reduce<Record<string, CategoryAttribute>>((m, a) => { m[a.id] = a; return m; }, {});
+          const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang, projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })), attributesById);
           downloadData(JSON.stringify(resolved, null, 2), filename, 'application/json');
       } else if (format === 'xml') {
           // InDesign / Generic XML format
@@ -1153,6 +1205,33 @@ const ProjectIMGenerator: React.FC = () => {
     const attr = allAttributes.find(a => a.id === section.conditionFeatureId);
     if (!attr) return true;
     return matchesConditionValue(value, section.conditionLabel, attr);
+  };
+
+  // Toggle a per-project section hide. Hidden = sectionVisibility[id] === false (persisted
+  // as secvis_<id>); toggling a hidden section back removes the override (reverts to default/
+  // auto-condition). Works for any section — template, placeholder, or project.
+  const toggleSectionHidden = (id: string) => {
+    setSectionVisibility(prev => {
+      if (prev[id] === false) { const next = { ...prev }; delete next[id]; return next; }
+      return { ...prev, [id]: false };
+    });
+  };
+
+  // Effective visibility for the preview/PDF: a section is shown only if it AND all of its
+  // ancestors are visible — mirrors the resolver, which skips a hidden section's whole subtree.
+  const isSectionEffectivelyVisible = (section: IMSection): boolean => {
+    let current: IMSection | undefined = section;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.id)) {
+      if (!isSectionVisible(current)) return false;
+      seen.add(current.id);
+      const parentId = current.parentId ?? null;
+      if (!parentId) break;
+      const extra = extraSections.find(s => s.id === parentId);
+      current = sections.find(s => s.id === parentId)
+        ?? (extra ? ({ ...extra, templateId: '', isPlaceholder: false, content: {} } as IMSection) : undefined);
+    }
+    return true;
   };
 
   // --- Per-chapter SKU scope (SKU-specific chapter variants) ---
@@ -1511,10 +1590,14 @@ const ProjectIMGenerator: React.FC = () => {
       // Conditional inline rows + shared blocks: hidden when their condition isn't met
       // (unless a manual Include override forces them on). Mirrors the resolver.
       if ((ref.kind === 'inline' || ref.kind === 'block') && !isRefVisible(section.id, i, ref)) continue;
-      if (ref.kind === 'inline') {
-        const html = processContent((ref as any).content?.[activeLang] || (ref as any).content?.['en'] || '');
+      // Per-project inline block override (e.g. an edited table) replaces this template
+      // inline ref. Not applied to section overrides (already the project's own content).
+      const inlineOverride = !override ? blockOverrides[section.id]?.[String(i)] : undefined;
+      const effRef: any = (ref.kind === 'inline' && inlineOverride) ? inlineOverride : ref;
+      if (effRef.kind === 'inline') {
+        const html = processContent(effRef.content?.[activeLang] || effRef.content?.['en'] || '');
         // A row variant wraps its whole content in the ISO callout box (matches the resolver).
-        if (html) parts.push((ref as any).variant ? wrapBlockCallout((ref as any).variant, html, activeLang) : html);
+        if (html) parts.push(effRef.variant ? wrapBlockCallout(effRef.variant, html, activeLang) : html);
       } else if (ref.kind === 'block') {
         const blk = availableBlocks[(ref as any).block_id];
         if (blk) {
@@ -1639,7 +1722,7 @@ const ProjectIMGenerator: React.FC = () => {
     else if (boundCount === 0) blocking.push('No SKU is bound to this manual. Select at least one in “Bound SKUs”.');
 
     for (const section of orderedSections) {
-      if (!isSectionVisible(section)) continue;
+      if (!isSectionEffectivelyVisible(section)) continue;
       const secTitle = localizedSectionTitle(section, 'en');
       const { items, attrTokens } = collectSectionInputs(section, 'en');
       // Placeholder values + value-conditions are filled once and shared across languages.
@@ -1672,7 +1755,7 @@ const ProjectIMGenerator: React.FC = () => {
     for (const lang of otherLangs) {
       const missing = new Set<string>();
       for (const section of orderedSections) {
-        if (!isSectionVisible(section)) continue;
+        if (!isSectionEffectivelyVisible(section)) continue;
         const secTitle = localizedSectionTitle(section, 'en');
         const refs = sectionOverrides[section.id] ?? section.blockRefs ?? [];
         const hasInlineRef = refs.some(r => r.kind === 'inline');
@@ -1804,148 +1887,253 @@ const ProjectIMGenerator: React.FC = () => {
     </div>
   );
 
-  const renderContentEditor = () => (
-    <div className="flex-1 overflow-y-auto p-5 space-y-6">
-      <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2">
-        <FilePlus2 size={14} className="mt-0.5 shrink-0" />
-        <span>Add content that applies only to this project. Choose <strong>Add text</strong> for plain content within a section, or <strong>Add chapter</strong> for a titled section that gets its own heading and a new entry in the table of contents. Use <strong>Duplicate this chapter</strong> to make a SKU-specific variant, then pick its SKUs under <strong>Applies to SKUs</strong> — they show as an “Applies to: …” header on the final IM. Template blocks are <strong>locked</strong>; nothing here changes the shared template.</span>
+  // Editor pane for ONE selected section (extracted from the old flat list). Handles the
+  // three kinds — project/extra, placeholder, and locked template — plus a hidden banner.
+  const renderSectionContentEditor = (section: IMSection & { __projectExtra?: true }) => {
+    const isExtra = (section as any).__projectExtra === true;
+    const refs = section.blockRefs ?? [];
+    const additions = [...(sectionAdditions[section.id] ?? [])].sort((a, b) => a.position - b.position);
+    const hidden = sectionVisibility[section.id] === false;
+
+    const hiddenBanner = hidden ? (
+      <div className="mb-3 flex items-center justify-between gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-600">
+        <span className="flex items-center gap-1.5"><EyeOff size={13} /> Hidden for this project — it won't appear in the generated IM.</span>
+        <button onClick={() => toggleSectionHidden(section.id)} className="flex items-center gap-1 font-medium text-indigo-600 hover:text-indigo-700"><Eye size={13} /> Show</button>
       </div>
+    ) : null;
 
-      {orderedSections.map(section => {
-        // Internal metadata section is not user-facing content.
-        if (section.title === '__METADATA__') return null;
-        const isExtra = (section as any).__projectExtra === true;
-        const refs = section.blockRefs ?? [];
-        const additions = [...(sectionAdditions[section.id] ?? [])].sort((a, b) => a.position - b.position);
-
-        if (isExtra) {
-          const extra = extraSections.find(e => e.id === section.id);
-          if (!extra) return null;
-          return (
-            <div key={section.id} className="border border-emerald-200 rounded-xl p-3 bg-emerald-50/30">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">Project section</span>
-                <input
-                  value={extra.title}
-                  onChange={e => updateExtraSection(extra.id, { title: e.target.value })}
-                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-emerald-400"
-                  placeholder="Section title"
-                />
-                <button onClick={() => removeExtraSection(extra.id)} title="Delete section" className="p-1.5 text-gray-400 hover:text-rose-600"><Trash2 size={15} /></button>
-              </div>
-              <div className="space-y-3">
-                {extra.blocks.map((block, idx) => (
-                  <div key={`${extra.id}-${idx}`}>
-                    {renderAdditionEditor(block, {
-                      rowKey: `${extra.id}-${idx}`,
-                      onChange: (lang, html) => updateExtraBlock(extra.id, idx, lang, html),
-                      onVariant: (v) => setExtraBlockVariant(extra.id, idx, v),
-                      onRemove: () => removeExtraBlock(extra.id, idx),
-                    })}
-                  </div>
-                ))}
-                <button onClick={() => addBlockToExtra(extra.id)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
-                {renderAddChapterButton(extra)}
-                {renderDuplicateChapterButton(section)}
-              </div>
-              {renderSkuScopeSelector(section.id)}
+    if (isExtra) {
+      const extra = extraSections.find(e => e.id === section.id);
+      if (!extra) return null;
+      return (
+        <div className={hidden ? 'opacity-60' : ''}>
+          {hiddenBanner}
+          <div className="border border-emerald-200 rounded-xl p-3 bg-emerald-50/30">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">Project section</span>
+              <input
+                value={extra.title}
+                onChange={e => updateExtraSection(extra.id, { title: e.target.value })}
+                className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-emerald-400"
+                placeholder="Section title"
+              />
+              <button onClick={() => removeExtraSection(extra.id)} title="Delete section" className="p-1.5 text-gray-400 hover:text-rose-600"><Trash2 size={15} /></button>
             </div>
-          );
-        }
-
-        // Placeholder section: fully editable at project level. These are designed
-        // to be authored per project, so we edit their blocks directly (stored as a
-        // project override) instead of locking them.
-        if (section.isPlaceholder) {
-          const blocks = getOverrideBlocks(section);
-          return (
-            <div key={section.id} className="border border-amber-200 rounded-xl p-3 bg-amber-50/30">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">Placeholder · editable</span>
-                <span className="font-bold text-gray-800 text-sm">{localizedSectionTitle(section, activeLang)}</span>
-              </div>
-              <p className="text-[11px] text-amber-700 mb-2">This section is a placeholder meant to be filled in for this project. Edits here apply only to this project.</p>
-              <div className="space-y-3">
-                {blocks.map((block, idx) => (
-                  <div key={`${section.id}-ov-${idx}`}>
-                    {renderAdditionEditor(block, {
-                      rowKey: `${section.id}-ov-${idx}`,
-                      onChange: (lang, html) => updateOverrideBlock(section, idx, lang, html),
-                      onVariant: (v) => setOverrideVariant(section, idx, v),
-                      onRemove: () => removeOverrideBlock(section, idx),
-                      onUp: idx > 0 ? () => moveOverrideBlock(section, idx, -1) : undefined,
-                      onDown: idx < blocks.length - 1 ? () => moveOverrideBlock(section, idx, 1) : undefined,
-                    })}
-                  </div>
-                ))}
-                <button onClick={() => addOverrideBlock(section)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
-                {renderAddChapterButton(section)}
-                {renderDuplicateChapterButton(section)}
-              </div>
-              {renderSkuScopeSelector(section.id)}
-            </div>
-          );
-        }
-
-        // Template section: locked blocks + insertable project additions.
-        return (
-          <div key={section.id} className="border-b border-gray-100 pb-5 last:border-0">
-            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-muted text-xs">Sec {section.order}</span> {localizedSectionTitle(section, activeLang)}
-            </h4>
-            <div className="space-y-2">
-              {renderInsertButton(section.id, 0)}
-              {additions.filter(a => a.position <= 0).map((a, i, arr) => (
-                <div key={a.id}>{renderAdditionEditor(a.block, {
-                  rowKey: a.id,
-                  onChange: (lang, html) => updateAdditionContent(section.id, a.id, lang, html),
-                  onVariant: (v) => setAdditionVariant(section.id, a.id, v),
-                  onRemove: () => removeAddition(section.id, a.id),
-                  onUp: i > 0 ? () => moveAddition(section.id, a.id, -1) : undefined,
-                  onDown: i < arr.length - 1 ? () => moveAddition(section.id, a.id, 1) : undefined,
-                })}</div>
+            <div className="space-y-3">
+              {extra.blocks.map((block, idx) => (
+                <div key={`${extra.id}-${idx}`}>
+                  {renderAdditionEditor(block, {
+                    rowKey: `${extra.id}-${idx}`,
+                    onChange: (lang, html) => updateExtraBlock(extra.id, idx, lang, html),
+                    onVariant: (v) => setExtraBlockVariant(extra.id, idx, v),
+                    onRemove: () => removeExtraBlock(extra.id, idx),
+                  })}
+                </div>
               ))}
-
-              {refs.map((ref, i) => (
-                <React.Fragment key={i}>
-                  {/* Locked template block */}
-                  {ref.kind === 'sku_slot' ? (
-                    <div className="flex items-center gap-2 text-xs text-gray-400 italic border border-gray-100 rounded px-2 py-1.5 bg-gray-50">
-                      <Lock size={11} /> SKU slot: {(ref as SKUSlotRef).label?.[activeLang] || (ref as SKUSlotRef).slot}
-                    </div>
-                  ) : (
-                    <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
-                      <span className="absolute top-1 right-1 text-gray-300" title="Template content (locked)"><Lock size={11} /></span>
-                      <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
-                    </div>
-                  )}
-                  {renderInsertButton(section.id, i + 1)}
-                  {additions.filter(a => a.position === i + 1).map((a, idx, arr) => (
-                    <div key={a.id}>{renderAdditionEditor(a.block, {
-                      rowKey: a.id,
-                      onChange: (lang, html) => updateAdditionContent(section.id, a.id, lang, html),
-                      onVariant: (v) => setAdditionVariant(section.id, a.id, v),
-                      onRemove: () => removeAddition(section.id, a.id),
-                      onUp: idx > 0 ? () => moveAddition(section.id, a.id, -1) : undefined,
-                      onDown: idx < arr.length - 1 ? () => moveAddition(section.id, a.id, 1) : undefined,
-                    })}</div>
-                  ))}
-                </React.Fragment>
-              ))}
-              <div className="pt-1">{renderAddChapterButton(section)}</div>
-              <div className="pt-1">{renderDuplicateChapterButton(section)}</div>
+              <button onClick={() => addBlockToExtra(extra.id)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
+              {renderAddChapterButton(extra)}
+              {renderDuplicateChapterButton(section)}
             </div>
             {renderSkuScopeSelector(section.id)}
           </div>
-        );
-      })}
+        </div>
+      );
+    }
 
-      {/* Add a new top-level project chapter */}
-      <div className="pt-2">
-        <AddProjectSection sections={orderedSections} onAdd={addExtraSection} />
+    // Placeholder section: fully editable at project level. These are designed
+    // to be authored per project, so we edit their blocks directly (stored as a
+    // project override) instead of locking them.
+    if (section.isPlaceholder) {
+      const blocks = getOverrideBlocks(section);
+      return (
+        <div className={hidden ? 'opacity-60' : ''}>
+          {hiddenBanner}
+          <div className="border border-amber-200 rounded-xl p-3 bg-amber-50/30">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">Placeholder · editable</span>
+              <span className="font-bold text-gray-800 text-sm">{localizedSectionTitle(section, activeLang)}</span>
+            </div>
+            <p className="text-[11px] text-amber-700 mb-2">This section is a placeholder meant to be filled in for this project. Edits here apply only to this project.</p>
+            <div className="space-y-3">
+              {blocks.map((block, idx) => (
+                <div key={`${section.id}-ov-${idx}`}>
+                  {renderAdditionEditor(block, {
+                    rowKey: `${section.id}-ov-${idx}`,
+                    onChange: (lang, html) => updateOverrideBlock(section, idx, lang, html),
+                    onVariant: (v) => setOverrideVariant(section, idx, v),
+                    onRemove: () => removeOverrideBlock(section, idx),
+                    onUp: idx > 0 ? () => moveOverrideBlock(section, idx, -1) : undefined,
+                    onDown: idx < blocks.length - 1 ? () => moveOverrideBlock(section, idx, 1) : undefined,
+                  })}
+                </div>
+              ))}
+              <button onClick={() => addOverrideBlock(section)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
+              {renderAddChapterButton(section)}
+              {renderDuplicateChapterButton(section)}
+            </div>
+            {renderSkuScopeSelector(section.id)}
+          </div>
+        </div>
+      );
+    }
+
+    // Template section: locked blocks + insertable project additions.
+    return (
+      <div className={hidden ? 'opacity-60' : ''}>
+        {hiddenBanner}
+        <div>
+          <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+            <span className="bg-gray-100 px-1.5 py-0.5 rounded text-muted text-xs">Sec {section.order}</span> {localizedSectionTitle(section, activeLang)}
+          </h4>
+          <div className="space-y-2">
+            {renderInsertButton(section.id, 0)}
+            {additions.filter(a => a.position <= 0).map((a, i, arr) => (
+              <div key={a.id}>{renderAdditionEditor(a.block, {
+                rowKey: a.id,
+                onChange: (lang, html) => updateAdditionContent(section.id, a.id, lang, html),
+                onVariant: (v) => setAdditionVariant(section.id, a.id, v),
+                onRemove: () => removeAddition(section.id, a.id),
+                onUp: i > 0 ? () => moveAddition(section.id, a.id, -1) : undefined,
+                onDown: i < arr.length - 1 ? () => moveAddition(section.id, a.id, 1) : undefined,
+              })}</div>
+            ))}
+
+            {refs.map((ref, i) => (
+              <React.Fragment key={i}>
+                {/* Locked template block */}
+                {ref.kind === 'sku_slot' ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-400 italic border border-gray-100 rounded px-2 py-1.5 bg-gray-50">
+                    <Lock size={11} /> SKU slot: {(ref as SKUSlotRef).label?.[activeLang] || (ref as SKUSlotRef).slot}
+                  </div>
+                ) : refHasTable(ref) ? (
+                  blockOverrides[section.id]?.[String(i)] ? (
+                    // Template table unlocked for this project — fully editable (add rows/columns).
+                    <div className="border border-sky-200 rounded-lg bg-sky-50/30">
+                      <div className="flex items-center justify-between px-2 py-1 border-b border-sky-100">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-sky-600 flex items-center gap-1"><Boxes size={11} /> Table · edited for this project</span>
+                        <button onClick={() => resetBlockOverride(section.id, i)} title="Discard project edits and use the template table" className="text-[10px] font-medium text-gray-500 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={11} /> Reset to template</button>
+                      </div>
+                      <InlineBlockEditor
+                        rowKey={`${section.id}-bo-${i}`}
+                        content={blockOverrides[section.id][String(i)].content}
+                        variant={blockOverrides[section.id][String(i)].variant}
+                        languages={editorLanguages}
+                        attributes={projectAttributes}
+                        onChange={(lang, html) => updateBlockOverride(section.id, i, lang, html)}
+                        onVariantChange={(v) => setBlockOverrideVariant(section.id, i, v)}
+                      />
+                    </div>
+                  ) : (
+                    // Locked template table + an opt-in to edit it for this project only.
+                    <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
+                      <span className="absolute top-1 right-1 text-gray-300" title="Template content (locked)"><Lock size={11} /></span>
+                      <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
+                      <button onClick={() => editBlockForProject(section.id, i, ref as InlineBlockRef)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-sky-600 border border-dashed border-sky-300 rounded hover:bg-sky-50 hover:text-sky-700 transition-colors"><Boxes size={12} /> Edit table for this project</button>
+                    </div>
+                  )
+                ) : (
+                  <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
+                    <span className="absolute top-1 right-1 text-gray-300" title="Template content (locked)"><Lock size={11} /></span>
+                    <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
+                  </div>
+                )}
+                {renderInsertButton(section.id, i + 1)}
+                {additions.filter(a => a.position === i + 1).map((a, idx, arr) => (
+                  <div key={a.id}>{renderAdditionEditor(a.block, {
+                    rowKey: a.id,
+                    onChange: (lang, html) => updateAdditionContent(section.id, a.id, lang, html),
+                    onVariant: (v) => setAdditionVariant(section.id, a.id, v),
+                    onRemove: () => removeAddition(section.id, a.id),
+                    onUp: idx > 0 ? () => moveAddition(section.id, a.id, -1) : undefined,
+                    onDown: idx < arr.length - 1 ? () => moveAddition(section.id, a.id, 1) : undefined,
+                  })}</div>
+                ))}
+              </React.Fragment>
+            ))}
+            <div className="pt-1">{renderAddChapterButton(section)}</div>
+            <div className="pt-1">{renderDuplicateChapterButton(section)}</div>
+          </div>
+          {renderSkuScopeSelector(section.id)}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  // One row of the project section tree (recursive), mirroring the template editor's
+  // Structure sidebar: indentation by depth, hierarchical numbering, hide + add controls.
+  const renderProjectTreeRow = (
+    section: IMSection & { __projectExtra?: true },
+    prefix: string,
+    level: number,
+  ): React.ReactNode => {
+    const all: (IMSection & { __projectExtra?: true })[] = [...sections, ...extraAsSections];
+    const children = all
+      .filter(s => (s.parentId ?? null) === section.id && s.title !== '__METADATA__')
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const isExtra = (section as any).__projectExtra === true;
+    const hidden = sectionVisibility[section.id] === false;
+    const selected = selectedContentSectionId === section.id;
+    return (
+      <div key={section.id} className="flex flex-col">
+        <div
+          onClick={() => setSelectedContentSectionId(section.id)}
+          className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selected ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`}
+          style={{ paddingLeft: `${(level * 12) + 8}px` }}
+        >
+          <span className="text-gray-400 text-xs font-mono min-w-[24px]">{prefix}</span>
+          <span className={`truncate flex-1 ${hidden ? 'line-through text-gray-400' : ''}`}>{localizedSectionTitle(section, activeLang)}</span>
+          {isExtra
+            ? <FilePlus2 size={12} className="text-emerald-400 shrink-0" aria-label="Project section" />
+            : section.isPlaceholder
+              ? <LayoutTemplate size={12} className="text-amber-400 shrink-0" aria-label="Placeholder section" />
+              : <Lock size={12} className="text-gray-300 shrink-0" aria-label="Template section" />}
+          {hidden && <EyeOff size={12} className="text-gray-400 shrink-0" aria-label="Hidden" />}
+          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-0.5">
+            <button onClick={(e) => { e.stopPropagation(); toggleSectionHidden(section.id); }} title={hidden ? 'Show section' : 'Hide section for this project'} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded">{hidden ? <Eye size={12} /> : <EyeOff size={12} />}</button>
+            <button onClick={(e) => { e.stopPropagation(); addExtraSection(section.id); }} title="Add sub-section" className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>
+            {isExtra && <button onClick={(e) => { e.stopPropagation(); removeExtraSection(section.id); if (selected) setSelectedContentSectionId(null); }} title="Delete project section" className="text-gray-400 hover:text-rose-600 p-1 hover:bg-rose-100 rounded"><Trash2 size={12} /></button>}
+          </div>
+        </div>
+        {children.map((child, idx) => renderProjectTreeRow(child, `${prefix}${idx + 1}.`, level + 1))}
+      </div>
+    );
+  };
+
+  const renderProjectSectionTree = () => {
+    const all: (IMSection & { __projectExtra?: true })[] = [...sections, ...extraAsSections];
+    const roots = all
+      .filter(s => !s.parentId && s.title !== '__METADATA__')
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+    return (
+      <div className="w-64 shrink-0 bg-white border border-gray-200 rounded-xl flex flex-col overflow-hidden">
+        <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
+          <span className="text-xs font-bold text-muted uppercase flex items-center gap-1.5"><Layers size={13} /> Section tree</span>
+          <button onClick={() => addExtraSection(null)} title="Add chapter at document root" className="text-indigo-600 hover:bg-indigo-100 p-1 rounded"><Plus size={14} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+          {roots.length ? roots.map((s, idx) => renderProjectTreeRow(s, `${idx + 1}.`, 0))
+            : <div className="text-xs text-gray-400 text-center py-6">No sections yet.</div>}
+        </div>
+      </div>
+    );
+  };
+
+  const renderContentEditor = () => {
+    const selectable = orderedSections.filter(s => s.title !== '__METADATA__');
+    const selectedSection = selectable.find(s => s.id === selectedContentSectionId) ?? selectable[0];
+    return (
+      <div className="flex-1 flex gap-3 p-4 overflow-hidden min-h-0">
+        {renderProjectSectionTree()}
+        <div className="flex-1 min-w-0 overflow-y-auto">
+          <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2 mb-4">
+            <FilePlus2 size={14} className="mt-0.5 shrink-0" />
+            <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section that doesn't apply — it (and its subsections) won't appear in the generated IM. Template blocks are <strong>locked</strong>; nothing here changes the shared template.</span>
+          </div>
+          {selectedSection ? renderSectionContentEditor(selectedSection) : <div className="text-sm text-gray-400 text-center py-10">No sections yet.</div>}
+        </div>
+      </div>
+    );
+  };
 
   const imThemeVars = getIMThemeVariables(template?.metadata);
   const masterPages = {
@@ -2171,8 +2359,8 @@ const ProjectIMGenerator: React.FC = () => {
            </div>
 
            <div className="flex flex-1 gap-6 overflow-hidden">
-               {/* LEFT: INPUTS */}
-               <div className="w-1/3 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+               {/* LEFT: INPUTS — wider in "Add content" mode to fit the section tree + editor. */}
+               <div className={`${editorMode === 'content' ? 'w-1/2' : 'w-1/3'} bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden transition-all`}>
                    <div className="bg-light border-b border-gray-200">
                        <div className="p-4 pb-2 font-bold text-gray-700 flex items-center justify-between">
                            <div className="flex items-center gap-2"><Settings size={16} /> Configuration</div>
@@ -2570,14 +2758,15 @@ const ProjectIMGenerator: React.FC = () => {
                               <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
                                   {orderedSections.map(section => {
                                       const inSkuScope = isSectionInSkuScope(section.id);
-                                      const visible = isSectionVisible(section) && inSkuScope;
+                                      const visible = isSectionEffectivelyVisible(section) && inSkuScope;
+                                      // WYSIWYG: the preview mirrors the generated output, so a chapter
+                                      // excluded by its condition (or because none of its SKUs are bound)
+                                      // is omitted entirely rather than shown dimmed. The "Optional &
+                                      // Conditional Content" panel above remains the place to see/override
+                                      // what's excluded.
+                                      if (!visible) return null;
                                       return (
-                                        <div key={section.id} className={`mb-8 transition-opacity ${!visible ? 'opacity-25 pointer-events-none select-none' : ''}`}>
-                                          {!visible && (
-                                            <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wide mb-1 flex items-center gap-1">
-                                              <span>⊘ {inSkuScope ? 'Chapter excluded by condition' : 'Chapter excluded — none of its SKUs are bound'}</span>
-                                            </div>
-                                          )}
+                                        <div key={section.id} className="mb-8">
                                           <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{localizedSectionTitle(section, activeLang)}</h3>
                                           <div className="im-content" style={{ color: metadata.brand?.textColors.body, fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
                                         </div>

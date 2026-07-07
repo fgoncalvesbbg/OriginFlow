@@ -151,6 +151,12 @@ export interface ProjectIM {
   // chapter per SKU). Empty/absent = applies to all bound SKUs → no SKU header is
   // rendered. A chapter whose ids don't intersect the bound SKUs is hidden.
   sectionSkus?: Record<string /* sectionId */, string[] /* project_skus.id */>;
+  // Per-project override of a single INLINE template block, keyed by section id then the
+  // block's index among that section's blockRefs (same index convention as the per-ref
+  // visibility `refvis_` keys). Lets a PM edit a template table's rows/columns for one
+  // project only. Absent = the template block is used unchanged. Never applied to shared
+  // or sku_slot refs, so approval-gated content and typed slots stay locked.
+  blockOverrides?: Record<string /* sectionId */, Record<string /* refIndex */, InlineBlockRef>>;
 }
 
 // ---------------------------------------------------------------------------

@@ -16,12 +16,22 @@ import {
   IMSection,
   ProjectIM,
   IMBlock,
+  CategoryAttribute,
   ResolvedManual,
   RESOLVED_MANUAL_SCHEMA_VERSION,
 } from '../../types';
 import { resolveManual } from './im-resolver';
 import { getIMBlocks } from './im-block.service';
 import { getProjectSkus } from '../project/project-sku.service';
+import { getCategoryAttributes } from '../compliance/compliance-requirement.service';
+
+/** Fetch all category attributes as an id→attribute map for data-type-aware condition matching. */
+export const getAttributesById = async (): Promise<Record<string, CategoryAttribute>> => {
+  const attrs = await getCategoryAttributes();
+  const byId: Record<string, CategoryAttribute> = {};
+  for (const a of attrs) byId[a.id] = a;
+  return byId;
+};
 
 const BUCKET = 'im-published';
 const TAG = '[im-publish.service]';
@@ -96,12 +106,16 @@ export const resolveContentHash = async (
   // Project SKUs (id + number) so the resolver can render "Applies to: …" chapter
   // headers and hide chapters scoped to unbound SKUs. Defaults to [].
   projectSkus: Array<{ id: string; skuNumber: string }> = [],
+  // Attribute definitions keyed by id, so section conditions resolve with the same
+  // data-type-aware logic the generator uses. Must be passed consistently by publish
+  // AND staleness so their content hashes match. Defaults to {} (exact-string fallback).
+  attributesById: Record<string, CategoryAttribute> = {},
 ): Promise<{ resolved: ResolvedManual; json: string; contentHash: string }> => {
   const resolverIM: ProjectIM = {
     ...projectIM,
     placeholderData: normalizeResolverData(projectIM.placeholderData),
   };
-  const resolved = resolveManual(template, sections, blocksById, resolverIM, language, projectSkus);
+  const resolved = resolveManual(template, sections, blocksById, resolverIM, language, projectSkus, attributesById);
   const json = JSON.stringify(resolved);
   const contentHash = await sha256Hex(json);
   return { resolved, json, contentHash };
@@ -178,13 +192,16 @@ export const publishResolvedManuals = async (
   const skuRows = await getProjectSkus(projectId);
   const projectSkus = skuRows.map(s => ({ id: s.id, skuNumber: s.skuNumber }));
 
+  // Attribute definitions for data-type-aware section-condition matching (fetched once).
+  const attributesById = await getAttributesById();
+
   const { data: userData } = await supabase.auth.getUser();
   const publishedBy = userData?.user?.email ?? userData?.user?.id ?? null;
 
   const published: PublishedLanguage[] = [];
 
   for (const language of languages) {
-    const { resolved, json, contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, language, projectSkus);
+    const { resolved, json, contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, language, projectSkus, attributesById);
     const storagePath = `${projectId}/${templateType}/${language}.json`;
     const url = await uploadJson(storagePath, json);
 
