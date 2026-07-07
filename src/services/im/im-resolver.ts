@@ -309,6 +309,10 @@ const resolveSkuSlotRef = (
  * @param projectIM     Project-specific data (placeholder values, conditions, sku_content).
  *                      Pass null when resolving for template preview (no project context).
  * @param language      BCP-47 language code to resolve content into.
+ * @param projectSkus   The project's SKUs (id + number), used to turn a chapter's
+ *                      sectionSkus scope into the "Applies to: …" header numbers and to
+ *                      hide a chapter whose scope doesn't intersect the bound SKUs.
+ *                      Defaults to [] (no SKU headers, no scope-based hiding).
  */
 export const resolveManual = (
   template: IMTemplate,
@@ -318,6 +322,7 @@ export const resolveManual = (
   // manual is assembled identically whether it's an IM or a Warning Leaflet.
   projectIM: (Omit<ProjectIM, 'templateType'> & { templateType?: ProjectIM['templateType']; skuContent?: Record<string, SKUContentValue> }) | null,
   language: string,
+  projectSkus: Array<{ id: string; skuNumber: string }> = [],
 ): ResolvedManual => {
   nodeCounter = 0; // reset per resolve call so IDs are stable for the same inputs
 
@@ -335,6 +340,29 @@ export const resolveManual = (
 
   // Per-project content additions layered on top of the template (see ProjectIM).
   const sectionAdditions = projectIM?.sectionAdditions ?? {};
+
+  // Per-chapter SKU scope (see ProjectIM.sectionSkus). SKU ids resolve to numbers for
+  // the "Applies to: …" header; a chapter scoped only to unbound SKUs is hidden.
+  const sectionSkus = projectIM?.sectionSkus ?? {};
+  const skuNumberById = new Map<string, string>();
+  for (const s of projectSkus) skuNumberById.set(s.id, s.skuNumber);
+  const boundSkuIds = projectIM?.boundSkuIds ?? [];
+  // Empty binding = all of the project's SKUs (backward compatible).
+  const boundSkuSet = new Set<string>(
+    boundSkuIds.length ? boundSkuIds : projectSkus.map(s => s.id),
+  );
+  // Resolve a section's SKU scope against the bound SKUs. Returns:
+  //   { hidden: true }            → scoped to SKUs, none of which are bound → drop section
+  //   { labels: string[] }        → scoped to bound SKUs → render "Applies to: …" numbers
+  //   { labels: undefined }       → no scope → applies to all, no header
+  const resolveSkuScope = (sectionId: string): { hidden: boolean; labels?: string[] } => {
+    const ids = sectionSkus[sectionId];
+    if (!ids || ids.length === 0) return { hidden: false };
+    const inScope = ids.filter(id => boundSkuSet.has(id));
+    if (inScope.length === 0) return { hidden: true };
+    const labels = inScope.map(id => skuNumberById.get(id)).filter(Boolean) as string[];
+    return { hidden: false, labels: labels.length ? labels : undefined };
+  };
 
   // Build parent → children map
   const childMap = new Map<string | null, IMSection[]>();
@@ -368,6 +396,10 @@ export const resolveManual = (
 
   const walkSection = (section: IMSection) => {
     if (!isSectionVisible(section, placeholderData, conditions)) return;
+
+    // A chapter scoped to specific SKUs, none of which are bound, doesn't apply here.
+    const skuScope = resolveSkuScope(section.id);
+    if (skuScope.hidden) return;
 
     const layout = resolveSectionLayout(section, template.metadata?.sectionLayoutMap);
     const nodes: ResolvedNode[] = [];
@@ -454,6 +486,7 @@ export const resolveManual = (
       layout,
       parentId: section.parentId ?? null,
       order: section.order,
+      ...(skuScope.labels ? { skuScope: skuScope.labels } : {}),
       nodes,
     });
 

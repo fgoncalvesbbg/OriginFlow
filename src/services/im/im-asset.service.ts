@@ -34,3 +34,25 @@ export const uploadIMAsset = async (file: File, folder = 'uploads'): Promise<str
   console.log(TAG, 'uploaded:', publicUrl);
   return publicUrl;
 };
+
+/**
+ * List the public URLs of every asset previously uploaded to a folder, newest first.
+ * Backs the template editor's reusable asset library so past uploads persist across
+ * refreshes/sessions. Returns [] on error (the library just shows empty).
+ * @param folder Sub-folder within the bucket to list (default 'library').
+ */
+export const listIMAssets = async (folder = 'library'): Promise<string[]> => {
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .list(folder, { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } });
+
+  if (error) {
+    console.error(TAG, 'list error:', error);
+    return [];
+  }
+
+  return (data ?? [])
+    // Skip sub-folders (id === null) and Supabase's `.emptyFolderPlaceholder` marker.
+    .filter((obj) => obj.id !== null && !obj.name.startsWith('.'))
+    .map((obj) => supabase.storage.from(BUCKET).getPublicUrl(`${folder}/${obj.name}`).data.publicUrl);
+};

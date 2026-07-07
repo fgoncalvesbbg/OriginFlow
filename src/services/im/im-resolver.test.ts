@@ -621,3 +621,65 @@ describe('resolveManual', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-chapter SKU scope (SKU-specific chapter variants)
+// ---------------------------------------------------------------------------
+
+describe('resolveManual — per-chapter SKU scope', () => {
+  const skus = [
+    { id: 'sku-a', skuNumber: '10035294' },
+    { id: 'sku-b', skuNumber: '10035295' },
+    { id: 'sku-c', skuNumber: '10035296' },
+  ];
+  const mkIM = (overrides: any = {}) => ({
+    id: 'proj-sku', templateId: 'tmpl-1',
+    placeholderData: {}, skuContent: {}, status: 'draft' as const, updatedAt: '',
+    boundSkuIds: ['sku-a', 'sku-b'],
+    ...overrides,
+  });
+
+  it('no scope for a section → no skuScope header', () => {
+    const section = makeSection({ id: 'ns', content: { en: '<p>x</p>' } });
+    const result = resolveManual(baseTemplate, [section], {}, mkIM(), 'en', skus);
+    expect(result.sections[0].skuScope).toBeUndefined();
+  });
+
+  it('scoped to bound SKUs → skuScope holds those SKU numbers', () => {
+    const section = makeSection({ id: 'sc', content: { en: '<p>x</p>' } });
+    const result = resolveManual(
+      baseTemplate, [section], {},
+      mkIM({ sectionSkus: { sc: ['sku-a'] } }), 'en', skus,
+    );
+    expect(result.sections[0].skuScope).toEqual(['10035294']);
+  });
+
+  it('scope intersects bound SKUs only (unbound ids dropped from the header)', () => {
+    const section = makeSection({ id: 'sc2', content: { en: '<p>x</p>' } });
+    const result = resolveManual(
+      baseTemplate, [section], {},
+      mkIM({ sectionSkus: { sc2: ['sku-a', 'sku-c'] } }), 'en', skus,
+    );
+    // sku-c is not bound → only sku-a's number appears.
+    expect(result.sections[0].skuScope).toEqual(['10035294']);
+  });
+
+  it('section scoped only to unbound SKUs is hidden', () => {
+    const kept = makeSection({ id: 'keep', order: 0, content: { en: '<p>keep</p>' } });
+    const hidden = makeSection({ id: 'hide', order: 1, content: { en: '<p>hide</p>' } });
+    const result = resolveManual(
+      baseTemplate, [kept, hidden], {},
+      mkIM({ sectionSkus: { hide: ['sku-c'] } }), 'en', skus,
+    );
+    expect(result.sections.map(s => s.id)).toEqual(['keep']);
+  });
+
+  it('empty binding treats all project SKUs as bound', () => {
+    const section = makeSection({ id: 'sc3', content: { en: '<p>x</p>' } });
+    const result = resolveManual(
+      baseTemplate, [section], {},
+      mkIM({ boundSkuIds: [], sectionSkus: { sc3: ['sku-c'] } }), 'en', skus,
+    );
+    expect(result.sections[0].skuScope).toEqual(['10035296']);
+  });
+});

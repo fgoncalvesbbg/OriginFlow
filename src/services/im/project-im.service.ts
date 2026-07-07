@@ -21,6 +21,7 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   sectionAdditions: data.section_additions ?? {},
   extraSections: data.extra_sections ?? [],
   sectionOverrides: data.section_overrides ?? {},
+  sectionSkus: data.section_skus ?? {},
 });
 
 /**
@@ -61,6 +62,8 @@ export const saveProjectIM = async (
   version?: number,
   // project_skus.id values this IM is bound to. Empty array = all project SKUs.
   boundSkuIds?: string[],
+  // Per-chapter SKU scope: sectionId → project_skus.id[]. Empty = applies to all.
+  sectionSkus?: Record<string, string[]>,
 ): Promise<ProjectIM> => {
     const { data: existing } = await supabase
       .from('project_ims')
@@ -78,6 +81,7 @@ export const saveProjectIM = async (
         section_additions: sectionAdditions ?? {},
         extra_sections: extraSections ?? [],
         section_overrides: sectionOverrides ?? {},
+        section_skus: sectionSkus ?? {},
         status,
         updated_at: new Date().toISOString()
     };

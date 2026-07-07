@@ -100,6 +100,8 @@ export interface ManualSection {
   layout: MasterLayoutName;
   parentId: string | null;
   order: number;
+  /** SKU numbers this chapter applies to; rendered as an "Applies to: …" header. Absent = all SKUs. */
+  skuScope?: string[];
   nodes: ManualNode[];
 }
 

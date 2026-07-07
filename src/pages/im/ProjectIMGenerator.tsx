@@ -16,8 +16,9 @@ import {
 } from '../../services';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
+import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
-import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
+import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult } from '../../services';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes } from 'lucide-react';
 import { InlineBlockEditor } from './editor/InlineBlockEditor';
@@ -63,6 +64,9 @@ const ProjectIMGenerator: React.FC = () => {
   const [extraSections, setExtraSections] = useState<ProjectExtraSection[]>([]);
   // Full project content for edited placeholder sections (keyed by section id).
   const [sectionOverrides, setSectionOverrides] = useState<Record<string, InlineBlockRef[]>>({});
+  // Per-chapter SKU scope: sectionId → project_skus.id[]. Empty = applies to all bound
+  // SKUs (no "Applies to: …" header). Drives SKU-specific chapter variants.
+  const [sectionSkus, setSectionSkus] = useState<Record<string, string[]>>({});
   // Left panel mode: fill placeholder values, or author project-specific content.
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
   const [availableBlocks, setAvailableBlocks] = useState<Record<string, { content: Record<string, string>; blockType: string }>>({});
@@ -176,6 +180,7 @@ const ProjectIMGenerator: React.FC = () => {
             if (existingInstance.sectionAdditions) setSectionAdditions(existingInstance.sectionAdditions);
             if (existingInstance.extraSections) setExtraSections(existingInstance.extraSections);
             if (existingInstance.sectionOverrides) setSectionOverrides(existingInstance.sectionOverrides);
+            if (existingInstance.sectionSkus) setSectionSkus(existingInstance.sectionSkus);
             
             // Restore conditions from saved data
             const loadedConds: Record<string, boolean> = {};
@@ -381,7 +386,7 @@ const ProjectIMGenerator: React.FC = () => {
       dataToSave['__field_bindings'] = JSON.stringify(fieldBindings);
 
       try {
-          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, undefined, boundSkuIds);
+          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, undefined, boundSkuIds, sectionSkus);
           setInstance(saved);
           alert("Draft saved successfully!");
       } catch (e) {
@@ -417,6 +422,7 @@ const ProjectIMGenerator: React.FC = () => {
           setSectionAdditions({});
           setExtraSections([]);
           setSectionOverrides({});
+          setSectionSkus({});
           setEditorMode('fill');
           setTemplate(null);
           setSections([]);
@@ -456,7 +462,7 @@ const ProjectIMGenerator: React.FC = () => {
           // section bodies (so project text/blocks render). `order: i` keeps the
           // renderer's flat sort in the same hierarchical order as the preview.
           const renderSections = orderedSections
-              .filter(s => isSectionVisible(s))
+              .filter(s => isSectionVisible(s) && isSectionInSkuScope(s.id))
               .map((s, i) => ({ ...s, order: i, title: localizedSectionTitle(s, activeLang), content: { ...s.content, [activeLang]: buildSectionHtml(s) } }));
 
           const pdfBlob = await renderProjectIMPdf({
@@ -504,7 +510,7 @@ const ProjectIMGenerator: React.FC = () => {
           dataToSave['__meta_language'] = activeLang;
           dataToSave['__field_bindings'] = JSON.stringify(fieldBindings);
 
-          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, nextVersion, boundSkuIds);
+          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, nextVersion, boundSkuIds, sectionSkus);
           setInstance(savedIM);
 
           // Publish the structured ResolvedManual (one JSON per language + manifest) to the
@@ -626,6 +632,55 @@ const ProjectIMGenerator: React.FC = () => {
       }]);
   };
 
+  // Map a shared block's type to its callout variant so a flattened copy keeps its look.
+  const blockTypeToVariant = (blockType?: string): CalloutVariant | undefined => {
+      const map: Record<string, CalloutVariant> = { warning: 'warning', caution: 'caution', electric: 'electric', flammable: 'flammable', info: 'info' };
+      return blockType ? map[blockType] : undefined;
+  };
+
+  // Copy a section's content into standalone inline blocks for a duplicated project
+  // chapter: inline refs are copied as-is; shared blocks are flattened to inline
+  // (keeping their callout look); a legacy content-only section becomes one block;
+  // sku_slot refs are dropped (per-SKU typed content is out of scope for duplication).
+  const sectionToInlineBlocks = (section: IMSection): InlineBlockRef[] => {
+      const refs = sectionOverrides[section.id] ?? (section.blockRefs ?? []);
+      const out: InlineBlockRef[] = [];
+      if (refs.length === 0) {
+          if (Object.values(section.content || {}).some(v => v)) out.push({ kind: 'inline', content: { ...section.content } });
+      } else {
+          for (const ref of refs) {
+              if (ref.kind === 'inline') {
+                  out.push({ kind: 'inline', content: { ...(ref as InlineBlockRef).content }, variant: (ref as InlineBlockRef).variant });
+              } else if (ref.kind === 'block') {
+                  const blk = availableBlocks[(ref as SharedBlockRef).block_id];
+                  if (blk) out.push({ kind: 'inline', content: { ...blk.content }, variant: blockTypeToVariant(blk.blockType) });
+              }
+              // sku_slot: intentionally skipped.
+          }
+      }
+      return out.length ? out : [{ kind: 'inline', content: {} }];
+  };
+
+  // Duplicate a chapter (single section, not its subsections) into an editable
+  // project-only chapter placed right after the source at the same level. The PM then
+  // edits it per SKU and tags it via the SKU selector.
+  const duplicateChapter = (section: IMSection) => {
+      const parentId = section.parentId ?? null;
+      const siblingOrders = [
+          ...sections.filter(s => (s.parentId ?? null) === parentId),
+          ...extraSections.filter(s => (s.parentId ?? null) === parentId),
+      ].map(s => s.order || 0);
+      const greater = siblingOrders.filter(o => o > (section.order || 0)).sort((a, b) => a - b);
+      const newOrder = greater.length ? ((section.order || 0) + greater[0]) / 2 : (section.order || 0) + 10;
+      setExtraSections(prev => [...prev, {
+          id: `proj-${Math.random().toString(36).slice(2, 11)}`,
+          parentId,
+          title: localizedSectionTitle(section, activeLang),
+          order: newOrder,
+          blocks: sectionToInlineBlocks(section),
+      }]);
+  };
+
   const updateExtraSection = (id: string, patch: Partial<ProjectExtraSection>) => {
       setExtraSections(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
   };
@@ -639,6 +694,7 @@ const ProjectIMGenerator: React.FC = () => {
               .map(s => s.parentId === id ? { ...s, parentId: removed?.parentId ?? null } : s);
       });
       setSectionAdditions(prev => { const next = { ...prev }; delete next[id]; return next; });
+      setSectionSkus(prev => { const next = { ...prev }; delete next[id]; return next; });
   };
 
   const addBlockToExtra = (id: string) => {
@@ -798,11 +854,16 @@ const ProjectIMGenerator: React.FC = () => {
               skuContent,
               status: 'generated',
               updatedAt: new Date().toISOString(),
+              sectionAdditions,
+              extraSections,
+              sectionOverrides,
+              boundSkuIds,
+              sectionSkus,
           };
           const blocks = await getIMBlocks();
           const blocksById: Record<string, any> = {};
           for (const b of blocks) blocksById[b.id] = b;
-          const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang);
+          const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang, projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })));
           downloadData(JSON.stringify(resolved, null, 2), filename, 'application/json');
       } else if (format === 'xml') {
           // InDesign / Generic XML format
@@ -1094,6 +1155,54 @@ const ProjectIMGenerator: React.FC = () => {
     return matchesConditionValue(value, section.conditionLabel, attr);
   };
 
+  // --- Per-chapter SKU scope (SKU-specific chapter variants) ---
+  // The SKUs a chapter may be scoped to: the bound SKUs, or all project SKUs when unbound.
+  const scopeCandidateSkus = (): ProjectSku[] => {
+    if (!boundSkuIds.length) return projectSkus;
+    const bound = new Set(boundSkuIds);
+    return projectSkus.filter(s => bound.has(s.id));
+  };
+
+  // SKU numbers a chapter is scoped to, intersected with the bound SKUs. Empty = applies
+  // to all (no "Applies to: …" header). Mirrors the resolver's resolveSkuScope.
+  const sectionSkuNumbers = (sectionId: string): string[] => {
+    const ids = sectionSkus[sectionId];
+    if (!ids || ids.length === 0) return [];
+    const bound = new Set(boundSkuIds.length ? boundSkuIds : projectSkus.map(s => s.id));
+    const numById = new Map(projectSkus.map(s => [s.id, s.skuNumber]));
+    return ids.filter(id => bound.has(id)).map(id => numById.get(id)).filter(Boolean) as string[];
+  };
+
+  // False only when a chapter is scoped to SKUs, none of which are bound (resolver hides it).
+  const isSectionInSkuScope = (sectionId: string): boolean => {
+    const ids = sectionSkus[sectionId];
+    if (!ids || ids.length === 0) return true;
+    const bound = new Set(boundSkuIds.length ? boundSkuIds : projectSkus.map(s => s.id));
+    return ids.some(id => bound.has(id));
+  };
+
+  // "Applies to: …" badge HTML prepended to a section body in the preview + PDF, mirroring
+  // the viewer's DocumentView header. Empty when the chapter applies to all SKUs.
+  const sectionSkuHeaderHtml = (sectionId: string): string => {
+    const nums = sectionSkuNumbers(sectionId);
+    if (!nums.length) return '';
+    // Inline styles (not a CSS class) so the badge renders identically in the on-screen
+    // preview and the html2canvas PDF, the same way wrapBlockCallout inlines its styles.
+    const style = 'display:inline-block;margin:0 0 10px;padding:3px 10px;border-radius:9999px;background:#0f172a;color:#fff;font-size:12px;font-weight:600;';
+    return `<div class="im-sku-scope" style="${style}">${escapeXml(getAppliesToLabel(activeLang))}: ${escapeXml(nums.join(', '))}</div>`;
+  };
+
+  // Toggle a SKU in a chapter's scope. Removing the last one clears the key (= applies to all).
+  const toggleSectionSku = (sectionId: string, skuId: string) => {
+    setSectionSkus(prev => {
+      const current = prev[sectionId] ?? [];
+      const next = current.includes(skuId) ? current.filter(id => id !== skuId) : [...current, skuId];
+      const out = { ...prev };
+      if (next.length) out[sectionId] = next; else delete out[sectionId];
+      return out;
+    });
+  };
+
   // --- Conditional inline rows + shared blocks ("Show if" conditions) ---
   // A ref carries a condition when it requires (or requires the absence of) an attribute.
 
@@ -1380,6 +1489,9 @@ const ProjectIMGenerator: React.FC = () => {
     const refs = override ?? (section.blockRefs ?? []);
     const hasInlineRef = refs.some(r => r.kind === 'inline');
     const parts: string[] = [];
+    // Lead with the "Applies to: …" SKU header when this chapter is scoped to SKUs.
+    const skuHeader = sectionSkuHeaderHtml(section.id);
+    if (skuHeader) parts.push(skuHeader);
     // Project additions for this section, anchored by position among the template refs.
     const additions = [...(sectionAdditions[section.id] ?? [])].sort((a, b) => a.position - b.position);
 
@@ -1627,6 +1739,45 @@ const ProjectIMGenerator: React.FC = () => {
     ><FilePlus2 size={12} /> Add chapter after this (with header)</button>
   );
 
+  // A "+ Duplicate chapter" button — copies this chapter into an editable project
+  // chapter placed right after it, for authoring a SKU-specific variant.
+  const renderDuplicateChapterButton = (section: IMSection) => (
+    <button
+      onClick={() => duplicateChapter(section)}
+      className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-sky-600 border border-dashed border-sky-300 rounded hover:bg-sky-50 hover:text-sky-700 transition-colors"
+    ><Boxes size={12} /> Duplicate this chapter for specific SKUs</button>
+  );
+
+  // Per-chapter SKU scope selector: pick which of the IM's SKUs this chapter applies
+  // to. None selected = applies to all (no "Applies to: …" header). Hidden for
+  // single-SKU manuals, where per-SKU variants are meaningless.
+  const renderSkuScopeSelector = (sectionId: string) => {
+    const candidates = scopeCandidateSkus();
+    if (candidates.length <= 1) return null;
+    const selected = new Set(sectionSkus[sectionId] ?? []);
+    return (
+      <div className="mt-3 border border-sky-100 rounded-lg bg-sky-50/40 px-2.5 py-2">
+        <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-sky-600 mb-1.5">
+          <Boxes size={11} /> Applies to SKUs
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {candidates.map(sku => {
+            const on = selected.has(sku.id);
+            return (
+              <button
+                key={sku.id}
+                onClick={() => toggleSectionSku(sectionId, sku.id)}
+                title={sku.skuTitle || sku.skuNumber}
+                className={`px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${on ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-gray-600 border-gray-200 hover:border-sky-300'}`}
+              >{sku.skuNumber}</button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-gray-400 mt-1.5">{selected.size === 0 ? 'Applies to all SKUs (no header shown).' : 'Shown as an “Applies to: …” header on the final IM.'}</p>
+      </div>
+    );
+  };
+
   // Editable card for one project-authored inline block.
   const renderAdditionEditor = (
     block: InlineBlockRef,
@@ -1657,7 +1808,7 @@ const ProjectIMGenerator: React.FC = () => {
     <div className="flex-1 overflow-y-auto p-5 space-y-6">
       <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2">
         <FilePlus2 size={14} className="mt-0.5 shrink-0" />
-        <span>Add content that applies only to this project. Choose <strong>Add text</strong> for plain content within a section, or <strong>Add chapter</strong> for a titled section that gets its own heading and a new entry in the table of contents. Template blocks are <strong>locked</strong>; nothing here changes the shared template.</span>
+        <span>Add content that applies only to this project. Choose <strong>Add text</strong> for plain content within a section, or <strong>Add chapter</strong> for a titled section that gets its own heading and a new entry in the table of contents. Use <strong>Duplicate this chapter</strong> to make a SKU-specific variant, then pick its SKUs under <strong>Applies to SKUs</strong> — they show as an “Applies to: …” header on the final IM. Template blocks are <strong>locked</strong>; nothing here changes the shared template.</span>
       </div>
 
       {orderedSections.map(section => {
@@ -1695,7 +1846,9 @@ const ProjectIMGenerator: React.FC = () => {
                 ))}
                 <button onClick={() => addBlockToExtra(extra.id)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
                 {renderAddChapterButton(extra)}
+                {renderDuplicateChapterButton(section)}
               </div>
+              {renderSkuScopeSelector(section.id)}
             </div>
           );
         }
@@ -1727,7 +1880,9 @@ const ProjectIMGenerator: React.FC = () => {
                 ))}
                 <button onClick={() => addOverrideBlock(section)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
                 {renderAddChapterButton(section)}
+                {renderDuplicateChapterButton(section)}
               </div>
+              {renderSkuScopeSelector(section.id)}
             </div>
           );
         }
@@ -1778,7 +1933,9 @@ const ProjectIMGenerator: React.FC = () => {
                 </React.Fragment>
               ))}
               <div className="pt-1">{renderAddChapterButton(section)}</div>
+              <div className="pt-1">{renderDuplicateChapterButton(section)}</div>
             </div>
+            {renderSkuScopeSelector(section.id)}
           </div>
         );
       })}
@@ -2412,12 +2569,13 @@ const ProjectIMGenerator: React.FC = () => {
                               {watermark && <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ background: watermark }} />}
                               <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
                                   {orderedSections.map(section => {
-                                      const visible = isSectionVisible(section);
+                                      const inSkuScope = isSectionInSkuScope(section.id);
+                                      const visible = isSectionVisible(section) && inSkuScope;
                                       return (
                                         <div key={section.id} className={`mb-8 transition-opacity ${!visible ? 'opacity-25 pointer-events-none select-none' : ''}`}>
                                           {!visible && (
                                             <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wide mb-1 flex items-center gap-1">
-                                              <span>⊘ Chapter excluded by condition</span>
+                                              <span>⊘ {inSkuScope ? 'Chapter excluded by condition' : 'Chapter excluded — none of its SKUs are bound'}</span>
                                             </div>
                                           )}
                                           <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{localizedSectionTitle(section, activeLang)}</h3>

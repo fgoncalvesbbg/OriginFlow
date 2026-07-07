@@ -209,6 +209,19 @@
 .imv-h2 { font-size: 20px; }
 .imv-h3 { font-size: 17px; }
 
+/* Per-chapter SKU scope header ("Applies to: 10035294, …"). */
+.imv-sku-scope {
+  display: inline-block;
+  margin: -8px 0 16px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: var(--imv-primary, #0f172a);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .imv-node {
   scroll-margin-top: 24px;
 }

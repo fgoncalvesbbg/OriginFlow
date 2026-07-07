@@ -31,14 +31,11 @@ const json = (statusCode: number, payload: unknown) => ({
 });
 
 const LANG_NAMES: Record<string, string> = {
-  // 24 official EU languages
   en: 'English', bg: 'Bulgarian', hr: 'Croatian', cs: 'Czech', da: 'Danish',
   nl: 'Dutch', et: 'Estonian', fi: 'Finnish', fr: 'French', de: 'German',
-  el: 'Greek', hu: 'Hungarian', ga: 'Irish', it: 'Italian', lv: 'Latvian',
-  lt: 'Lithuanian', mt: 'Maltese', pl: 'Polish', pt: 'Portuguese', ro: 'Romanian',
-  sk: 'Slovak', sl: 'Slovenian', es: 'Spanish', sv: 'Swedish',
-  // additional non-EU languages
-  zh: 'Simplified Chinese', ja: 'Japanese', tr: 'Turkish', ru: 'Russian',
+  el: 'Greek', hu: 'Hungarian', it: 'Italian', lv: 'Latvian', lt: 'Lithuanian',
+  pl: 'Polish', pt: 'Portuguese', ro: 'Romanian', sk: 'Slovak', sl: 'Slovenian',
+  es: 'Spanish', sv: 'Swedish',
 };
 const langName = (code: string) => LANG_NAMES[code] || code;
 

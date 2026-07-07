@@ -21,6 +21,7 @@ import {
 } from '../../types';
 import { resolveManual } from './im-resolver';
 import { getIMBlocks } from './im-block.service';
+import { getProjectSkus } from '../project/project-sku.service';
 
 const BUCKET = 'im-published';
 const TAG = '[im-publish.service]';
@@ -92,12 +93,15 @@ export const resolveContentHash = async (
   blocksById: Record<string, IMBlock>,
   projectIM: ProjectIM,
   language: string,
+  // Project SKUs (id + number) so the resolver can render "Applies to: …" chapter
+  // headers and hide chapters scoped to unbound SKUs. Defaults to [].
+  projectSkus: Array<{ id: string; skuNumber: string }> = [],
 ): Promise<{ resolved: ResolvedManual; json: string; contentHash: string }> => {
   const resolverIM: ProjectIM = {
     ...projectIM,
     placeholderData: normalizeResolverData(projectIM.placeholderData),
   };
-  const resolved = resolveManual(template, sections, blocksById, resolverIM, language);
+  const resolved = resolveManual(template, sections, blocksById, resolverIM, language, projectSkus);
   const json = JSON.stringify(resolved);
   const contentHash = await sha256Hex(json);
   return { resolved, json, contentHash };
@@ -169,13 +173,18 @@ export const publishResolvedManuals = async (
   const blocksById: Record<string, IMBlock> = {};
   for (const b of blocks) blocksById[b.id] = b;
 
+  // Project SKUs — used to render per-chapter "Applies to: …" headers and to hide
+  // chapters scoped to SKUs the IM isn't bound to (see ProjectIM.sectionSkus).
+  const skuRows = await getProjectSkus(projectId);
+  const projectSkus = skuRows.map(s => ({ id: s.id, skuNumber: s.skuNumber }));
+
   const { data: userData } = await supabase.auth.getUser();
   const publishedBy = userData?.user?.email ?? userData?.user?.id ?? null;
 
   const published: PublishedLanguage[] = [];
 
   for (const language of languages) {
-    const { resolved, json, contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, language);
+    const { resolved, json, contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, language, projectSkus);
     const storagePath = `${projectId}/${templateType}/${language}.json`;
     const url = await uploadJson(storagePath, json);
 

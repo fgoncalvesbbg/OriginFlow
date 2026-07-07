@@ -145,6 +145,12 @@ export interface ProjectIM {
   // template's content for that section at resolve time. Absent key = untouched
   // (resolver falls back to the template content). The template is never modified.
   sectionOverrides?: Record<string /* templateSectionId */, InlineBlockRef[]>;
+  // Per-chapter SKU scope: sectionId (a template im_sections id or a proj-… extra
+  // section id) → the project_skus.id values that chapter applies to. Used to make
+  // SKU-specific chapter variants (e.g. a duplicated "Setting the temperature"
+  // chapter per SKU). Empty/absent = applies to all bound SKUs → no SKU header is
+  // rendered. A chapter whose ids don't intersect the bound SKUs is hidden.
+  sectionSkus?: Record<string /* sectionId */, string[] /* project_skus.id */>;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +351,12 @@ export interface ResolvedSection {
   parentId: string | null;
   /** Sort position among siblings (mirrors the source IMSection.order). */
   order: number;
+  /**
+   * SKU numbers this chapter applies to, when the project scoped it to specific
+   * SKUs (see ProjectIM.sectionSkus). Rendered as an "Applies to: …" header on the
+   * final IM. Absent/empty = applies to all SKUs → no header.
+   */
+  skuScope?: string[];
   nodes: ResolvedNode[];
 }
 

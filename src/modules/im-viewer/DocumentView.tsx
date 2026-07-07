@@ -6,6 +6,7 @@
 import React from 'react';
 import { ManualSection, TemplateMetadata } from './types';
 import { NodeRenderer } from './NodeRenderer';
+import { getAppliesToLabel } from './callout-titles.i18n';
 
 interface Props {
   ordered: Array<{ section: ManualSection; depth: number }>;
@@ -31,6 +32,11 @@ export const DocumentView: React.FC<Props> = ({ ordered, metadata, language }) =
       <section key={section.id} id={`section-${section.id}`} className="imv-section" data-imv-section>
         {section.title && (
           <div className={`imv-section-title ${headingClass(depth)}`}>{section.title}</div>
+        )}
+        {section.skuScope && section.skuScope.length > 0 && (
+          <div className="imv-sku-scope">
+            {getAppliesToLabel(language)}: {section.skuScope.join(', ')}
+          </div>
         )}
         {section.nodes.map((node) => (
           <NodeRenderer key={node.id} node={node} language={language} />

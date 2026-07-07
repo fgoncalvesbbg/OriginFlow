@@ -31,6 +31,7 @@ import { getIMTemplates, getIMTemplateById } from './im-template.service';
 import { getIMSections } from './im-section.service';
 import { getIMBlocks } from './im-block.service';
 import { getGeneratedProjectIMs, getProjectIM } from './project-im.service';
+import { getProjectSkus } from '../project/project-sku.service';
 import { getProjectRequiredLanguages, resolveContentHash, publishResolvedManuals, PublishResult } from './im-publish.service';
 
 export const stalenessKey = (projectId: string, templateType: IMTemplateType) => `${projectId}::${templateType}`;
@@ -115,9 +116,11 @@ const isStale = async (
   hashes: Map<string, string>,
 ): Promise<boolean> => {
   const langs = getProjectRequiredLanguages(template, projectIM.placeholderData);
+  // Same SKU context publish uses, so re-resolved hashes match the published output.
+  const projectSkus = (await getProjectSkus(projectId)).map(s => ({ id: s.id, skuNumber: s.skuNumber }));
   for (const lang of langs) {
     const published = hashes.get(`${projectId}::${projectIM.templateType}::${lang}`);
-    const { contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, lang);
+    const { contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, lang, projectSkus);
     if (!published || published !== contentHash) return true;
   }
   return false;

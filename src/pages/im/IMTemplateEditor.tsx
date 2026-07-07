@@ -7,7 +7,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
-import { uploadIMAsset } from '../../services/im/im-asset.service';
+import { uploadIMAsset, listIMAssets } from '../../services/im/im-asset.service';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
 import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
@@ -64,7 +64,10 @@ const IMTemplateEditor: React.FC = () => {
   const [categoryAttributes, setCategoryAttributes] = useState<CategoryAttribute[]>([]);
 
   const [activeSidebarTab, setActiveSidebarTab] = useState<'structure' | 'assets'>('structure');
+  // Reusable asset library — public URLs of images uploaded to the `im-assets` bucket.
+  // Seeded from storage on load so past uploads persist across refreshes/sessions.
   const [assets, setAssets] = useState<string[]>([]);
+  const [assetUploading, setAssetUploading] = useState(false);
 
   const [isLangModalOpen, setIsLangModalOpen] = useState(false);
   const [langDraft, setLangDraft] = useState<string[]>(['en']);
@@ -128,6 +131,12 @@ const IMTemplateEditor: React.FC = () => {
     if (!categoryId) return;
     loadData();
   }, [categoryId, templateType]);
+
+  // Load the reusable asset library from storage so past uploads are always shown.
+  // Independent of the selected category/template — it's a shared library.
+  useEffect(() => {
+    listIMAssets().then(setAssets);
+  }, []);
 
   const loadData = async () => {
     if (!categoryId) return;
@@ -218,14 +227,23 @@ const IMTemplateEditor: React.FC = () => {
     setIsPlaceholderModalOpen(false);
   };
 
-  const handleUploadAsset = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          const file = e.target.files[0];
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              setAssets(prev => [...prev, reader.result as string]);
-          };
-          reader.readAsDataURL(file);
+  const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Reset the input so re-selecting the same file fires onChange again.
+      e.target.value = '';
+      if (!file) return;
+      setAssetUploading(true);
+      try {
+          // Upload to the shared `library` folder so the asset is durable and shows in
+          // every template's asset library for reuse (survives refresh, unlike a
+          // base64 data URL held only in memory).
+          const url = await uploadIMAsset(file, 'library');
+          setAssets(prev => [url, ...prev]);
+      } catch (err) {
+          console.error('[IMTemplateEditor] asset upload failed:', err);
+          alert(err instanceof Error ? err.message : 'Image upload failed');
+      } finally {
+          setAssetUploading(false);
       }
   };
 
@@ -1081,15 +1099,15 @@ const IMTemplateEditor: React.FC = () => {
                 {activeSidebarTab === 'assets' && (
                    <div className="flex-col flex h-full">
                       <div className="p-3 border-b border-gray-100 bg-light">
-                         <label className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 border-dashed rounded-xl p-3 cursor-pointer hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
-                            <Upload size={16} className="text-gray-400" />
-                            <span className="text-xs font-medium text-gray-600">Upload Image</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={handleUploadAsset} />
+                         <label className={`w-full flex items-center justify-center gap-2 bg-white border border-gray-300 border-dashed rounded-xl p-3 transition-colors ${assetUploading ? 'opacity-60 cursor-wait' : 'cursor-pointer hover:bg-indigo-50 hover:border-indigo-300'}`}>
+                            {assetUploading ? <Loader2 size={16} className="text-indigo-400 animate-spin" /> : <Upload size={16} className="text-gray-400" />}
+                            <span className="text-xs font-medium text-gray-600">{assetUploading ? 'Uploading…' : 'Upload Image'}</span>
+                            <input type="file" className="hidden" accept="image/*" disabled={assetUploading} onChange={handleUploadAsset} />
                          </label>
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2">
                          {assets.map((src, i) => (
-                            <div key={i} className="group relative aspect-square rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-400" onClick={() => handleInsertAsset(src)}>
+                            <div key={src} className="group relative aspect-square rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-400" onClick={() => handleInsertAsset(src)}>
                                <img src={src} alt={`Asset ${i}`} className="w-full h-full object-cover" />
                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Plus size={20} className="text-white" /></div>
                             </div>
