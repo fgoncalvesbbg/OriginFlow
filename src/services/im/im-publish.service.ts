@@ -172,6 +172,9 @@ export const publishResolvedManuals = async (
   template: IMTemplate,
   sections: IMSection[],
   projectIM: ProjectIM,
+  // Optional progress reporter — called once per language as it's resolved+uploaded, so the
+  // UI can show "Publishing language 3/12 (de)…" instead of an opaque spinner.
+  onProgress?: (done: number, total: number, language: string) => void,
 ): Promise<PublishResult> => {
   if (!isLive) {
     console.warn(TAG, 'publishResolvedManuals skipped — isLive=false');
@@ -200,7 +203,9 @@ export const publishResolvedManuals = async (
 
   const published: PublishedLanguage[] = [];
 
-  for (const language of languages) {
+  for (let i = 0; i < languages.length; i++) {
+    const language = languages[i];
+    onProgress?.(i + 1, languages.length, language);
     const { resolved, json, contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, language, projectSkus, attributesById);
     const storagePath = `${projectId}/${templateType}/${language}.json`;
     const url = await uploadJson(storagePath, json);

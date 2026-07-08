@@ -4,7 +4,7 @@
  */
 
 import {
-  User, Project, ProjectStep, ProjectDocument, Supplier, ComplianceRequest,
+  User, Project, ProjectStep, ProjectDocument, DocVersion, Supplier, ComplianceRequest,
   ProductionUpdate, RFQ, UserRole
 } from '../types';
 
@@ -55,6 +55,17 @@ export const mapProjectStep = (s: any): ProjectStep => {
     status: s.status
   };
 };
+
+/**
+ * Maps a database document_versions row to the DocVersion domain type
+ */
+export const mapDocVersion = (v: any): DocVersion => ({
+  id: v.id,
+  fileUrl: v.file_url,
+  uploadedAt: v.uploaded_at,
+  uploadedBySupplier: v.uploaded_by_supplier,
+  versionNumber: v.version_number,
+});
 
 /**
  * Maps database project_document row to ProjectDocument domain type

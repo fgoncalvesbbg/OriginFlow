@@ -13,6 +13,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
+import { DEFAULT_IM_LOGO_URL } from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, PrintPdfResult, PrintRender } from '../../../services';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 
@@ -55,7 +56,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   // Empty subtitle → builder auto-fills "Instruction Manual" in every printed language.
   const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? '');
   const [skuText, setSkuText] = useState(skus.join(', '));
-  const [logoUrl, setLogoUrl] = useState(formData['__custom_logo'] ?? meta?.companyLogoUrl ?? '');
+  const [logoUrl, setLogoUrl] = useState(formData['__custom_logo'] ?? meta?.companyLogoUrl ?? DEFAULT_IM_LOGO_URL);
   const [coverImageUrl, setCoverImageUrl] = useState(
     formData['__custom_cover_image'] ?? meta?.coverImageUrl ?? '',
   );

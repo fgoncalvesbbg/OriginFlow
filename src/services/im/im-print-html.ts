@@ -19,6 +19,7 @@
  */
 
 import { getCalloutTitle } from './callout-titles.i18n';
+import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 
 export type PrintPageSize = 'a4' | 'a5';
 
@@ -514,7 +515,7 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
     {
       title: opts.cover.title,
       subtitle: opts.cover.subtitle,
-      logoUrl: opts.cover.logoUrl ?? base?.companyLogoUrl,
+      logoUrl: opts.cover.logoUrl ?? base?.companyLogoUrl ?? DEFAULT_IM_LOGO_URL,
       coverImageUrl: opts.cover.coverImageUrl ?? base?.coverImageUrl,
       markUrls: opts.cover.markUrls,
       skus: opts.cover.skus,

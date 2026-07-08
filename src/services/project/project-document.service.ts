@@ -5,8 +5,8 @@
 
 import { supabase, portalClient } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
-import { ProjectDocument, DocStatus, ResponsibleParty, DocumentComment, ProjectOverallStatus } from '../../types';
-import { mapProjectDocument } from '../../utils/mappers.utils';
+import { ProjectDocument, DocVersion, DocStatus, ResponsibleParty, DocumentComment, ProjectOverallStatus } from '../../types';
+import { mapProjectDocument, mapDocVersion } from '../../utils/mappers.utils';
 import { handleError } from '../../utils/error.utils';
 import { runMutation } from '../core/db';
 import { getProjectsBySupplierId } from './project.service';
@@ -18,7 +18,26 @@ export const getProjectDocs = async (projectId: string): Promise<ProjectDocument
     if (!isLive) return [];
     const { data, error } = await supabase.from('project_documents').select('*').eq('project_id', projectId);
     if (error) return [];
-    return (data || []).map(mapProjectDocument);
+    const docs = (data || []).map(mapProjectDocument);
+
+    // Attach version history in one extra query. Best-effort: a failure here (missing
+    // table / RLS) must never drop the documents list, so versions just stay empty.
+    const ids = docs.map(d => d.id);
+    if (ids.length) {
+        const { data: versionRows } = await supabase.from('document_versions').select('*').in('document_id', ids);
+        if (versionRows) {
+            const byDoc = new Map<string, DocVersion[]>();
+            for (const row of versionRows) {
+                const list = byDoc.get(row.document_id) ?? [];
+                list.push(mapDocVersion(row));
+                byDoc.set(row.document_id, list);
+            }
+            for (const d of docs) {
+                d.versions = (byDoc.get(d.id) ?? []).sort((a, b) => a.versionNumber - b.versionNumber);
+            }
+        }
+    }
+    return docs;
 };
 
 /**
@@ -118,10 +137,16 @@ export const uploadFile = async (docId: string, file: File, isSupplier: boolean,
     const { data, error } = await supabase.from('project_documents').update(updates).eq('id', docId).select().single();
 
     if (data) {
+        // Sequential version number = (existing versions for this doc) + 1. The updated
+        // row doesn't carry its versions, so count them directly.
+        const { count } = await supabase
+            .from('document_versions')
+            .select('id', { count: 'exact', head: true })
+            .eq('document_id', docId);
         await supabase.from('document_versions').insert({
             document_id: docId,
             file_url: publicUrl,
-            version_number: (data.versions?.length || 0) + 1,
+            version_number: (count || 0) + 1,
             uploaded_by_supplier: false,
             uploaded_at: new Date().toISOString()
         });

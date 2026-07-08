@@ -5,6 +5,7 @@
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { IMSection, IMTemplate } from '../../types';
+import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 
 interface RenderProjectIMPdfParams {
   previewElement: HTMLDivElement | null;
@@ -161,7 +162,7 @@ const buildIMPrintDocument =({
     formData.__cover_subtitle !== undefined
       ? formData.__cover_subtitle
       : 'INSTRUCTION MANUAL';
-  const displayLogo = formData.__custom_logo || template?.metadata?.companyLogoUrl;
+  const displayLogo = formData.__custom_logo || template?.metadata?.companyLogoUrl || DEFAULT_IM_LOGO_URL;
   const displayCoverImage =
     formData.__custom_cover_image || template?.metadata?.coverImageUrl;
   const displayFooter =

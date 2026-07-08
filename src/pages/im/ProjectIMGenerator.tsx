@@ -10,13 +10,16 @@ import Layout from '../../components/Layout';
 import {
     getProjectById, getIMTemplateById, getIMSections,
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
-    addDocument, uploadFile, getCategoryAttributes, getAttributeRequestsByProject,
+    addDocument, uploadFile, getProjectDocs, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable
 } from '../../services';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
 import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
+import { translateHtml } from '../../services/ai/translation.service';
+import { IM_LANGUAGE_NAMES } from '../../config/im-languages';
+import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult } from '../../services';
@@ -88,13 +91,26 @@ const ProjectIMGenerator: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Brief "Saved!" confirmation shown on the Save Draft button after a successful save.
+  const [savedTick, setSavedTick] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // Live phase text during publish ("Rendering PDF…", "Publishing 3/12 (de)…") so the long
+  // publish shows visible progress instead of an opaque, seemingly-stuck spinner.
+  const [publishStatus, setPublishStatus] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   // Pre-publish checklist: populated when the user clicks Publish and something is
   // missing, so they can review before confirming (or cancel and fix).
   const [checklist, setChecklist] = useState<{ blocking: string[]; values: string[]; slots: string[]; translations: { lang: string; items: string[] }[] } | null>(null);
+  // Auto-translation of project-authored content (added/edited sections). English is
+  // always the source; template content is translated in the template editor, not here.
+  const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  // When true (default) only blank target fragments are translated; the "retranslate"
+  // checkbox flips it to overwrite existing translations too.
+  const [translateSkipExisting, setTranslateSkipExisting] = useState(true);
 
   // Interactive Editing State
   const [textEditId, setTextEditId] = useState<string | null>(null);
@@ -368,32 +384,40 @@ const ProjectIMGenerator: React.FC = () => {
       }
   };
 
-  const handleSaveDraft = async () => {
-      if (!projectId || !selectedTemplateId) return;
-      setSaving(true);
-      
+  // Yield a frame so React can paint a status change before the next (possibly main-thread
+  // blocking) step runs — otherwise "Saving…"/"Rendering PDF…" never shows until it's over.
+  const yieldToPaint = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+  // Encode the current form/condition/visibility state into the flat placeholder_data
+  // map persisted on project_ims. Shared by draft save, publish, and auto-translate so
+  // all three write an identical payload.
+  const buildPlaceholderData = (): Record<string, string> => {
       // Base layer = submitted attribute values (keyed by attribute id) so bound
       // placeholders/tokens resolve in the saved manual; PM edits in formData win.
-      const dataToSave = { ...submittedAttrValues, ...formData };
-      Object.entries(conditions).forEach(([k, v]) => {
-          dataToSave[`cond_${k}`] = String(v);
-      });
-      Object.entries(sectionVisibility).forEach(([k, v]) => {
-          dataToSave[`secvis_${k}`] = String(v);
-      });
-      Object.entries(refVisibility).forEach(([k, v]) => {
-          dataToSave[`refvis_${k}`] = String(v);
-      });
+      const data: Record<string, string> = { ...submittedAttrValues, ...formData };
+      Object.entries(conditions).forEach(([k, v]) => { data[`cond_${k}`] = String(v); });
+      Object.entries(sectionVisibility).forEach(([k, v]) => { data[`secvis_${k}`] = String(v); });
+      Object.entries(refVisibility).forEach(([k, v]) => { data[`refvis_${k}`] = String(v); });
+      // Current language + attribute bindings so manual/attribute mode is restored next time.
+      data['__meta_language'] = activeLang;
+      data['__field_bindings'] = JSON.stringify(fieldBindings);
+      return data;
+  };
 
-      // Save current language
-      dataToSave['__meta_language'] = activeLang;
-      // Persist attribute bindings so manual/attribute mode is restored next time.
-      dataToSave['__field_bindings'] = JSON.stringify(fieldBindings);
+  const handleSaveDraft = async () => {
+      if (!projectId || !selectedTemplateId) return;
+      setSavedTick(false);
+      setSaving(true);
+      await yieldToPaint();
+
+      const dataToSave = buildPlaceholderData();
 
       try {
           const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, undefined, boundSkuIds, sectionSkus, blockOverrides);
           setInstance(saved);
-          alert("Draft saved successfully!");
+          // Transient inline confirmation instead of a blocking alert.
+          setSavedTick(true);
+          setTimeout(() => setSavedTick(false), 2500);
       } catch (e) {
           console.error(e);
           alert("Failed to save draft.");
@@ -454,10 +478,15 @@ const ProjectIMGenerator: React.FC = () => {
           return;
       }
       setGenerating(true);
+      setPublishStatus('Preparing…');
       // Each publish bumps the version; it's stamped in the PDF footer and persisted.
       const nextVersion = (instance?.version ?? 0) + 1;
 
       try {
+          // Paint the status before the CPU-heavy, main-thread-blocking PDF render below.
+          setPublishStatus('Rendering PDF…');
+          await yieldToPaint();
+
           const shouldUseLegacyRenderer =
               import.meta.env.VITE_IM_PDF_LEGACY_HTML2CANVAS === 'true' ||
               window.localStorage.getItem('im.export.legacyHtml2canvas') === 'true';
@@ -483,39 +512,38 @@ const ProjectIMGenerator: React.FC = () => {
               version: nextVersion,
           });
 
+          setPublishStatus('Uploading document…');
           const docTypeSlug = templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual';
           const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${activeLang.toUpperCase()}.pdf`;
           const file = new File([pdfBlob], fileName, { type: "application/pdf" });
 
-          const docTitle = `Generated ${typeLabel} (${activeLang.toUpperCase()}) - ${new Date().toLocaleDateString()}`;
-          const newDoc = await addDocument({
+          // Generated manuals live under the Production step (step 3) — never RFQ —
+          // as a SINGLE document per template type. Each (re)generation is appended as
+          // a new version via uploadFile, so the Production section always shows the
+          // latest file with older versions collapsed under it (Version History).
+          const PRODUCTION_STEP = 3;
+          const generatedDocTitle = `Generated ${typeLabel}`;
+          const existingDocs = await getProjectDocs(project.id);
+          const targetDoc = existingDocs.find(d =>
+             d.stepNumber === PRODUCTION_STEP &&
+             d.title === generatedDocTitle &&
+             d.responsibleParty === ResponsibleParty.INTERNAL
+          ) ?? await addDocument({
              projectId: project.id,
-             stepNumber: project.currentStep || 3,
-             title: docTitle,
-             description: `Generated from ${typeLabel} template in ${activeLang.toUpperCase()}`,
+             stepNumber: PRODUCTION_STEP,
+             title: generatedDocTitle,
+             description: `Generated from ${typeLabel} template`,
              responsibleParty: ResponsibleParty.INTERNAL,
              isVisibleToSupplier: true,
              isRequired: false,
              status: DocStatus.APPROVED
           });
-          
-          await uploadFile(newDoc.id, file, false);
-          
-          // Base layer = submitted attribute values (keyed by attribute id) so bound
-      // placeholders/tokens resolve in the saved manual; PM edits in formData win.
-      const dataToSave = { ...submittedAttrValues, ...formData };
-          Object.entries(conditions).forEach(([k, v]) => {
-             dataToSave[`cond_${k}`] = String(v);
-          });
-          Object.entries(sectionVisibility).forEach(([k, v]) => {
-             dataToSave[`secvis_${k}`] = String(v);
-          });
-          Object.entries(refVisibility).forEach(([k, v]) => {
-             dataToSave[`refvis_${k}`] = String(v);
-          });
-          dataToSave['__meta_language'] = activeLang;
-          dataToSave['__field_bindings'] = JSON.stringify(fieldBindings);
 
+          await uploadFile(targetDoc.id, file, false);
+
+          const dataToSave = buildPlaceholderData();
+
+          setPublishStatus('Saving…');
           const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, nextVersion, boundSkuIds, sectionSkus, blockOverrides);
           setInstance(savedIM);
 
@@ -524,7 +552,11 @@ const ProjectIMGenerator: React.FC = () => {
           // Non-fatal: the PDF is already generated and uploaded above.
           if (template) {
               try {
-                  const result = await publishResolvedManuals(project.id, template, sections, savedIM);
+                  setPublishStatus('Publishing languages…');
+                  const result = await publishResolvedManuals(
+                      project.id, template, sections, savedIM,
+                      (done, total, lang) => setPublishStatus(`Publishing ${done}/${total} (${lang.toUpperCase()})…`),
+                  );
                   setPublishResult(result);
               } catch (pubErr: any) {
                   console.error('Structured publish failed', pubErr);
@@ -541,6 +573,7 @@ const ProjectIMGenerator: React.FC = () => {
           alert(`Failed to generate PDF: ${e.message}`);
       } finally {
           setGenerating(false);
+          setPublishStatus(null);
       }
   };
 
@@ -1658,6 +1691,128 @@ const ProjectIMGenerator: React.FC = () => {
     walk(null);
     return out;
   })();
+
+  // --- Project-content translation ---------------------------------------------
+  // Only project-AUTHORED content is translated here (added/edited sections):
+  // sectionAdditions, sectionOverrides, blockOverrides, and extraSections — each an
+  // inline block carrying content[lang]. Template blockRefs / shared blocks arrive
+  // pre-translated from the template editor and are never touched. English is the
+  // source. Returns display gaps + deferred translate tasks that mutate fresh working
+  // copies (committed only after the run) plus those copies for persistence.
+  const buildTranslationPlan = (langs: string[], skipExisting: boolean) => {
+    // Deep-ish copies so a mid-run failure never leaves torn state.
+    const wAdditions: Record<string, ProjectBlockAddition[]> = {};
+    for (const [sid, adds] of Object.entries(sectionAdditions)) {
+      wAdditions[sid] = adds.map(a => ({ ...a, block: { ...a.block, content: { ...a.block.content } } }));
+    }
+    const wOverrides: Record<string, InlineBlockRef[]> = {};
+    for (const [sid, refs] of Object.entries(sectionOverrides)) {
+      wOverrides[sid] = refs.map(r => ({ ...r, content: { ...r.content } }));
+    }
+    const wBlockOverrides: Record<string, Record<string, InlineBlockRef>> = {};
+    for (const [sid, byIdx] of Object.entries(blockOverrides)) {
+      wBlockOverrides[sid] = {};
+      for (const [idx, ref] of Object.entries(byIdx)) wBlockOverrides[sid][idx] = { ...ref, content: { ...ref.content } };
+    }
+    const wExtras: ProjectExtraSection[] = extraSections.map(ex => ({
+      ...ex, blocks: ex.blocks.map(b => ({ ...b, content: { ...b.content } })),
+    }));
+
+    // sectionId → English title, for labelling gaps in the UI.
+    const titleById = new Map<string, string>();
+    for (const s of orderedSections) titleById.set(s.id, localizedSectionTitle(s, 'en'));
+
+    const tasksByLang: Record<string, Array<() => Promise<void>>> = {};
+    const gapsByLang: Record<string, Set<string>> = {};
+    for (const lang of langs) { tasksByLang[lang] = []; gapsByLang[lang] = new Set(); }
+
+    // A fragment is translatable when it has English prose; it's a gap for `lang`
+    // when the target is blank (or always, in overwrite mode). Mirrors the template
+    // editor's `needs(...)`.
+    const consider = (
+      content: Record<string, string>,
+      sectionId: string,
+      write: (lang: string, html: string) => void,
+    ) => {
+      const src = content?.['en'];
+      if (!src || !src.trim()) return;
+      const label = titleById.get(sectionId) ?? sectionId;
+      for (const lang of langs) {
+        if (skipExisting && content[lang]?.trim()) continue;
+        gapsByLang[lang].add(label);
+        tasksByLang[lang].push(async () => { write(lang, await translateHtml(src, 'en', lang)); });
+      }
+    };
+
+    for (const [sid, adds] of Object.entries(wAdditions)) {
+      adds.forEach(a => consider(a.block.content, sid, (lang, html) => { a.block.content[lang] = html; }));
+    }
+    for (const [sid, refs] of Object.entries(wOverrides)) {
+      refs.forEach(r => consider(r.content, sid, (lang, html) => { r.content[lang] = html; }));
+    }
+    for (const [sid, byIdx] of Object.entries(wBlockOverrides)) {
+      Object.values(byIdx).forEach(r => consider(r.content, sid, (lang, html) => { r.content[lang] = html; }));
+    }
+    wExtras.forEach(ex => ex.blocks.forEach(b => consider(b.content, ex.id, (lang, html) => { b.content[lang] = html; })));
+
+    return { tasksByLang, gapsByLang, working: { wAdditions, wOverrides, wBlockOverrides, wExtras } };
+  };
+
+  // Translate the project-authored content into `langs` (English excluded). Mirrors
+  // the template editor's concurrency pool + progress + failure collection, then
+  // commits the working overlays and persists them (same payload as Save Draft).
+  const handleTranslateProject = async (langs: string[]) => {
+    if (translating || !projectId || !selectedTemplateId) return;
+    const targets = langs.filter(l => l !== 'en');
+    if (!targets.length) return;
+
+    const { tasksByLang, working } = buildTranslationPlan(targets, translateSkipExisting);
+    const tasks = targets.flatMap(l => tasksByLang[l]);
+    if (tasks.length === 0) {
+      alert(translateSkipExisting
+        ? 'Nothing to translate — the selected language(s) are up to date. Enable “Retranslate existing” to overwrite.'
+        : 'Nothing to translate — no project-authored sections have English content yet.');
+      return;
+    }
+
+    setTranslating(true);
+    setTranslateProgress({ done: 0, total: tasks.length });
+    const failures: string[] = [];
+    let done = 0;
+    const CONCURRENCY = 4;
+    let cursor = 0;
+    const runner = async () => {
+      while (cursor < tasks.length) {
+        const t = tasks[cursor++];
+        try { await t(); } catch (e: any) { failures.push(e?.message || 'a fragment failed'); }
+        done += 1;
+        setTranslateProgress({ done, total: tasks.length });
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, runner));
+
+      // Commit UI state, then persist directly with the working copies (state is async).
+      setSectionAdditions(working.wAdditions);
+      setSectionOverrides(working.wOverrides);
+      setBlockOverrides(working.wBlockOverrides);
+      setExtraSections(working.wExtras);
+      try {
+        const saved = await saveProjectIM(
+          projectId, selectedTemplateId, buildPlaceholderData(), 'draft', skuContent, templateType,
+          working.wAdditions, working.wExtras, working.wOverrides, undefined, boundSkuIds, sectionSkus, working.wBlockOverrides,
+        );
+        setInstance(saved);
+      } catch (e) { console.error(e); failures.push('Failed to save translations.'); }
+
+      if (failures.length) {
+        alert(`Translated ${tasks.length - failures.length}/${tasks.length} fragment(s). ${failures.length} left untranslated:\n\n${failures.slice(0, 8).join('\n')}${failures.length > 8 ? '\n…' : ''}`);
+      }
+    } finally {
+      setTranslating(false);
+    }
+  };
+
   // Attributes selectable for this project (its category + global attributes).
   const projectAttributes = project?.categoryId
     ? getAttributesForCategory(allAttributes, project.categoryId)
@@ -1693,6 +1848,16 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Language list for the project content editor (one tab per REQUIRED language).
   const editorLanguages = requiredLanguages.map(c => ({ code: c, label: c.toUpperCase() }));
+
+  // Languages this project produces (minus English, the source) and a display-only
+  // gap map for the translation badge/modal.
+  const otherRequiredLangs = requiredLanguages.filter(l => l !== 'en');
+  const translationGaps = buildTranslationPlan(otherRequiredLangs, true).gapsByLang;
+  const untranslatedSectionLabels = (() => {
+    const s = new Set<string>();
+    Object.values(translationGaps).forEach(set => set.forEach(l => s.add(l)));
+    return s;
+  })();
 
   // Toggle a SKU in/out of this IM's binding. Enforces ≥1 bound SKU (can't remove the last).
   const toggleBoundSku = (skuId: string) => {
@@ -2144,7 +2309,7 @@ const ProjectIMGenerator: React.FC = () => {
   // Computed values for current language
   const displayTitle = formData['__cover_title'] !== undefined ? formData['__cover_title'] : (project?.name || 'Product Name');
   const displaySubtitle = formData['__cover_subtitle'] !== undefined ? formData['__cover_subtitle'] : 'INSTRUCTION MANUAL';
-  const displayLogo = formData['__custom_logo'] || metadata.companyLogoUrl;
+  const displayLogo = formData['__custom_logo'] || metadata.companyLogoUrl || DEFAULT_IM_LOGO_URL;
   const displayCoverImage = formData['__custom_cover_image'] || metadata.coverImageUrl;
   const displayFooter = formData['__custom_footer'] !== undefined ? formData['__custom_footer'] : (metadata.footerText || '');
   // Version the next publish will stamp (current persisted version + 1).
@@ -2292,6 +2457,73 @@ const ProjectIMGenerator: React.FC = () => {
          </div>
        )}
 
+       {/* TRANSLATIONS */}
+       {isTranslateModalOpen && (
+         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] flex flex-col">
+             <div className="flex items-start justify-between mb-1">
+               <h3 className="font-bold text-lg flex items-center gap-2"><Globe size={18} className="text-indigo-500" /> Translate project content</h3>
+               <button onClick={() => { if (!translating) setIsTranslateModalOpen(false); }} className="text-gray-400 hover:text-gray-600 disabled:opacity-40" disabled={translating}><X size={18} /></button>
+             </div>
+             <p className="text-sm text-muted mb-4">
+               Auto-translate the sections you added or edited on this project. Template content is already translated and isn’t included here.
+             </p>
+             <div className="overflow-y-auto space-y-3 pr-1 flex-1">
+               {otherRequiredLangs.map(lang => {
+                 const missing = [...(translationGaps[lang] ?? [])];
+                 const name = IM_LANGUAGE_NAMES[lang] ?? lang.toUpperCase();
+                 return (
+                   <div key={lang} className="border border-gray-200 rounded-lg p-3">
+                     <div className="flex items-center justify-between gap-2">
+                       <div className="text-sm font-medium">
+                         {missing.length === 0
+                           ? <span className="flex items-center gap-1.5 text-emerald-700"><CheckCircle size={14} /> {name} — up to date</span>
+                           : <span className="flex items-center gap-1.5 text-orange-700"><Globe size={14} className="text-amber-500" /> {name} — {missing.length} missing</span>}
+                       </div>
+                       <button
+                         onClick={() => handleTranslateProject([lang])}
+                         disabled={translating || (missing.length === 0 && translateSkipExisting)}
+                         className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 font-medium hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                       >Translate</button>
+                     </div>
+                     {missing.length > 0 && (
+                       <ul className="mt-2 space-y-1">
+                         {missing.map((m, i) => (
+                           <li key={i} className="text-xs text-gray-600 flex items-start gap-2"><Globe size={12} className="text-amber-400 mt-0.5 shrink-0" /> {m}</li>
+                         ))}
+                       </ul>
+                     )}
+                   </div>
+                 );
+               })}
+             </div>
+             {translating && (
+               <div className="mt-3">
+                 <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                   <div className="h-full bg-indigo-500 transition-all" style={{ width: `${translateProgress.total ? (translateProgress.done / translateProgress.total) * 100 : 0}%` }} />
+                 </div>
+                 <div className="text-xs text-muted mt-1">Translating {translateProgress.done}/{translateProgress.total}…</div>
+               </div>
+             )}
+             <label className="flex items-center gap-2 text-xs text-gray-600 mt-3 pt-3 border-t border-gray-100">
+               <input type="checkbox" checked={!translateSkipExisting} onChange={e => setTranslateSkipExisting(!e.target.checked)} disabled={translating} />
+               Retranslate content that already has a translation (overwrite)
+             </label>
+             <p className="text-[11px] text-muted mt-2">
+               New project-only section titles aren’t translated (they’re shared across languages). Auto-translation requires the deployed translation service.
+             </p>
+             <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">
+               <button onClick={() => { if (!translating) setIsTranslateModalOpen(false); }} disabled={translating} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">Close</button>
+               <button
+                 onClick={() => handleTranslateProject(otherRequiredLangs)}
+                 disabled={translating || (untranslatedSectionLabels.size === 0 && translateSkipExisting)}
+                 className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+               >{translating ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />} Translate all languages</button>
+             </div>
+           </div>
+         </div>
+       )}
+
 
        <input
           type="file" 
@@ -2323,8 +2555,20 @@ const ProjectIMGenerator: React.FC = () => {
                        {instance ? 'Delete Draft' : 'Reset'}
                    </button>
 
-                   <button onClick={handleSaveDraft} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light"><Save size={16} /> Save Draft</button>
-                   
+                   <button onClick={handleSaveDraft} disabled={saving} className={`flex items-center gap-2 px-4 py-2 bg-white border rounded-xl text-sm font-medium hover:bg-light disabled:opacity-80 ${savedTick ? 'border-emerald-300 text-emerald-700' : 'border-gray-300 text-gray-700'}`}>
+                      {saving ? <Loader2 size={16} className="animate-spin" /> : savedTick ? <CheckCircle size={16} className="text-emerald-600" /> : <Save size={16} />}
+                      {saving ? 'Saving…' : savedTick ? 'Saved!' : 'Save Draft'}
+                   </button>
+
+                   {otherRequiredLangs.length > 0 && (
+                     <button onClick={() => setIsTranslateModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light" title="Review & auto-translate project-authored sections">
+                        <Globe size={16} /> Translations
+                        {untranslatedSectionLabels.size > 0 && (
+                          <span className="ml-0.5 text-[10px] font-bold bg-amber-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untranslatedSectionLabels.size}</span>
+                        )}
+                     </button>
+                   )}
+
                    {/* Export Menu */}
                    <div className="relative" ref={exportMenuRef}>
                        <button 
@@ -2351,9 +2595,9 @@ const ProjectIMGenerator: React.FC = () => {
                        )}
                    </div>
 
-                   <button onClick={handlePublishClick} disabled={generating} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70">
-                      {generating ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
-                      {generating ? 'Publishing...' : `Publish (${activeLang.toUpperCase()})`}
+                   <button onClick={handlePublishClick} disabled={generating} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
+                      {generating ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
+                      <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : `Publish (${activeLang.toUpperCase()})`}</span>
                    </button>
                </div>
            </div>
@@ -2716,6 +2960,18 @@ const ProjectIMGenerator: React.FC = () => {
                                {completion.status === 'ready' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
                                {completion.label}
                            </div>
+
+                           {/* Translation Status Badge */}
+                           {otherRequiredLangs.length > 0 && (
+                             <button
+                               onClick={() => setIsTranslateModalOpen(true)}
+                               className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 font-medium transition-colors ${untranslatedSectionLabels.size === 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-orange-700 border-amber-200 hover:bg-amber-100'}`}
+                               title="Review & auto-translate project-authored sections"
+                             >
+                               <Globe size={12} />
+                               {untranslatedSectionLabels.size === 0 ? 'Translations complete' : `${untranslatedSectionLabels.size} untranslated`}
+                             </button>
+                           )}
 
                            {/* Language Selector */}
                            <div className="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs shadow">
