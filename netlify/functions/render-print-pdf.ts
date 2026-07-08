@@ -6,14 +6,15 @@
  *
  * Pipeline (all server-side):
  *   1. fetch the published manifest + each requested language's ResolvedManual JSON (im-published);
- *   2. build the combined print HTML with the SHARED builder (src/services/im/im-print-html.ts) so
- *      the output can never drift from the rest of the app;
- *   3. send the HTML to PDFShift (hosted Chromium HTML→PDF) and get back the PDF bytes;
+ *   2. build the booklet as SEPARATE HTML parts (cover, one per language, back) with the SHARED
+ *      builder — each language part carries a color-coded edge thumb-tab (a position:fixed bar can
+ *      only repeat per page in a SINGLE-language render, so it can't vary per language in one doc);
+ *   3. render each part with PDFShift (Chromium), then MERGE them with pdf-lib and stamp continuous
+ *      page numbers + the running footer onto the merged pages;
  *   4. upload to im-print and return the public URL.
  *
- * Engine note: PDFShift is Chromium-based — screen-grade output. Page numbers come from PDFShift's
- * footer param (the builder does NOT emit crop marks / bleed / running headers / TOC page numbers,
- * which only Prince-class engines support).
+ * Engine note: PDFShift is Chromium-based — screen-grade output. Per-part right margin is 0 so the
+ * thumb-tabs sit flush to the paper edge (the builder restores the text inset via padding).
  *
  * Server-only env (set in Netlify, NOT VITE_-prefixed):
  *   PDFSHIFT_API_KEY             — print engine credential
@@ -22,7 +23,8 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { buildPrintHtml, PrintManual, PrintHtmlOptions } from '../../src/services/im/im-print-html';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { buildPrintPartsHtml, PrintManual, PrintHtmlOptions } from '../../src/services/im/im-print-html';
 
 interface NetlifyEvent {
   httpMethod: string;
@@ -69,14 +71,61 @@ const isValid = (b: unknown): b is RenderRequest => {
   );
 };
 
-/** Footer HTML for PDFShift — running text on the left, "page / total" on the right. */
-const footerSource = (runningText: string): string => {
-  const safe = runningText.replace(/[<>&]/g, '');
-  return (
-    `<div style="width:100%;font-size:8px;color:#64748b;font-family:Arial,sans-serif;` +
-    `padding:0 14mm;display:flex;justify-content:space-between;">` +
-    `<span>${safe}</span><span>{{page}} / {{total}}</span></div>`
-  );
+const MM_TO_PT = 72 / 25.4;
+
+/** Strip diacritics / non-ASCII so the stamped footer is safe for pdf-lib's standard font. */
+const toAscii = (text: string): string =>
+  text.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '').trim();
+
+/** Render one standalone HTML part to PDF bytes via PDFShift. Right margin is 0 so the edge
+ *  thumb-tabs are flush to the paper edge; page numbers are stamped later on the merged pdf. */
+const renderPart = async (html: string, format: string, apiKey: string, rightMargin: string): Promise<Uint8Array> => {
+  const auth = Buffer.from(`api:${apiKey}`).toString('base64');
+  const res = await fetch(PDFSHIFT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
+    body: JSON.stringify({
+      source: html,
+      format,
+      use_print: true,
+      margin: { top: '16mm', bottom: '18mm', left: '14mm', right: rightMargin },
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Print engine failed (${res.status}): ${detail.slice(0, 300)}`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+};
+
+/**
+ * Merge rendered parts in order and stamp the running footer + "page / total" onto every page
+ * from page 2 (the cover, page 1, stays clean). Continuous numbering across the whole booklet.
+ */
+const mergeAndStamp = async (partPdfs: Uint8Array[], runningText: string): Promise<Buffer> => {
+  const merged = await PDFDocument.create();
+  const font = await merged.embedFont(StandardFonts.Helvetica);
+  for (const bytes of partPdfs) {
+    const doc = await PDFDocument.load(bytes);
+    const pages = await merged.copyPages(doc, doc.getPageIndices());
+    for (const p of pages) merged.addPage(p);
+  }
+
+  const running = toAscii(runningText);
+  const total = merged.getPageCount();
+  const size = 8;
+  const color = rgb(0.39, 0.45, 0.55);
+  const y = 9 * MM_TO_PT;
+  merged.getPages().forEach((page, i) => {
+    if (i < 1) return; // skip the cover (page 1)
+    const width = page.getWidth();
+    if (running) page.drawText(running, { x: 14 * MM_TO_PT, y, size, font, color });
+    const right = `${i + 1} / ${total}`;
+    const rw = font.widthOfTextAtSize(right, size);
+    page.drawText(right, { x: width - 14 * MM_TO_PT - rw, y, size, font, color });
+  });
+
+  return Buffer.from(await merged.save());
 };
 
 export const handler = async (event: NetlifyEvent) => {
@@ -120,8 +169,8 @@ export const handler = async (event: NetlifyEvent) => {
     const manuals: PrintManual[] = [];
     for (const lang of ordered) manuals.push(await fetchJson<PrintManual>(byLang.get(lang)!));
 
-    // 2. Combined print HTML (shared builder).
-    const html = buildPrintHtml(manuals, {
+    // 2. Booklet as separate HTML parts (cover, one per language w/ edge tab, back).
+    const parts = buildPrintPartsHtml(manuals, {
       pageSize: req.pageSize,
       cover: req.cover,
       back: req.back,
@@ -130,25 +179,11 @@ export const handler = async (event: NetlifyEvent) => {
 
     const name = `${req.templateType}-${ordered.join('-')}-${req.pageSize}`;
     const running = [req.cover.footerText, req.cover.title].filter(Boolean).join(' · ');
+    const format = req.pageSize.toUpperCase(); // A4 | A5
 
-    // 3. PDFShift → PDF bytes. Margins (and thus footer space) are owned by the engine here.
-    const auth = Buffer.from(`api:${apiKey}`).toString('base64');
-    const pdfRes = await fetch(PDFSHIFT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
-      body: JSON.stringify({
-        source: html,
-        format: req.pageSize.toUpperCase(), // A4 | A5
-        use_print: true,
-        margin: { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' },
-        footer: { source: footerSource(running), start_at: 2 },
-      }),
-    });
-    if (!pdfRes.ok) {
-      const detail = await pdfRes.text().catch(() => '');
-      throw new Error(`Print engine failed (${pdfRes.status}): ${detail.slice(0, 300)}`);
-    }
-    const pdf = Buffer.from(await pdfRes.arrayBuffer());
+    // 3. Render every part (in parallel) then merge + stamp continuous page numbers.
+    const partPdfs = await Promise.all(parts.map((p) => renderPart(p.html, format, apiKey, p.edge ? '0mm' : '14mm')));
+    const pdf = await mergeAndStamp(partPdfs, running);
 
     // 4. Upload to im-print under a UNIQUE path (never overwrite — history is preserved).
     const storagePath = `${req.projectId}/${req.templateType}/${name}-v${req.version ?? 0}-${Date.now()}.pdf`;

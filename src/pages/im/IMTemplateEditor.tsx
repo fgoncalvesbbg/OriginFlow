@@ -443,6 +443,10 @@ const IMTemplateEditor: React.FC = () => {
   const draftKey = template ? `im-draft:${template.id}` : null;
 
   const handleSaveAll = async () => {
+    // Guard against a manual Save racing an in-flight autosave: both would upsert
+    // the same section rows concurrently, and the second write queues behind the
+    // first's row lock instead of failing fast (see with-timeout.ts).
+    if (saving) return;
     if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
     const dirty = getDirtySections();
     if (dirty.length === 0) { setLastSaved(new Date()); return; }

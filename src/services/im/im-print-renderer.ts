@@ -291,13 +291,23 @@ const buildIMPrintDocument =({
           }
 
           .im-page-cover { padding: 0; }
-          .im-cover-image { height: 110mm; background-size: cover; background-position: center; }
           .im-cover-content {
-            min-height: 297mm;
+            height: 297mm;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             padding: 22mm 20mm;
+          }
+          /* Cover image: centered in the page's middle band, scaled to FIT (never cropped
+             or stretched), capped so it can't crowd the title above or the footer below. */
+          .im-cover-image {
+            flex: 1;
+            min-height: 0;
+            max-height: 150mm;
+            margin: 12mm 0;
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
           }
           .im-cover-logo { height: 18mm; object-fit: contain; margin-bottom: 20mm; }
           .im-cover-title { margin: 0 0 6mm; color: ${primaryColor}; font-size: 18mm; line-height: 1.1; }
@@ -376,13 +386,13 @@ const buildIMPrintDocument =({
       </head>
       <body>
         <section class="im-page-section im-page-cover">
-          ${coverImageBlock}
           <div class="im-cover-content">
             <div>
               ${logoBlock}
               <h1 class="im-cover-title">${escapeHtml(displayTitle)}</h1>
               <p class="im-cover-subtitle">${escapeHtml(displaySubtitle)}</p>
             </div>
+            ${coverImageBlock}
             <div class="im-cover-footer">
               <div><strong>${escapeHtml(
                 template?.metadata?.companyName || 'Company Name'

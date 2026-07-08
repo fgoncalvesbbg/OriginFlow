@@ -60,10 +60,13 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
     // Bound the write so a stalled request can't hang the editor's autosave
-    // forever (see with-timeout.ts). The builder is one-shot, so wrap it in a
-    // factory to allow a retry.
+    // forever (see with-timeout.ts). withTimeout must wrap the query BUILDER
+    // (not a promise already produced from it) so it can wire up abortSignal
+    // and actually cancel the in-flight request on timeout — otherwise a
+    // retry queues behind its own still-running first attempt's row lock.
+    // The builder is one-shot, so wrap it in a factory to allow a retry.
     const runUpsert = () =>
-      withTimeout(runQuery(supabase.from('im_sections').upsert(payload).select().single(), 'saveIMSection'));
+      runQuery(withTimeout(supabase.from('im_sections').upsert(payload).select().single()), 'saveIMSection');
 
     let data;
     try {
