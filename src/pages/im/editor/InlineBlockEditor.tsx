@@ -12,7 +12,8 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Bold, Italic, Underline, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Info, Upload, Loader2, Code, type LucideIcon } from 'lucide-react';
+import { Bold, Italic, Underline, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Info, Upload, Loader2, Code, Languages, type LucideIcon } from 'lucide-react';
+import { translateHtml } from '../../../services/ai/translation.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { CalloutVariant, CategoryAttribute } from '../../../types';
@@ -648,10 +649,14 @@ interface InlineHtmlRowProps {
   onVariantChange: (variant: CalloutVariant | undefined) => void;
   onInsertPlaceholder: (type: 'text' | 'image') => void;
   onInsertCondition: () => void;
+  /** Show a per-box "Translate from EN" button on non-English language tabs. */
+  enableTranslate?: boolean;
 }
 
-export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition }) => {
+export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate }) => {
   const [rowLang, setRowLang] = useState('en');
+  const [translating, setTranslating] = useState(false);
+  const [translateErr, setTranslateErr] = useState<string | null>(null);
   // Guard against the active row language being disabled on the template later.
   const activeCode = languages.some(l => l.code === rowLang) ? rowLang : (languages[0]?.code ?? 'en');
   const variantCfg = variant ? CALLOUT_VARIANTS.find(v => v.value === variant) : undefined;
@@ -719,6 +724,28 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     onChangeRef.current(code, chips.map(c => `<p>${c}</p>`).join(''));
   }, []);
 
+  // Per-box AI translation: fill the ACTIVE language tab from the English source via
+  // the same proxy the bulk translator uses (chips/images preserved). The result is
+  // pushed through onChange so it renders in the editor for the author to review and
+  // tweak before saving — nothing is persisted here.
+  const enSource = content['en'] ?? '';
+  const canTranslate = !!enableTranslate && activeCode !== 'en' && !!enSource.trim();
+  const handleTranslateRow = useCallback(async () => {
+    const source = contentRef.current['en'] ?? '';
+    const target = activeCodeRef.current;
+    if (target === 'en' || !source.trim() || translating) return;
+    setTranslateErr(null);
+    setTranslating(true);
+    try {
+      const out = await translateHtml(source, 'en', target);
+      onChangeRef.current(target, out);
+    } catch (e: any) {
+      setTranslateErr(e?.message || 'Translation failed');
+    } finally {
+      setTranslating(false);
+    }
+  }, [translating]);
+
   return (
     <div className="flex flex-col gap-2 p-3 resize-y overflow-hidden min-h-[280px]">
       {/* Callout box selector — wraps the ENTIRE row content in this ISO sign box on render */}
@@ -748,7 +775,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
       </div>
 
       {/* Per-row language tabs — a filled dot marks languages that already have content */}
-      <div className="flex gap-1 flex-wrap shrink-0">
+      <div className="flex items-center gap-1 flex-wrap shrink-0">
         {languages.map(l => {
           const filled = !!(content[l.code] && content[l.code].trim());
           const isActive = activeCode === l.code;
@@ -766,7 +793,20 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
             </button>
           );
         })}
+        {enableTranslate && activeCode !== 'en' && (
+          <button
+            type="button"
+            onClick={handleTranslateRow}
+            disabled={!canTranslate || translating}
+            title={enSource.trim() ? `Translate this box from English into ${activeCode.toUpperCase()} — review before saving` : 'Add English content first'}
+            className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {translating ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
+            {translating ? 'Translating…' : `Translate from EN`}
+          </button>
+        )}
       </div>
+      {translateErr && <div className="text-[11px] text-rose-600 shrink-0 -mt-1">{translateErr}</div>}
 
       {/* Editor — when a variant is set, the surface is framed to show everything inside is wrapped */}
       <div className={`flex-1 min-h-0 flex flex-col ${variantCfg ? `border-l-4 rounded-r ${variantCfg.frame} pl-2` : ''}`}>
@@ -1071,9 +1111,11 @@ interface InlineBlockEditorProps {
   rowKey: string;
   onChange: (lang: string, html: string) => void;
   onVariantChange: (variant: CalloutVariant | undefined) => void;
+  /** Show a per-box "Translate from EN" button on non-English language tabs. */
+  enableTranslate?: boolean;
 }
 
-export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange }) => {
+export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange, enableTranslate }) => {
   const [placeholderType, setPlaceholderType] = useState<'text' | 'image' | null>(null);
   const [conditionOpen, setConditionOpen] = useState(false);
 
@@ -1087,6 +1129,7 @@ export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, v
         index={0}
         onChange={onChange}
         onVariantChange={onVariantChange}
+        enableTranslate={enableTranslate}
         onInsertPlaceholder={(type) => setPlaceholderType(type)}
         onInsertCondition={() => setConditionOpen(true)}
       />

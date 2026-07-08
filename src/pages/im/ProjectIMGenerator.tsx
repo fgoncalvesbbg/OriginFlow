@@ -2110,6 +2110,7 @@ const ProjectIMGenerator: React.FC = () => {
         attributes={projectAttributes}
         onChange={opts.onChange}
         onVariantChange={opts.onVariant}
+        enableTranslate
       />
     </div>
   );
@@ -2248,6 +2249,7 @@ const ProjectIMGenerator: React.FC = () => {
                         attributes={projectAttributes}
                         onChange={(lang, html) => updateBlockOverride(section.id, i, lang, html)}
                         onVariantChange={(v) => setBlockOverrideVariant(section.id, i, v)}
+                        enableTranslate
                       />
                     </div>
                   ) : (
