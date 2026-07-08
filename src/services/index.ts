@@ -161,7 +161,12 @@ export {
   requestPrintPdf,
   getPrintPdfUrl,
   getPrintRenders,
-  isPrintExportAvailable
+  isPrintExportAvailable,
+  getIMShares,
+  createIMShare,
+  revokeIMShare,
+  resolveIMShareToken,
+  getIMShareUrl
 } from './im';
 export type {
   PublishResult,
@@ -171,7 +176,8 @@ export type {
   PrintPdfResult,
   PrintCoverInput,
   PrintBackInput,
-  PrintRender
+  PrintRender,
+  IMShare
 } from './im';
 
 // Sourcing module

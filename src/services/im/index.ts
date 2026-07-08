@@ -55,3 +55,11 @@ export type {
   PrintBackInput,
   PrintRender,
 } from './im-print-export.service';
+export {
+  getIMShares,
+  createIMShare,
+  revokeIMShare,
+  resolveIMShareToken,
+  getIMShareUrl,
+} from './im-share.service';
+export type { IMShare } from './im-share.service';

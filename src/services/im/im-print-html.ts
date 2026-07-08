@@ -92,6 +92,13 @@ export interface PrintCoverOptions {
   imName?: string;
   companyName?: string;
   footerText?: string;
+  /**
+   * Per-language directory shown on the cover ("EN Instruction Manual … 14"), so a reader
+   * can jump straight to their language. `page` is the language's start page in the merged
+   * booklet (null while unknown — the print function fills it in on a second cover render).
+   * Only rendered for multi-language booklets; replaces the plain subtitle when present.
+   */
+  languageIndex?: { code: string; name: string; page: number | null }[];
 }
 
 export interface PrintBackOptions {
@@ -252,6 +259,19 @@ const markRow = (urls?: string[]): string =>
     ? `<div class="im-marks">${urls.map((u) => `<img class="im-mark" src="${u}" alt="" />`).join('')}</div>`
     : '';
 
+/** Cover language directory: one row per language — code · localized name · start page. */
+const buildLanguageIndex = (entries: NonNullable<PrintCoverOptions['languageIndex']>): string => `
+  <div class="im-cover-index">
+    ${entries
+      .map(
+        (e) =>
+          `<div class="im-cover-index-row"><span class="im-cix-code">${escapeHtml(e.code)}</span>` +
+          `<span class="im-cix-name">${escapeHtml(e.name)}</span>` +
+          `<span class="im-cix-pg">${e.page != null ? e.page : ''}</span></div>`,
+      )
+      .join('')}
+  </div>`;
+
 const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string => {
   const coverImage = opts.coverImageUrl
     ? `<div class="im-cover-image" style="background-image:url('${opts.coverImageUrl}')"></div>`
@@ -270,7 +290,9 @@ const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string =>
         <div>
           ${logo}
           <h1 class="im-cover-title">${escapeHtml(opts.title || '')}</h1>
-          <p class="im-cover-subtitle">${escapeHtml(subtitle)}</p>
+          ${opts.languageIndex && opts.languageIndex.length > 1
+            ? buildLanguageIndex(opts.languageIndex)
+            : `<p class="im-cover-subtitle">${escapeHtml(subtitle)}</p>`}
         </div>
         ${coverImage}
         <div class="im-cover-footer">
@@ -366,29 +388,35 @@ const buildBackPage = (opts: PrintBackOptions, companyName: string, versionLabel
 // CSS
 // ---------------------------------------------------------------------------
 
-// Distinct, print-friendly colors cycled by a language's position in the booklet, so
-// adjacent language sections never share a color. Used for the staggered edge thumb-tabs.
-const TAB_PALETTE = [
-  '#e11d48', '#2563eb', '#16a34a', '#f59e0b', '#7c3aed', '#0891b2',
-  '#db2777', '#65a30d', '#ea580c', '#0d9488', '#4f46e5', '#b91c1c',
+// Light, faded colors so the flags stay legible in B&W (and don't hog toner). The
+// language's staggered VERTICAL slot is the primary index; color is a secondary cue.
+export const TAB_PALETTE = [
+  '#bfdbfe', '#bbf7d0', '#fde68a', '#fecaca', '#ddd6fe', '#a5f3fc',
+  '#fbcfe8', '#d9f99d', '#fed7aa', '#99f6e4', '#c7d2fe', '#e2e8f0',
 ];
 
+export interface TabLayout {
+  topMm: number;
+  heightMm: number;
+  widthMm: number;
+  color: string;
+}
+
 /**
- * A single language's edge thumb-tab: a `position: fixed` colored bar pinned to the
- * OUTER (right) paper edge, so Chromium repeats it on every page of that language's
- * (single-language) render. Each language gets a distinct color and a vertical slot
- * that steps down the page — a classic thumb-index that reads as a "flag" when fanned.
+ * Geometry + color for language `index`'s edge thumb-tab. Tabs step DOWN the page (one
+ * vertical slot per language) so a fanned booklet reads as a thumb-index. The tab is
+ * drawn onto the MERGED pdf by the print function (see render-print-pdf), which also
+ * alternates the outer edge per page (recto=right, verso=left) for the bound booklet.
  */
-const buildLanguageTab = (index: number, total: number, pageSize: PrintPageSize, code: string): string => {
+export const getTabLayout = (index: number, total: number, pageSize: PrintPageSize): TabLayout => {
   const pageH = PAGE_DIMS[pageSize].h;
   const topStart = 30;                 // clear of the running header band
   const bandH = pageH - topStart - 30; // clear of the footer band
   const slot = bandH / Math.max(total, 1);
-  const tabH = Math.min(slot * 0.72, 26);
-  const barW = pageSize === 'a5' ? 5 : 6;
-  const top = topStart + index * slot + (slot - tabH) / 2;
-  const color = TAB_PALETTE[index % TAB_PALETTE.length];
-  return `<div class="im-lang-tab" style="top:${top.toFixed(1)}mm;height:${tabH.toFixed(1)}mm;width:${barW}mm;background:${color};"><span>${escapeHtml(code.toUpperCase())}</span></div>`;
+  const heightMm = Math.min(slot * 0.72, 26);
+  const widthMm = pageSize === 'a5' ? 7 : 8;
+  const topMm = topStart + index * slot + (slot - heightMm) / 2;
+  return { topMm, heightMm, widthMm, color: TAB_PALETTE[index % TAB_PALETTE.length] };
 };
 
 const buildStyles = (
@@ -396,7 +424,6 @@ const buildStyles = (
   primaryColor: string,
   fontImport: string,
   fontStack: string,
-  withEdgeTabs = false,
 ): string => {
   const dims = PAGE_DIMS[pageSize];
   const s = pageSize === 'a5' ? 0.82 : 1; // A5 type scale
@@ -427,6 +454,12 @@ const buildStyles = (
     .im-cover-logo { height: ${mm(9)}; object-fit: contain; margin-bottom: ${mm(16)}; }
     .im-cover-title { margin: 0 0 ${mm(6)}; color: ${primaryColor}; font-size: ${mm(8)}; line-height: 1.1; }
     .im-cover-subtitle { margin: 0; color: #475569; font-size: ${mm(3)}; letter-spacing: 0.2em; text-transform: uppercase; line-height: 1.4; }
+    /* Cover language directory — jump-to-your-language index (2 columns for compactness). */
+    .im-cover-index { columns: 2; column-gap: ${mm(8)}; margin: ${mm(1)} 0 0; font-size: ${mm(3)}; }
+    .im-cover-index-row { display: flex; align-items: baseline; gap: ${mm(2)}; break-inside: avoid; margin-bottom: ${mm(1.2)}; color: #334155; }
+    .im-cix-code { font-weight: 800; color: ${primaryColor}; min-width: ${mm(7)}; }
+    .im-cix-name { flex: 1; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .im-cix-pg { font-weight: 700; color: ${primaryColor}; font-variant-numeric: tabular-nums; }
     .im-cover-footer { border-top: 1.5mm solid ${primaryColor}; padding-top: ${mm(6)}; font-size: ${mm(3.4)}; color: #334155; }
     .im-cover-imname { margin-top: ${mm(1.5)}; color: #475569; }
     .im-cover-skus { margin-top: ${mm(1.5)}; font-weight: 600; letter-spacing: 0.02em; color: #334155; }
@@ -512,24 +545,6 @@ const buildStyles = (
     .im-end-logo { height: ${mm(16)}; object-fit: contain; margin-bottom: ${mm(8)}; }
     .im-end-content { font-size: ${mm(3.5)}; color: #1e293b; }
     .im-end-copyright { margin-top: ${mm(10)}; font-size: ${mm(3.2)}; color: #64748b; text-align: center; }
-${withEdgeTabs ? `
-    /* Edge thumb-tabs: the render owns 0 right margin so the tab is FLUSH to the paper
-       edge; restore the text inset with padding instead so content clears the tab. */
-    .im-page { padding-right: 14mm; }
-    .im-lang-tab {
-      position: fixed;
-      right: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      font-weight: 800;
-      font-size: 3mm;
-      letter-spacing: 0.08em;
-      border-radius: 2px 0 0 2px;
-    }
-    .im-lang-tab span { writing-mode: vertical-rl; }
-` : ''}
   `;
 };
 
@@ -619,28 +634,12 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
  */
 export interface PrintPart {
   html: string;
-  /** True for language bodies (rendered with 0 right margin so the tab is flush to the edge). */
-  edge: boolean;
+  /** Edge thumb-tab spec for a language body; null for the shared cover/back parts. */
+  tab: { index: number; total: number; code: string } | null;
 }
 
-export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): PrintPart[] => {
-  if (!manuals.length) throw new Error('buildPrintPartsHtml requires at least one resolved manual.');
-
-  const base = manuals[0].metadata;
-  const primaryColor = base?.primaryColor || '#0f172a';
-  const fontFamily = base?.fontFamily;
-  const fontImport = getFontImport(fontFamily);
-  const fontStack = getFontStack(fontFamily);
-  const versionLabel = opts.version ? `v${opts.version}` : '';
-  const languages = manuals.map((m) => m.language);
-  const multi = manuals.length > 1;
-
-  // Two stylesheets: cover/back render with normal margins; language bodies render flush
-  // to the edge (0 right margin) so the thumb-tab reaches the paper edge, with the text
-  // inset restored via padding.
-  const stylesPlain = buildStyles(opts.pageSize, primaryColor, fontImport, fontStack, false);
-  const stylesEdge = buildStyles(opts.pageSize, primaryColor, fontImport, fontStack, true);
-  const wrap = (inner: string, styles: string) => `<!doctype html>
+/** Wrap section HTML into a standalone print document with the shared stylesheet. */
+const wrapStandalone = (inner: string, styles: string): string => `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -650,14 +649,55 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
   <body>${inner}</body>
 </html>`;
 
+const partStyles = (manuals: PrintManual[], opts: PrintHtmlOptions): string => {
+  const base = manuals[0].metadata;
+  return buildStyles(opts.pageSize, base?.primaryColor || '#0f172a', getFontImport(base?.fontFamily), getFontStack(base?.fontFamily));
+};
+
+/**
+ * Build ONLY the front-cover part. `pages` gives each language's start page in the final
+ * booklet (index-aligned to `manuals`); pass nulls when unknown — the print function renders
+ * once to measure page counts, then calls this again with real numbers. Multi-language only:
+ * the cover then shows the jump-to-your-language directory in place of the plain subtitle.
+ */
+export const buildCoverPartHtml = (
+  manuals: PrintManual[],
+  opts: PrintHtmlOptions,
+  pages: (number | null)[],
+): string => {
+  if (!manuals.length) throw new Error('buildCoverPartHtml requires at least one resolved manual.');
+  const base = manuals[0].metadata;
+  const languageIndex = manuals.length > 1
+    ? manuals.map((m, i) => ({
+        code: m.language.toUpperCase(),
+        name: INSTRUCTION_MANUAL_NAMES[m.language] ?? m.language.toUpperCase(),
+        page: pages[i] ?? null,
+      }))
+    : undefined;
+  const coverOpts = { ...resolveCoverOpts(opts, base), languageIndex };
+  return wrapStandalone(buildCoverPage(coverOpts, manuals.map((m) => m.language)), partStyles(manuals, opts));
+};
+
+export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): PrintPart[] => {
+  if (!manuals.length) throw new Error('buildPrintPartsHtml requires at least one resolved manual.');
+
+  const base = manuals[0].metadata;
+  const primaryColor = base?.primaryColor || '#0f172a';
+  const versionLabel = opts.version ? `v${opts.version}` : '';
+  const multi = manuals.length > 1;
+  const styles = partStyles(manuals, opts);
+
   const parts: PrintPart[] = [];
-  parts.push({ html: wrap(buildCoverPage(resolveCoverOpts(opts, base), languages), stylesPlain), edge: false });
+  // Cover with a PLACEHOLDER directory (page numbers unknown until every part is rendered).
+  parts.push({ html: buildCoverPartHtml(manuals, opts, manuals.map(() => null)), tab: null });
   manuals.forEach((manual, i) => {
-    // Only tag with an edge tab when the booklet actually spans multiple languages.
-    const tab = multi ? buildLanguageTab(i, manuals.length, opts.pageSize, manual.language) : '';
     const divider = multi ? buildLanguageDivider(manual.language, primaryColor) : '';
-    parts.push({ html: wrap(tab + divider + buildTocPage(manual) + buildSectionPages(manual), multi ? stylesEdge : stylesPlain), edge: multi });
+    parts.push({
+      html: wrapStandalone(divider + buildTocPage(manual) + buildSectionPages(manual), styles),
+      // Only tag with an edge tab when the booklet actually spans multiple languages.
+      tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,
+    });
   });
-  parts.push({ html: wrap(buildBackPage(resolveBackOpts(opts, base), opts.cover.companyName ?? base?.companyName ?? '', versionLabel), stylesPlain), edge: false });
+  parts.push({ html: wrapStandalone(buildBackPage(resolveBackOpts(opts, base), opts.cover.companyName ?? base?.companyName ?? '', versionLabel), styles), tab: null });
   return parts;
 };

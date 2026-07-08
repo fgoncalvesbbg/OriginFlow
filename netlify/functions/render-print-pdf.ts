@@ -23,8 +23,15 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { buildPrintPartsHtml, PrintManual, PrintHtmlOptions } from '../../src/services/im/im-print-html';
+import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
+import {
+  buildPrintPartsHtml,
+  buildCoverPartHtml,
+  getTabLayout,
+  PrintManual,
+  PrintHtmlOptions,
+  PrintPart,
+} from '../../src/services/im/im-print-html';
 
 interface NetlifyEvent {
   httpMethod: string;
@@ -77,9 +84,9 @@ const MM_TO_PT = 72 / 25.4;
 const toAscii = (text: string): string =>
   text.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '').trim();
 
-/** Render one standalone HTML part to PDF bytes via PDFShift. Right margin is 0 so the edge
- *  thumb-tabs are flush to the paper edge; page numbers are stamped later on the merged pdf. */
-const renderPart = async (html: string, format: string, apiKey: string, rightMargin: string): Promise<Uint8Array> => {
+/** Render one standalone HTML part to PDF bytes via PDFShift. Edge thumb-tabs are drawn
+ *  onto the MERGED pdf afterwards, so parts keep normal (symmetric) margins here. */
+const renderPart = async (html: string, format: string, apiKey: string): Promise<Uint8Array> => {
   const auth = Buffer.from(`api:${apiKey}`).toString('base64');
   const res = await fetch(PDFSHIFT_ENDPOINT, {
     method: 'POST',
@@ -88,7 +95,7 @@ const renderPart = async (html: string, format: string, apiKey: string, rightMar
       source: html,
       format,
       use_print: true,
-      margin: { top: '16mm', bottom: '18mm', left: '14mm', right: rightMargin },
+      margin: { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' },
     }),
   });
   if (!res.ok) {
@@ -98,31 +105,80 @@ const renderPart = async (html: string, format: string, apiKey: string, rightMar
   return new Uint8Array(await res.arrayBuffer());
 };
 
+/** hex ('#rrggbb') → pdf-lib rgb (0..1). */
+const hexRgb = (hex: string) => {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+};
+
 /**
- * Merge rendered parts in order and stamp the running footer + "page / total" onto every page
- * from page 2 (the cover, page 1, stays clean). Continuous numbering across the whole booklet.
+ * Merge rendered parts in order, then on each merged page stamp:
+ *   - the running footer + continuous "page / total" (from page 2 on), and
+ *   - the language's color-coded edge thumb-tab (for language-body pages), on the OUTER
+ *     edge — right on recto (odd) pages, left on verso (even) pages, so it lands on the
+ *     open edge of a bound double-sided booklet and reads as a flag when fanned.
  */
-const mergeAndStamp = async (partPdfs: Uint8Array[], runningText: string): Promise<Buffer> => {
+const mergeAndStamp = async (
+  partPdfs: Uint8Array[],
+  parts: PrintPart[],
+  runningText: string,
+  pageSize: 'a4' | 'a5',
+): Promise<Buffer> => {
   const merged = await PDFDocument.create();
   const font = await merged.embedFont(StandardFonts.Helvetica);
-  for (const bytes of partPdfs) {
-    const doc = await PDFDocument.load(bytes);
-    const pages = await merged.copyPages(doc, doc.getPageIndices());
-    for (const p of pages) merged.addPage(p);
+
+  // Track which language tab (if any) each merged page belongs to.
+  const pageTabs: (PrintPart['tab'])[] = [];
+  for (let i = 0; i < partPdfs.length; i++) {
+    const doc = await PDFDocument.load(partPdfs[i]);
+    const copied = await merged.copyPages(doc, doc.getPageIndices());
+    for (const p of copied) { merged.addPage(p); pageTabs.push(parts[i].tab); }
   }
 
   const running = toAscii(runningText);
   const total = merged.getPageCount();
   const size = 8;
-  const color = rgb(0.39, 0.45, 0.55);
-  const y = 9 * MM_TO_PT;
+  const footColor = rgb(0.39, 0.45, 0.55);
+  const tabTextColor = rgb(0.2, 0.25, 0.32);
+  const footY = 9 * MM_TO_PT;
+
   merged.getPages().forEach((page, i) => {
-    if (i < 1) return; // skip the cover (page 1)
+    const pageNum = i + 1;
     const width = page.getWidth();
-    if (running) page.drawText(running, { x: 14 * MM_TO_PT, y, size, font, color });
-    const right = `${i + 1} / ${total}`;
-    const rw = font.widthOfTextAtSize(right, size);
-    page.drawText(right, { x: width - 14 * MM_TO_PT - rw, y, size, font, color });
+    const height = page.getHeight();
+
+    // Footer + page number (cover stays clean).
+    if (pageNum >= 2) {
+      if (running) page.drawText(running, { x: 14 * MM_TO_PT, y: footY, size, font, color: footColor });
+      const right = `${pageNum} / ${total}`;
+      const rw = font.widthOfTextAtSize(right, size);
+      page.drawText(right, { x: width - 14 * MM_TO_PT - rw, y: footY, size, font, color: footColor });
+    }
+
+    // Edge thumb-tab (language bodies only).
+    const tab = pageTabs[i];
+    if (tab) {
+      const lay = getTabLayout(tab.index, tab.total, pageSize);
+      const w = lay.widthMm * MM_TO_PT;
+      const h = lay.heightMm * MM_TO_PT;
+      const y = height - lay.topMm * MM_TO_PT - h; // pdf-lib origin is bottom-left
+      const onRight = pageNum % 2 === 1;           // recto → outer edge is the right
+      const x = onRight ? width - w : 0;
+      page.drawRectangle({ x, y, width: w, height: h, color: hexRgb(lay.color) });
+
+      // Language code, rotated to run along the bar (dark text stays legible in B&W).
+      const label = toAscii(tab.code.toUpperCase()) || tab.code.toUpperCase();
+      const ts = 7;
+      const tw = font.widthOfTextAtSize(label, ts);
+      page.drawText(label, {
+        x: x + w / 2 + ts / 2,
+        y: y + h / 2 - tw / 2,
+        size: ts,
+        font,
+        color: tabTextColor,
+        rotate: degrees(90),
+      });
+    }
   });
 
   return Buffer.from(await merged.save());
@@ -181,9 +237,32 @@ export const handler = async (event: NetlifyEvent) => {
     const running = [req.cover.footerText, req.cover.title].filter(Boolean).join(' · ');
     const format = req.pageSize.toUpperCase(); // A4 | A5
 
-    // 3. Render every part (in parallel) then merge + stamp continuous page numbers.
-    const partPdfs = await Promise.all(parts.map((p) => renderPart(p.html, format, apiKey, p.edge ? '0mm' : '14mm')));
-    const pdf = await mergeAndStamp(partPdfs, running);
+    // 3. Render every part (in parallel).
+    const partPdfs = await Promise.all(parts.map((p) => renderPart(p.html, format, apiKey)));
+
+    // 3a. Cover language directory: with page counts now known, compute each language's start
+    // page and re-render the cover with real numbers. The directory's row count is unchanged,
+    // so the cover's own page count is stable. parts = [cover, lang0, lang1, …, back].
+    if (manuals.length > 1) {
+      const counts = await Promise.all(
+        partPdfs.map(async (b) => (await PDFDocument.load(b)).getPageCount()),
+      );
+      const langStart: number[] = [];
+      let acc = counts[0]; // pages before the first language body = the cover
+      for (let i = 0; i < manuals.length; i++) {
+        langStart.push(acc + 1);
+        acc += counts[i + 1];
+      }
+      const coverHtml = buildCoverPartHtml(
+        manuals,
+        { pageSize: req.pageSize, cover: req.cover, back: req.back, version: req.version },
+        langStart,
+      );
+      partPdfs[0] = await renderPart(coverHtml, format, apiKey);
+    }
+
+    // 3b. Merge + stamp page numbers + edge tabs.
+    const pdf = await mergeAndStamp(partPdfs, parts, running, req.pageSize);
 
     // 4. Upload to im-print under a UNIQUE path (never overwrite — history is preserved).
     const storagePath = `${req.projectId}/${req.templateType}/${name}-v${req.version ?? 0}-${Date.now()}.pdf`;

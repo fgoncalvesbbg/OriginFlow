@@ -35,6 +35,7 @@ import ComplianceLibrary from '../pages/compliance/ComplianceLibrary';
 import IMDashboard from '../pages/im/IMDashboard';
 import IMTemplateEditor from '../pages/im/IMTemplateEditor';
 import IMPreview from '../pages/im/IMPreview';
+import IMSharedManual from '../pages/im/IMSharedManual';
 import IMBlockLibrary from '../pages/im/IMBlockLibrary';
 import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
@@ -65,6 +66,7 @@ const AppContent: React.FC = () => {
           <Route path="/compliance/supplier-portal" element={<SupplierCompliancePortalList />} />
           <Route path="/sourcing/supplier/:token" element={<SupplierRFQPortal />} />
           <Route path="/im/preview/:templateId" element={<IMPreview />} />
+          <Route path="/share/im/:token" element={<IMSharedManual />} />
           <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
 
           {/* Protected PM Routes */}
