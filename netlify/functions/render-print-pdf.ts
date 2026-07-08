@@ -19,7 +19,6 @@
  *   PDFSHIFT_API_KEY             — print engine credential
  *   SUPABASE_URL                 — project URL (public manifest URL + storage)
  *   SUPABASE_SERVICE_ROLE_KEY    — service role, so the upload bypasses RLS
- *   PDFSHIFT_SANDBOX = "true"     — optional: free watermarked renders while validating
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -141,7 +140,6 @@ export const handler = async (event: NetlifyEvent) => {
         source: html,
         format: req.pageSize.toUpperCase(), // A4 | A5
         use_print: true,
-        sandbox: process.env.PDFSHIFT_SANDBOX === 'true',
         margin: { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' },
         footer: { source: footerSource(running), start_at: 2 },
       }),

@@ -283,8 +283,29 @@ const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string =>
   `;
 };
 
+/**
+ * Order sections in per-parent DFS reading order — the same order the resolver emits and the
+ * live preview shows. `order` is assigned per sibling-group (10/20/30 within each parent), so a
+ * flat global sort would interleave children of different parents and break the hierarchy.
+ */
+const flattenInReadingOrder = (sections: PrintSection[]): PrintSection[] => {
+  const byParent = new Map<string | null, PrintSection[]>();
+  for (const s of sections) {
+    const p = s.parentId ?? null;
+    if (!byParent.has(p)) byParent.set(p, []);
+    byParent.get(p)!.push(s);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.order - b.order);
+  const out: PrintSection[] = [];
+  const walk = (parent: string | null) => {
+    for (const s of byParent.get(parent) ?? []) { out.push(s); walk(s.id); }
+  };
+  walk(null);
+  return out;
+};
+
 const buildTocPage = (manual: PrintManual): string => {
-  const ordered = [...manual.sections].sort((a, b) => a.order - b.order);
+  const ordered = flattenInReadingOrder(manual.sections);
   const rows = ordered
     .map((s) => `<a class="im-toc-row${s.parentId ? ' im-toc-sub' : ''}" href="#sec-${s.id}">${escapeHtml(s.title)}</a>`)
     .join('');
@@ -296,19 +317,23 @@ const buildTocPage = (manual: PrintManual): string => {
   `;
 };
 
+// Sections flow continuously within a single content page (matching the live preview), instead
+// of forcing a new page per section. Only the content block as a whole starts on a fresh page
+// (im-break); individual sections break naturally on overflow.
 const buildSectionPages = (manual: PrintManual): string => {
-  const ordered = [...manual.sections].sort((a, b) => a.order - b.order);
-  return ordered
+  const ordered = flattenInReadingOrder(manual.sections);
+  const inner = ordered
     .map((section) => {
       const body = section.nodes.map((n) => renderNode(n, manual.language)).join('');
       return `
-        <section id="sec-${section.id}" class="im-page im-break im-page-content">
+        <section id="sec-${section.id}" class="im-section">
           <h2 class="im-section-title">${escapeHtml(section.title)}</h2>
           <div class="im-section-content">${body}</div>
         </section>
       `;
     })
     .join('');
+  return `<div class="im-page im-break im-page-content">${inner}</div>`;
 };
 
 const buildLanguageDivider = (code: string, primaryColor: string): string => `
@@ -393,8 +418,10 @@ const buildStyles = (
     .im-toc-row { display: block; text-decoration: none; color: #1f2937; padding: ${mm(1.6)} 0; border-bottom: 1px solid #f1f5f9; font-size: ${mm(3.8)}; }
     .im-toc-row.im-toc-sub { padding-left: ${mm(6)}; color: #475569; font-size: ${mm(3.5)}; }
 
-    /* Section content */
-    .im-section-title { margin: 0 0 ${mm(5)}; padding-bottom: ${mm(2)}; border-bottom: 0.6mm solid ${primaryColor}; color: ${primaryColor}; font-size: ${mm(6.2)}; }
+    /* Section content — sections flow continuously (like the preview); the whole content block
+       is the only forced page. A title never sits orphaned at the foot of a page. */
+    .im-section { margin: 0 0 ${mm(8)}; }
+    .im-section-title { margin: 0 0 ${mm(5)}; padding-bottom: ${mm(2)}; border-bottom: 0.6mm solid ${primaryColor}; color: ${primaryColor}; font-size: ${mm(6.2)}; break-after: avoid; }
     .im-section-content { font-size: ${mm(3.8)}; line-height: 1.6; color: #1f2937; }
     .im-section-content h1, .im-section-content h2, .im-section-content h3 { color: ${primaryColor}; margin: ${mm(4)} 0 ${mm(2)}; break-after: avoid; }
     .im-section-content h1 { font-size: ${mm(5.5)}; }

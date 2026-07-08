@@ -60,8 +60,24 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
     // Bound the write so a stalled request can't hang the editor's autosave
-    // forever (see with-timeout.ts). On timeout this rejects and the caller retries.
-    const data = await withTimeout(runQuery(supabase.from('im_sections').upsert(payload).select().single(), 'saveIMSection'));
+    // forever (see with-timeout.ts). The builder is one-shot, so wrap it in a
+    // factory to allow a retry.
+    const runUpsert = () =>
+      withTimeout(runQuery(supabase.from('im_sections').upsert(payload).select().single(), 'saveIMSection'));
+
+    let data;
+    try {
+      data = await runUpsert();
+    } catch (e) {
+      // A timed-out / "Failed to fetch" write is almost always a stale or expired
+      // auth session (token refresh stuck behind a navigator.locks lock — see
+      // supabase.client.ts). Re-establish it and retry ONCE so a single transient
+      // failure doesn't wedge the editor into an endless same-payload retry loop
+      // against a dead client. Both steps are time-bounded so we can't hang here.
+      console.warn('[saveIMSection] write failed — refreshing session and retrying once', e);
+      await withTimeout(supabase.auth.refreshSession(), 8000).catch(() => {});
+      data = await runUpsert();
+    }
     return {
       id: data.id,
       templateId: data.template_id,
