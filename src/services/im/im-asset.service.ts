@@ -35,6 +35,60 @@ export const uploadIMAsset = async (file: File, folder = 'uploads'): Promise<str
   return publicUrl;
 };
 
+// Matches a base64 image data URI, e.g. `data:image/png;base64,iVBORw0KG...`. The
+// base64 charset stops at the surrounding quote, so this captures the whole payload
+// without spilling into the rest of the HTML attribute.
+const DATA_URI_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
+
+/** Decode a base64 image data URI into a File suitable for uploadIMAsset. */
+const dataUriToFile = (dataUri: string, name: string): File | null => {
+  const comma = dataUri.indexOf(',');
+  if (comma < 0) return null;
+  const meta = dataUri.slice(5, comma); // strip leading "data:"
+  const mime = meta.split(';')[0] || 'image/png';
+  const bin = atob(dataUri.slice(comma + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = (mime.split('/')[1] || 'png').split('+')[0];
+  return new File([bytes], `${name}.${ext}`, { type: mime });
+};
+
+/**
+ * Replace every base64 image data URI in `html` with an uploaded storage URL, so
+ * large images never live inside content JSONB (which is stored per language and
+ * would otherwise be duplicated across every translation). `cache` dedups identical
+ * data URIs across calls — the same image shared by many languages uploads ONCE.
+ * Best-effort: an upload failure leaves that one data URI in place rather than throwing.
+ * Returns the (possibly unchanged) HTML.
+ */
+export const externalizeHtmlImages = async (
+  html: string,
+  cache: Map<string, string>,
+  folder = 'inline',
+): Promise<string> => {
+  if (!html || !html.includes('data:image')) return html;
+  const uris = html.match(DATA_URI_RE);
+  if (!uris) return html;
+  let out = html;
+  for (const uri of uris) {
+    if (out.indexOf(uri) < 0) continue; // already replaced (duplicate in match list)
+    let url = cache.get(uri);
+    if (!url) {
+      try {
+        const file = dataUriToFile(uri, `img_${Date.now()}_${cache.size}`);
+        if (!file) continue;
+        url = await uploadIMAsset(file, folder);
+        cache.set(uri, url);
+      } catch (e) {
+        console.error(TAG, 'externalize failed for one image; leaving inline', e);
+        continue;
+      }
+    }
+    out = out.split(uri).join(url);
+  }
+  return out;
+};
+
 /**
  * List the public URLs of every asset previously uploaded to a folder, newest first.
  * Backs the template editor's reusable asset library so past uploads persist across

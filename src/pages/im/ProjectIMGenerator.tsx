@@ -20,7 +20,7 @@ import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { translateHtml } from '../../services/ai/translation.service';
 import { IM_LANGUAGE_NAMES } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
-import { uploadIMAsset } from '../../services/im/im-asset.service';
+import { uploadIMAsset, externalizeHtmlImages } from '../../services/im/im-asset.service';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult } from '../../services';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate } from 'lucide-react';
@@ -413,7 +413,13 @@ const ProjectIMGenerator: React.FC = () => {
       const dataToSave = buildPlaceholderData();
 
       try {
-          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, undefined, boundSkuIds, sectionSkus, blockOverrides);
+          // Move any base64 images out of content into storage first (keeps the row small).
+          const ext = await externalizeOverlayImages({ sectionAdditions, sectionOverrides, blockOverrides, extraSections });
+          setSectionAdditions(ext.sectionAdditions);
+          setSectionOverrides(ext.sectionOverrides);
+          setBlockOverrides(ext.blockOverrides);
+          setExtraSections(ext.extraSections);
+          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides);
           setInstance(saved);
           // Transient inline confirmation instead of a blocking alert.
           setSavedTick(true);
@@ -544,7 +550,13 @@ const ProjectIMGenerator: React.FC = () => {
           const dataToSave = buildPlaceholderData();
 
           setPublishStatus('Saving…');
-          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, sectionAdditions, extraSections, sectionOverrides, nextVersion, boundSkuIds, sectionSkus, blockOverrides);
+          // Move any base64 images out of content into storage first (keeps the row small).
+          const extOv = await externalizeOverlayImages({ sectionAdditions, sectionOverrides, blockOverrides, extraSections });
+          setSectionAdditions(extOv.sectionAdditions);
+          setSectionOverrides(extOv.sectionOverrides);
+          setBlockOverrides(extOv.blockOverrides);
+          setExtraSections(extOv.extraSections);
+          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides);
           setInstance(savedIM);
 
           // Publish the structured ResolvedManual (one JSON per language + manifest) to the
@@ -1758,6 +1770,48 @@ const ProjectIMGenerator: React.FC = () => {
     return { tasksByLang, gapsByLang, working: { wAdditions, wOverrides, wBlockOverrides, wExtras } };
   };
 
+  // Upload any base64 images embedded in project-authored content to storage and
+  // replace them with URLs, BEFORE persisting. Content is stored per language, so an
+  // inline base64 image would otherwise be duplicated across every translation and can
+  // bloat the row past the DB write timeout. Returns externalized copies of the four
+  // overlay maps (a shared cache uploads each unique image only once).
+  const externalizeOverlayImages = async (ov: {
+    sectionAdditions: Record<string, ProjectBlockAddition[]>;
+    sectionOverrides: Record<string, InlineBlockRef[]>;
+    blockOverrides: Record<string, Record<string, InlineBlockRef>>;
+    extraSections: ProjectExtraSection[];
+  }): Promise<typeof ov> => {
+    const cache = new Map<string, string>();
+    const fixContent = async (content: Record<string, string>) => {
+      const next: Record<string, string> = { ...content };
+      for (const lang of Object.keys(next)) next[lang] = await externalizeHtmlImages(next[lang], cache, 'project');
+      return next;
+    };
+
+    const sectionAdditions: Record<string, ProjectBlockAddition[]> = {};
+    for (const [sid, adds] of Object.entries(ov.sectionAdditions)) {
+      sectionAdditions[sid] = [];
+      for (const a of adds) sectionAdditions[sid].push({ ...a, block: { ...a.block, content: await fixContent(a.block.content) } });
+    }
+    const sectionOverrides: Record<string, InlineBlockRef[]> = {};
+    for (const [sid, refs] of Object.entries(ov.sectionOverrides)) {
+      sectionOverrides[sid] = [];
+      for (const r of refs) sectionOverrides[sid].push({ ...r, content: await fixContent(r.content) });
+    }
+    const blockOverrides: Record<string, Record<string, InlineBlockRef>> = {};
+    for (const [sid, byIdx] of Object.entries(ov.blockOverrides)) {
+      blockOverrides[sid] = {};
+      for (const [idx, r] of Object.entries(byIdx)) blockOverrides[sid][idx] = { ...r, content: await fixContent(r.content) };
+    }
+    const extraSections: ProjectExtraSection[] = [];
+    for (const ex of ov.extraSections) {
+      const blocks: InlineBlockRef[] = [];
+      for (const b of ex.blocks) blocks.push({ ...b, content: await fixContent(b.content) });
+      extraSections.push({ ...ex, blocks });
+    }
+    return { sectionAdditions, sectionOverrides, blockOverrides, extraSections };
+  };
+
   // Translate the project-authored content into `langs` (English excluded). Mirrors
   // the template editor's concurrency pool + progress + failure collection, then
   // commits the working overlays and persists them (same payload as Save Draft).
@@ -1792,15 +1846,23 @@ const ProjectIMGenerator: React.FC = () => {
     try {
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, runner));
 
-      // Commit UI state, then persist directly with the working copies (state is async).
-      setSectionAdditions(working.wAdditions);
-      setSectionOverrides(working.wOverrides);
-      setBlockOverrides(working.wBlockOverrides);
-      setExtraSections(working.wExtras);
+      // Externalize base64 images to storage first — content is stored per language, so
+      // an inline image would be duplicated across every translation and bloat the row.
+      const ext = await externalizeOverlayImages({
+        sectionAdditions: working.wAdditions,
+        sectionOverrides: working.wOverrides,
+        blockOverrides: working.wBlockOverrides,
+        extraSections: working.wExtras,
+      });
+      // Commit UI state, then persist directly with the externalized copies (state is async).
+      setSectionAdditions(ext.sectionAdditions);
+      setSectionOverrides(ext.sectionOverrides);
+      setBlockOverrides(ext.blockOverrides);
+      setExtraSections(ext.extraSections);
       try {
         const saved = await saveProjectIM(
           projectId, selectedTemplateId, buildPlaceholderData(), 'draft', skuContent, templateType,
-          working.wAdditions, working.wExtras, working.wOverrides, undefined, boundSkuIds, sectionSkus, working.wBlockOverrides,
+          ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides,
         );
         setInstance(saved);
       } catch (e) { console.error(e); failures.push('Failed to save translations.'); }
