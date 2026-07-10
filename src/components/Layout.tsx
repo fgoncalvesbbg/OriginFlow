@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2 } from 'lucide-react';
+import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
 import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
@@ -22,6 +22,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [overdueCount, setOverdueCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+
+  // Collapse the whole nav rail to reclaim screen width; persisted across sessions.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem('originflow.sidebarCollapsed') === '1',
+  );
+  const toggleSidebar = () => setSidebarCollapsed(prev => {
+    const next = !prev;
+    try { localStorage.setItem('originflow.sidebarCollapsed', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -76,7 +86,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
     <div className="flex min-h-screen bg-light">
       {/* Sidebar */}
-      <aside className="w-64 bg-primary text-white hidden md:flex flex-col fixed h-full z-30 shadow-lg">
+      <aside className={`w-64 bg-primary text-white flex-col fixed h-full z-30 shadow-lg ${sidebarCollapsed ? 'hidden' : 'hidden md:flex'}`}>
         <div className="p-6 border-b border-gray-700">
           <h1 className="text-xl font-bold flex items-center gap-2 tracking-tight">
             <Box className="w-6 h-6 text-indigo-400" />
@@ -152,10 +162,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 md:ml-64 min-h-screen flex flex-col">
+      <main className={`flex-1 min-h-screen flex flex-col transition-[margin] ${sidebarCollapsed ? 'md:ml-0' : 'md:ml-64'}`}>
         <div className="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center sticky top-0 z-20 shadow">
-          <div className="flex-1">
-             <Breadcrumbs />
+          <div className="flex-1 flex items-center gap-3 min-w-0">
+             <button
+               onClick={toggleSidebar}
+               aria-label={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'}
+               title={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'}
+               className="hidden md:inline-flex p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent shrink-0"
+             >
+               {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+             </button>
+             <div className="min-w-0 flex-1"><Breadcrumbs /></div>
           </div>
 
           {/* Notification Center */}

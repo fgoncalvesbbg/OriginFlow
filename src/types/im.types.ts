@@ -89,7 +89,7 @@ export interface IMTemplate {
   name: string;
   languages: string[];
   isFinalized: boolean;
-  finalizedAt?: string;
+  finalizedAt?: string | null;
   metadata?: IMTemplateMetadata;
   updatedAt?: string;
   lastUpdatedBy?: string;
@@ -176,7 +176,10 @@ export interface ProjectExtraSection {
   parentId: string | null;  // a template section id, another extra-section id, or null (root)
   title: string;
   order: number;            // sort key among siblings (template + extra sections mixed)
-  blocks: InlineBlockRef[]; // project-authored inline blocks for this section, in order
+  // Project-authored inline blocks, plus optional references to approved shared
+  // (standardized) blocks from im_blocks. Shared refs resolve read-only via the
+  // block library — the resolver already handles `kind:'block'` in a section's refs.
+  blocks: Array<InlineBlockRef | SharedBlockRef>;
 }
 
 // ---------------------------------------------------------------------------

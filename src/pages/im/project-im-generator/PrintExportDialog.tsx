@@ -13,9 +13,10 @@
 import React, { useEffect, useState } from 'react';
 import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
-import { DEFAULT_IM_LOGO_URL } from '../../../config/im.constants';
+import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, PrintPdfResult, PrintRender } from '../../../services';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
+import { DEFAULT_LEAFLET_TEXT_PT, DEFAULT_LEAFLET_HEADING_PT } from '../../../services/im/im-print-html';
 
 interface PrintExportDialogProps {
   projectId: string;
@@ -44,11 +45,17 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 }) => {
   const meta = template?.metadata;
 
+  // Warning Leaflets render as a compact PDF with no cover/back — so the dialog only needs the
+  // logo (which feeds the per-language header), languages, and page size. The backend ignores
+  // the other cover/back inputs for leaflets regardless; hiding them avoids confusion.
+  const isLeaflet = templateType === 'warning_leaflet';
+
   // Language selection — all on by default, preserving the published order.
   const [selected, setSelected] = useState<string[]>(languages);
 
   const [pageSize, setPageSize] = useState<'a4' | 'a5'>(
-    meta?.pageSize === 'a5' ? 'a5' : 'a4',
+    // Leaflets default to A5 (compact); full manuals honor the template's page size.
+    isLeaflet ? 'a5' : meta?.pageSize === 'a5' ? 'a5' : 'a4',
   );
 
   // Shared cover, prefilled from existing override hooks + template metadata.
@@ -56,11 +63,17 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   // Empty subtitle → builder auto-fills "Instruction Manual" in every printed language.
   const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? '');
   const [skuText, setSkuText] = useState(skus.join(', '));
-  const [logoUrl, setLogoUrl] = useState(formData['__custom_logo'] ?? meta?.companyLogoUrl ?? DEFAULT_IM_LOGO_URL);
+  const [logoUrl, setLogoUrl] = useState(
+    formData['__custom_logo'] ?? meta?.companyLogoUrl ?? (isLeaflet ? DEFAULT_LEAFLET_LOGO_URL : DEFAULT_IM_LOGO_URL),
+  );
   const [coverImageUrl, setCoverImageUrl] = useState(
     formData['__custom_cover_image'] ?? meta?.coverImageUrl ?? '',
   );
   const [coverMarks, setCoverMarks] = useState<string[]>([]);
+
+  // Leaflet typography — applied to ALL body text / headings in the compact PDF (leaflets only).
+  const [leafletTextPt, setLeafletTextPt] = useState<number>(DEFAULT_LEAFLET_TEXT_PT);
+  const [leafletHeadingPt, setLeafletHeadingPt] = useState<number>(DEFAULT_LEAFLET_HEADING_PT);
 
   // Shared back cover.
   const [backContent, setBackContent] = useState(meta?.backPageContent ?? '');
@@ -164,6 +177,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         languages: selected,
         pageSize,
         version,
+        ...(isLeaflet ? { leafletTextPt, leafletHeadingPt } : {}),
         cover: {
           title,
           subtitle: subtitle.trim() || undefined,
@@ -271,7 +285,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-            <FileDown size={18} /> Export print PDF
+            <FileDown size={18} /> {isLeaflet ? 'Export leaflet PDF' : 'Export print PDF'}
           </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
             <X size={20} />
@@ -321,74 +335,116 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </div>
           </div>
 
-          {/* Front cover */}
-          <div className="border rounded-lg p-4 space-y-3">
-            <div className="text-sm font-semibold text-gray-700">Front cover</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase">Title</label>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase">Subtitle</label>
-                <input
-                  value={subtitle}
-                  onChange={(e) => setSubtitle(e.target.value)}
-                  placeholder='Auto: "Instruction Manual" in all selected languages'
-                  className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase">SKU / Article number(s)</label>
-              <input
-                value={skuText}
-                onChange={(e) => setSkuText(e.target.value)}
-                placeholder="Comma-separated, e.g. 10045123, 10045124"
-                className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">Shown on the cover. Prefilled from the SKUs bound to this manual.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+          {/* Front cover — leaflets have no cover, so only the header logo is shown. */}
+          {isLeaflet ? (
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="text-sm font-semibold text-gray-700">Header logo</div>
+              <p className="text-[11px] text-gray-400 -mt-1">
+                Shown at the top of the first page of each language. Leaflets have no cover, table of
+                contents, or back page — content is rendered compactly.
+              </p>
               <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
-              <ImgField
-                label="Cover image"
-                slot="cover-image"
-                value={coverImageUrl}
-                onSet={setCoverImageUrl}
-                onClear={() => setCoverImageUrl('')}
-              />
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Body text size (pt)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={24}
+                    step={0.5}
+                    value={leafletTextPt}
+                    onChange={(e) => setLeafletTextPt(Number(e.target.value) || DEFAULT_LEAFLET_TEXT_PT)}
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Heading size (pt)</label>
+                  <input
+                    type="number"
+                    min={6}
+                    max={32}
+                    step={0.5}
+                    value={leafletHeadingPt}
+                    onChange={(e) => setLeafletHeadingPt(Number(e.target.value) || DEFAULT_LEAFLET_HEADING_PT)}
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                Applied uniformly to all text and all headings in the leaflet — no per-element exceptions.
+              </p>
             </div>
-            <MarkList label="Marks (CE, UKCA, WEEE…)" slot="cover-mark" marks={coverMarks} setMarks={setCoverMarks} />
-          </div>
+          ) : (
+            <>
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="text-sm font-semibold text-gray-700">Front cover</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase">Title</label>
+                    <input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase">Subtitle</label>
+                    <input
+                      value={subtitle}
+                      onChange={(e) => setSubtitle(e.target.value)}
+                      placeholder='Auto: "Instruction Manual" in all selected languages'
+                      className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">SKU / Article number(s)</label>
+                  <input
+                    value={skuText}
+                    onChange={(e) => setSkuText(e.target.value)}
+                    placeholder="Comma-separated, e.g. 10045123, 10045124"
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">Shown on the cover. Prefilled from the SKUs bound to this manual.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
+                  <ImgField
+                    label="Cover image"
+                    slot="cover-image"
+                    value={coverImageUrl}
+                    onSet={setCoverImageUrl}
+                    onClear={() => setCoverImageUrl('')}
+                  />
+                </div>
+                <MarkList label="Marks (CE, UKCA, WEEE…)" slot="cover-mark" marks={coverMarks} setMarks={setCoverMarks} />
+              </div>
 
-          {/* Back cover */}
-          <div className="border rounded-lg p-4 space-y-3">
-            <div className="text-sm font-semibold text-gray-700">Back cover</div>
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase">Content (HTML)</label>
-              <textarea
-                value={backContent}
-                onChange={(e) => setBackContent(e.target.value)}
-                rows={3}
-                className="w-full text-sm border rounded px-2 py-1.5 mt-1 font-mono"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <ImgField
-                label="Logo"
-                slot="back-logo"
-                value={backLogoUrl}
-                onSet={setBackLogoUrl}
-                onClear={() => setBackLogoUrl('')}
-              />
-            </div>
-            <MarkList label="Marks" slot="back-mark" marks={backMarks} setMarks={setBackMarks} />
-          </div>
+              {/* Back cover */}
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="text-sm font-semibold text-gray-700">Back cover</div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Content (HTML)</label>
+                  <textarea
+                    value={backContent}
+                    onChange={(e) => setBackContent(e.target.value)}
+                    rows={3}
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1 font-mono"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <ImgField
+                    label="Logo"
+                    slot="back-logo"
+                    value={backLogoUrl}
+                    onSet={setBackLogoUrl}
+                    onClear={() => setBackLogoUrl('')}
+                  />
+                </div>
+                <MarkList label="Marks" slot="back-mark" marks={backMarks} setMarks={setBackMarks} />
+              </div>
+            </>
+          )}
 
           {/* Existing-version / regeneration guard for the current selection */}
           {!loadingHistory && match && (

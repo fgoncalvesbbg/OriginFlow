@@ -138,6 +138,10 @@ export {
   getIMTemplateByCategoryId,
   createIMTemplate,
   updateIMTemplate,
+  deleteIMTemplate,
+  getProjectIMCountForTemplate,
+  getOrCreateBlankTemplate,
+  BLANK_TEMPLATE_NAME,
   getIMSections,
   saveIMSection,
   deleteIMSection,
@@ -166,9 +170,22 @@ export {
   createIMShare,
   revokeIMShare,
   resolveIMShareToken,
-  getIMShareUrl
+  getIMShareUrl,
+  validateImImport,
+  importIMTemplate,
+  buildExtraSectionsFromDoc,
+  importProjectIMFromDoc
 } from './im';
 export type {
+  ImImportDoc,
+  ImImportSection,
+  ImImportBlock,
+  ImImportBlockType,
+  ImImportScope,
+  ImImportImageNeed,
+  ImImportValidation,
+  ImImportResult,
+  ImProjectImportResult,
   PublishResult,
   StaleReason,
   StaleManual,
@@ -195,3 +212,6 @@ export {
   createEnhancedSupplierProposal,
   convertProposalToRFQ
 } from './sourcing';
+
+// AI module
+export { getAIPrompts, updateAIPrompt } from './ai';

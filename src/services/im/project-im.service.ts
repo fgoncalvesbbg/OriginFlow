@@ -7,6 +7,9 @@ import { supabase } from '../core/supabase.client';
 import { isLive } from '../../config/environment.config';
 import { ProjectIM, SKUContentValue, IMTemplateType, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef } from '../../types';
 import { handleError } from '../../utils/error.utils';
+import { withTimeout } from '../core/with-timeout';
+import { saveWithRetry } from '../core/save-retry';
+import { runQuery } from '../core/db';
 
 const mapProjectIMRow = (data: any): ProjectIM => ({
   id: data.id,
@@ -68,12 +71,27 @@ export const saveProjectIM = async (
   // Per-project inline block overrides: sectionId → refIndex → replacement inline block.
   blockOverrides?: Record<string, Record<string, InlineBlockRef>>,
 ): Promise<ProjectIM> => {
-    const { data: existing } = await supabase
-      .from('project_ims')
-      .select('id')
-      .eq('project_id', projectId)
-      .eq('template_type', templateType)
-      .maybeSingle();
+    // Bound every network call so a stalled request / stale auth lock can't leave the
+    // caller's "Saving…" state latched forever (see with-timeout.ts). withTimeout must
+    // wrap the query BUILDER (not a promise already produced from it) so it can wire up
+    // abortSignal and cancel the in-flight request on timeout; the builders are one-shot,
+    // so each is wrapped in a factory the retry pipeline can re-invoke.
+    const existing = await saveWithRetry(
+      (timeoutMs) =>
+        runQuery<{ id: string } | null>(
+          withTimeout(
+            supabase
+              .from('project_ims')
+              .select('id')
+              .eq('project_id', projectId)
+              .eq('template_type', templateType)
+              .maybeSingle(),
+            timeoutMs,
+          ),
+          'saveProjectIM lookup',
+        ),
+      { context: 'saveProjectIM lookup' },
+    );
 
     const payload: Record<string, unknown> = {
         project_id: projectId,
@@ -92,15 +110,23 @@ export const saveProjectIM = async (
     if (version !== undefined) payload.version = version;
     if (boundSkuIds !== undefined) payload.bound_sku_ids = boundSkuIds;
 
-    if (existing) {
-        const { data, error } = await supabase.from('project_ims').update(payload).eq('id', existing.id).select().single();
-        if (error) handleError(error, 'saveProjectIM update');
-        return mapProjectIMRow(data);
-    } else {
-        const { data, error } = await supabase.from('project_ims').insert(payload).select().single();
-        if (error) handleError(error, 'saveProjectIM insert');
-        return mapProjectIMRow(data);
-    }
+    // Echo back only the cheap columns we can't know client-side (row id on insert,
+    // the stored version when a draft save omits it) — never the full jsonb row,
+    // which would download the whole payload again after every save.
+    const context = existing ? 'saveProjectIM update' : 'saveProjectIM insert';
+    const runWrite = (timeoutMs: number) =>
+        runQuery<{ id: string; version: number; updated_at: string }>(
+          withTimeout(
+            existing
+              ? supabase.from('project_ims').update(payload).eq('id', existing.id).select('id, version, updated_at').single()
+              : supabase.from('project_ims').insert(payload).select('id, version, updated_at').single(),
+            timeoutMs,
+          ),
+          context,
+        );
+
+    const data = await saveWithRetry(runWrite, { context, payloadBytes: JSON.stringify(payload).length });
+    return mapProjectIMRow({ ...payload, ...data });
 };
 
 /**

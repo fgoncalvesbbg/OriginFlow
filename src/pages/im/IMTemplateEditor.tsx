@@ -6,10 +6,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
+import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, deleteIMTemplate, getProjectIMCountForTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
 import { uploadIMAsset, listIMAssets } from '../../services/im/im-asset.service';
+import { mapWithConcurrency } from '../../services/core/save-retry';
+import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
@@ -47,10 +49,22 @@ const IMTemplateEditor: React.FC = () => {
   const [templateLanguages, setTemplateLanguages] = useState<string[]>(['en']);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // True only during an EXPLICIT "Save All" — drives the blocking overlay. Autosave stays
+  // silent (its whole point is to be non-blocking; the local draft is the safety net).
+  const [blockingSave, setBlockingSave] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   // A save that timed out / failed — surfaces an honest status instead of a stuck
   // "Saving…" and lets the user know autosave is still retrying in the background.
   const [saveError, setSaveError] = useState(false);
+  // Message of the last failed save, so the manual-save alert can say WHY
+  // (e.g. an oversized payload) instead of just "see console".
+  const lastSaveErrorRef = useRef<string | null>(null);
+  // Safety lock: a template marked FINAL is read-only in this editor. Every
+  // mutating path is guarded on template.isFinalized, and the user must
+  // explicitly unlock (pre-release) it before changes are possible again —
+  // so a final template can't be edited by accident.
+  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   // Unsaved edits recovered from localStorage on load (see draft backup below).
   // While set, we pause autosave and keep the stored draft until the user decides.
   const [pendingDraft, setPendingDraft] = useState<{ savedAt: string; sections: IMSection[] } | null>(null);
@@ -64,6 +78,34 @@ const IMTemplateEditor: React.FC = () => {
   const [categoryAttributes, setCategoryAttributes] = useState<CategoryAttribute[]>([]);
 
   const [activeSidebarTab, setActiveSidebarTab] = useState<'structure' | 'assets'>('structure');
+
+  // Resizable structure/assets sidebar — persisted so long section titles aren't
+  // permanently truncated. Clamped to a sensible range.
+  const SIDEBAR_MIN = 200, SIDEBAR_MAX = 640;
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const v = Number(localStorage.getItem('im.editor.sidebarWidth'));
+    return v >= SIDEBAR_MIN && v <= SIDEBAR_MAX ? v : 256;
+  });
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const startSidebarResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + (ev.clientX - startX)));
+      sidebarWidthRef.current = next;
+      setSidebarWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      try { localStorage.setItem('im.editor.sidebarWidth', String(sidebarWidthRef.current)); } catch { /* ignore */ }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+  };
   // Reusable asset library — public URLs of images uploaded to the `im-assets` bucket.
   // Seeded from storage on load so past uploads persist across refreshes/sessions.
   const [assets, setAssets] = useState<string[]>([]);
@@ -80,6 +122,7 @@ const IMTemplateEditor: React.FC = () => {
   const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [deletingTemplate, setDeletingTemplate] = useState(false);
   const [isPlaceholderModalOpen, setIsPlaceholderModalOpen] = useState(false);
   const [isSectionCondModalOpen, setIsSectionCondModalOpen] = useState(false);
   const [secCondAttrId, setSecCondAttrId] = useState('');
@@ -167,7 +210,14 @@ const IMTemplateEditor: React.FC = () => {
         });
         setSections(normalizedSecs);
         // Baseline snapshot — these match the DB, so nothing is dirty on load.
-        savedSnapshot.current = new Map(normalizedSecs.map(s => [s.id, sectionSnapshotKey(s)]));
+        // EXCEPTION: legacy rows still carrying inline base64 images are seeded
+        // as dirty so the externalizing autosave rewrites them to Storage URLs
+        // on open — that's what heals the oversized rows that used to make
+        // every save time out. Skipped for finalized templates: they're locked
+        // read-only, so nothing may rewrite their rows until unlocked.
+        savedSnapshot.current = new Map(normalizedSecs
+          .filter(s => temp.isFinalized || !sectionSnapshotKey(s).includes('data:image/'))
+          .map(s => [s.id, sectionSnapshotKey(s)]));
         if (normalizedSecs.length > 0 && !selectedSectionId) {
            setSelectedSectionId(normalizedSecs[0].id);
         }
@@ -373,7 +423,7 @@ const IMTemplateEditor: React.FC = () => {
   };
 
   const handleAddSection = async () => {
-    if (!template) return;
+    if (!template || template.isFinalized) return;
     const rootSections = sections.filter(s => !s.parentId);
     if (rootSections.length >= 15) { alert("Maximum limit of 15 root sections reached."); return; }
     
@@ -392,7 +442,7 @@ const IMTemplateEditor: React.FC = () => {
   };
 
   const handleAddSubSection = async (parentId: string) => {
-    if (!template) return;
+    if (!template || template.isFinalized) return;
     const siblings = sections.filter(s => s.parentId === parentId);
     const maxOrder = siblings.reduce((max, s) => Math.max(max, s.order || 0), 0);
     const newOrder = maxOrder + 10;
@@ -414,16 +464,38 @@ const IMTemplateEditor: React.FC = () => {
     [sections]
   );
 
-  /** Persist the given sections in parallel and mark them clean. */
+  /** Persist the given sections (bounded concurrency) and mark them clean. */
   const persistSections = useCallback(async (targets: IMSection[]): Promise<boolean> => {
     if (targets.length === 0) return true;
+    // Final templates are locked — refuse to write even if a stray edit slipped
+    // past the disabled UI. (The DB trigger enforces the same rule server-side.)
+    if (template?.isFinalized) {
+      console.warn('[IMTemplateEditor] blocked save: template is finalized — unlock it first');
+      return false;
+    }
     // Capture the exact serialized state we're about to save, before any await,
     // so edits made during the save remain flagged dirty for the next pass.
     const pending = targets.map(s => ({ id: s.id, key: sectionSnapshotKey(s), section: s }));
     setSaving(true);
     try {
-      await Promise.all(pending.map(p => saveIMSection(p.section)));
-      pending.forEach(p => savedSnapshot.current.set(p.id, p.key));
+      // At most 3 sections in flight: unbounded Promise.all made concurrent
+      // uploads compete for bandwidth and push each other over the write timeout.
+      const saved = await mapWithConcurrency(pending, 3, p => saveIMSection(p.section));
+      pending.forEach((p, i) => {
+        const s = saved[i];
+        // saveIMSection externalizes pasted base64 images into Storage URLs. If it
+        // rewrote content/blockRefs, sync the URLs back into local state (unless the
+        // user edited the section mid-save) — otherwise every subsequent save would
+        // re-upload the same images and re-send the giant payload.
+        const rewritten =
+          JSON.stringify(s.content) !== JSON.stringify(p.section.content ?? {}) ||
+          JSON.stringify(s.blockRefs ?? []) !== JSON.stringify(p.section.blockRefs ?? []);
+        if (!rewritten) { savedSnapshot.current.set(p.id, p.key); return; }
+        const externalized = { ...p.section, content: s.content, blockRefs: s.blockRefs };
+        savedSnapshot.current.set(p.id, sectionSnapshotKey(externalized));
+        setSections(prev => prev.map(cur =>
+          cur.id === p.id && sectionSnapshotKey(cur) === p.key ? externalized : cur));
+      });
       setTemplate(prev => prev ? ({ ...prev, lastUpdatedBy: user?.name || 'User', updatedAt: new Date().toISOString() }) : null);
       setLastSaved(new Date());
       setSaveError(false);
@@ -432,26 +504,58 @@ const IMTemplateEditor: React.FC = () => {
       // Leave the sections dirty (snapshots untouched) so the next autosave retries.
       // The local draft (written on every edit) still holds the work regardless.
       console.error('Failed to save sections', e);
+      lastSaveErrorRef.current = e instanceof Error ? e.message : String(e);
       setSaveError(true);
       return false;
     } finally {
       setSaving(false);
     }
-  }, [user]);
+  }, [user, template?.isFinalized]);
 
   /** localStorage key holding this template's unsaved-edit draft. */
   const draftKey = template ? `im-draft:${template.id}` : null;
 
   const handleSaveAll = async () => {
-    // Guard against a manual Save racing an in-flight autosave: both would upsert
-    // the same section rows concurrently, and the second write queues behind the
-    // first's row lock instead of failing fast (see with-timeout.ts).
-    if (saving) return;
+    if (template?.isFinalized) return; // locked — unlock (pre-release) first
+    // Guard against a manual Save racing an in-flight autosave or translation: concurrent
+    // upserts of the same section rows queue behind each other's row lock instead of failing
+    // fast (see with-timeout.ts).
+    if (saving || translating) return;
     if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
     const dirty = getDirtySections();
     if (dirty.length === 0) { setLastSaved(new Date()); return; }
-    const ok = await persistSections(dirty);
-    if (!ok) alert('Error saving sections — see console for details.');
+    // The write itself is bounded (withTimeout + refresh-and-retry in saveIMSection), so it
+    // can't hang; on failure the local draft still holds the work and the user can retry.
+    setBlockingSave(true);
+    try {
+      const ok = await persistSections(dirty);
+      if (!ok) {
+        const detail = lastSaveErrorRef.current ? `\n\nDetails: ${lastSaveErrorRef.current}` : '';
+        alert(`Error saving sections — your edits are backed up locally on this device.${detail}`);
+      }
+    } finally {
+      setBlockingSave(false);
+    }
+  };
+
+  /**
+   * Unlock (pre-release) a FINAL template so it can be edited again. Explicit,
+   * confirmed action — the whole point of the lock is that a finalized template
+   * can never be changed by accident. Mirrors the dashboard's "Reopen" toggle.
+   */
+  const handleUnlock = async () => {
+    if (!template) return;
+    setUnlocking(true);
+    try {
+      await updateIMTemplate(template.id, { isFinalized: false, finalizedAt: null, lastUpdatedBy: user?.name });
+      setTemplate(prev => prev ? ({ ...prev, isFinalized: false, finalizedAt: null }) : prev);
+      setIsUnlockModalOpen(false);
+    } catch (e) {
+      console.error('Failed to unlock template', e);
+      alert('Failed to unlock the template — see console for details.');
+    } finally {
+      setUnlocking(false);
+    }
   };
 
   // Draft backup + debounced autosave.
@@ -462,18 +566,26 @@ const IMTemplateEditor: React.FC = () => {
   // debounced. While a recovered draft is awaiting the user's restore decision
   // we pause both (and keep the stored draft intact).
   useEffect(() => {
-    if (loading || pendingDraft || !draftKey) return;
+    // Locked (finalized) templates never autosave and never accumulate drafts.
+    if (loading || pendingDraft || !draftKey || template?.isFinalized) return;
     const dirty = getDirtySections();
     try {
       if (dirty.length > 0) localStorage.setItem(draftKey, JSON.stringify({ savedAt: new Date().toISOString(), sections }));
       else localStorage.removeItem(draftKey);
     } catch { /* quota / private mode — best-effort, the network save still runs */ }
 
-    if (saving || dirty.length === 0) return;
+    // Don't autosave mid-operation: while a translation (or explicit save) is running, a
+    // debounced network autosave would upsert the same rows concurrently and stall behind a
+    // row lock. The local draft above still captures every edit, so nothing is lost; the
+    // autosave simply resumes once the operation finishes.
+    if (saving || translating || dirty.length === 0) return;
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    // persistSections → saveIMSection is bounded (withTimeout + refresh-and-retry), so a stalled
+    // network can't wedge autosave; a failed tick leaves the sections dirty and the local draft
+    // intact, and the next edit re-triggers it.
     autosaveTimer.current = setTimeout(() => { persistSections(dirty); }, 2500);
     return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
-  }, [sections, loading, saving, draftKey, pendingDraft, getDirtySections, persistSections]);
+  }, [sections, loading, saving, translating, draftKey, pendingDraft, getDirtySections, persistSections, template?.isFinalized]);
 
   const restoreDraft = () => {
     if (!pendingDraft) return;
@@ -498,12 +610,13 @@ const IMTemplateEditor: React.FC = () => {
   }, [getDirtySections]);
 
   const handleDeleteSection = (id: string) => {
+    if (template?.isFinalized) return; // locked — unlock (pre-release) first
     // Open modal instead of window.confirm
     setDeleteModal({ isOpen: true, sectionId: id });
   };
 
   const confirmDeleteSection = async () => {
-    if (!deleteModal.sectionId) return;
+    if (!deleteModal.sectionId || template?.isFinalized) return;
     const id = deleteModal.sectionId;
     await deleteIMSection(id);
     const newSections = sections.filter(s => s.id !== id && s.parentId !== id);
@@ -518,7 +631,7 @@ const IMTemplateEditor: React.FC = () => {
   const handleReorder = async (e: React.MouseEvent, id: string, direction: 'up' | 'down') => {
     e.stopPropagation();
     e.preventDefault();
-    if (!template) return;
+    if (!template || template.isFinalized) return;
     
     const currentSection = sections.find(s => s.id === id);
     if (!currentSection) return;
@@ -555,9 +668,9 @@ const IMTemplateEditor: React.FC = () => {
     });
     setSections(newSections);
     
-    // Save all modified siblings
+    // Save all modified siblings (bounded — see persistSections)
     try {
-        await Promise.all(updates.map(u => saveIMSection({ id: u.id, templateId: template.id, order: u.order })));
+        await mapWithConcurrency(updates, 4, u => saveIMSection({ id: u.id, templateId: template.id, order: u.order }));
         // Re-baseline the moved sections so the new order isn't seen as dirty.
         updates.forEach(u => savedSnapshot.current.set(u.id, sectionSnapshotKey(u)));
         setLastSaved(new Date());
@@ -789,6 +902,7 @@ const IMTemplateEditor: React.FC = () => {
   };
 
   const openLangModal = () => {
+    if (template?.isFinalized) return; // locked — unlock (pre-release) first
     setLangDraft(templateLanguages);
     setIsLangModalOpen(true);
   };
@@ -814,6 +928,7 @@ const IMTemplateEditor: React.FC = () => {
   };
 
   const openTranslateModal = () => {
+    if (template?.isFinalized) return; // locked — unlock (pre-release) first
     // Default the target to the first enabled non-English language, else German.
     const firstOther = templateLanguages.find(c => c !== 'en');
     setTranslateTarget(firstOther || 'de');
@@ -960,8 +1075,29 @@ const IMTemplateEditor: React.FC = () => {
       }
   };
 
+  // Delete the whole template (and its sections). Tucked inside Settings so it can't
+  // be clicked by accident from the dashboard. If project manuals were generated from
+  // it, they are deleted too — confirmed explicitly first.
+  const handleDeleteTemplate = async () => {
+      if (!template) return;
+      setDeletingTemplate(true);
+      try {
+          const dependents = await getProjectIMCountForTemplate(template.id);
+          const msg = dependents > 0
+              ? `Delete "${template.name}"?\n\nThis will also permanently delete ${dependents} project manual(s) generated from it, plus all its sections. This cannot be undone.`
+              : `Delete "${template.name}" and all its sections? This cannot be undone.`;
+          if (!window.confirm(msg)) { setDeletingTemplate(false); return; }
+          await deleteIMTemplate(template.id, { force: dependents > 0 });
+          navigate('/im');
+      } catch (e: any) {
+          console.error('[IMTemplateEditor] delete template failed:', e);
+          alert(`Failed to delete template: ${e instanceof Error ? e.message : JSON.stringify(e)}`);
+          setDeletingTemplate(false);
+      }
+  };
+
   const handleSectionLayoutChange = async (sectionId: string, layout: IMMasterLayoutName) => {
-    if (!template) return;
+    if (!template || template.isFinalized) return;
 
     const nextMetadata: IMTemplateMetadata = {
       ...metaSettings,
@@ -989,24 +1125,26 @@ const IMTemplateEditor: React.FC = () => {
        <div key={s.id} className="flex flex-col">
            <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
               <span className="text-gray-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
-              <span className="truncate flex-1">{localizedSectionTitle(s, activeLang)}</span>
-              <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
-                  {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
-                  <div className="flex flex-col">
-                     <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronUp size={12} /></button>
-                     <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronDown size={12} /></button>
-                  </div>
-                  <select
-                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600"
-                    value={selectedLayout}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => handleSectionLayoutChange(s.id, e.target.value as IMMasterLayoutName)}
-                  >
-                    {SECTION_LAYOUT_OPTIONS.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-              </div>
+              <span className="truncate flex-1" title={localizedSectionTitle(s, activeLang)}>{localizedSectionTitle(s, activeLang)}</span>
+              {!locked && (
+                <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                    {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
+                    <div className="flex flex-col">
+                       <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronUp size={12} /></button>
+                       <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronDown size={12} /></button>
+                    </div>
+                    <select
+                      className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600"
+                      value={selectedLayout}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => handleSectionLayoutChange(s.id, e.target.value as IMMasterLayoutName)}
+                    >
+                      {SECTION_LAYOUT_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                </div>
+              )}
               {s.isPlaceholder && <LayoutTemplate size={12} className="text-gray-400 shrink-0" />}
               {s.conditionFeatureId && <span title="Conditional chapter"><GitBranch size={12} className="text-violet-400 shrink-0" /></span>}
            </div>
@@ -1029,9 +1167,17 @@ const IMTemplateEditor: React.FC = () => {
   ];
   const imThemeVars = getIMThemeVariables(metaSettings);
   const unsavedCount = getDirtySections().length;
+  // FINAL templates are read-only until explicitly unlocked (pre-released).
+  const locked = template.isFinalized;
+  // Neutralizes every editing surface in one class: no clicks, no text cursor.
+  const lockedCls = locked ? 'pointer-events-none select-none opacity-70' : '';
 
   return (
     <Layout>
+       {/* Blocking overlay for an explicit "Save All" — stops navigation mid-write. Autosave
+           stays silent (its whole point), and translation shows its own progress modal; the
+           local draft is the safety net for both. */}
+       <SaveProgressOverlay isOpen={blockingSave} message="Saving your work…" />
        <div className="flex flex-col h-[calc(100vh-100px)]" style={imThemeVars}>
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
@@ -1042,6 +1188,9 @@ const IMTemplateEditor: React.FC = () => {
                    {category?.name} — {IM_TEMPLATE_TYPE_LABELS[templateType]}
                    {templateType === 'warning_leaflet' && (
                      <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">Leaflet</span>
+                   )}
+                   {locked && (
+                     <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full"><Lock size={10} /> Final</span>
                    )}
                  </h2>
                  <div className="flex items-center gap-4 text-xs text-muted mt-1">
@@ -1061,12 +1210,28 @@ const IMTemplateEditor: React.FC = () => {
             </div>
 
             <div className="flex gap-3 items-center">
-               <button onClick={openLangModal} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Globe size={16} /> Languages <span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span></button>
-               <button onClick={() => setIsSettingsModalOpen(true)} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Settings size={16} /> Settings</button>
-               <button onClick={openTranslateModal} disabled={translating} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-70">{translating ? <Loader2 size={16} className="animate-spin" /> : <LanguagesIcon size={16} />} Translate</button>
-               <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
+               <button onClick={openLangModal} disabled={locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Globe size={16} /> Languages <span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span></button>
+               <button onClick={() => setIsSettingsModalOpen(true)} disabled={locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Settings size={16} /> Settings</button>
+               <button onClick={openTranslateModal} disabled={translating || locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed">{translating ? <Loader2 size={16} className="animate-spin" /> : <LanguagesIcon size={16} />} Translate</button>
+               {locked ? (
+                 <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-amber-600 shadow ml-2"><Unlock size={16} /> Unlock to edit</button>
+               ) : (
+                 <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
+               )}
             </div>
           </div>
+
+          {locked && (
+            <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900">
+              <Lock size={18} className="shrink-0 text-emerald-600" />
+              <div className="text-sm flex-1">
+                <span className="font-semibold">This template is marked FINAL and is locked against changes.</span>{' '}
+                {template.finalizedAt && <>Finalized {new Date(template.finalizedAt).toLocaleString()}. </>}
+                To make changes, unlock it (pre-release) first — this prevents accidental edits to a released template.
+              </div>
+              <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-1.5 bg-white border border-emerald-300 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-emerald-100"><Unlock size={14} /> Unlock to edit</button>
+            </div>
+          )}
 
           {pendingDraft && (
             <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900">
@@ -1082,7 +1247,7 @@ const IMTemplateEditor: React.FC = () => {
 
           <div className="flex flex-1 gap-6 overflow-hidden">
              {/* Sidebar */}
-             <div className="w-64 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+             <div style={{ width: sidebarWidth }} className="shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
                 <div className="flex border-b border-gray-200">
                    <button onClick={() => setActiveSidebarTab('structure')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'structure' ? 'bg-light text-indigo-600 border-b-2 border-indigo-600' : 'text-muted hover:bg-light'}`}><Layers size={14} /> Structure</button>
                    <button onClick={() => setActiveSidebarTab('assets')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'assets' ? 'bg-light text-indigo-600 border-b-2 border-indigo-600' : 'text-muted hover:bg-light'}`}><Grid size={14} /> Assets</button>
@@ -1092,7 +1257,7 @@ const IMTemplateEditor: React.FC = () => {
                    <>
                      <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
                         <span className="text-xs font-bold text-muted uppercase">Section Tree</span>
-                        <button onClick={handleAddSection} className={`text-indigo-600 hover:bg-indigo-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>
+                        {!locked && <button onClick={handleAddSection} className={`text-indigo-600 hover:bg-indigo-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>}
                      </div>
                      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
                         {rootSections.map((s, idx) => renderSidebarItem(s, `${idx + 1}.`, 0))}
@@ -1122,11 +1287,18 @@ const IMTemplateEditor: React.FC = () => {
                 )}
              </div>
 
+             {/* Drag handle to resize the sidebar */}
+             <div
+               onMouseDown={startSidebarResize}
+               title="Drag to resize"
+               className="shrink-0 w-1.5 -mx-2 cursor-col-resize rounded bg-transparent hover:bg-indigo-300 active:bg-indigo-400 transition-colors"
+             />
+
              {/* Editor Area */}
-             <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+             <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
                 {currentSection ? (
                    <>
-                     <div className="p-4 border-b border-gray-100 bg-light/50 flex justify-between items-start">
+                     <div className={`p-4 border-b border-gray-100 bg-light/50 flex justify-between items-start ${lockedCls}`}>
                         <div className="flex-1 max-w-md">
                            <div className="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">
                               {currentSection.parentId ? 'Sub-Chapter' : 'Section'} title
@@ -1155,7 +1327,7 @@ const IMTemplateEditor: React.FC = () => {
                         </div>
                      </div>
                      {/* Chapter condition row */}
-                     <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-100 bg-light/40 text-xs">
+                     <div className={`flex items-center gap-2 px-4 py-2 border-t border-gray-100 bg-light/40 text-xs ${lockedCls}`}>
                         <GitBranch size={13} className="text-gray-400 shrink-0" />
                         <span className="text-muted font-medium">Chapter condition:</span>
                         {currentSection.conditionFeatureId ? (() => {
@@ -1182,10 +1354,12 @@ const IMTemplateEditor: React.FC = () => {
                         </div>
                      </div>
 
-                     {/* Row composer */}
+                     {/* Row composer — language tabs above stay clickable so a FINAL
+                         template remains browsable read-only in every language. */}
                      <div className="flex-1 flex flex-col overflow-hidden">
-                       {/* Rows */}
-                       <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                       {/* Rows — when locked, the children lose pointer events (read-only)
+                           but the scroll container itself keeps them so the wheel still works. */}
+                       <div className={`flex-1 overflow-y-auto p-3 space-y-2 ${locked ? '[&>*]:pointer-events-none select-none opacity-70' : ''}`}>
                          {(currentSection.blockRefs ?? []).length === 0 && (
                            <div className="flex flex-col items-center justify-center py-10 text-gray-400 text-center">
                              <p className="text-sm font-medium mb-1">No rows yet</p>
@@ -1384,7 +1558,7 @@ const IMTemplateEditor: React.FC = () => {
                        </div>
 
                        {/* Add-row bar */}
-                       <div className="border-t border-gray-100 bg-light/40 px-3 py-2 flex flex-wrap items-center gap-2">
+                       <div className={`border-t border-gray-100 bg-light/40 px-3 py-2 flex flex-wrap items-center gap-2 ${lockedCls}`}>
                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Add row:</span>
                          <button onClick={addInlineRow}
                            className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-800 font-medium">
@@ -1567,6 +1741,22 @@ const IMTemplateEditor: React.FC = () => {
                     <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Back Page Content</label>
                         <textarea className="w-full border rounded p-2 text-sm font-mono" rows={4} value={metaSettings.backPageContent || ''} onChange={(e) => setMetaSettings({...metaSettings, backPageContent: e.target.value})} placeholder="HTML content for the back/last page (optional)" />
+                    </div>
+
+                    {/* Danger zone — delete the whole template. Kept here (not on the dashboard) to avoid accidental clicks. */}
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-red-400 mb-3 mt-5">Danger Zone</h4>
+                    <div className="border border-red-200 rounded-lg p-4 mb-2 flex items-center justify-between gap-4 bg-red-50/40">
+                        <div>
+                            <p className="text-sm font-semibold text-gray-800">Delete this template</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Removes the template and all its sections. Any project manuals generated from it are deleted too. This cannot be undone.</p>
+                        </div>
+                        <button
+                            onClick={handleDeleteTemplate}
+                            disabled={deletingTemplate}
+                            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                            <Trash2 size={14} /> {deletingTemplate ? 'Deleting…' : 'Delete Template'}
+                        </button>
                     </div>
 
                     <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
@@ -1960,6 +2150,15 @@ const IMTemplateEditor: React.FC = () => {
             message="Are you sure you want to delete this section? All content within it will be lost."
             onConfirm={confirmDeleteSection}
             onCancel={() => setDeleteModal({ isOpen: false, sectionId: null })}
+          />
+
+          <ConfirmationModal
+            isOpen={isUnlockModalOpen}
+            title="Unlock final template?"
+            message="This template is marked FINAL. Unlocking (pre-release) removes the safety lock and makes it editable again — project manuals generated from it may then drift from what was released. You can mark it Final again from the IM dashboard when you're done."
+            confirmLabel={unlocking ? 'Unlocking…' : 'Unlock for editing'}
+            onConfirm={handleUnlock}
+            onCancel={() => setIsUnlockModalOpen(false)}
           />
 
           {/* Block Picker Modal */}

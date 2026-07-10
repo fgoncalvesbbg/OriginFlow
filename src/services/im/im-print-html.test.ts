@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { buildPrintHtml, PrintManual, PrintHtmlOptions } from './im-print-html';
+import {
+  buildPrintHtml,
+  buildPrintPartsHtml,
+  DEFAULT_LEAFLET_TEXT_PT,
+  DEFAULT_LEAFLET_HEADING_PT,
+  PrintManual,
+  PrintHtmlOptions,
+} from './im-print-html';
 
 // A manual whose section `order` is assigned per sibling-group (10/20 within each parent).
 // Roots: A(10) with child A1(10); B(20) with child B1(10). Correct reading order is the
@@ -46,5 +53,72 @@ describe('buildPrintHtml — section ordering + pagination', () => {
     // Exactly one content page container wraps the whole (single-language) flow.
     const contentPages = html.match(/class="im-page im-break im-page-content"/g) ?? [];
     expect(contentPages).toHaveLength(1);
+  });
+});
+
+describe('buildPrintPartsHtml — Warning Leaflet compact layout', () => {
+  const de: PrintManual = { ...manual, language: 'de' };
+
+  it('compact: one part per language — no cover / TOC / divider / back parts', () => {
+    const parts = buildPrintPartsHtml([manual, de], { ...opts, compact: true });
+    // Exactly one part per language (no separate cover or back parts).
+    expect(parts).toHaveLength(2);
+    const all = parts.map((p) => p.html).join('\n');
+    // Assert on the actual page ELEMENT markup (the class names also appear in the shared CSS).
+    expect(all).not.toContain('class="im-page im-page-cover"');
+    expect(all).not.toContain('im-page im-break im-page-toc');
+    expect(all).not.toContain('im-page im-break im-page-divider');
+    expect(all).not.toContain('im-page im-break im-page-end');
+  });
+
+  it('compact: each language part starts with the logo header and carries its edge tab', () => {
+    const parts = buildPrintPartsHtml([manual, de], { ...opts, compact: true });
+    parts.forEach((p, i) => {
+      expect(p.html).toContain('im-leaflet-header');
+      expect(p.html).toContain('im-leaflet-logo');
+      // Multi-language → every language body gets a tab with the correct index/code.
+      expect(p.tab).toEqual({ index: i, total: 2, code: i === 0 ? 'en' : 'de' });
+    });
+  });
+
+  it('compact: single language has no edge tab (matches the main manual)', () => {
+    const [part] = buildPrintPartsHtml([manual], { ...opts, compact: true });
+    expect(part.tab).toBeNull();
+    expect(part.html).toContain('im-leaflet-header');
+  });
+
+  it('compact: the content block does NOT force a page break (header stays with content)', () => {
+    const [part] = buildPrintPartsHtml([manual], { ...opts, compact: true });
+    // The compact stylesheet neutralizes the forced break on the content container.
+    expect(part.html).toContain('break-before: auto');
+  });
+
+  it('compact: custom font sizes are applied to all text + all headings', () => {
+    const [part] = buildPrintPartsHtml([manual], {
+      ...opts,
+      compact: true,
+      leafletTextPt: 8,
+      leafletHeadingPt: 11,
+    });
+    // Universal body-text rule and the heading rule carry the chosen pt sizes.
+    expect(part.html).toContain('.im-page-content * { font-size: 8pt');
+    expect(part.html).toContain('font-size: 11pt');
+  });
+
+  it('compact: font sizes fall back to the defaults when not provided', () => {
+    const [part] = buildPrintPartsHtml([manual], { ...opts, compact: true });
+    expect(part.html).toContain(`font-size: ${DEFAULT_LEAFLET_TEXT_PT}pt`);
+    expect(part.html).toContain(`font-size: ${DEFAULT_LEAFLET_HEADING_PT}pt`);
+  });
+
+  it('regression: non-compact still emits cover + TOC + back parts', () => {
+    const parts = buildPrintPartsHtml([manual, de], opts);
+    // [cover, lang0, lang1, back]
+    expect(parts).toHaveLength(4);
+    const all = parts.map((p) => p.html).join('\n');
+    expect(all).toContain('class="im-page im-page-cover"');
+    expect(all).toContain('im-page im-break im-page-toc');
+    expect(all).toContain('im-page im-break im-page-end');
+    expect(all).not.toContain('im-leaflet-header');
   });
 });

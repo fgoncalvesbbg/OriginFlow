@@ -74,6 +74,9 @@ export interface RequestPrintPdfParams {
   back: PrintBackInput;
   /** Publish version stamped into the footer (optional). */
   version?: number;
+  /** Compact-leaflet typography (points), applied to ALL body text / headings. Leaflets only. */
+  leafletTextPt?: number;
+  leafletHeadingPt?: number;
 }
 
 export interface PrintPdfResult {

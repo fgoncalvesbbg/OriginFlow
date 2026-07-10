@@ -47,6 +47,9 @@ interface RenderRequest {
   cover: PrintHtmlOptions['cover'];
   back: PrintHtmlOptions['back'];
   version?: number;
+  /** Compact-leaflet typography (points), applied to ALL text / headings. Optional. */
+  leafletTextPt?: number;
+  leafletHeadingPt?: number;
 }
 
 const BUCKET = 'im-print';
@@ -74,7 +77,9 @@ const isValid = (b: unknown): b is RenderRequest => {
     r.languages.length > 0 &&
     (r.pageSize === 'a4' || r.pageSize === 'a5') &&
     typeof r.cover === 'object' &&
-    typeof r.back === 'object'
+    typeof r.back === 'object' &&
+    (r.leafletTextPt === undefined || typeof r.leafletTextPt === 'number') &&
+    (r.leafletHeadingPt === undefined || typeof r.leafletHeadingPt === 'number')
   );
 };
 
@@ -84,9 +89,17 @@ const MM_TO_PT = 72 / 25.4;
 const toAscii = (text: string): string =>
   text.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '').trim();
 
+interface PageMargin { top: string; bottom: string; left: string; right: string; }
+
+/** Full-IM margins (footer + page numbers sit in the generous bottom band). */
+const IM_MARGIN: PageMargin = { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' };
+/** Compact Warning Leaflet margins — narrower, but left/right ≥ the ~8mm edge tab so content
+ *  never runs under the stamped thumb-tab (which alternates left/right per recto/verso). */
+const LEAFLET_MARGIN: PageMargin = { top: '8mm', bottom: '8mm', left: '10mm', right: '10mm' };
+
 /** Render one standalone HTML part to PDF bytes via PDFShift. Edge thumb-tabs are drawn
  *  onto the MERGED pdf afterwards, so parts keep normal (symmetric) margins here. */
-const renderPart = async (html: string, format: string, apiKey: string): Promise<Uint8Array> => {
+const renderPart = async (html: string, format: string, apiKey: string, margin: PageMargin): Promise<Uint8Array> => {
   const auth = Buffer.from(`api:${apiKey}`).toString('base64');
   const res = await fetch(PDFSHIFT_ENDPOINT, {
     method: 'POST',
@@ -95,7 +108,7 @@ const renderPart = async (html: string, format: string, apiKey: string): Promise
       source: html,
       format,
       use_print: true,
-      margin: { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' },
+      margin,
     }),
   });
   if (!res.ok) {
@@ -123,6 +136,8 @@ const mergeAndStamp = async (
   parts: PrintPart[],
   runningText: string,
   pageSize: 'a4' | 'a5',
+  compact: boolean,
+  copyrightText: string,
 ): Promise<Buffer> => {
   const merged = await PDFDocument.create();
   const font = await merged.embedFont(StandardFonts.Helvetica);
@@ -141,14 +156,22 @@ const mergeAndStamp = async (
   const footColor = rgb(0.39, 0.45, 0.55);
   const tabTextColor = rgb(0.2, 0.25, 0.32);
   const footY = 9 * MM_TO_PT;
+  const copyright = toAscii(copyrightText);
 
   merged.getPages().forEach((page, i) => {
     const pageNum = i + 1;
     const width = page.getWidth();
     const height = page.getHeight();
 
-    // Footer + page number (cover stays clean).
-    if (pageNum >= 2) {
+    if (compact) {
+      // Leaflet: fully clean pages (no running footer, no page numbers). A single minimal
+      // copyright/version line is stamped, centered, at the bottom of the LAST page only.
+      if (copyright && pageNum === total) {
+        const cw = font.widthOfTextAtSize(copyright, 7);
+        page.drawText(copyright, { x: (width - cw) / 2, y: 5 * MM_TO_PT, size: 7, font, color: footColor });
+      }
+    } else if (pageNum >= 2) {
+      // Full IM: footer + page number (cover stays clean).
       if (running) page.drawText(running, { x: 14 * MM_TO_PT, y: footY, size, font, color: footColor });
       const right = `${pageNum} / ${total}`;
       const rw = font.widthOfTextAtSize(right, size);
@@ -225,12 +248,20 @@ export const handler = async (event: NetlifyEvent) => {
     const manuals: PrintManual[] = [];
     for (const lang of ordered) manuals.push(await fetchJson<PrintManual>(byLang.get(lang)!));
 
+    // A Warning Leaflet renders as a compact booklet: no cover / TOC / dividers / back page,
+    // a logo-only header per language, narrower margins, and clean (footer-less) pages.
+    const compact = req.templateType === 'warning_leaflet';
+    const margin = compact ? LEAFLET_MARGIN : IM_MARGIN;
+
     // 2. Booklet as separate HTML parts (cover, one per language w/ edge tab, back).
     const parts = buildPrintPartsHtml(manuals, {
       pageSize: req.pageSize,
       cover: req.cover,
       back: req.back,
       version: req.version,
+      compact,
+      leafletTextPt: req.leafletTextPt,
+      leafletHeadingPt: req.leafletHeadingPt,
     });
 
     const name = `${req.templateType}-${ordered.join('-')}-${req.pageSize}`;
@@ -238,12 +269,13 @@ export const handler = async (event: NetlifyEvent) => {
     const format = req.pageSize.toUpperCase(); // A4 | A5
 
     // 3. Render every part (in parallel).
-    const partPdfs = await Promise.all(parts.map((p) => renderPart(p.html, format, apiKey)));
+    const partPdfs = await Promise.all(parts.map((p) => renderPart(p.html, format, apiKey, margin)));
 
     // 3a. Cover language directory: with page counts now known, compute each language's start
     // page and re-render the cover with real numbers. The directory's row count is unchanged,
     // so the cover's own page count is stable. parts = [cover, lang0, lang1, …, back].
-    if (manuals.length > 1) {
+    // Skipped for compact leaflets — they have no cover part (partPdfs[0] is a language body).
+    if (manuals.length > 1 && !compact) {
       const counts = await Promise.all(
         partPdfs.map(async (b) => (await PDFDocument.load(b)).getPageCount()),
       );
@@ -258,11 +290,16 @@ export const handler = async (event: NetlifyEvent) => {
         { pageSize: req.pageSize, cover: req.cover, back: req.back, version: req.version },
         langStart,
       );
-      partPdfs[0] = await renderPart(coverHtml, format, apiKey);
+      partPdfs[0] = await renderPart(coverHtml, format, apiKey, margin);
     }
 
-    // 3b. Merge + stamp page numbers + edge tabs.
-    const pdf = await mergeAndStamp(partPdfs, parts, running, req.pageSize);
+    // 3b. Merge + stamp (footer/page numbers for IMs; a single last-page copyright line for leaflets)
+    // + edge tabs.
+    const year = new Date().getFullYear();
+    const companyName = req.cover.companyName ?? '';
+    const versionLabel = req.version ? ` · v${req.version}` : '';
+    const copyrightText = `© ${year} ${companyName}. All rights reserved.${versionLabel}`;
+    const pdf = await mergeAndStamp(partPdfs, parts, running, req.pageSize, compact, copyrightText);
 
     // 4. Upload to im-print under a UNIQUE path (never overwrite — history is preserved).
     const storagePath = `${req.projectId}/${req.templateType}/${name}-v${req.version ?? 0}-${Date.now()}.pdf`;

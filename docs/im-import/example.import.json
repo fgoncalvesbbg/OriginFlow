@@ -1,0 +1,235 @@
+{
+  "importSchemaVersion": 1,
+  "kind": "im",
+  "category": "Coffee Machines",
+  "product": {
+    "name": "BrewMaster 500 Espresso Machine",
+    "sku": "KL-BM500",
+    "supplier": "Ningbo Homelux Appliances Co."
+  },
+  "languages": ["en", "de"],
+  "sourceLanguage": "en",
+  "cover": {
+    "title": {
+      "en": "BrewMaster 500 — Instruction Manual",
+      "de": "BrewMaster 500 — Bedienungsanleitung"
+    },
+    "imageNeed": {
+      "description": "Front three-quarter product shot of the assembled espresso machine on a neutral background",
+      "purpose": "cover hero image",
+      "annotations": [],
+      "suggestedSource": "supplier marketing pack / studio render"
+    }
+  },
+  "sections": [
+    {
+      "key": "intended-use",
+      "parentKey": null,
+      "order": 1,
+      "title": { "en": "Intended Use", "de": "Bestimmungsgemäße Verwendung" },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This appliance is intended for preparing espresso and hot beverages in private households and comparable settings. Any other use is considered improper and may cause damage or injury.</p>",
+            "de": "<p>Dieses Gerät ist zur Zubereitung von Espresso und Heißgetränken in privaten Haushalten und vergleichbaren Umgebungen bestimmt. Jede andere Verwendung gilt als unsachgemäß und kann zu Schäden oder Verletzungen führen.</p>"
+          },
+          "note": "Added by reviewer — supplier draft had no intended-use chapter."
+        }
+      ]
+    },
+    {
+      "key": "safety",
+      "parentKey": null,
+      "order": 2,
+      "title": { "en": "Safety Instructions", "de": "Sicherheitshinweise" },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Read all instructions before using the appliance and keep this manual for future reference.</p>",
+            "de": "<p>Lesen Sie vor Gebrauch alle Anweisungen und bewahren Sie diese Anleitung auf.</p>"
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "electric",
+          "content": {
+            "en": "<p>Do not immerse the appliance base, cord, or plug in water or other liquids. Risk of electric shock.</p>",
+            "de": "<p>Gerätesockel, Kabel oder Stecker nicht in Wasser oder andere Flüssigkeiten tauchen. Stromschlaggefahr.</p>"
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "warning",
+          "content": {
+            "en": "<p>The steam wand and portafilter become very hot during operation. Handle only by the insulated grips.</p>",
+            "de": "<p>Dampfdüse und Siebträger werden im Betrieb sehr heiß. Nur an den isolierten Griffen anfassen.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "parts",
+      "parentKey": null,
+      "order": 3,
+      "title": { "en": "Parts and Controls", "de": "Teile und Bedienelemente" },
+      "scope": "model-specific",
+      "blocks": [
+        {
+          "type": "image",
+          "imageNeed": {
+            "description": "Labelled front view of the machine identifying all user-facing parts",
+            "purpose": "parts overview diagram",
+            "annotations": [
+              "1 = water tank",
+              "2 = portafilter",
+              "3 = steam wand",
+              "4 = drip tray",
+              "5 = power button",
+              "6 = brew/steam selector"
+            ],
+            "suggestedSource": "supplier PDF p.3, figure 1"
+          },
+          "content": { "en": "", "de": "" }
+        }
+      ]
+    },
+    {
+      "key": "setup",
+      "parentKey": null,
+      "order": 4,
+      "title": { "en": "Setup and First Use", "de": "Aufstellung und Erstinbetriebnahme" },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Remove all packaging, rinse the water tank, and fill it with fresh cold water to the MAX line before first use.</p>",
+            "de": "<p>Entfernen Sie sämtliches Verpackungsmaterial, spülen Sie den Wassertank aus und füllen Sie ihn vor dem ersten Gebrauch bis zur MAX-Markierung mit frischem kaltem Wasser.</p>"
+          }
+        },
+        {
+          "type": "image",
+          "imageNeed": {
+            "description": "Top-down diagram of the removable water tank showing the fill line",
+            "purpose": "setup step 2",
+            "annotations": ["1 = lid", "2 = MAX line"],
+            "suggestedSource": "supplier PDF p.4, figure 2"
+          },
+          "content": { "en": "", "de": "" }
+        }
+      ]
+    },
+    {
+      "key": "operation",
+      "parentKey": null,
+      "order": 5,
+      "title": { "en": "Operation", "de": "Bedienung" },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Lock the filled portafilter into the group head, place a cup on the drip tray, and press the brew button to start extraction.</p>",
+            "de": "<p>Setzen Sie den befüllten Siebträger in den Brühkopf ein, stellen Sie eine Tasse auf das Abtropfblech und drücken Sie die Brühtaste, um die Extraktion zu starten.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "cleaning",
+      "parentKey": null,
+      "order": 6,
+      "title": { "en": "Cleaning and Maintenance", "de": "Reinigung und Wartung" },
+      "blocks": [
+        {
+          "type": "callout",
+          "variant": "caution",
+          "content": {
+            "en": "<p>Unplug the appliance and let it cool completely before cleaning.</p>",
+            "de": "<p>Ziehen Sie vor der Reinigung den Netzstecker und lassen Sie das Gerät vollständig abkühlen.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Descale the machine every 2 months with a commercial descaling solution to maintain performance.</p>",
+            "de": "<p>Entkalken Sie die Maschine alle 2 Monate mit einem handelsüblichen Entkalker, um die Leistung zu erhalten.</p>"
+          },
+          "note": "Reviewer fixed contradiction: supplier draft stated both '2 months' and '3 months'."
+        }
+      ]
+    },
+    {
+      "key": "troubleshooting",
+      "parentKey": null,
+      "order": 7,
+      "title": { "en": "Troubleshooting", "de": "Fehlerbehebung" },
+      "blocks": [
+        {
+          "type": "table",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>Problem</th><th>Possible cause</th><th>Solution</th></tr></thead><tbody><tr><td>No coffee dispensed</td><td>Water tank empty</td><td>Refill the tank to the MAX line</td></tr><tr><td>Weak crema</td><td>Coffee ground too coarse</td><td>Use a finer grind</td></tr></tbody></table>",
+            "de": "<table class=\"im-table\"><thead><tr><th>Problem</th><th>Mögliche Ursache</th><th>Lösung</th></tr></thead><tbody><tr><td>Kein Kaffee</td><td>Wassertank leer</td><td>Tank bis zur MAX-Markierung füllen</td></tr><tr><td>Wenig Crema</td><td>Kaffee zu grob gemahlen</td><td>Feineren Mahlgrad verwenden</td></tr></tbody></table>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "specs",
+      "parentKey": null,
+      "order": 8,
+      "title": { "en": "Technical Specifications", "de": "Technische Daten" },
+      "scope": "model-specific",
+      "blocks": [
+        {
+          "type": "table",
+          "scope": "model-specific",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>Specification</th><th>Value</th></tr></thead><tbody><tr><td>Rated voltage</td><td>220–240 V~, 50/60 Hz</td></tr><tr><td>Rated power</td><td>1450 W</td></tr><tr><td>Water tank capacity</td><td>1.5 L</td></tr><tr><td>Pump pressure</td><td>15 bar</td></tr></tbody></table>",
+            "de": "<table class=\"im-table\"><thead><tr><th>Spezifikation</th><th>Wert</th></tr></thead><tbody><tr><td>Nennspannung</td><td>220–240 V~, 50/60 Hz</td></tr><tr><td>Nennleistung</td><td>1450 W</td></tr><tr><td>Wassertankvolumen</td><td>1,5 L</td></tr><tr><td>Pumpendruck</td><td>15 bar</td></tr></tbody></table>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "disposal",
+      "parentKey": null,
+      "order": 9,
+      "title": { "en": "Disposal", "de": "Entsorgung" },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Return packaging materials to local recycling collection according to their material type.</p>",
+            "de": "<p>Führen Sie Verpackungsmaterialien entsprechend ihrer Materialart der örtlichen Wertstoffsammlung zu.</p>"
+          },
+          "note": "Product-specific packaging note only. Standard WEEE symbol/disposal block is auto-added by the platform and was removed — see excludedStandardized."
+        }
+      ]
+    }
+  ],
+  "excludedStandardized": [
+    "WEEE crossed-out wheelie-bin symbol block and generic electronics disposal paragraph",
+    "Company address / imprint (Chal-Tec GmbH)",
+    "Generic EU Declaration of Conformity paragraph",
+    "Manufacturer marketing blurb in the introduction"
+  ],
+  "reviewNotes": {
+    "corrections": [
+      "Fixed contradictory descaling interval — draft stated both 2 and 3 months; standardized to 2 months.",
+      "Rewrote 'do not put in water' warning as an ELECTRIC-hazard callout with correct scope (base, cord, plug)."
+    ],
+    "additionsSuggested": [
+      "Added an 'Intended Use' chapter that was missing from the supplier draft.",
+      "Added a structured troubleshooting table (draft had loose prose)."
+    ],
+    "deletions": [
+      "Removed marketing copy embedded in the safety section.",
+      "Removed duplicated 'keep out of reach of children' line (kept once)."
+    ],
+    "openQuestions": [
+      "Draft did not state the heat-up time — confirm with supplier if it should be listed in specs.",
+      "Is the water tank dishwasher-safe? Draft ambiguous; not asserted in the cleaning section."
+    ]
+  }
+}

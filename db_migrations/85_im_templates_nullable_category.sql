@@ -1,0 +1,12 @@
+-- Migration 85: allow im_templates.category_id to be NULL
+--
+-- Migration 46 originally declared `category_id` without NOT NULL, but the live
+-- database drifted to NOT NULL. The project-based IM import ("quick, template-free"
+-- flow) needs ONE shared, category-less "Blank Standardized Template" that projects
+-- bind to while all their content lives in project_ims.extra_sections. That row must
+-- have category_id IS NULL.
+--
+-- Safe + backward compatible: only relaxes a constraint. The unique index
+-- (category_id, template_type) treats NULLs as distinct, so this does not conflict
+-- with existing per-category templates. Existing rows are unaffected.
+ALTER TABLE public.im_templates ALTER COLUMN category_id DROP NOT NULL;

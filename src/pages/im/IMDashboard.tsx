@@ -11,9 +11,11 @@ import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
-  FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw
+  FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson
 } from 'lucide-react';
 import { IMViewerTab } from './IMViewerTab';
+import { ImImportDialog } from './ImImportDialog';
+import type { ImImportResult } from '../../services';
 
 const TEMPLATE_TYPE_ORDER: IMTemplateType[] = ['im', 'warning_leaflet'];
 
@@ -321,6 +323,7 @@ interface TemplatesTabProps {
   togglingId: string | null;   // template id whose finalized state is updating
   onCreate: (cat: CategoryL3, type: IMTemplateType) => void;
   onToggleFinalized: (t: IMTemplate) => void;
+  onImport: () => void;
 }
 
 // One row per template type within a category card.
@@ -390,9 +393,20 @@ const TemplateRow: React.FC<TemplateRowProps> = ({
 };
 
 const TemplatesTab: React.FC<TemplatesTabProps> = ({
-  categories, templates, creatingId, togglingId, onCreate, onToggleFinalized
+  categories, templates, creatingId, togglingId, onCreate, onToggleFinalized, onImport
 }) => (
   <div>
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs text-gray-400">
+        Author a template per category, or import a reviewed IM from JSON for categories without one.
+      </p>
+      <button
+        onClick={onImport}
+        className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+      >
+        <FileJson size={13} /> Import from JSON
+      </button>
+    </div>
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {categories.map(cat => (
         <div key={cat.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow flex flex-col hover:shadow-md transition-all">
@@ -440,6 +454,7 @@ const IMDashboard: React.FC = () => {
   const [loadingIMs, setLoadingIMs] = useState(true);
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     loadTemplateData();
@@ -481,13 +496,20 @@ const IMDashboard: React.FC = () => {
     }
   };
 
+  const handleImported = (result: ImImportResult) => {
+    setShowImport(false);
+    loadTemplateData();
+    navigate(editorPath(result.categoryId, result.templateType));
+  };
+
   const handleToggleFinalized = async (template: IMTemplate) => {
     setTogglingId(template.id);
     const newStatus = !template.isFinalized;
     try {
       await updateIMTemplate(template.id, {
         isFinalized: newStatus,
-        finalizedAt: newStatus ? new Date().toISOString() : undefined
+        // null (not undefined) so reopening actually clears the timestamp.
+        finalizedAt: newStatus ? new Date().toISOString() : null
       });
       await loadTemplateData();
     } catch (e) {
@@ -557,10 +579,19 @@ const IMDashboard: React.FC = () => {
               togglingId={togglingId}
               onCreate={handleCreate}
               onToggleFinalized={handleToggleFinalized}
+              onImport={() => setShowImport(true)}
             />
       )}
       {activeTab === 'blocks' && <BlockLibraryContent />}
       {activeTab === 'viewer' && <IMViewerTab ims={allIMs} />}
+
+      {showImport && (
+        <ImImportDialog
+          categories={categories}
+          onClose={() => setShowImport(false)}
+          onImported={handleImported}
+        />
+      )}
     </Layout>
   );
 };

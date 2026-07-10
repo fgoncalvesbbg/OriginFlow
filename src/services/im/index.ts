@@ -8,7 +8,11 @@ export {
   getIMTemplateById,
   getIMTemplateByCategoryId,
   createIMTemplate,
-  updateIMTemplate
+  updateIMTemplate,
+  deleteIMTemplate,
+  getProjectIMCountForTemplate,
+  getOrCreateBlankTemplate,
+  BLANK_TEMPLATE_NAME
 } from './im-template.service';
 
 export {
@@ -63,3 +67,20 @@ export {
   getIMShareUrl,
 } from './im-share.service';
 export type { IMShare } from './im-share.service';
+export {
+  validateImImport,
+  importIMTemplate,
+  buildExtraSectionsFromDoc,
+  importProjectIMFromDoc,
+} from './im-import.service';
+export type {
+  ImImportDoc,
+  ImImportSection,
+  ImImportBlock,
+  ImImportBlockType,
+  ImImportScope,
+  ImImportImageNeed,
+  ImImportValidation,
+  ImImportResult,
+  ImProjectImportResult,
+} from './im-import.service';

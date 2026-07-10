@@ -12,7 +12,7 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Bold, Italic, Underline, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Info, Upload, Loader2, Code, Languages, type LucideIcon } from 'lucide-react';
+import { Bold, Italic, Underline, List, ListOrdered, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Info, Upload, Loader2, Code, Languages, type LucideIcon } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
@@ -53,6 +53,7 @@ type EditorBlock =
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: 'warning' | 'caution' | 'electric' | 'info'; content: InlineNode[] }
   | { id: string; type: 'image'; src: string; alt?: string; width?: string }
+  | { id: string; type: 'list'; ordered: boolean; items: InlineNode[][] }
   | { id: string; type: 'table'; rows: InlineNode[][][] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
   | { id: string; type: 'legacy_html'; html: string };
@@ -294,6 +295,14 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined });
         return;
       }
+      if (el.tagName === 'UL' || el.tagName === 'OL') {
+        // Direct <li> children only; inline content per item (nested lists flatten).
+        const items = Array.from(el.children)
+          .filter((c) => c.tagName === 'LI')
+          .map((li) => parseInlineNodes(li as HTMLElement));
+        parsed.push({ id: createId(), type: 'list', ordered: el.tagName === 'OL', items: items.length ? items : [[]] });
+        return;
+      }
       if (el.tagName === 'TABLE') {
         // Parse each cell into inline nodes (not textContent) so placeholder /
         // condition chips inside cells survive the round-trip instead of being
@@ -324,6 +333,11 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (block.type === 'image') {
         const sizing = block.width ? `width:${block.width};max-width:100%;` : 'max-width:100%;';
         return `<img src="${block.src}" alt="${block.alt || ''}" style="${sizing}height:auto;border-radius:0.375rem;margin:1rem 0;" />`;
+      }
+      if (block.type === 'list') {
+        const tag = block.ordered ? 'ol' : 'ul';
+        const items = block.items.length ? block.items : [[]];
+        return `<${tag}>${items.map((item) => `<li>${serializeInline(item)}</li>`).join('')}</${tag}>`;
       }
       if (block.type === 'table') {
         const [headerRow, ...body] = block.rows;
@@ -369,6 +383,45 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       savedRangeRef.current = range.cloneRange();
     }
   }, []);
+
+  // Upload pasted/dropped image files to Storage and insert the URL, instead of
+  // letting the browser inline them as base64 data URIs. A pasted screenshot
+  // stored inline gets duplicated into every language on save and can push a
+  // section row to tens of MB — which is what times out the save. (Content that
+  // still slips through with data URIs is externalized again at save time in
+  // im-section.service / im-block.service as a safety net.)
+  const uploadAndInsertImages = useCallback(async (files: File[]) => {
+    setUploadingImg(true);
+    try {
+      for (const file of files) {
+        const url = await uploadIMAsset(file, 'blocks');
+        insertHtmlAtCursor(`<img src="${url}" alt="${file.name}" style="max-width:100%;height:auto;border-radius:0.375rem;margin:1rem 0;" />`);
+      }
+    } catch (err: any) {
+      console.error('[SimpleRichTextEditor] pasted/dropped image upload failed:', err);
+      alert(err?.message ?? 'Image upload failed — see console for details.');
+    } finally {
+      setUploadingImg(false);
+    }
+  }, [insertHtmlAtCursor]);
+
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    const files = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => !!f);
+    if (!files.length) return; // plain text/HTML paste — let the browser handle it
+    event.preventDefault();
+    saveSelection(); // pin the caret so the async insert lands where the user pasted
+    void uploadAndInsertImages(files);
+  }, [saveSelection, uploadAndInsertImages]);
+
+  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const files = Array.from(event.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    event.preventDefault();
+    void uploadAndInsertImages(files);
+  }, [uploadAndInsertImages]);
 
   // --- Table row/column editing -------------------------------------------
   // Locate the caret's table cell within this editor: which table (by DOM order),
@@ -550,6 +603,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold (Ctrl+B)"><Bold size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic (Ctrl+I)"><Italic size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline (Ctrl+U)"><Underline size={16} /></button>
+            {/* Lists — execCommand toggles the current line(s); onInput re-parses into a list block */}
+            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bulleted list"><List size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('insertOrderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Numbered list"><ListOrdered size={16} /></button>
           </>
         )}
         {mode === 'rich' && !minimal && (
@@ -622,6 +678,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               className="min-h-[160px] p-4 outline-none im-content max-w-none font-sans"
               contentEditable
               onInput={handleChange}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
               onClick={handleEditorClick}
               onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
               onBlur={() => { setIsFocused(false); saveSelection(); }}

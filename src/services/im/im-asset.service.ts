@@ -5,9 +5,17 @@
  */
 
 import { supabase } from '../core/supabase.client';
+import { withTimeout } from '../core/with-timeout';
 
 const BUCKET = 'im-assets';
 const TAG = '[im-asset.service]';
+
+// Storage uploads carry image bytes, so they get a longer ceiling than DB writes —
+// a multi-MB pasted screenshot on a slow uplink legitimately needs this long.
+// Storage builders don't expose `.abortSignal()`, so withTimeout degrades to a plain
+// race here — acceptable: each path is unique with `upsert:false`, so there's no row
+// lock a retry could queue behind.
+const UPLOAD_TIMEOUT_MS = 45000;
 
 /**
  * Upload a file to Supabase Storage and return its public URL.
@@ -21,9 +29,10 @@ export const uploadIMAsset = async (file: File, folder = 'uploads'): Promise<str
 
   console.log(TAG, `uploading ${file.name} (${(file.size / 1024).toFixed(1)} KB) → ${storagePath}`);
 
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, file, { cacheControl: '31536000', upsert: false });
+  const { data, error } = await withTimeout(
+    supabase.storage.from(BUCKET).upload(storagePath, file, { cacheControl: '31536000', upsert: false }),
+    UPLOAD_TIMEOUT_MS,
+  );
 
   if (error) {
     console.error(TAG, 'upload error:', error);
@@ -85,6 +94,29 @@ export const externalizeHtmlImages = async (
       }
     }
     out = out.split(uri).join(url);
+  }
+  return out;
+};
+
+/**
+ * Replace base64 image data URIs held in a flat placeholder_data-style map with uploaded
+ * storage URLs, BEFORE persisting. PM cover/preview image uploads land in this map as full
+ * base64 data URLs; left inline they bloat the project_ims row past the DB write timeout
+ * (the exact hang this guards against). Pass a shared `cache` so an image reused here and in
+ * overlay content uploads only once. Best-effort per value (a failed upload stays inline).
+ * Returns a new map (the input is not mutated); values without a data URI are copied as-is.
+ */
+export const externalizeFormDataImages = async (
+  formData: Record<string, string>,
+  cache: Map<string, string>,
+  folder = 'project',
+): Promise<Record<string, string>> => {
+  const out: Record<string, string> = { ...formData };
+  for (const key of Object.keys(out)) {
+    const val = out[key];
+    if (typeof val === 'string' && val.includes('data:image')) {
+      out[key] = await externalizeHtmlImages(val, cache, folder);
+    }
   }
   return out;
 };

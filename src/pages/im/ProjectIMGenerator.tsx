@@ -20,11 +20,13 @@ import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { translateHtml } from '../../services/ai/translation.service';
 import { IM_LANGUAGE_NAMES } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
-import { uploadIMAsset, externalizeHtmlImages } from '../../services/im/im-asset.service';
-import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
+import { uploadIMAsset, listIMAssets, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
+import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
+import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult } from '../../services';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate } from 'lucide-react';
 import { InlineBlockEditor } from './editor/InlineBlockEditor';
+import { ProjectImImportDialog } from './ProjectImImportDialog';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
 import { getIMThemeVariables } from './styles/im-theme';
@@ -34,6 +36,24 @@ import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { BindableField } from './project-im-generator/BindableField';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
+
+// The full set of editable, persisted state captured in a crash-safe local draft. Mirrors
+// exactly what saveProjectIM writes, so a restored draft reproduces the unsaved session.
+interface DraftState {
+  formData: Record<string, string>;
+  fieldBindings: Record<string, string[]>;
+  conditions: Record<string, boolean>;
+  sectionVisibility: Record<string, boolean>;
+  refVisibility: Record<string, boolean>;
+  skuContent: Record<string, SKUContentValue>;
+  sectionAdditions: Record<string, ProjectBlockAddition[]>;
+  extraSections: ProjectExtraSection[];
+  sectionOverrides: Record<string, InlineBlockRef[]>;
+  sectionSkus: Record<string, string[]>;
+  blockOverrides: Record<string, Record<string, InlineBlockRef>>;
+  boundSkuIds: string[];
+  activeLang: string;
+}
 
 const ProjectIMGenerator: React.FC = () => {
   const { projectId, templateType: templateTypeParam } = useParams<{ projectId: string; templateType?: string }>();
@@ -77,7 +97,16 @@ const ProjectIMGenerator: React.FC = () => {
   // Left panel mode: fill placeholder values, or author project-specific content.
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
   const [availableBlocks, setAvailableBlocks] = useState<Record<string, { content: Record<string, string>; blockType: string }>>({});
+  // Full block library (title/slug/type) for the standardized-block picker.
+  const [blockLibrary, setBlockLibrary] = useState<IMBlock[]>([]);
+  // Extra-section id the shared-block picker is currently adding into (null = closed).
+  const [sharedPickerFor, setSharedPickerFor] = useState<string | null>(null);
+  const [blockPickerSearch, setBlockPickerSearch] = useState('');
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  // Reusable asset library (public URLs from the `im-assets` bucket) — same as the template editor.
+  const [assets, setAssets] = useState<string[]>([]);
+  const [assetUploading, setAssetUploading] = useState(false);
+  const [showAssets, setShowAssets] = useState(false);
 
   // Context Data
   const [allAttributes, setAllAttributes] = useState<CategoryAttribute[]>([]);
@@ -121,9 +150,22 @@ const ProjectIMGenerator: React.FC = () => {
   // Modal State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Any network write is in flight — blocks re-entry and mutating actions, and drives the
+  // blocking save overlay so the user can't navigate away and wedge the session mid-save.
+  const isBusy = saving || generating || translating;
+
+  // Crash-safe local draft. `savedSnapshotRef` holds a serialization of the last-persisted
+  // editable state (the DB baseline); the current state differing from it = "unsaved edits",
+  // which drives both the localStorage backup and the beforeunload guard. `pendingDraft` is a
+  // recovered draft awaiting the user's Restore/Discard decision.
+  const savedSnapshotRef = useRef<string | null>(null);
+  const [pendingDraft, setPendingDraft] = useState<{ savedAt: string; state: DraftState } | null>(null);
+  const draftKey = projectId ? `project-im-draft:${projectId}:${templateType}` : null;
+
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     if (projectId) loadData();
@@ -174,6 +216,8 @@ const ProjectIMGenerator: React.FC = () => {
         const blkMap: Record<string, { content: Record<string, string>; blockType: string }> = {};
         blks.forEach(b => { blkMap[b.id] = { content: b.content, blockType: b.blockType }; });
         setAvailableBlocks(blkMap);
+        setBlockLibrary(blks);
+        listIMAssets().then(setAssets).catch(() => {});
 
         // The project's SKUs + attribute submissions feed resolution. The collapsed
         // attributeId -> value map (and the {{__sku}} token) is derived from the BOUND
@@ -390,11 +434,12 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Encode the current form/condition/visibility state into the flat placeholder_data
   // map persisted on project_ims. Shared by draft save, publish, and auto-translate so
-  // all three write an identical payload.
-  const buildPlaceholderData = (): Record<string, string> => {
+  // all three write an identical payload. `fd` defaults to current formData; save paths
+  // pass the image-externalized copy so the persisted row never carries inline base64.
+  const buildPlaceholderData = (fd: Record<string, string> = formData): Record<string, string> => {
       // Base layer = submitted attribute values (keyed by attribute id) so bound
       // placeholders/tokens resolve in the saved manual; PM edits in formData win.
-      const data: Record<string, string> = { ...submittedAttrValues, ...formData };
+      const data: Record<string, string> = { ...submittedAttrValues, ...fd };
       Object.entries(conditions).forEach(([k, v]) => { data[`cond_${k}`] = String(v); });
       Object.entries(sectionVisibility).forEach(([k, v]) => { data[`secvis_${k}`] = String(v); });
       Object.entries(refVisibility).forEach(([k, v]) => { data[`refvis_${k}`] = String(v); });
@@ -404,29 +449,131 @@ const ProjectIMGenerator: React.FC = () => {
       return data;
   };
 
+  // ---------------- CRASH-SAFE LOCAL DRAFT ----------------
+  // A snapshot of the editable state, in a fixed key order so JSON.stringify is a stable
+  // dirty-check key. Built from current state; save paths pass `over` to substitute the
+  // image-externalized copies so the baseline matches exactly what was persisted.
+  const buildDraftState = (over: Partial<DraftState> = {}): DraftState => ({
+    formData, fieldBindings, conditions, sectionVisibility, refVisibility, skuContent,
+    sectionAdditions, extraSections, sectionOverrides, sectionSkus, blockOverrides,
+    boundSkuIds, activeLang, ...over,
+  });
+  const serializeDraft = (over: Partial<DraftState> = {}) => JSON.stringify(buildDraftState(over));
+
+  // Record what we just persisted as the new baseline and drop the local backup — nothing
+  // is unsaved, so beforeunload stops warning and the draft won't be offered on reload.
+  const markSaved = (over: Partial<DraftState> = {}) => {
+    savedSnapshotRef.current = serializeDraft(over);
+    if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
+  };
+
+  const restoreDraft = () => {
+    if (!pendingDraft) return;
+    const s = pendingDraft.state;
+    // Apply the recovered edits but leave savedSnapshotRef at the DB baseline, so the
+    // restored state registers as dirty and gets re-backed-up / offered for saving.
+    setFormData(s.formData ?? {});
+    setFieldBindings(s.fieldBindings ?? {});
+    setConditions(s.conditions ?? {});
+    setSectionVisibility(s.sectionVisibility ?? {});
+    setRefVisibility(s.refVisibility ?? {});
+    setSkuContent(s.skuContent ?? {});
+    setSectionAdditions(s.sectionAdditions ?? {});
+    setExtraSections(s.extraSections ?? []);
+    setSectionOverrides(s.sectionOverrides ?? {});
+    setSectionSkus(s.sectionSkus ?? {});
+    setBlockOverrides(s.blockOverrides ?? {});
+    if (Array.isArray(s.boundSkuIds)) setBoundSkuIds(s.boundSkuIds);
+    if (s.activeLang) setActiveLang(s.activeLang);
+    setPendingDraft(null);
+  };
+
+  const discardDraft = () => {
+    if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
+    setPendingDraft(null);
+  };
+
+  // Seed the DB baseline once loading finishes (so nothing is dirty on load), then offer to
+  // restore a newer local draft if one survived a hang/crash/close on this device.
+  useEffect(() => {
+    if (loading || !draftKey || savedSnapshotRef.current !== null) return;
+    savedSnapshotRef.current = serializeDraft();
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        const newerThanDb = !instance || new Date(draft?.savedAt).getTime() > new Date(instance.updatedAt).getTime();
+        if (draft?.savedAt && draft?.state && newerThanDb && JSON.stringify(draft.state) !== savedSnapshotRef.current) {
+          setPendingDraft(draft);
+        } else {
+          localStorage.removeItem(draftKey);
+        }
+      }
+    } catch { /* ignore malformed draft */ }
+  }, [loading, draftKey, instance]);
+
+  // Back the current edits up to localStorage IMMEDIATELY on every change (no network), so a
+  // hang, crash, or accidental navigation never loses work — it's recovered on next load.
+  // Paused while a recovered draft awaits the user's decision (keeps the stored draft intact).
+  useEffect(() => {
+    if (loading || pendingDraft || !draftKey || savedSnapshotRef.current === null) return;
+    try {
+      const cur = serializeDraft();
+      if (cur !== savedSnapshotRef.current) {
+        localStorage.setItem(draftKey, JSON.stringify({ savedAt: new Date().toISOString(), state: buildDraftState() }));
+      } else {
+        localStorage.removeItem(draftKey);
+      }
+    } catch { /* quota / private mode — best-effort */ }
+  }, [formData, fieldBindings, conditions, sectionVisibility, refVisibility, skuContent,
+      sectionAdditions, extraSections, sectionOverrides, sectionSkus, blockOverrides,
+      boundSkuIds, activeLang, loading, pendingDraft, draftKey]);
+
+  // Warn before leaving (tab close / reload) with unsaved edits or a save in flight.
+  // No dependency array on purpose: re-binding each render keeps the handler closing over the
+  // latest dirty check / isBusy. `serializeDraft()` only runs if the user actually tries to
+  // leave, so this is cheap.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      const dirty = savedSnapshotRef.current !== null && serializeDraft() !== savedSnapshotRef.current;
+      if (dirty || isBusy) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  });
+
   const handleSaveDraft = async () => {
       if (!projectId || !selectedTemplateId) return;
+      // Never let a save start on top of another operation (Publish/Translate/another Save):
+      // overlapping writes to the same row queue behind each other's row lock (see with-timeout.ts).
+      if (isBusy) return;
       setSavedTick(false);
       setSaving(true);
       await yieldToPaint();
 
-      const dataToSave = buildPlaceholderData();
-
       try {
-          // Move any base64 images out of content into storage first (keeps the row small).
+          // Move any base64 images out of the row (formData + overlay content) into storage
+          // first, so the persisted JSONB stays small and can't trip the DB write timeout.
+          const cache = new Map<string, string>();
+          const extForm = await externalizeFormDataImages(formData, cache);
+          setFormData(extForm);
           const ext = await externalizeOverlayImages({ sectionAdditions, sectionOverrides, blockOverrides, extraSections });
           setSectionAdditions(ext.sectionAdditions);
           setSectionOverrides(ext.sectionOverrides);
           setBlockOverrides(ext.blockOverrides);
           setExtraSections(ext.extraSections);
+          const dataToSave = buildPlaceholderData(extForm);
           const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides);
           setInstance(saved);
+          // Baseline = exactly what we persisted, so the local draft clears and nothing shows dirty.
+          markSaved({ formData: extForm, sectionAdditions: ext.sectionAdditions, sectionOverrides: ext.sectionOverrides, blockOverrides: ext.blockOverrides, extraSections: ext.extraSections });
           // Transient inline confirmation instead of a blocking alert.
           setSavedTick(true);
           setTimeout(() => setSavedTick(false), 2500);
       } catch (e) {
           console.error(e);
-          alert("Failed to save draft.");
+          const detail = e instanceof Error && e.message ? `\n\nDetails: ${e.message}` : '';
+          alert(`Failed to save draft. Your work is backed up locally on this device — try Save again.${detail}`);
       } finally {
           setSaving(false);
       }
@@ -464,7 +611,13 @@ const ProjectIMGenerator: React.FC = () => {
           setSections([]);
           setSelectedTemplateId('');
           setActiveLang('en'); // Reset language
-          
+
+          // The empty state IS the new baseline — drop the local draft and reset the
+          // snapshot so this deliberate reset isn't treated as unsaved edits.
+          savedSnapshotRef.current = null;
+          setPendingDraft(null);
+          if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
+
           // Refresh templates for the selection screen
           const allTemps = (await getIMTemplates()).filter(t => t.templateType === templateType);
           setTemplates(allTemps);
@@ -483,6 +636,9 @@ const ProjectIMGenerator: React.FC = () => {
           alert("Could not load project details to generate PDF.");
           return;
       }
+      // Don't publish on top of another in-flight operation (see handleSaveDraft).
+      if (isBusy) return;
+
       setGenerating(true);
       setPublishStatus('Preparing…');
       // Each publish bumps the version; it's stamped in the PDF footer and persisted.
@@ -547,17 +703,22 @@ const ProjectIMGenerator: React.FC = () => {
 
           await uploadFile(targetDoc.id, file, false);
 
-          const dataToSave = buildPlaceholderData();
-
           setPublishStatus('Saving…');
-          // Move any base64 images out of content into storage first (keeps the row small).
+          // Move any base64 images out of the row (formData + overlay content) into storage
+          // first, so the persisted JSONB stays small and can't trip the DB write timeout.
+          const cache = new Map<string, string>();
+          const extForm = await externalizeFormDataImages(formData, cache);
+          setFormData(extForm);
           const extOv = await externalizeOverlayImages({ sectionAdditions, sectionOverrides, blockOverrides, extraSections });
           setSectionAdditions(extOv.sectionAdditions);
           setSectionOverrides(extOv.sectionOverrides);
           setBlockOverrides(extOv.blockOverrides);
           setExtraSections(extOv.extraSections);
+          const dataToSave = buildPlaceholderData(extForm);
           const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides);
           setInstance(savedIM);
+          // Baseline = exactly what we persisted, so the local draft clears.
+          markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
 
           // Publish the structured ResolvedManual (one JSON per language + manifest) to the
           // public im-published bucket, for a separate web/PDF render service to consume by URL.
@@ -754,20 +915,69 @@ const ProjectIMGenerator: React.FC = () => {
 
   const updateExtraBlock = (id: string, idx: number, lang: string, html: string) => {
       setExtraSections(prev => prev.map(s => s.id === id
-          ? { ...s, blocks: s.blocks.map((b, i) => i === idx ? { ...b, content: { ...b.content, [lang]: html } } : b) }
+          ? { ...s, blocks: s.blocks.map((b, i) => i === idx && b.kind === 'inline' ? { ...b, content: { ...b.content, [lang]: html } } : b) }
           : s));
   };
 
   const setExtraBlockVariant = (id: string, idx: number, variant: CalloutVariant | undefined) => {
       setExtraSections(prev => prev.map(s => s.id === id
-          ? { ...s, blocks: s.blocks.map((b, i) => i === idx ? { ...b, variant } : b) }
+          ? { ...s, blocks: s.blocks.map((b, i) => i === idx && b.kind === 'inline' ? { ...b, variant } : b) }
           : s));
+  };
+
+  // Insert a reference to an approved shared (standardized) block into a project section.
+  const addSharedBlockToExtra = (id: string, blockId: string) => {
+      setExtraSections(prev => prev.map(s => s.id === id
+          ? { ...s, blocks: [...s.blocks, { kind: 'block', block_id: blockId } as SharedBlockRef] }
+          : s));
+  };
+
+  // --- Reusable asset library (upload + insert into the focused editor) ---
+  const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = ''; // allow re-selecting the same file
+      if (!file) return;
+      setAssetUploading(true);
+      try {
+          // Shared `library` folder so it's durable and reusable across manuals.
+          const url = await uploadIMAsset(file, 'library');
+          setAssets(prev => [url, ...prev]);
+      } catch (err) {
+          console.error('[ProjectIMGenerator] asset upload failed:', err);
+          alert(err instanceof Error ? err.message : 'Image upload failed');
+      } finally {
+          setAssetUploading(false);
+      }
+  };
+
+  // Insert a library asset at the caret of the last-focused inline editor (the editor
+  // registers itself as the insert target on focus and restores its saved selection).
+  const handleInsertAsset = (src: string) => {
+      const insert = (window as any).currentEditorInsertHtml;
+      if (!insert) {
+          alert('Click into a text block where you want the image, then pick an asset.');
+          return;
+      }
+      insert(`<img src="${src}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`);
+      setShowAssets(false);
   };
 
   const removeExtraBlock = (id: string, idx: number) => {
       setExtraSections(prev => prev.map(s => s.id === id
           ? { ...s, blocks: s.blocks.filter((_, i) => i !== idx) }
           : s));
+  };
+
+  // Reorder a block within a project section (works for inline and shared blocks).
+  const moveExtraBlock = (id: string, idx: number, dir: -1 | 1) => {
+      setExtraSections(prev => prev.map(s => {
+          if (s.id !== id) return s;
+          const j = idx + dir;
+          if (j < 0 || j >= s.blocks.length) return s;
+          const blocks = [...s.blocks];
+          [blocks[idx], blocks[j]] = [blocks[j], blocks[idx]];
+          return { ...s, blocks };
+      }));
   };
 
   // --- Placeholder section overrides (full project content for is_placeholder sections) ---
@@ -1227,8 +1437,33 @@ const ProjectIMGenerator: React.FC = () => {
                           <option value="" disabled>-- Choose a Template --</option>
                           {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
+
+                      <div className="flex items-center gap-3 my-5">
+                          <div className="flex-1 h-px bg-gray-100" />
+                          <span className="text-xs text-gray-400 uppercase tracking-wide">or</span>
+                          <div className="flex-1 h-px bg-gray-100" />
+                      </div>
+
+                      <button
+                          onClick={() => setShowImport(true)}
+                          className="w-full flex items-center justify-center gap-2 border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl p-3 text-sm font-semibold transition-colors"
+                      >
+                          <FileJson size={16} /> Import from JSON (quick, template-free)
+                      </button>
+                      <p className="text-[11px] text-gray-400 mt-2">
+                          Drops a reviewed <code>.import.json</code> straight into this project as an editable
+                          manual — no category template needed.
+                      </p>
                   </div>
               </div>
+              {showImport && (
+                  <ProjectImImportDialog
+                      projectId={projectId!}
+                      templateType={templateType}
+                      onClose={() => setShowImport(false)}
+                      onImported={() => { setShowImport(false); loadData(); }}
+                  />
+              )}
           </Layout>
       );
   }
@@ -1727,7 +1962,7 @@ const ProjectIMGenerator: React.FC = () => {
       for (const [idx, ref] of Object.entries(byIdx)) wBlockOverrides[sid][idx] = { ...ref, content: { ...ref.content } };
     }
     const wExtras: ProjectExtraSection[] = extraSections.map(ex => ({
-      ...ex, blocks: ex.blocks.map(b => ({ ...b, content: { ...b.content } })),
+      ...ex, blocks: ex.blocks.map(b => b.kind === 'inline' ? { ...b, content: { ...b.content } } : b),
     }));
 
     // sectionId → English title, for labelling gaps in the UI.
@@ -1765,7 +2000,7 @@ const ProjectIMGenerator: React.FC = () => {
     for (const [sid, byIdx] of Object.entries(wBlockOverrides)) {
       Object.values(byIdx).forEach(r => consider(r.content, sid, (lang, html) => { r.content[lang] = html; }));
     }
-    wExtras.forEach(ex => ex.blocks.forEach(b => consider(b.content, ex.id, (lang, html) => { b.content[lang] = html; })));
+    wExtras.forEach(ex => ex.blocks.forEach(b => { if (b.kind === 'inline') consider(b.content, ex.id, (lang, html) => { b.content[lang] = html; }); }));
 
     return { tasksByLang, gapsByLang, working: { wAdditions, wOverrides, wBlockOverrides, wExtras } };
   };
@@ -1805,8 +2040,8 @@ const ProjectIMGenerator: React.FC = () => {
     }
     const extraSections: ProjectExtraSection[] = [];
     for (const ex of ov.extraSections) {
-      const blocks: InlineBlockRef[] = [];
-      for (const b of ex.blocks) blocks.push({ ...b, content: await fixContent(b.content) });
+      const blocks: Array<InlineBlockRef | SharedBlockRef> = [];
+      for (const b of ex.blocks) blocks.push(b.kind === 'inline' ? { ...b, content: await fixContent(b.content) } : b);
       extraSections.push({ ...ex, blocks });
     }
     return { sectionAdditions, sectionOverrides, blockOverrides, extraSections };
@@ -1846,8 +2081,12 @@ const ProjectIMGenerator: React.FC = () => {
     try {
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, runner));
 
-      // Externalize base64 images to storage first — content is stored per language, so
-      // an inline image would be duplicated across every translation and bloat the row.
+      // Externalize base64 images to storage first (formData + overlay content), so the
+      // persisted row stays small — content is stored per language, so an inline image would
+      // be duplicated across every translation and bloat the row past the DB write timeout.
+      const cache = new Map<string, string>();
+      const extForm = await externalizeFormDataImages(formData, cache);
+      setFormData(extForm);
       const ext = await externalizeOverlayImages({
         sectionAdditions: working.wAdditions,
         sectionOverrides: working.wOverrides,
@@ -1861,11 +2100,12 @@ const ProjectIMGenerator: React.FC = () => {
       setExtraSections(ext.extraSections);
       try {
         const saved = await saveProjectIM(
-          projectId, selectedTemplateId, buildPlaceholderData(), 'draft', skuContent, templateType,
+          projectId, selectedTemplateId, buildPlaceholderData(extForm), 'draft', skuContent, templateType,
           ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides,
         );
         setInstance(saved);
-      } catch (e) { console.error(e); failures.push('Failed to save translations.'); }
+        markSaved({ formData: extForm, sectionAdditions: ext.sectionAdditions, sectionOverrides: ext.sectionOverrides, blockOverrides: ext.blockOverrides, extraSections: ext.extraSections });
+      } catch (e) { console.error(e); failures.push('Failed to save translations. Your work is backed up locally on this device.'); }
 
       if (failures.length) {
         alert(`Translated ${tasks.length - failures.length}/${tasks.length} fragment(s). ${failures.length} left untranslated:\n\n${failures.slice(0, 8).join('\n')}${failures.length > 8 ? '\n…' : ''}`);
@@ -2115,6 +2355,34 @@ const ProjectIMGenerator: React.FC = () => {
     </div>
   );
 
+  // Read-only card for a standardized (shared) block referenced in a project section.
+  // Shared blocks are approval-gated, so they render locked (edit them in the Block
+  // Library); the resolver pulls their current content at publish time.
+  const renderSharedBlockCard = (
+    ref: SharedBlockRef,
+    opts: { onRemove: () => void; onUp?: () => void; onDown?: () => void },
+  ) => {
+    const meta = blockLibrary.find(b => b.id === ref.block_id);
+    const html = templateRefPreviewHtml(ref);
+    return (
+      <div className="border border-amber-200 rounded-lg bg-amber-50/40">
+        <div className="flex items-center justify-between px-2 py-1 border-b border-amber-100">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-amber-600 flex items-center gap-1">
+            <Lock size={11} /> Standardized block{meta?.title ? `: ${meta.title}` : ''}
+          </span>
+          <div className="flex items-center gap-1">
+            {opts.onUp && <button onClick={opts.onUp} title="Move up" className="p-1 text-gray-400 hover:text-indigo-600"><ChevronUp size={13} /></button>}
+            {opts.onDown && <button onClick={opts.onDown} title="Move down" className="p-1 text-gray-400 hover:text-indigo-600"><ChevronDown size={13} /></button>}
+            <button onClick={opts.onRemove} title="Remove" className="p-1 text-gray-400 hover:text-rose-600"><Trash2 size={13} /></button>
+          </div>
+        </div>
+        {html
+          ? <div className="im-content p-3 text-sm pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
+          : <div className="p-3 text-xs text-gray-400 italic">No content for {activeLang.toUpperCase()} (or the block was removed from the library).</div>}
+      </div>
+    );
+  };
+
   // Editor pane for ONE selected section (extracted from the old flat list). Handles the
   // three kinds — project/extra, placeholder, and locked template — plus a hidden banner.
   const renderSectionContentEditor = (section: IMSection & { __projectExtra?: true }) => {
@@ -2148,17 +2416,27 @@ const ProjectIMGenerator: React.FC = () => {
               <button onClick={() => removeExtraSection(extra.id)} title="Delete section" className="p-1.5 text-gray-400 hover:text-rose-600"><Trash2 size={15} /></button>
             </div>
             <div className="space-y-3">
-              {extra.blocks.map((block, idx) => (
-                <div key={`${extra.id}-${idx}`}>
-                  {renderAdditionEditor(block, {
-                    rowKey: `${extra.id}-${idx}`,
-                    onChange: (lang, html) => updateExtraBlock(extra.id, idx, lang, html),
-                    onVariant: (v) => setExtraBlockVariant(extra.id, idx, v),
-                    onRemove: () => removeExtraBlock(extra.id, idx),
-                  })}
-                </div>
-              ))}
-              <button onClick={() => addBlockToExtra(extra.id)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
+              {extra.blocks.map((block, idx) => {
+                const onUp = idx > 0 ? () => moveExtraBlock(extra.id, idx, -1) : undefined;
+                const onDown = idx < extra.blocks.length - 1 ? () => moveExtraBlock(extra.id, idx, 1) : undefined;
+                return (
+                  <div key={`${extra.id}-${idx}`}>
+                    {block.kind === 'inline'
+                      ? renderAdditionEditor(block, {
+                          rowKey: `${extra.id}-${idx}`,
+                          onChange: (lang, html) => updateExtraBlock(extra.id, idx, lang, html),
+                          onVariant: (v) => setExtraBlockVariant(extra.id, idx, v),
+                          onRemove: () => removeExtraBlock(extra.id, idx),
+                          onUp, onDown,
+                        })
+                      : renderSharedBlockCard(block, { onRemove: () => removeExtraBlock(extra.id, idx), onUp, onDown })}
+                  </div>
+                );
+              })}
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => addBlockToExtra(extra.id)} className="flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
+                <button onClick={() => { setBlockPickerSearch(''); setSharedPickerFor(extra.id); }} className="flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-amber-500 border border-dashed border-amber-300 rounded hover:bg-amber-50 hover:text-amber-700 transition-colors"><Lock size={12} /> Add standardized block</button>
+              </div>
               {renderAddChapterButton(extra)}
               {renderDuplicateChapterButton(section)}
             </div>
@@ -2337,7 +2615,10 @@ const ProjectIMGenerator: React.FC = () => {
       <div className="w-64 shrink-0 bg-white border border-gray-200 rounded-xl flex flex-col overflow-hidden">
         <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
           <span className="text-xs font-bold text-muted uppercase flex items-center gap-1.5"><Layers size={13} /> Section tree</span>
-          <button onClick={() => addExtraSection(null)} title="Add chapter at document root" className="text-indigo-600 hover:bg-indigo-100 p-1 rounded"><Plus size={14} /></button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => { listIMAssets().then(setAssets).catch(() => {}); setShowAssets(true); }} title="Asset library — upload & insert images" className="text-gray-500 hover:bg-gray-100 hover:text-indigo-600 p-1 rounded"><ImageIcon size={14} /></button>
+            <button onClick={() => addExtraSection(null)} title="Add chapter at document root" className="text-indigo-600 hover:bg-indigo-100 p-1 rounded"><Plus size={14} /></button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {roots.length ? roots.map((s, idx) => renderProjectTreeRow(s, `${idx + 1}.`, 0))
@@ -2391,6 +2672,30 @@ const ProjectIMGenerator: React.FC = () => {
          onConfirm={confirmDeleteDraft}
          onCancel={() => setShowDeleteConfirm(false)}
        />
+
+       {/* Blocking overlay while a save/publish is in flight — stops the user navigating away
+           and wedging the session. Guaranteed to clear because every network call in the save
+           path is time-bounded (see with-timeout.ts / saveProjectIM). Translation is excluded:
+           it shows its own progress in the translate modal, which this would otherwise hide. */}
+       <SaveProgressOverlay
+         isOpen={saving || generating}
+         message={generating ? 'Publishing your manual…' : 'Saving your work…'}
+         detail={generating ? publishStatus : null}
+       />
+
+       {/* Recovered unsaved edits from a hang/crash/close on this device. */}
+       {pendingDraft && (
+         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[65] bg-white border border-amber-300 shadow-xl rounded-xl px-4 py-3 flex items-center gap-4 max-w-lg">
+           <AlertCircle size={18} className="text-amber-500 shrink-0" />
+           <span className="text-sm text-gray-700">
+             We found unsaved edits from {new Date(pendingDraft.savedAt).toLocaleString()} that didn't finish saving. Restore them?
+           </span>
+           <div className="flex gap-2 shrink-0">
+             <button onClick={restoreDraft} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700">Restore</button>
+             <button onClick={discardDraft} className="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50">Discard</button>
+           </div>
+         </div>
+       )}
 
        {publishResult && (
          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -2610,28 +2915,36 @@ const ProjectIMGenerator: React.FC = () => {
                    </div>
                </div>
                <div className="flex gap-3 items-center">
-                   <button 
-                        onClick={handleDeleteDraft} 
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-xl text-sm font-medium hover:bg-rose-50 transition-colors"
-                        disabled={loading || saving}
+                   <button
+                        onClick={handleDeleteDraft}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-xl text-sm font-medium hover:bg-rose-50 transition-colors disabled:opacity-60"
+                        disabled={loading || isBusy}
                    >
                        {instance ? <Trash2 size={16} /> : <RotateCcw size={16} />}
                        {instance ? 'Delete Draft' : 'Reset'}
                    </button>
 
-                   <button onClick={handleSaveDraft} disabled={saving} className={`flex items-center gap-2 px-4 py-2 bg-white border rounded-xl text-sm font-medium hover:bg-light disabled:opacity-80 ${savedTick ? 'border-emerald-300 text-emerald-700' : 'border-gray-300 text-gray-700'}`}>
+                   <button onClick={handleSaveDraft} disabled={isBusy} className={`flex items-center gap-2 px-4 py-2 bg-white border rounded-xl text-sm font-medium hover:bg-light disabled:opacity-80 ${savedTick ? 'border-emerald-300 text-emerald-700' : 'border-gray-300 text-gray-700'}`}>
                       {saving ? <Loader2 size={16} className="animate-spin" /> : savedTick ? <CheckCircle size={16} className="text-emerald-600" /> : <Save size={16} />}
                       {saving ? 'Saving…' : savedTick ? 'Saved!' : 'Save Draft'}
                    </button>
 
                    {otherRequiredLangs.length > 0 && (
-                     <button onClick={() => setIsTranslateModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light" title="Review & auto-translate project-authored sections">
+                     <button onClick={() => setIsTranslateModalOpen(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Review & auto-translate project-authored sections">
                         <Globe size={16} /> Translations
                         {untranslatedSectionLabels.size > 0 && (
                           <span className="ml-0.5 text-[10px] font-bold bg-amber-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untranslatedSectionLabels.size}</span>
                         )}
                      </button>
                    )}
+
+                   <button onClick={() => { listIMAssets().then(setAssets).catch(() => {}); setShowAssets(true); }} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Upload & insert images from the shared asset library">
+                      <ImageIcon size={16} /> Assets
+                   </button>
+
+                   <button onClick={() => setShowImport(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Replace this manual by importing a reviewed JSON">
+                      <FileJson size={16} /> Import
+                   </button>
 
                    {/* Export Menu */}
                    <div className="relative" ref={exportMenuRef}>
@@ -2659,7 +2972,7 @@ const ProjectIMGenerator: React.FC = () => {
                        )}
                    </div>
 
-                   <button onClick={handlePublishClick} disabled={generating} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
+                   <button onClick={handlePublishClick} disabled={isBusy} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
                       {generating ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
                       <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : `Publish (${activeLang.toUpperCase()})`}</span>
                    </button>
@@ -3140,6 +3453,85 @@ const ProjectIMGenerator: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {showImport && (
+                <ProjectImImportDialog
+                    projectId={projectId!}
+                    templateType={templateType}
+                    onClose={() => setShowImport(false)}
+                    onImported={() => { setShowImport(false); loadData(); }}
+                />
+            )}
+
+            {showAssets && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setShowAssets(false)}>
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onMouseDown={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><ImageIcon size={18} className="text-indigo-600" /> Asset Library</h2>
+                            <button onClick={() => setShowAssets(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+                        </div>
+                        <div className="px-5 pt-4">
+                            <label className={`w-full flex items-center justify-center gap-2 bg-white border border-gray-300 border-dashed rounded-xl p-3 transition-colors ${assetUploading ? 'opacity-60 cursor-wait' : 'cursor-pointer hover:bg-indigo-50 hover:border-indigo-300'}`}>
+                                {assetUploading ? <Loader2 size={16} className="text-indigo-400 animate-spin" /> : <Upload size={16} className="text-gray-400" />}
+                                <span className="text-xs font-medium text-gray-600">{assetUploading ? 'Uploading…' : 'Upload image'}</span>
+                                <input type="file" className="hidden" accept="image/*" disabled={assetUploading} onChange={handleUploadAsset} />
+                            </label>
+                            <p className="text-[11px] text-gray-400 mt-1.5">Click into a text block first, then pick an image to insert it at the cursor.</p>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            {assets.map((src, i) => (
+                                <div key={src} className="group relative aspect-square rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-400" onClick={() => handleInsertAsset(src)}>
+                                    <img src={src} alt={`Asset ${i}`} className="w-full h-full object-cover" />
+                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Plus size={20} className="text-white" /></div>
+                                </div>
+                            ))}
+                            {assets.length === 0 && <div className="col-span-full text-center py-10 text-gray-400 text-xs">No assets uploaded yet.</div>}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {sharedPickerFor && (() => {
+                const q = blockPickerSearch.trim().toLowerCase();
+                const candidates = blockLibrary
+                    .filter(b => b.approvalStatus === 'approved')
+                    .filter(b => !q || b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q));
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setSharedPickerFor(null)}>
+                        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" onMouseDown={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Lock size={16} className="text-amber-600" /> Add standardized block</h2>
+                                <button onClick={() => setSharedPickerFor(null)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+                            </div>
+                            <div className="px-5 pt-3">
+                                <input
+                                    autoFocus
+                                    value={blockPickerSearch}
+                                    onChange={e => setBlockPickerSearch(e.target.value)}
+                                    placeholder="Search approved blocks by title or slug…"
+                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+                                />
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                                {candidates.length === 0 && <div className="text-center py-10 text-gray-400 text-sm">No approved blocks{q ? ' match your search' : ' in the library yet'}.</div>}
+                                {candidates.map(b => (
+                                    <button
+                                        key={b.id}
+                                        onClick={() => { addSharedBlockToExtra(sharedPickerFor, b.id); setSharedPickerFor(null); }}
+                                        className="w-full text-left border border-gray-200 rounded-lg px-3 py-2 hover:border-amber-300 hover:bg-amber-50 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-semibold text-gray-800">{b.title}</span>
+                                            <span className="text-[9px] font-bold uppercase tracking-wide bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{b.blockType}</span>
+                                        </div>
+                                        <div className="text-[11px] font-mono text-gray-400 truncate">{b.slug}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
        </div>
     </Layout>
   );

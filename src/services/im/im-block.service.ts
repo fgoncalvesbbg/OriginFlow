@@ -8,6 +8,8 @@ import { isLive } from '../../config/environment.config';
 import { IMBlock } from '../../types';
 import { handleError, generateUUID } from '../../utils';
 import { withTimeout } from '../core/with-timeout';
+import { saveWithRetry } from '../core/save-retry';
+import { externalizeFormDataImages } from './im-asset.service';
 
 const TAG = '[im-block.service]';
 
@@ -53,13 +55,19 @@ export const saveIMBlock = async (block: Partial<IMBlock>): Promise<IMBlock> => 
   const id = block.id ?? generateUUID();
   console.log(TAG, `saveIMBlock — ${isNew ? 'INSERT' : 'UPDATE'} id=${id} slug=${block.slug}`);
 
+  // Pasted images must live in Storage, not inline base64 duplicated per language
+  // (that's what bloats rows past the write timeout — see im-asset.service).
+  const content = block.content
+    ? await externalizeFormDataImages(block.content, new Map(), 'blocks')
+    : {};
+
   const payload: Record<string, unknown> = {
     id,
     slug: block.slug,
     title: block.title,
     block_type: block.blockType ?? 'content',
     source_language: block.sourceLanguage ?? 'en',
-    content: block.content ?? {},
+    content,
     placeholders: block.placeholders ?? [],
     applicable_categories: block.applicableCategories ?? [],
     requires_feature: block.requiresFeature ?? null,
@@ -73,25 +81,26 @@ export const saveIMBlock = async (block: Partial<IMBlock>): Promise<IMBlock> => 
   console.log(TAG, 'saveIMBlock payload:', payload);
 
   try {
-    const { data, error } = await withTimeout(
-      supabase.from('im_blocks').upsert(payload).select().single()
+    const data = await saveWithRetry(
+      async (timeoutMs) => {
+        const { data: row, error } = await withTimeout(
+          supabase.from('im_blocks').upsert(payload).select().single(),
+          timeoutMs,
+        );
+        if (error) {
+          console.error(TAG, 'saveIMBlock Supabase error:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+          });
+          handleError(error, 'saveIMBlock');
+        }
+        if (!row) throw new Error('saveIMBlock: upsert returned no data and no error');
+        return row;
+      },
+      { context: 'saveIMBlock', payloadBytes: JSON.stringify(payload).length },
     );
-
-    if (error) {
-      console.error(TAG, 'saveIMBlock Supabase error:', {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      });
-      handleError(error, 'saveIMBlock');
-    }
-
-    if (!data) {
-      const msg = 'saveIMBlock: upsert returned no data and no error';
-      console.error(TAG, msg);
-      throw new Error(msg);
-    }
 
     console.log(TAG, 'saveIMBlock success, returned id:', data.id);
     return mapRow(data);

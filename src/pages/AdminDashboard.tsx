@@ -10,25 +10,32 @@ import {
   unassignAttributeFromCategory, makeAttributeGlobal,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
-  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS
+  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS,
+  getAIPrompts, updateAIPrompt
 } from '../services';
 import { generateUUID, getAttributesForCategory } from '../utils';
-import { User, UserRole, Supplier, CategoryL3, CategoryAttribute } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search } from 'lucide-react';
+import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AIPrompt } from '../types';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'prompts'>('users');
   const [refreshing, setRefreshing] = useState(false);
-  
+
   // Core Data
   const [users, setUsers] = useState<User[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
+  const [aiPrompts, setAIPrompts] = useState<AIPrompt[]>([]);
+
+  // AI Prompt Editing State
+  const [editingPrompt, setEditingPrompt] = useState<AIPrompt | null>(null);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [savingPrompt, setSavingPrompt] = useState(false);
   
   // Forms & UI State
   const [newSupName, setNewSupName] = useState('');
@@ -73,18 +80,20 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const [u, s, c, a, p] = await Promise.all([
+    const [u, s, c, a, p, ai] = await Promise.all([
       getProfiles(),
       getSuppliers(),
       getCategories(),
       getCategoryAttributes(),
-      getProjects()
+      getProjects(),
+      getAIPrompts()
     ]);
     setUsers(u);
     setSuppliers(s);
     setCategories(c);
     setAttributes(a);
     setProjects(p);
+    setAIPrompts(ai);
   };
 
   useRefetchOnFocus(loadData);
@@ -331,6 +340,36 @@ const AdminDashboard: React.FC = () => {
       finalizedAt: newStatus ? new Date().toISOString() : null
     });
     loadData();
+  };
+
+  // --- AI PROMPT ACTIONS ---
+  const openPromptModal = (prompt: AIPrompt) => {
+    setEditingPrompt({ ...prompt });
+    setPromptModalOpen(true);
+  };
+
+  const handleSavePrompt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPrompt) return;
+    setSavingPrompt(true);
+    try {
+      await updateAIPrompt(
+        editingPrompt.id,
+        {
+          systemPrompt: editingPrompt.systemPrompt,
+          model: editingPrompt.model,
+          maxTokens: editingPrompt.maxTokens
+        },
+        currentUser?.id
+      );
+      setPromptModalOpen(false);
+      setEditingPrompt(null);
+      await loadData();
+    } catch (e: any) {
+      alert(`Error saving prompt: ${e.message}`);
+    } finally {
+      setSavingPrompt(false);
+    }
   };
 
   // --- RENDERERS ---
@@ -592,6 +631,9 @@ const AdminDashboard: React.FC = () => {
         <button onClick={() => setActiveTab('projects')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'projects' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Package size={18} /> Projects
         </button>
+        <button onClick={() => setActiveTab('prompts')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'prompts' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <Sparkles size={18} /> AI Prompts
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow border border-gray-200 min-h-[400px]">
@@ -741,6 +783,44 @@ const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
                 ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* AI PROMPTS TAB */}
+        {activeTab === 'prompts' && (
+          <div>
+            <div className="px-6 py-4 bg-light border-b border-gray-200">
+              <h3 className="font-bold text-gray-800">AI Prompts</h3>
+              <p className="text-xs text-muted mt-1">System prompts sent to Claude for server-side AI features. Edit here to change wording without a code deploy.</p>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {aiPrompts.map(prompt => (
+                <div key={prompt.id} className="p-4 hover:bg-light px-6 flex justify-between items-start gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-primary flex items-center gap-2">
+                      {prompt.name}
+                      <span className="text-[10px] font-mono bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200">{prompt.key}</span>
+                    </div>
+                    {prompt.description && (
+                      <div className="text-xs text-muted mt-1">{prompt.description}</div>
+                    )}
+                    <div className="flex gap-3 text-xs text-muted mt-2 items-center flex-wrap">
+                      <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200 font-mono">{prompt.model}</span>
+                      <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{prompt.maxTokens} max tokens</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => openPromptModal(prompt)}
+                    className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors whitespace-nowrap"
+                  >
+                    <Edit2 size={13} /> Edit Prompt
+                  </button>
+                </div>
+              ))}
+              {aiPrompts.length === 0 && (
+                <div className="p-8 text-center text-gray-400">No AI prompts found.</div>
               )}
             </div>
           </div>
@@ -1107,6 +1187,76 @@ const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Prompt Edit Modal */}
+      {promptModalOpen && editingPrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-lg text-gray-800">{editingPrompt.name}</h3>
+              <button onClick={() => setPromptModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            {editingPrompt.description && (
+              <p className="text-xs text-muted mb-4">{editingPrompt.description}</p>
+            )}
+
+            <form onSubmit={handleSavePrompt} className="space-y-4 overflow-y-auto flex-1 pr-1">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">System Prompt</label>
+                <textarea
+                  required
+                  rows={14}
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                  value={editingPrompt.systemPrompt}
+                  onChange={e => setEditingPrompt({ ...editingPrompt, systemPrompt: e.target.value })}
+                />
+                <p className="text-xs text-gray-500 mt-1">Keep any {'{{placeholder}}'} tokens exactly as they appear — the server fills them in at request time.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                  <input
+                    required
+                    type="text"
+                    className="w-full border border-gray-300 p-2.5 rounded-md text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={editingPrompt.model}
+                    onChange={e => setEditingPrompt({ ...editingPrompt, model: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={editingPrompt.maxTokens}
+                    onChange={e => setEditingPrompt({ ...editingPrompt, maxTokens: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setPromptModalOpen(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPrompt}
+                  className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-sm font-medium disabled:opacity-50"
+                >
+                  {savingPrompt ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

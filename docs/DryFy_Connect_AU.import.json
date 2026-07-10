@@ -1,0 +1,1093 @@
+{
+  "importSchemaVersion": 1,
+  "kind": "im",
+  "category": "Dehumidifiers",
+  "product": {
+    "name": "DryFy Connect",
+    "sku": "10049174",
+    "supplier": "Klarstein (Chal-Tec GmbH)"
+  },
+  "languages": [
+    "en"
+  ],
+  "sourceLanguage": "en",
+  "cover": {
+    "title": {
+      "en": "DryFy Connect Dehumidifier"
+    },
+    "imageNeed": {
+      "description": "Product hero image of the DryFy Connect dehumidifier for the manual cover.",
+      "purpose": "cover",
+      "annotations": [],
+      "suggestedSource": "Supplier product photography / existing Klarstein asset for item 10049174."
+    }
+  },
+  "sections": [
+    {
+      "key": "welcome",
+      "parentKey": null,
+      "order": 1,
+      "title": {
+        "en": "Welcome"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Please read this manual carefully and follow the instructions to avoid damage. Damage resulting from failure to follow this manual is not covered by the warranty.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Scan the QR code on the rating label or packaging to access the latest version of this manual and other product information.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "intended_use",
+      "parentKey": null,
+      "order": 2,
+      "title": {
+        "en": "Intended Use"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This appliance is a dehumidifier for reducing air humidity in indoor domestic rooms. It is intended for household and similar indoor use only.</p>"
+          },
+          "note": "Chapter created during review; no dedicated Intended Use section in the draft."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>It is not intended for commercial, industrial or outdoor use. Use the appliance only for its intended purpose as described in this manual.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "safety",
+      "parentKey": null,
+      "order": 3,
+      "title": {
+        "en": "Safety Instructions"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Read these instructions carefully before using the appliance and keep them for future reference.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Symbols used</h3>"
+          }
+        },
+        {
+          "type": "table",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>Symbol</th><th>Meaning</th></tr></thead><tbody><tr><td>WARNING</td><td>A hazardous situation which, if not avoided, could result in serious injury or death.</td></tr><tr><td>CAUTION</td><td>A potentially hazardous situation which may result in minor injury or damage to the appliance.</td></tr><tr><td>Risk of electric shock</td><td>Electrical hazard.</td></tr><tr><td>Risk of fire</td><td>Flammable material or fire hazard.</td></tr><tr><td>Note</td><td>Helpful tips and information for using your appliance.</td></tr></tbody></table>"
+          },
+          "note": "May be redundant if the platform renders its own callout legend."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>General safety</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This appliance is for household and similar indoor use only. It is not intended for commercial, industrial or outdoor use.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Use the appliance only for its intended purpose as described in this manual.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Place the appliance on a stable, level surface to reduce vibration and noise.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Keep the appliance upright during operation. Do not tilt it more than 45° or turn it upside down.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>If the appliance has been transported or stored on its side, stand it upright for at least 24 hours before connecting it to power.</p>"
+          },
+          "note": "Applies to compressor/refrigerant dehumidifiers; a desiccant model would not need this. Kept generic as most of the category is compressor-based — review if the template must also cover desiccant units."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Ensure the water tank is correctly fitted before operating the appliance.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Empty the water tank after each use to prevent overflow on restart.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not place heavy objects on the appliance, and do not sit, stand or climb on it.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Electrical safety</h3>"
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "electric",
+          "content": {
+            "en": "<p>Before connecting the appliance, check that the voltage on the rating label matches your mains supply.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Connect the appliance only to a correctly installed and earthed socket outlet. The electrical installation must comply with all applicable national and local regulations.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not operate the appliance if the power cord, plug or any other electrical component is damaged.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>If the power cord is damaged, it must be replaced by the manufacturer, its service agent or a similarly qualified person to avoid a hazard.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not switch the appliance on or off by inserting or removing the plug. Always grasp the plug — never the cord — when unplugging.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not use extension cords, double adapters or power boards that may overload the circuit.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not route the power cord under carpets, rugs or furniture, and do not let it create a trip hazard.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Disconnect the appliance from power before cleaning, servicing, moving or resetting it, and whenever it will not be used for an extended period.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Refrigerant safety</h3>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This appliance contains R290 (propane), a flammable refrigerant (Class A3). Refrigerant charge: <strong>[TO CONFIRM: charge mass in g]</strong>.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Model-specific: only applies to R290/flammable-refrigerant models; charge value differs per model."
+        },
+        {
+          "type": "callout",
+          "variant": "flammable",
+          "content": {
+            "en": "<p>The refrigerant in this appliance is flammable.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not puncture, drill, cut, burn or otherwise damage any part of the refrigerant circuit.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Keep the appliance away from open flames, sparks, hot surfaces and other ignition sources.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not use any means to accelerate defrosting, or to clean the appliance, other than those recommended by the manufacturer.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Store and operate the appliance only in a room without continuously operating ignition sources (for example open flames, an operating gas appliance or an operating electric heater).</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>The appliance must be installed and operated in a room with a floor area larger than <strong>[TO CONFIRM: minimum floor area in m²]</strong>.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Be aware that the refrigerant may be odourless. If a leak is suspected, switch off the appliance, ventilate the room, keep all ignition sources away, and contact qualified service personnel.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Servicing, repair and maintenance of the refrigerant circuit must only be carried out by personnel qualified and licensed to handle flammable refrigerants (in Australia, an ARC refrigerant handling licence).</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Children and vulnerable persons</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This appliance may be used by children aged 8 years and above, and by persons with reduced physical, sensory or mental capabilities or lack of experience and knowledge, only if they are supervised or instructed in safe use and understand the hazards involved.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Children must not play with the appliance.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Cleaning and user maintenance must not be carried out by children unless they are aged 8 or over and supervised.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Keep children under 8 away from the appliance and its power cord.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Keep packaging, including plastic bags and films, away from children to avoid suffocation.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Water, moisture and cleaning agents</h3>"
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "warning",
+          "content": {
+            "en": "<p>Do not place the appliance in water or any other liquid.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not allow water, oil or any other liquid to enter the interior of the appliance.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Never pour water over the appliance or immerse it.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Clean exterior surfaces only with a soft, slightly damp cloth.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not use benzene, petrol, alcohol or other aggressive solvents. If needed, use a mild neutral detergent.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Operational safety</h3>"
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "flammable",
+          "content": {
+            "en": "<p>Do not cover the appliance. Covering it can cause overheating, fire or damage.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Keep the air inlet and outlet unobstructed at all times, and maintain sufficient clearance for airflow.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not insert fingers, tools or foreign objects into the air inlet, outlet or any opening.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not operate the appliance where flammable gases, vapours, aerosols or explosive substances are present, and do not use sprays or flammable substances near it.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not place the appliance near heat sources such as open flames or heaters.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not use the appliance with wet hands.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Maintenance and service</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Always switch off and disconnect the appliance from power before cleaning or maintenance.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not attempt to repair, modify or disassemble the appliance yourself. Repairs must be carried out only by qualified service personnel.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Use only accessories and replacement parts approved by the manufacturer.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "parts",
+      "parentKey": null,
+      "order": 4,
+      "scope": "model-specific",
+      "title": {
+        "en": "Parts and Controls"
+      },
+      "blocks": [
+        {
+          "type": "image",
+          "imageNeed": {
+            "description": "Labelled diagram(s) of the dehumidifier identifying all 13 user-facing parts with numbered callouts.",
+            "purpose": "parts overview",
+            "annotations": [
+              "1 = Water tank",
+              "2 = Water tank handle",
+              "3 = Water tank cover",
+              "4 = Air louvre",
+              "5 = Moisture indicator",
+              "6 = Control panel",
+              "7 = Front cover",
+              "8 = Rear cover",
+              "9 = Grip",
+              "10 = Filter frame",
+              "11 = Drain plug",
+              "12 = Power cord holder",
+              "13 = Wheel"
+            ],
+            "suggestedSource": "Supplier printed manual parts diagram (draft: 'Parts are numbered on the diagrams in the printed manual')."
+          },
+          "content": {
+            "en": ""
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "table",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>No.</th><th>Part</th></tr></thead><tbody><tr><td>1</td><td>Water tank</td></tr><tr><td>2</td><td>Water tank handle</td></tr><tr><td>3</td><td>Water tank cover</td></tr><tr><td>4</td><td>Air louvre</td></tr><tr><td>5</td><td>Moisture indicator</td></tr><tr><td>6</td><td>Control panel</td></tr><tr><td>7</td><td>Front cover</td></tr><tr><td>8</td><td>Rear cover</td></tr><tr><td>9</td><td>Grip</td></tr><tr><td>10</td><td>Filter frame</td></tr><tr><td>11</td><td>Drain plug</td></tr><tr><td>12</td><td>Power cord holder</td></tr><tr><td>13</td><td>Wheel</td></tr></tbody></table>"
+          },
+          "scope": "model-specific"
+        }
+      ]
+    },
+    {
+      "key": "controls",
+      "parentKey": "parts",
+      "order": 5,
+      "scope": "model-specific",
+      "title": {
+        "en": "Control Panel"
+      },
+      "blocks": [
+        {
+          "type": "image",
+          "imageNeed": {
+            "description": "Labelled diagram of the control panel showing each button and the LCD display.",
+            "purpose": "control layout",
+            "annotations": [
+              "Timer",
+              "Dry",
+              "Air velocity",
+              "LCD display",
+              "Humidity",
+              "Mode",
+              "Power On/Off"
+            ],
+            "suggestedSource": "Supplier printed manual control-panel figure."
+          },
+          "content": {
+            "en": ""
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "table",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>Button</th><th>Function</th></tr></thead><tbody><tr><td>Timer</td><td>Sets a 1–24 hour timer to switch the unit on or off. Press once for 1 hour; each further press adds an hour. To cancel, press again twice after confirming the set time.</td></tr><tr><td>Dry</td><td>Dries the inside of the unit to prevent mould. The cycle takes about one hour. Press again to cancel and return to the previous mode.</td></tr><tr><td>Air velocity</td><td>In AUTO or CONTINUOUS mode, selects high (HIGH) or low (LOW) fan speed.</td></tr><tr><td>LCD display</td><td>Shows ambient humidity in AUTO, CONTINUOUS and DRYING modes; shows the set humidity when adjusting the target, and the set time in Timer mode. “%” indicates relative humidity.</td></tr><tr><td>Humidity</td><td>Sets the target humidity in AUTO mode, cycling through 30% to 80% in 5% steps. Active in AUTO mode only.</td></tr><tr><td>Mode</td><td>Selects the operating mode during start-up or timer setting. Hold for 3 seconds to activate or deactivate the Child Lock, which disables all buttons.</td></tr><tr><td>Power On/Off</td><td>Turns the unit on or off.</td></tr></tbody></table>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Button combinations:</strong> press Humidity + Mode together to turn the moisture (colour) indicator on or off; press Timer + Dry together to activate or deactivate the air-swing function.</p>"
+          },
+          "scope": "model-specific"
+        }
+      ]
+    },
+    {
+      "key": "setup",
+      "parentKey": null,
+      "order": 6,
+      "title": {
+        "en": "Setup and First Use"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Leave a minimum clearance of 50 cm above the unit and 20 cm on all sides for adequate airflow.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Clearance values are model-dependent."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>If the unit is noisy, place rubber buffers or a damping mat underneath to reduce vibration and to protect wooden or carpeted floors.</p>"
+          }
+        },
+        {
+          "type": "image",
+          "imageNeed": {
+            "description": "Diagram showing required installation clearances around the unit.",
+            "purpose": "installation clearances",
+            "annotations": [
+              "50 cm minimum above",
+              "20 cm minimum each side"
+            ],
+            "suggestedSource": "Create from clearance figures if no supplier figure exists."
+          },
+          "content": {
+            "en": ""
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "callout",
+          "variant": "flammable",
+          "content": {
+            "en": "<p>For this flammable-refrigerant unit, install the appliance only in a room larger than the minimum floor area stated in Refrigerant safety (<strong>[TO CONFIRM: minimum floor area in m²]</strong>).</p>"
+          },
+          "scope": "model-specific",
+          "note": "Model-specific: flammable-refrigerant models only; area depends on charge mass."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Emptying the water tank</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>When the tank is full, the tank indicator flashes, the compressor and fan stop, and the unit beeps 10 times.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Tank-full signalling (beep count) is model-specific."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Place both hands on the sides of the rear cover and carefully pull out the water tank.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Open the tank cover on the right of the tank and pour the water out through the gap between the tank and its cover.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Close the cover, turn the handle down, refit the tank and restart the unit.</p>"
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "info",
+          "content": {
+            "en": "<p>Before refitting the tank, check that the float can move freely up and down.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Continuous water drainage</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Locate the drain plug on the unit.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Remove the drain plug.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Connect a drain hose of suitable length to the water outlet.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Before use, check the hose is properly connected, or water may leak.</p>"
+          }
+        },
+        {
+          "type": "image",
+          "imageNeed": {
+            "description": "Diagram showing location of the drain plug and connection of a drain hose to the water outlet.",
+            "purpose": "continuous drainage setup",
+            "annotations": [
+              "Drain plug",
+              "Water outlet",
+              "Drain hose"
+            ],
+            "suggestedSource": "Supplier printed manual drainage figure."
+          },
+          "content": {
+            "en": ""
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "callout",
+          "variant": "info",
+          "content": {
+            "en": "<p>The drain hose must not sit higher than the water outlet, and must be securely connected — otherwise water cannot drain and may leak.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "operation",
+      "parentKey": null,
+      "order": 7,
+      "title": {
+        "en": "Operation"
+      },
+      "blocks": [
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Timer</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>While the unit is running, press Timer to set an automatic switch-off after 1–24 hours. While the unit is in standby, use Timer the same way to set an automatic switch-on. The setting is confirmed if no button is pressed within 5 seconds; the timer indicator then lights.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>AUTO mode</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>In AUTO mode the unit dehumidifies until the room reaches the humidity you set, then holds it there automatically. The compressor runs while room humidity is above the target. When room humidity falls to the target, the compressor stops; the fan may keep running at the set speed. If room humidity rises above the target again, the compressor restarts. The factory-set target is 50%. Set the target with the Humidity button and the fan speed with the Air velocity button.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>CONTINUOUS mode</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>In CONTINUOUS mode the compressor runs regardless of room humidity, for maximum moisture removal — useful for a very damp room or for drying laundry. The fan runs at maximum speed by default; adjust it with the Air velocity button. Empty the tank as needed, or set up continuous drainage.</p>"
+          }
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Drying function</h3>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Press Dry to dry the inside of the unit and prevent mould. The cycle takes about one hour: the unit runs at high speed for over 30 minutes, then at low speed for about 20 minutes. Press Dry again to stop and return to the previous mode, or press On/Off to stop and go to standby.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Internal-dry feature and its timings are model-specific."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Moisture (colour) indicator</h3>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Press Humidity + Mode together to turn the colour indicator on or off. During use the front of the unit changes colour with room humidity: red above 60%, green between 40% and 60%, blue below 40%.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Feature and button combination are model-specific."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Air-swing function</h3>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Press Timer + Dry together to activate or deactivate the air-swing function.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Feature and button combination are model-specific."
+        }
+      ]
+    },
+    {
+      "key": "smartphone",
+      "parentKey": "operation",
+      "order": 8,
+      "scope": "model-specific",
+      "title": {
+        "en": "Control by Smartphone"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Connect the appliance to your home Wi-Fi to control it from the Klarstein app.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Download the Klarstein app by scanning the QR code, or from the App Store or Google Play.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Make sure your smartphone is on the same Wi-Fi network the appliance will use.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Open the app and sign in, or create an account.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Follow the in-app instructions to pair the appliance.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "callout",
+          "variant": "info",
+          "content": {
+            "en": "<p>The appliance connects on the 2.4 GHz Wi-Fi band only. If your router is dual-band, use a separate 2.4 GHz network name (SSID) for pairing.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>If the appliance will not connect</h3>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Check the appliance is plugged in and switched on.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Check the Wi-Fi indicator on the panel is blinking (pairing mode); reset the Wi-Fi settings if not.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Check your network is 2.4 GHz with its own SSID — the appliance will not join a 5 GHz network.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Avoid public or restricted networks (e.g. workplaces, airports) whose firewall may block pairing.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Check the Wi-Fi password entered in the app matches the network your phone is on.</p>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>If it still will not connect, email <strong>appsupport@klarstein.com</strong>.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Confirm this support address is the correct AU-market routing (may be an EU inbox)."
+        }
+      ]
+    },
+    {
+      "key": "cleaning",
+      "parentKey": null,
+      "order": 9,
+      "title": {
+        "en": "Cleaning and Maintenance"
+      },
+      "blocks": [
+        {
+          "type": "callout",
+          "variant": "electric",
+          "content": {
+            "en": "<p>Unplug the appliance before cleaning or servicing, and whenever it will not be used for a long period. Do not clean the body with alcohol, petrol, benzene or other solvents.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Water tank and cover:</strong> clean regularly with a slightly damp cloth so mould cannot form inside.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Body:</strong> wipe with a slightly damp cloth. Do not use detergents or abrasive sponges, which can damage the plastic.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Filter (washable PP grid):</strong> clean with warm or cold water at least once every two weeks. Do not use hot water or chemical solutions.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Filter type/interval is model-dependent."
+        }
+      ]
+    },
+    {
+      "key": "troubleshooting",
+      "parentKey": null,
+      "order": 10,
+      "title": {
+        "en": "Troubleshooting"
+      },
+      "blocks": [
+        {
+          "type": "table",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>Issue</th><th>Possible cause</th><th>Solution</th></tr></thead><tbody><tr><td>Unit does not run</td><td>Not plugged in</td><td>Insert the plug into the socket.</td></tr><tr><td>Unit does not run</td><td>Tank full or not fitted correctly</td><td>Empty the tank or refit it correctly.</td></tr><tr><td>Unit does not run</td><td>Room below 5 °C or above 32 °C</td><td>Normal — the unit only runs within its operating range.</td></tr><tr><td>Poor dehumidification</td><td>Room temperature or humidity too low</td><td>Normal in dry or cold conditions — capacity is reduced.</td></tr><tr><td>Poor dehumidification</td><td>Air inlet or outlet blocked</td><td>Clear the inlet and outlet.</td></tr><tr><td>No air blown out</td><td>Ventilation grille blocked</td><td>Clean the grille.</td></tr><tr><td>Unusual noise</td><td>Uneven surface / blocked grille</td><td>Level the unit; clean the grille.</td></tr><tr><td>Splashing sound</td><td>Circulating refrigerant</td><td>Normal.</td></tr><tr><td>Water leaks</td><td>Loose hose / blocked drain</td><td>Tighten the hose; clear and straighten the drain line.</td></tr><tr><td>Frost forms</td><td>Low ambient temperature</td><td>Normal — the unit defrosts automatically.</td></tr></tbody></table>"
+          },
+          "note": "Operating-range values (5–32 °C) echo this model's spec; kept generic as the failure logic is category-wide."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "content": {
+            "en": "<h3>Frequently asked questions</h3>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Why is there less water in the tank in winter?</strong> Colder, drier air holds less moisture, so capacity is lower than in warm months. This is not a fault.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Why does the unit not run, or stop suddenly?</strong> The tank may be full or not fitted correctly — empty or refit it. Or the room is outside the operating range: the unit runs only between 5 °C and 32 °C and 30% to 80% RH (optimal 16–32 °C).</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Why is the outlet air warm?</strong> The unit cools incoming air to condense out moisture, then reheats the dried air before it leaves the outlet. Warm outlet air is normal.</p>"
+          }
+        }
+      ]
+    },
+    {
+      "key": "specs",
+      "parentKey": null,
+      "order": 11,
+      "scope": "model-specific",
+      "title": {
+        "en": "Technical Specifications"
+      },
+      "blocks": [
+        {
+          "type": "table",
+          "content": {
+            "en": "<table class=\"im-table\"><thead><tr><th>Specification</th><th>Value</th></tr></thead><tbody><tr><td>Item number</td><td>10049174</td></tr><tr><td>Power supply</td><td>220–240 V ~ 50/60 Hz</td></tr><tr><td>Power</td><td>600 W</td></tr><tr><td>Dehumidification capacity</td><td>30 L/day (at 30 °C, 80% RH)</td></tr><tr><td>Tank capacity</td><td>5 L</td></tr><tr><td>Air flow</td><td>230 m³/h</td></tr><tr><td>Suitable room size</td><td>25–30 m²</td></tr><tr><td>Operating range</td><td>5 °C to 32 °C, 30% to 80% RH (optimal 16–32 °C)</td></tr><tr><td>Wi-Fi standard</td><td>802.11 b/g/n</td></tr><tr><td>Wi-Fi frequency</td><td>2.4 GHz</td></tr><tr><td>Wi-Fi radio-frequency power (max.)</td><td>20 dBm</td></tr><tr><td>Standby with information display</td><td>0.4 W</td></tr><tr><td>Networked standby</td><td>0.8 W</td></tr><tr><td>Refrigerant type</td><td>R290 (propane) — Class A3 (flammable)</td></tr><tr><td>Refrigerant charge</td><td>[TO CONFIRM: charge mass in g]</td></tr></tbody></table>"
+          },
+          "scope": "model-specific"
+        },
+        {
+          "type": "callout",
+          "variant": "info",
+          "content": {
+            "en": "<p>The suitable room size above (25–30 m²) is a performance recommendation. It is not the same as the minimum floor area required for the flammable refrigerant, which is stated in the Safety Instructions.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Draft footnote 2: performance room size must not be confused with the flammable-refrigerant safety minimum floor area."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>The refrigerant type and charge must also appear on the rating label.</p>"
+          },
+          "scope": "model-specific"
+        }
+      ]
+    },
+    {
+      "key": "disposal",
+      "parentKey": null,
+      "order": 12,
+      "title": {
+        "en": "Disposal"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>Do not dispose of this appliance with general household waste. Take it to a local council collection point or e-waste drop-off for recycling of electrical and electronic equipment.</p>"
+          },
+          "note": "RETAINED, not stripped: Australian e-waste guidance, NOT the standardized EU WEEE crossed-bin block the platform re-adds."
+        },
+        {
+          "type": "callout",
+          "variant": "flammable",
+          "content": {
+            "en": "<p>Because this appliance contains flammable refrigerant, the refrigerant must be recovered by a licensed technician before the appliance is dismantled or scrapped. It must not be released to the atmosphere. Contact your local council or waste service for e-waste and refrigerant-appliance disposal options in your area.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Model-specific: refrigerant-recovery obligation applies to refrigerant models only."
+        }
+      ]
+    },
+    {
+      "key": "conformity",
+      "parentKey": null,
+      "order": 13,
+      "title": {
+        "en": "Declaration of Conformity"
+      },
+      "blocks": [
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Responsible Supplier (Australia / New Zealand):</strong> <strong>[TO CONFIRM: Responsible Supplier legal entity, ABN, Australian address]</strong></p>"
+          },
+          "note": "RETAINED: Australian DoC (EESS/RCM/ACMA), NOT the generic EU/UK DoC the platform re-adds. Do not let the platform overwrite it with an EU 2014/53/EU declaration."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p><strong>Contact:</strong> <strong>[TO CONFIRM: Responsible Supplier contact email / phone]</strong></p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This appliance complies with the applicable Australian electrical safety requirements under the Electrical Equipment Safety System (EESS), assessed against AS/NZS 60335.1 and AS/NZS 60335.2.40.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>This model additionally meets the radiocommunications and electromagnetic compatibility (EMC) requirements administered by the ACMA for its 2.4 GHz Wi-Fi radio.</p>"
+          },
+          "scope": "model-specific",
+          "note": "Model-specific: radio/EMC clause applies only to models with a radio (Wi-Fi)."
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>The appliance is marked with the Regulatory Compliance Mark (RCM): <strong>[TO CONFIRM: insert RCM mark artwork]</strong>.</p>"
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": {
+            "en": "<p>The full declaration of conformity is available at: <strong>[TO CONFIRM: Australian DoC URL]</strong>.</p>"
+          }
+        }
+      ]
+    }
+  ],
+  "excludedStandardized": [
+    "(none removed) — this AU draft contains NO EU/UK standardized boilerplate to strip: no company imprint, no EU WEEE crossed-bin block, no generic EU/UK DoC. The AU disposal and AU DoC content are RETAINED as product/market-specific. See reviewNotes.openQuestions #1 — the platform's auto-added EU/UK boilerplate and CE/UKCA marks must be SUPPRESSED for this AU category/SKU."
+  ],
+  "reviewNotes": {
+    "corrections": [
+      "Created an Intended Use chapter (missing in draft) from the household/indoor-use statements in General safety.",
+      "Moved Technical Data to the Technical Specifications position (after Troubleshooting, before Disposal) per the normalized chapter order.",
+      "Kept the performance 'suitable room size' (25–30 m²) explicitly separate from the flammable-refrigerant 'minimum floor area' safety figure (draft footnote 2).",
+      "Converted all bullet lists to separate <p> lines and mapped WARNING/CAUTION/Note items to callout variants (electric / flammable / warning / info).",
+      "Split the AU conformity paragraph into an electrical-safety clause (generic) and a radio/EMC clause (model-specific) so radio content is not inherited by non-radio models."
+    ],
+    "additionsSuggested": [
+      "Parts, control-panel, installation-clearance, and continuous-drainage diagrams emitted as imageNeed blocks — supply artwork or confirm supplier figures.",
+      "Consider adding rated current (A), sound power/pressure (dB) and net weight to Technical Specifications — commonly expected on AU dehumidifier IMs and absent from the draft.",
+      "Consider whether 'Dehumidifiers' is the right template grain: a single template spanning compressor/desiccant and Wi-Fi/non-Wi-Fi variants forces a large share of content to model-specific. A narrower 'Compressor dehumidifiers (flammable refrigerant)' template would let refrigerant safety be generic within it and reduce per-model tagging."
+    ],
+    "deletions": [
+      "Removed the 'How to read this document' internal drafting instruction.",
+      "Removed footnotes [^1]–[^5]; unresolved values carried as [TO CONFIRM] tokens in-content and listed in openQuestions.",
+      "Removed the internal 'Sources' section (regulatory citations / access dates) — not consumer content.",
+      "Trimmed the 'Congratulations on purchasing' marketing line from the welcome."
+    ],
+    "openQuestions": [
+      "PLATFORM BOILERPLATE MISMATCH (blocker): This is an Australian template. If the platform auto-adds EU/UK boilerplate (EU WEEE block, generic EU/UK DoC, CE/UKCA marks), it MUST be suppressed for this category/SKU — otherwise the manual carries EU disposal text, an EU 2014/53/EU DoC, and CE/UKCA marks instead of the AU e-waste/refrigerant-recovery block, the AU EESS/ACMA DoC, and the RCM. AU disposal and DoC are deliberately RETAINED; confirm they will not be overwritten or duplicated, and that suppression can be set at TEMPLATE level for all AU models.",
+      "SCOPE / TEMPLATE REUSE (blocker for correct reuse): flammable-refrigerant safety, refrigerant charge, minimum floor area, the Wi-Fi/smartphone feature set, and the ACMA radio clause are marked model-specific. If the template engine still inherits model-specific blocks by default, a non-R290 or non-Wi-Fi model reusing this template would show false safety/feature claims. Confirm model-specific blocks are excluded unless explicitly enabled per model.",
+      "Refrigerant charge mass (g): required from engineering / rating label. Type confirmed (R290, Class A3); charge not.",
+      "Minimum floor area (m²) for the flammable refrigerant: calculate per AS/NZS 60335.2.40 (Annex GG) from the confirmed charge mass. May not be required if charge is below the standard's threshold.",
+      "Responsible Supplier (AU/NZ): legal entity + ABN (or NZ IRD) + Australian address. An overseas entity cannot be the Responsible Supplier under the EESS; value not in source manual.",
+      "Responsible Supplier contact email / phone.",
+      "RCM mark artwork: may be affixed only once the Responsible Supplier is EESS-registered (electrical) and ACMA-registered (radio/EMC). Insert artwork here and on the rating label / packaging per AS/NZS 4417.1 & 4417.2.",
+      "Australian DoC URL: must resolve to an AU declaration, not the EU DoC. The source manual's link (use.berlin/10049174) points to an EU 2014/53/EU DoC.",
+      "AS/NZS 60335.2.40 edition applicable to this product's assessment date: 2023 edition current; 2025 edition (published Nov 2025) supersedes from 27 Nov 2028. Confirm which edition the assessment cites.",
+      "Product supplier/OEM name not stated; product.supplier set to the brand owner (Klarstein / Chal-Tec GmbH) — confirm the correct value.",
+      "Support email appsupport@klarstein.com: confirm correct AU-market routing, not an EU-only inbox.",
+      "'Symbols used' legend table in Safety may be redundant if the platform renders its own callout legend."
+    ]
+  }
+}

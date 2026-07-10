@@ -19,9 +19,16 @@
  */
 
 import { getCalloutTitle } from './callout-titles.i18n';
-import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
+import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
 
 export type PrintPageSize = 'a4' | 'a5';
+
+/**
+ * Default compact-leaflet typography (points). Body text and headings are user-configurable
+ * before rendering; these are the pre-filled starting values (≈ the previous 3.4mm / 4.6mm).
+ */
+export const DEFAULT_LEAFLET_TEXT_PT = 6;
+export const DEFAULT_LEAFLET_HEADING_PT = 8;
 
 // ---------------------------------------------------------------------------
 // Render contract — a deliberately local, minimal shape of the published
@@ -113,6 +120,22 @@ export interface PrintHtmlOptions {
   back: PrintBackOptions;
   /** Publish version stamped onto the back page (e.g. 3 → "v3"). */
   version?: number;
+  /**
+   * Compact 'warning_leaflet' layout: no cover / TOC / language dividers / back page, a
+   * per-language logo-only header, and tight spacing. Default false = the full IM booklet.
+   * Only consulted by buildPrintPartsHtml (the PDF render path).
+   */
+  compact?: boolean;
+  /**
+   * Compact-leaflet body-text size in points, applied to ALL body text with no per-element
+   * exceptions. Falls back to DEFAULT_LEAFLET_TEXT_PT. Only used when `compact`.
+   */
+  leafletTextPt?: number;
+  /**
+   * Compact-leaflet heading size in points, applied to ALL headings (section titles, in-content
+   * h1–h3, callout titles). Falls back to DEFAULT_LEAFLET_HEADING_PT. Only used when `compact`.
+   */
+  leafletHeadingPt?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +295,15 @@ const buildLanguageIndex = (entries: NonNullable<PrintCoverOptions['languageInde
       .join('')}
   </div>`;
 
+/**
+ * Compact leaflet header — a logo-only bar shown at the top of the first page of each language
+ * (the Warning Leaflet has no cover page). Empty when no logo is available.
+ */
+const buildLeafletHeader = (logoUrl?: string): string =>
+  logoUrl
+    ? `<header class="im-leaflet-header"><img src="${logoUrl}" alt="Logo" class="im-leaflet-logo" /></header>`
+    : '';
+
 const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string => {
   const coverImage = opts.coverImageUrl
     ? `<div class="im-cover-image" style="background-image:url('${opts.coverImageUrl}')"></div>`
@@ -419,11 +451,57 @@ export const getTabLayout = (index: number, total: number, pageSize: PrintPageSi
   return { topMm, heightMm, widthMm, color: TAB_PALETTE[index % TAB_PALETTE.length] };
 };
 
+/**
+ * Compact-leaflet CSS overrides, appended AFTER the shared rules (so the full-IM path stays
+ * byte-identical). Removes filler heights and tightens spacing to squeeze the leaflet into as
+ * few pages as possible while staying readable, and styles the logo-only header.
+ */
+const compactOverrides = (primaryColor: string, textPt: number, headingPt: number): string => `
+    /* --- Warning Leaflet compact overrides --- */
+    .im-leaflet-header { display: flex; align-items: center; margin: 0 0 3mm; padding-bottom: 1.5mm; border-bottom: 0.5mm solid ${primaryColor}; }
+    .im-leaflet-logo { height: 8mm; width: auto; object-fit: contain; }
+    /* Each language is its own render part, so the content block must NOT force a page break —
+       otherwise the logo header would sit alone on page 1 and content would start on page 2. */
+    .im-page-content { padding: 0; break-before: auto; page-break-before: auto; }
+
+    /* Uniform typography: EVERY element in the leaflet content uses the chosen body size, and
+       every heading the chosen heading size — no per-element exceptions. Numeric badges use em
+       units below so they scale with the text instead of overflowing their circles. */
+    .im-page-content, .im-page-content * { font-size: ${textPt}pt; line-height: 1.3; }
+    .im-section-title,
+    .im-section-content h1, .im-section-content h2, .im-section-content h3,
+    .imv-block-title { font-size: ${headingPt}pt; line-height: 1.2; }
+
+    .im-section { margin: 0 0 2.5mm; }
+    .im-section-title { margin: 0 0 1.5mm; padding-bottom: 1mm; }
+    .im-section-content h1, .im-section-content h2, .im-section-content h3 { margin: 1.5mm 0 1mm; }
+    .imv-content p, .imv-content ul, .imv-content ol { margin: 0 0 0.35em; }
+    .imv-content li { margin-bottom: 0.1em; }
+
+    /* ISO-symbol callout boxes — tighter padding / margin / gap and a smaller icon. */
+    .imv-block-wrapper { gap: 0.4rem; padding: 0.35rem 0.5rem; margin: 0.4rem 0; border-left-width: 3px; border-radius: 4px; }
+    .imv-block-icon { width: 22px; height: 22px; }
+    .imv-block-title { margin-bottom: 0.1rem; }
+    .imv-block-content p { margin: 0 0 0.2em; }
+    .imv-block-content p:last-child { margin-bottom: 0; }
+
+    .imv-annotated, .imv-steps, .imv-legend-table { margin: 0.5rem 0; }
+    .imv-annotated-item { margin-bottom: 0.5rem; }
+    .imv-step { margin-bottom: 6px; gap: 10px; }
+    /* Numeric badges scale with the text so they never overflow at larger sizes. */
+    .imv-marker { width: 1.9em; height: 1.9em; }
+    .imv-legend-num { min-width: 1.7em; height: 1.7em; }
+    .imv-step-num { width: 2.1em; height: 2.1em; }
+`;
+
 const buildStyles = (
   pageSize: PrintPageSize,
   primaryColor: string,
   fontImport: string,
   fontStack: string,
+  compact = false,
+  textPt: number = DEFAULT_LEAFLET_TEXT_PT,
+  headingPt: number = DEFAULT_LEAFLET_HEADING_PT,
 ): string => {
   const dims = PAGE_DIMS[pageSize];
   const s = pageSize === 'a5' ? 0.82 : 1; // A5 type scale
@@ -545,6 +623,7 @@ const buildStyles = (
     .im-end-logo { height: ${mm(16)}; object-fit: contain; margin-bottom: ${mm(8)}; }
     .im-end-content { font-size: ${mm(3.5)}; color: #1e293b; }
     .im-end-copyright { margin-top: ${mm(10)}; font-size: ${mm(3.2)}; color: #64748b; text-align: center; }
+    ${compact ? compactOverrides(primaryColor, textPt, headingPt) : ''}
   `;
 };
 
@@ -651,7 +730,7 @@ const wrapStandalone = (inner: string, styles: string): string => `<!doctype htm
 
 const partStyles = (manuals: PrintManual[], opts: PrintHtmlOptions): string => {
   const base = manuals[0].metadata;
-  return buildStyles(opts.pageSize, base?.primaryColor || '#0f172a', getFontImport(base?.fontFamily), getFontStack(base?.fontFamily));
+  return buildStyles(opts.pageSize, base?.primaryColor || '#0f172a', getFontImport(base?.fontFamily), getFontStack(base?.fontFamily), opts.compact, opts.leafletTextPt, opts.leafletHeadingPt);
 };
 
 /**
@@ -686,6 +765,18 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
   const versionLabel = opts.version ? `v${opts.version}` : '';
   const multi = manuals.length > 1;
   const styles = partStyles(manuals, opts);
+
+  // Compact Warning Leaflet: no cover / TOC / dividers / back page. Each language is a single part
+  // (a logo-only header + its sections) so it still carries the same edge thumb-tab as the main
+  // manual. The last-page copyright line is stamped onto the merged PDF by the print function.
+  if (opts.compact) {
+    // Leaflets fall back to their own standard logo (not the full-manual DEFAULT_IM_LOGO_URL).
+    const logoUrl = opts.cover.logoUrl ?? base?.companyLogoUrl ?? DEFAULT_LEAFLET_LOGO_URL;
+    return manuals.map((manual, i) => ({
+      html: wrapStandalone(buildLeafletHeader(logoUrl) + buildSectionPages(manual), styles),
+      tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,
+    }));
+  }
 
   const parts: PrintPart[] = [];
   // Cover with a PLACEHOLDER directory (page numbers unknown until every part is rendered).
