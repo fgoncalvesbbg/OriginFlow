@@ -29,6 +29,12 @@ interface PrintExportDialogProps {
   /** SKU / article numbers this IM covers (one IM can cover several). */
   skus: string[];
   version?: number;
+  /**
+   * Called after a successful render to persist the PDF into the project's documents
+   * (the print render is the ONLY PDF saved on the project — publish itself stores none).
+   * Failures are surfaced as a non-fatal warning; the PDF stays downloadable regardless.
+   */
+  onRendered?: (result: PrintPdfResult, languages: string[], pageSize: 'a4' | 'a5') => Promise<void>;
   onClose: () => void;
 }
 
@@ -41,6 +47,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   languages,
   skus,
   version,
+  onRendered,
   onClose,
 }) => {
   const meta = template?.metadata;
@@ -63,8 +70,10 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   // Empty subtitle → builder auto-fills "Instruction Manual" in every printed language.
   const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? '');
   const [skuText, setSkuText] = useState(skus.join(', '));
+  // `||` (not `??`): normalizeIMTemplateMetadata coerces a missing companyLogoUrl to '',
+  // which must still fall through to the standard default so the logo is prelinked.
   const [logoUrl, setLogoUrl] = useState(
-    formData['__custom_logo'] ?? meta?.companyLogoUrl ?? (isLeaflet ? DEFAULT_LEAFLET_LOGO_URL : DEFAULT_IM_LOGO_URL),
+    formData['__custom_logo'] || meta?.companyLogoUrl || (isLeaflet ? DEFAULT_LEAFLET_LOGO_URL : DEFAULT_IM_LOGO_URL),
   );
   const [coverImageUrl, setCoverImageUrl] = useState(
     formData['__custom_cover_image'] ?? meta?.coverImageUrl ?? '',
@@ -85,6 +94,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PrintPdfResult | null>(null);
+  // Saving the rendered PDF into the project's documents (via onRendered).
+  const [attachState, setAttachState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
 
   // Render history (for "already exists" + version comparison + credit guard).
   const [renders, setRenders] = useState<PrintRender[]>([]);
@@ -170,6 +181,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     setElapsed(0);
     setError(null);
     setResult(null);
+    setAttachState('idle');
     try {
       const res = await requestPrintPdf({
         projectId,
@@ -201,6 +213,19 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       setResult(res);
       if (res.render) setRenders((prev) => [res.render as PrintRender, ...prev]);
       setConfirmCredit(false);
+
+      // Persist the render as the project's "Generated …" document. Non-fatal: the PDF
+      // is already rendered and downloadable — a failure here only shows a warning.
+      if (onRendered) {
+        setAttachState('saving');
+        try {
+          await onRendered(res, selected, pageSize);
+          setAttachState('saved');
+        } catch (attachErr) {
+          console.error('[print-export] Saving the PDF to the project failed:', attachErr);
+          setAttachState('failed');
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Print render failed.');
     } finally {
@@ -516,7 +541,15 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
           {result && (
             <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded px-3 py-2.5">
-              <span className="text-sm text-emerald-800">Print PDF ready.</span>
+              <span className="text-sm text-emerald-800 flex items-center gap-1.5">
+                Print PDF ready.
+                {attachState === 'saving' && (
+                  <span className="text-emerald-700/80 flex items-center gap-1">
+                    <Loader2 size={12} className="animate-spin" /> Saving to project documents…
+                  </span>
+                )}
+                {attachState === 'saved' && <span className="text-emerald-700/80">Saved to project documents.</span>}
+              </span>
               <a
                 href={result.url}
                 target="_blank"
@@ -525,6 +558,13 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
               >
                 <Download size={14} /> Download
               </a>
+            </div>
+          )}
+
+          {attachState === 'failed' && (
+            <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              The PDF was rendered, but saving it to the project's documents failed. Download it
+              above, or generate again to retry.
             </div>
           )}
         </div>

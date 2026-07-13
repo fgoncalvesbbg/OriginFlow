@@ -7,6 +7,7 @@ import {
   PrintManual,
   PrintHtmlOptions,
 } from './im-print-html';
+import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
 
 // A manual whose section `order` is assigned per sibling-group (10/20 within each parent).
 // Roots: A(10) with child A1(10); B(20) with child B1(10). Correct reading order is the
@@ -120,5 +121,35 @@ describe('buildPrintPartsHtml — Warning Leaflet compact layout', () => {
     expect(all).toContain('im-page im-break im-page-toc');
     expect(all).toContain('im-page im-break im-page-end');
     expect(all).not.toContain('im-leaflet-header');
+  });
+});
+
+describe('default logo fallback — normalized-empty companyLogoUrl', () => {
+  // normalizeIMTemplateMetadata stores a missing companyLogoUrl as '' (not undefined),
+  // so published manifests carry the empty string. The default logo must still apply.
+  const normalized: PrintManual = {
+    ...manual,
+    metadata: { ...manual.metadata, companyLogoUrl: '' },
+  };
+
+  it('compact leaflet: header falls back to the standard leaflet logo', () => {
+    const [part] = buildPrintPartsHtml([normalized], { ...opts, compact: true });
+    expect(part.html).toContain(DEFAULT_LEAFLET_LOGO_URL);
+    expect(part.html).toContain('im-leaflet-logo');
+  });
+
+  it('full manual: cover falls back to the standard IM logo', () => {
+    const html = buildPrintHtml([normalized], opts);
+    expect(html).toContain(DEFAULT_IM_LOGO_URL);
+  });
+
+  it('an explicit cover logo still wins over both defaults', () => {
+    const [part] = buildPrintPartsHtml([normalized], {
+      ...opts,
+      compact: true,
+      cover: { title: 'T', logoUrl: 'https://example.com/custom.png' },
+    });
+    expect(part.html).toContain('https://example.com/custom.png');
+    expect(part.html).not.toContain(DEFAULT_LEAFLET_LOGO_URL);
   });
 });

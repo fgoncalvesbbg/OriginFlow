@@ -635,7 +635,9 @@ const buildStyles = (
 const resolveCoverOpts = (opts: PrintHtmlOptions, base: PrintManual['metadata']): PrintCoverOptions => ({
   title: opts.cover.title,
   subtitle: opts.cover.subtitle,
-  logoUrl: opts.cover.logoUrl ?? base?.companyLogoUrl ?? DEFAULT_IM_LOGO_URL,
+  // `||` (not `??`): published manifests carry normalized metadata where a missing
+  // companyLogoUrl is '', which must still fall through to the standard default.
+  logoUrl: opts.cover.logoUrl || base?.companyLogoUrl || DEFAULT_IM_LOGO_URL,
   coverImageUrl: opts.cover.coverImageUrl ?? base?.coverImageUrl,
   markUrls: opts.cover.markUrls,
   skus: opts.cover.skus,
@@ -771,7 +773,9 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
   // manual. The last-page copyright line is stamped onto the merged PDF by the print function.
   if (opts.compact) {
     // Leaflets fall back to their own standard logo (not the full-manual DEFAULT_IM_LOGO_URL).
-    const logoUrl = opts.cover.logoUrl ?? base?.companyLogoUrl ?? DEFAULT_LEAFLET_LOGO_URL;
+    // `||` (not `??`): normalized metadata stores a missing companyLogoUrl as '', which must
+    // still fall through to the default so the header logo is always prelinked.
+    const logoUrl = opts.cover.logoUrl || base?.companyLogoUrl || DEFAULT_LEAFLET_LOGO_URL;
     return manuals.map((manual, i) => ({
       html: wrapStandalone(buildLeafletHeader(logoUrl) + buildSectionPages(manual), styles),
       tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,

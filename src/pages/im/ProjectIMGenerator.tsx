@@ -12,7 +12,8 @@ import {
     getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
     addDocument, uploadFile, getProjectDocs, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
-    getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable
+    getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
+    getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl
 } from '../../services';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
@@ -23,12 +24,11 @@ import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 import { uploadIMAsset, listIMAssets, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
-import type { PublishResult } from '../../services';
+import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate } from 'lucide-react';
 import { InlineBlockEditor } from './editor/InlineBlockEditor';
 import { ProjectImImportDialog } from './ProjectImImportDialog';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
-import { renderProjectIMPdf } from '../../services/im/im-print-renderer';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
 import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition } from './project-im-generator/im-content.utils';
@@ -132,6 +132,10 @@ const ProjectIMGenerator: React.FC = () => {
   // Pre-publish checklist: populated when the user clicks Publish and something is
   // missing, so they can review before confirming (or cancel and fix).
   const [checklist, setChecklist] = useState<{ blocking: string[]; values: string[]; slots: string[]; translations: { lang: string; items: string[] }[] } | null>(null);
+  // "Already up to date" guard: set when Publish is clicked but the published output would be
+  // identical to what's already live. Carries the prior artifacts to show instead of republishing.
+  const [noChangesPrompt, setNoChangesPrompt] = useState<{ manifestUrl: string | null; lastRender: PrintRender | null } | null>(null);
+  const [checkingChanges, setCheckingChanges] = useState(false);
   // Auto-translation of project-authored content (added/edited sections). English is
   // always the source; template content is translated in the template editor, not here.
   const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
@@ -152,7 +156,7 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Any network write is in flight — blocks re-entry and mutating actions, and drives the
   // blocking save overlay so the user can't navigate away and wedge the session mid-save.
-  const isBusy = saving || generating || translating;
+  const isBusy = saving || generating || translating || checkingChanges;
 
   // Crash-safe local draft. `savedSnapshotRef` holds a serialization of the last-persisted
   // editable state (the DB baseline); the current state differing from it = "unsaved edits",
@@ -429,7 +433,7 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // Yield a frame so React can paint a status change before the next (possibly main-thread
-  // blocking) step runs — otherwise "Saving…"/"Rendering PDF…" never shows until it's over.
+  // blocking) step runs — otherwise "Saving…" never shows until it's over.
   const yieldToPaint = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
   // Encode the current form/condition/visibility state into the flat placeholder_data
@@ -631,9 +635,9 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-      if (!project) {
-          console.error("Project missing");
-          alert("Could not load project details to generate PDF.");
+      if (!project || !template) {
+          console.error("Project or template missing");
+          alert("Could not load project details to publish.");
           return;
       }
       // Don't publish on top of another in-flight operation (see handleSaveDraft).
@@ -641,69 +645,12 @@ const ProjectIMGenerator: React.FC = () => {
 
       setGenerating(true);
       setPublishStatus('Preparing…');
-      // Each publish bumps the version; it's stamped in the PDF footer and persisted.
+      // Each publish bumps the version; it's stamped into the print PDF footer and persisted.
       const nextVersion = (instance?.version ?? 0) + 1;
 
       try {
-          // Paint the status before the CPU-heavy, main-thread-blocking PDF render below.
-          setPublishStatus('Rendering PDF…');
-          await yieldToPaint();
-
-          const shouldUseLegacyRenderer =
-              import.meta.env.VITE_IM_PDF_LEGACY_HTML2CANVAS === 'true' ||
-              window.localStorage.getItem('im.export.legacyHtml2canvas') === 'true';
-
-          // Compose every visible section (template sections + project chapters, in
-          // document order) into final HTML for the active language. This feeds the
-          // PDF's Contents page (so project chapters get their own TOC entry) and the
-          // section bodies (so project text/blocks render). `order: i` keeps the
-          // renderer's flat sort in the same hierarchical order as the preview.
-          const renderSections = orderedSections
-              .filter(s => isSectionEffectivelyVisible(s) && isSectionInSkuScope(s.id))
-              .map((s, i) => ({ ...s, order: i, title: localizedSectionTitle(s, activeLang), content: { ...s.content, [activeLang]: buildSectionHtml(s) } }));
-
-          const pdfBlob = await renderProjectIMPdf({
-              previewElement: previewRef.current,
-              projectName: project.name,
-              language: activeLang,
-              template,
-              sections: renderSections,
-              formData,
-              conditions,
-              useLegacyHtml2Canvas: shouldUseLegacyRenderer,
-              version: nextVersion,
-          });
-
-          setPublishStatus('Uploading document…');
-          const docTypeSlug = templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual';
-          const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${activeLang.toUpperCase()}.pdf`;
-          const file = new File([pdfBlob], fileName, { type: "application/pdf" });
-
-          // Generated manuals live under the Production step (step 3) — never RFQ —
-          // as a SINGLE document per template type. Each (re)generation is appended as
-          // a new version via uploadFile, so the Production section always shows the
-          // latest file with older versions collapsed under it (Version History).
-          const PRODUCTION_STEP = 3;
-          const generatedDocTitle = `Generated ${typeLabel}`;
-          const existingDocs = await getProjectDocs(project.id);
-          const targetDoc = existingDocs.find(d =>
-             d.stepNumber === PRODUCTION_STEP &&
-             d.title === generatedDocTitle &&
-             d.responsibleParty === ResponsibleParty.INTERNAL
-          ) ?? await addDocument({
-             projectId: project.id,
-             stepNumber: PRODUCTION_STEP,
-             title: generatedDocTitle,
-             description: `Generated from ${typeLabel} template`,
-             responsibleParty: ResponsibleParty.INTERNAL,
-             isVisibleToSupplier: true,
-             isRequired: false,
-             status: DocStatus.APPROVED
-          });
-
-          await uploadFile(targetDoc.id, file, false);
-
           setPublishStatus('Saving…');
+          await yieldToPaint();
           // Move any base64 images out of the row (formData + overlay content) into storage
           // first, so the persisted JSONB stays small and can't trip the DB write timeout.
           const cache = new Map<string, string>();
@@ -721,33 +668,57 @@ const ProjectIMGenerator: React.FC = () => {
           markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
 
           // Publish the structured ResolvedManual (one JSON per language + manifest) to the
-          // public im-published bucket, for a separate web/PDF render service to consume by URL.
-          // Non-fatal: the PDF is already generated and uploaded above.
-          if (template) {
-              try {
-                  setPublishStatus('Publishing languages…');
-                  const result = await publishResolvedManuals(
-                      project.id, template, sections, savedIM,
-                      (done, total, lang) => setPublishStatus(`Publishing ${done}/${total} (${lang.toUpperCase()})…`),
-                  );
-                  setPublishResult(result);
-              } catch (pubErr: any) {
-                  console.error('Structured publish failed', pubErr);
-                  alert(`${typeLabel} generated, but publishing the structured JSON failed: ${pubErr.message}`);
-                  navigate(`/project/${project.id}`);
-              }
-          } else {
-              alert(`${typeLabel} generated and uploaded successfully!`);
-              navigate(`/project/${project.id}`);
-          }
+          // public im-published bucket. This IS the publish output — the print-ready PDF is
+          // rendered on demand from it (PrintExportDialog → render-print-pdf) and attached to
+          // the project's documents when that render succeeds (attachPrintPdfToProject).
+          setPublishStatus('Publishing languages…');
+          const result = await publishResolvedManuals(
+              project.id, template, sections, savedIM,
+              (done, total, lang) => setPublishStatus(`Publishing ${done}/${total} (${lang.toUpperCase()})…`),
+          );
+          setPublishResult(result);
 
       } catch (e: any) {
-          console.error("Generation failed", e);
-          alert(`Failed to generate PDF: ${e.message}`);
+          console.error("Publish failed", e);
+          alert(`Failed to publish ${typeLabel}: ${e.message}`);
       } finally {
           setGenerating(false);
           setPublishStatus(null);
       }
+  };
+
+  // After a print render succeeds, persist that PDF as the project's single
+  // "Generated {typeLabel}" document under the Production step (step 3) — never RFQ.
+  // Each render is appended as a new version via uploadFile, so the Production section
+  // always shows the latest file with older versions collapsed under it (Version History).
+  const attachPrintPdfToProject = async (res: PrintPdfResult, langs: string[], pageSize: 'a4' | 'a5') => {
+      if (!project) throw new Error('Project not loaded.');
+      const resp = await fetch(res.url);
+      if (!resp.ok) throw new Error(`Could not download the rendered PDF (${resp.status}).`);
+      const blob = await resp.blob();
+      const docTypeSlug = templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual';
+      const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${langs.map(l => l.toUpperCase()).join('-')}_${pageSize.toUpperCase()}.pdf`;
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+
+      const PRODUCTION_STEP = 3;
+      const generatedDocTitle = `Generated ${typeLabel}`;
+      const existingDocs = await getProjectDocs(project.id);
+      const targetDoc = existingDocs.find(d =>
+         d.stepNumber === PRODUCTION_STEP &&
+         d.title === generatedDocTitle &&
+         d.responsibleParty === ResponsibleParty.INTERNAL
+      ) ?? await addDocument({
+         projectId: project.id,
+         stepNumber: PRODUCTION_STEP,
+         title: generatedDocTitle,
+         description: `Generated from ${typeLabel} template`,
+         responsibleParty: ResponsibleParty.INTERNAL,
+         isVisibleToSupplier: true,
+         isRequired: false,
+         status: DocStatus.APPROVED
+      });
+
+      await uploadFile(targetDoc.id, file, false);
   };
 
   // ---------------- PROJECT CONTENT EDITOR ----------------
@@ -1546,7 +1517,7 @@ const ProjectIMGenerator: React.FC = () => {
     const nums = sectionSkuNumbers(sectionId);
     if (!nums.length) return '';
     // Inline styles (not a CSS class) so the badge renders identically in the on-screen
-    // preview and the html2canvas PDF, the same way wrapBlockCallout inlines its styles.
+    // preview and the published/print HTML, the same way wrapBlockCallout inlines its styles.
     const style = 'display:inline-block;margin:0 0 10px;padding:3px 10px;border-radius:9999px;background:#0f172a;color:#fff;font-size:12px;font-weight:600;';
     return `<div class="im-sku-scope" style="${style}">${escapeXml(getAppliesToLabel(activeLang))}: ${escapeXml(nums.join(', '))}</div>`;
   };
@@ -2245,15 +2216,65 @@ const ProjectIMGenerator: React.FC = () => {
     return { blocking, values, slots, translations };
   };
 
-  // Publish entry point: run the checklist first. If anything's missing (or blocked),
-  // show it for review; otherwise publish straight away.
-  const handlePublishClick = () => {
+  // Publish entry point. If the manual is already published and nothing changed since
+  // (no unsaved edits + the published content hashes still match a re-resolve), don't
+  // publish again — show the existing files and require explicit confirmation instead.
+  // Otherwise continue to the checklist.
+  const handlePublishClick = async () => {
+    if (isBusy || !project) return;
+    const hasUnsavedEdits = savedSnapshotRef.current !== null && serializeDraft() !== savedSnapshotRef.current;
+    if (instance?.status === 'generated' && !hasUnsavedEdits) {
+      setCheckingChanges(true);
+      try {
+        const reasons = await getProjectIMStaleReasons(project.id, templateType);
+        if (!reasons.length) {
+          const renders = await getPrintRenders(project.id, templateType);
+          setNoChangesPrompt({
+            manifestUrl: getPublishedManifestUrl(project.id, templateType),
+            lastRender: renders[0] ?? null,
+          });
+          return;
+        }
+      } catch (e) {
+        // Change detection is best-effort — on failure fall through to a normal publish.
+        console.error('Publish change-check failed; proceeding to publish.', e);
+      } finally {
+        setCheckingChanges(false);
+      }
+    }
+    proceedToChecklist();
+  };
+
+  // Checklist step (2nd stage of Publish): if anything's missing (or blocked), show it
+  // for review; otherwise publish straight away.
+  const proceedToChecklist = () => {
     const result = buildPublishChecklist();
     if (result.blocking.length || result.values.length || result.slots.length || result.translations.length) {
       setChecklist(result);
     } else {
       handleGenerate();
     }
+  };
+
+  // Open the print-export dialog for the ALREADY-published version without republishing.
+  // The publish-result payload is rebuilt from the deterministic storage layout
+  // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed.
+  const openPrintForPublished = () => {
+    if (!project || !instance) return;
+    const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
+    setPublishResult({
+      manifestUrl,
+      manifestPath: `${project.id}/${templateType}/manifest.json`,
+      languages: requiredLanguages.map(language => ({
+        language,
+        url: manifestUrl.replace(/manifest\.json(\?.*)?$/, `${language}.json$1`),
+        storagePath: `${project.id}/${templateType}/${language}.json`,
+        contentHash: '',
+        warnings: [],
+      })),
+    });
+    setNoChangesPrompt(null);
+    setShowPrintDialog(true);
   };
 
   // Read-only HTML for a single template block ref (shown as a locked card in the
@@ -2757,8 +2778,71 @@ const ProjectIMGenerator: React.FC = () => {
              .map((s) => s.skuNumber)
              .filter(Boolean)}
            version={instance?.version}
+           onRendered={attachPrintPdfToProject}
            onClose={() => setShowPrintDialog(false)}
          />
+       )}
+
+       {/* ALREADY UP TO DATE — nothing changed since the last publish. Show the existing
+           files and only regenerate on explicit confirmation. */}
+       {noChangesPrompt && (
+         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+             <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
+               <CheckCircle size={18} className="text-emerald-600" /> Already up to date
+             </h3>
+             <p className="text-sm text-muted mb-4">
+               Nothing has changed since <strong>v{instance?.version}</strong> of this {typeLabel.toLowerCase()} was
+               published — regenerating would produce identical output. Use the existing files below,
+               or regenerate anyway.
+             </p>
+
+             <div className="border rounded-lg divide-y mb-5">
+               <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                 <div className="min-w-0">
+                   <div className="text-sm font-medium text-gray-800">Published manifest (v{instance?.version})</div>
+                   <div className="text-xs text-muted">Structured JSON — all languages</div>
+                 </div>
+                 {noChangesPrompt.manifestUrl && (
+                   <a href={noChangesPrompt.manifestUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50 shrink-0">Open</a>
+                 )}
+               </div>
+               {noChangesPrompt.lastRender ? (
+                 <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                   <div className="min-w-0">
+                     <div className="text-sm font-medium text-gray-800">
+                       Print PDF{noChangesPrompt.lastRender.imVersion != null ? ` (v${noChangesPrompt.lastRender.imVersion})` : ''}
+                     </div>
+                     <div className="text-xs text-muted">
+                       <span className="uppercase">{noChangesPrompt.lastRender.languages.join(', ')} · {noChangesPrompt.lastRender.pageSize?.toUpperCase()}</span>
+                       {' · '}{new Date(noChangesPrompt.lastRender.createdAt).toLocaleDateString()}
+                     </div>
+                   </div>
+                   <a href={noChangesPrompt.lastRender.url} target="_blank" rel="noreferrer" className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50 flex items-center gap-1 shrink-0">
+                     <Download size={12} /> Download
+                   </a>
+                 </div>
+               ) : (
+                 <div className="px-3 py-2.5 text-xs text-muted">No print PDF has been rendered for this version yet.</div>
+               )}
+             </div>
+
+             <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
+               {/* Render a (new) print PDF from the already-published version — no republish needed. */}
+               {isPrintExportAvailable() && (
+                 <button onClick={openPrintForPublished} className="text-sm px-3 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 flex items-center gap-1.5">
+                   <FileDown size={14} /> Export print PDF
+                 </button>
+               )}
+               <div className="flex-1" />
+               <button onClick={() => setNoChangesPrompt(null)} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50">Close</button>
+               <button
+                 onClick={() => { setNoChangesPrompt(null); proceedToChecklist(); }}
+                 className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700"
+               >Regenerate anyway</button>
+             </div>
+           </div>
+         </div>
        )}
 
        {/* PRE-PUBLISH CHECKLIST */}
@@ -2973,8 +3057,8 @@ const ProjectIMGenerator: React.FC = () => {
                    </div>
 
                    <button onClick={handlePublishClick} disabled={isBusy} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
-                      {generating ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
-                      <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : `Publish (${activeLang.toUpperCase()})`}</span>
+                      {(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
+                      <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${activeLang.toUpperCase()})`}</span>
                    </button>
                </div>
            </div>
