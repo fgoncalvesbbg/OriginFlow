@@ -214,4 +214,4 @@ export {
 } from './sourcing';
 
 // AI module
-export { getAIPrompts, updateAIPrompt } from './ai';
+export { getAIPrompts, updateAIPrompt, getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry, getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim } from './ai';

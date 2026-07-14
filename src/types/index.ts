@@ -94,4 +94,4 @@ export type { ProductionUpdate } from './manufacturing.types';
 export type { Toast, ToastType, ToastContextType } from './toast.types';
 
 // AI types
-export type { AIPrompt } from './ai.types';
+export type { AIPrompt, PromptLibraryEntry, TranslationVerbatim } from './ai.types';

@@ -11,12 +11,15 @@ import {
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS,
-  getAIPrompts, updateAIPrompt
+  getAIPrompts, updateAIPrompt,
+  getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry,
+  getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim
 } from '../services';
 import { generateUUID, getAttributesForCategory } from '../utils';
-import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AIPrompt } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles } from 'lucide-react';
+import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
@@ -36,6 +39,18 @@ const AdminDashboard: React.FC = () => {
   const [editingPrompt, setEditingPrompt] = useState<AIPrompt | null>(null);
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
+
+  // Prompt Library State — user-saved prompts for use in Claude chat outside the app.
+  const [promptLibrary, setPromptLibrary] = useState<PromptLibraryEntry[]>([]);
+  const [editingLibEntry, setEditingLibEntry] = useState<{ id?: string; title: string; description: string; promptText: string } | null>(null);
+  const [savingLibEntry, setSavingLibEntry] = useState(false);
+  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+
+  // Translation Verbatims State — regulation phrases with official per-language
+  // wording; translation substitutes the stored wording instead of translating.
+  const [verbatims, setVerbatims] = useState<TranslationVerbatim[]>([]);
+  const [editingVerbatim, setEditingVerbatim] = useState<{ id?: string; phrase: string; note: string; translations: Record<string, string> } | null>(null);
+  const [savingVerbatim, setSavingVerbatim] = useState(false);
   
   // Forms & UI State
   const [newSupName, setNewSupName] = useState('');
@@ -80,13 +95,15 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const [u, s, c, a, p, ai] = await Promise.all([
+    const [u, s, c, a, p, ai, lib, verbs] = await Promise.all([
       getProfiles(),
       getSuppliers(),
       getCategories(),
       getCategoryAttributes(),
       getProjects(),
-      getAIPrompts()
+      getAIPrompts(),
+      getPromptLibrary(),
+      getTranslationVerbatims()
     ]);
     setUsers(u);
     setSuppliers(s);
@@ -94,6 +111,8 @@ const AdminDashboard: React.FC = () => {
     setAttributes(a);
     setProjects(p);
     setAIPrompts(ai);
+    setPromptLibrary(lib);
+    setVerbatims(verbs);
   };
 
   useRefetchOnFocus(loadData);
@@ -370,6 +389,96 @@ const AdminDashboard: React.FC = () => {
     } finally {
       setSavingPrompt(false);
     }
+  };
+
+  // --- PROMPT LIBRARY ACTIONS ---
+  const handleSaveLibEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLibEntry) return;
+    setSavingLibEntry(true);
+    try {
+      const { id, title, description, promptText } = editingLibEntry;
+      if (id) {
+        await updatePromptLibraryEntry(id, { title, description, promptText });
+      } else {
+        await createPromptLibraryEntry({ title, description, promptText }, currentUser?.id);
+      }
+      setEditingLibEntry(null);
+      await loadData();
+    } catch (e: any) {
+      alert(`Error saving prompt: ${e.message}`);
+    } finally {
+      setSavingLibEntry(false);
+    }
+  };
+
+  const handleDeleteLibEntry = (entry: PromptLibraryEntry) => {
+    setDeleteModal({
+      isOpen: true,
+      title: 'Delete Prompt?',
+      message: `Delete "${entry.title}" from the prompt library? This cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await deletePromptLibraryEntry(entry.id);
+          await loadData();
+        } catch (e: any) {
+          alert(`Error deleting prompt: ${e.message}`);
+        }
+        setDeleteModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const handleCopyLibPrompt = async (entry: PromptLibraryEntry) => {
+    try {
+      await navigator.clipboard.writeText(entry.promptText);
+      setCopiedPromptId(entry.id);
+      setTimeout(() => setCopiedPromptId((cur) => (cur === entry.id ? null : cur)), 2000);
+    } catch {
+      alert('Could not copy to clipboard.');
+    }
+  };
+
+  // --- TRANSLATION VERBATIM ACTIONS ---
+  const handleSaveVerbatim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVerbatim) return;
+    setSavingVerbatim(true);
+    try {
+      const { id, phrase, note } = editingVerbatim;
+      // Persist only non-blank language entries (blank = fall back to keeping the source phrase).
+      const translations = Object.fromEntries(
+        Object.entries(editingVerbatim.translations).filter(([, v]) => v && v.trim()),
+      );
+      if (id) {
+        await updateTranslationVerbatim(id, { phrase, note, translations });
+      } else {
+        await createTranslationVerbatim({ phrase, note, translations }, currentUser?.id);
+      }
+      setEditingVerbatim(null);
+      await loadData();
+    } catch (e: any) {
+      alert(`Error saving verbatim: ${e.message}`);
+    } finally {
+      setSavingVerbatim(false);
+    }
+  };
+
+  const handleDeleteVerbatim = (entry: TranslationVerbatim) => {
+    setDeleteModal({
+      isOpen: true,
+      title: 'Delete Verbatim?',
+      message: `Delete "${entry.phrase}"? Future translations will no longer protect this phrase.`,
+      onConfirm: async () => {
+        try {
+          await deleteTranslationVerbatim(entry.id);
+          await loadData();
+        } catch (e: any) {
+          alert(`Error deleting verbatim: ${e.message}`);
+        }
+        setDeleteModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // --- RENDERERS ---
@@ -823,6 +932,126 @@ const AdminDashboard: React.FC = () => {
                 <div className="p-8 text-center text-gray-400">No AI prompts found.</div>
               )}
             </div>
+
+            {/* PROMPT LIBRARY — user-saved prompts, never executed by the app. Copy them (or
+                open claude.ai prefilled) to use directly in Claude chat outside the app. */}
+            <div className="px-6 py-4 bg-light border-y border-gray-200 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-gray-800 flex items-center gap-2"><BookOpen size={16} className="text-indigo-500" /> Prompt Library</h3>
+                <p className="text-xs text-muted mt-1">Your saved prompts for use with Claude chat outside the app — copy one, or open it directly in Claude. The app never runs these.</p>
+              </div>
+              <button
+                onClick={() => setEditingLibEntry({ title: '', description: '', promptText: '' })}
+                className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white rounded px-3 py-2 font-medium hover:bg-indigo-700 whitespace-nowrap"
+              >
+                <Plus size={14} /> Add Prompt
+              </button>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {promptLibrary.map(entry => (
+                <div key={entry.id} className="p-4 hover:bg-light px-6 flex justify-between items-start gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-primary">{entry.title}</div>
+                    {entry.description && (
+                      <div className="text-xs text-muted mt-1">{entry.description}</div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-2 font-mono bg-gray-50 border border-gray-100 rounded px-2 py-1.5 line-clamp-2 whitespace-pre-wrap break-words">
+                      {entry.promptText}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                    <button
+                      onClick={() => handleCopyLibPrompt(entry)}
+                      className={`flex items-center gap-1 text-xs border rounded px-3 py-1.5 transition-colors whitespace-nowrap ${copiedPromptId === entry.id ? 'border-emerald-300 text-emerald-700 bg-emerald-50' : 'border-gray-200 text-gray-600 hover:bg-light hover:text-indigo-600'}`}
+                    >
+                      {copiedPromptId === entry.id ? <CheckCircle size={13} /> : <Copy size={13} />}
+                      {copiedPromptId === entry.id ? 'Copied' : 'Copy'}
+                    </button>
+                    <a
+                      href={`https://claude.ai/new?q=${encodeURIComponent(entry.promptText)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Open a new Claude chat with this prompt prefilled"
+                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors whitespace-nowrap"
+                    >
+                      <ExternalLink size={13} /> Open in Claude
+                    </a>
+                    <button
+                      onClick={() => setEditingLibEntry({ id: entry.id, title: entry.title, description: entry.description ?? '', promptText: entry.promptText })}
+                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors whitespace-nowrap"
+                    >
+                      <Edit2 size={13} /> Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteLibEntry(entry)}
+                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors whitespace-nowrap"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {promptLibrary.length === 0 && (
+                <div className="p-8 text-center text-gray-400 text-sm">
+                  No saved prompts yet. Add one to build your team's library for Claude chat.
+                </div>
+              )}
+            </div>
+
+            {/* TRANSLATION VERBATIMS — exact phrases AI translation must never alter. They are
+                frozen into opaque tokens before the text reaches the model, so they survive
+                every translation byte-identical. */}
+            <div className="px-6 py-4 bg-light border-y border-gray-200 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-gray-800 flex items-center gap-2"><ShieldCheck size={16} className="text-emerald-600" /> Translation Verbatims</h3>
+                <p className="text-xs text-muted mt-1">
+                  Regulation phrases with official wording per language. When the English phrase appears in a text being translated,
+                  the stored wording for the target language is substituted directly — the AI never translates it. Languages without
+                  stored wording keep the English phrase unchanged (right for identifiers like “(EU) 2019/2016”). Add more as you find them.
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingVerbatim({ phrase: '', note: '', translations: {} })}
+                className="flex items-center gap-1.5 text-xs bg-emerald-600 text-white rounded px-3 py-2 font-medium hover:bg-emerald-700 whitespace-nowrap"
+              >
+                <Plus size={14} /> Add Verbatim
+              </button>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {verbatims.map(entry => (
+                <div key={entry.id} className="p-3 hover:bg-light px-6 flex justify-between items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-mono text-sm text-gray-800 bg-gray-50 border border-gray-100 rounded px-2 py-0.5 break-words">{entry.phrase}</span>
+                    <span
+                      className={`text-[10px] font-bold ml-2 px-1.5 py-0.5 rounded-full border ${Object.keys(entry.translations).length ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}
+                      title={Object.keys(entry.translations).length ? `Official wording stored for: ${Object.keys(entry.translations).map(c => c.toUpperCase()).join(', ')}` : 'No per-language wording stored — the English phrase is kept as-is in every language'}
+                    >
+                      {Object.keys(entry.translations).length ? `${Object.keys(entry.translations).length} lang` : 'as-is'}
+                    </span>
+                    {entry.note && <span className="text-xs text-muted ml-2">{entry.note}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => setEditingVerbatim({ id: entry.id, phrase: entry.phrase, note: entry.note ?? '', translations: { ...entry.translations } })}
+                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-light hover:text-indigo-600 transition-colors whitespace-nowrap"
+                    >
+                      <Edit2 size={13} /> Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteVerbatim(entry)}
+                      className="flex items-center gap-1 text-xs border border-gray-200 rounded px-3 py-1.5 text-gray-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors whitespace-nowrap"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {verbatims.length === 0 && (
+                <div className="p-8 text-center text-gray-400 text-sm">
+                  No verbatims yet. Add regulation phrases and standard identifiers that translations must never change.
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1254,6 +1483,149 @@ const AdminDashboard: React.FC = () => {
                   className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-sm font-medium disabled:opacity-50"
                 >
                   {savingPrompt ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Prompt Library Add/Edit Modal */}
+      {editingLibEntry && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                <BookOpen size={18} className="text-indigo-500" /> {editingLibEntry.id ? 'Edit Prompt' : 'Add Prompt'}
+              </h3>
+              <button onClick={() => setEditingLibEntry(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <p className="text-xs text-muted mb-4">Saved to the shared library for use with Claude chat outside the app.</p>
+
+            <form onSubmit={handleSaveLibEntry} className="space-y-4 overflow-y-auto flex-1 pr-1">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input
+                  required
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={editingLibEntry.title}
+                  onChange={e => setEditingLibEntry({ ...editingLibEntry, title: e.target.value })}
+                  placeholder="e.g. Rewrite safety warnings in plain language"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+                <input
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={editingLibEntry.description}
+                  onChange={e => setEditingLibEntry({ ...editingLibEntry, description: e.target.value })}
+                  placeholder="When to use this prompt"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Prompt</label>
+                <textarea
+                  required
+                  rows={12}
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                  value={editingLibEntry.promptText}
+                  onChange={e => setEditingLibEntry({ ...editingLibEntry, promptText: e.target.value })}
+                  placeholder="The full prompt text, ready to paste into Claude…"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingLibEntry(null)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingLibEntry}
+                  className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-md text-sm font-medium disabled:opacity-50"
+                >
+                  {savingLibEntry ? 'Saving…' : editingLibEntry.id ? 'Save Changes' : 'Add Prompt'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Translation Verbatim Add/Edit Modal */}
+      {editingVerbatim && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-emerald-600" /> {editingVerbatim.id ? 'Edit Verbatim' : 'Add Verbatim'}
+              </h3>
+              <button onClick={() => setEditingVerbatim(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <p className="text-xs text-muted mb-4">
+              The English phrase is matched exactly (case-sensitive). In each language's output, the stored official
+              wording below is substituted — the AI never translates it. Languages left blank keep the English phrase
+              unchanged (right for identifiers like “(EU) 2019/2016”).
+            </p>
+
+            <form onSubmit={handleSaveVerbatim} className="space-y-4 overflow-y-auto flex-1 pr-1">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">English phrase (exact, case-sensitive)</label>
+                <input
+                  required
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={editingVerbatim.phrase}
+                  onChange={e => setEditingVerbatim({ ...editingVerbatim, phrase: e.target.value })}
+                  placeholder='e.g. Keep out of reach of children. or (EU) 2019/2016'
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+                <input
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={editingVerbatim.note}
+                  onChange={e => setEditingVerbatim({ ...editingVerbatim, note: e.target.value })}
+                  placeholder="Where this comes from / why it must stay verbatim"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Official wording per language</label>
+                <div className="border border-gray-200 rounded-md divide-y divide-gray-100 max-h-72 overflow-y-auto">
+                  {IM_LANGUAGES.filter(l => l.code !== 'en').map(l => (
+                    <div key={l.code} className="flex items-center gap-3 px-3 py-1.5">
+                      <span className="text-xs font-mono font-semibold text-gray-500 w-8 shrink-0 uppercase">{l.code}</span>
+                      <input
+                        className="flex-1 border-0 bg-transparent text-sm py-1 focus:ring-0 outline-none placeholder:text-gray-300"
+                        value={editingVerbatim.translations[l.code] ?? ''}
+                        onChange={e => setEditingVerbatim({
+                          ...editingVerbatim,
+                          translations: { ...editingVerbatim.translations, [l.code]: e.target.value },
+                        })}
+                        placeholder={`${l.name} — blank keeps the English phrase`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingVerbatim(null)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingVerbatim}
+                  className="px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-md text-sm font-medium disabled:opacity-50"
+                >
+                  {savingVerbatim ? 'Saving…' : editingVerbatim.id ? 'Save Changes' : 'Add Verbatim'}
                 </button>
               </div>
             </form>

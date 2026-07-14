@@ -70,6 +70,10 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   // Empty subtitle → builder auto-fills "Instruction Manual" in every printed language.
   const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? '');
   const [skuText, setSkuText] = useState(skus.join(', '));
+  // Manual name shown in the cover footer. Prefilled from the template name, but editable —
+  // internal template names (e.g. "Blank Standardized Template") shouldn't leak into print.
+  // Empty → the footer line is omitted entirely.
+  const [imName, setImName] = useState(template?.name ?? '');
   // `||` (not `??`): normalizeIMTemplateMetadata coerces a missing companyLogoUrl to '',
   // which must still fall through to the standard default so the logo is prelinked.
   const [logoUrl, setLogoUrl] = useState(
@@ -200,7 +204,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean),
-          imName: template?.name,
+          imName: imName.trim() || undefined,
           companyName: meta?.companyName,
           footerText: formData['__custom_footer'] ?? meta?.footerText,
         },
@@ -431,6 +435,16 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                     className="w-full text-sm border rounded px-2 py-1.5 mt-1"
                   />
                   <p className="text-[11px] text-gray-400 mt-1">Shown on the cover. Prefilled from the SKUs bound to this manual.</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Manual name (cover footer)</label>
+                  <input
+                    value={imName}
+                    onChange={(e) => setImName(e.target.value)}
+                    placeholder="Leave empty to omit this line"
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">Prefilled from the template name. Clear it to leave the line out of the PDF.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { freeze, thaw, hasProse, countTokens } from './im-chip-freeze';
+import { freeze, freezeVerbatims, thaw, hasProse, countTokens } from './im-chip-freeze';
 
 // Real chip HTML shapes taken from im_sections content in the DB.
 const PLACEHOLDER = `<p><strong>Technical Data</strong></p><td>Power Supply</td><td>&nbsp;<span class="im-placeholder bg-amber-100 border-yellow-300 text-amber-800 border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="text" data-id="b2c73541" data-attr-id="b2c73541" data-label="Voltage%20Range">[Voltage Range [V / Hz]]</span>&nbsp;</td>`;
@@ -48,5 +48,76 @@ describe('im-chip-freeze', () => {
     const { frozen } = freeze(CONDITION);
     // The frozen fragment is verbatim, so data-feature-id … data-content order is intact.
     expect(frozen[0].indexOf('data-feature-id')).toBeLessThan(frozen[0].indexOf('data-content'));
+  });
+});
+
+describe('freezeVerbatims — regulation phrases use stored official wording', () => {
+  const v = (phrase: string, replacement?: string) => ({ phrase, replacement });
+
+  it('freezes an exact match and thaws it back byte-identical when no translation is stored', () => {
+    const fh = freeze('<p>Complies with (EU) 2019/2016 requirements.</p>');
+    const out = freezeVerbatims(fh, [v('(EU) 2019/2016')]);
+    expect(out.text).not.toContain('(EU) 2019/2016');
+    expect(countTokens(out.text)).toBe(1);
+    expect(thaw(out.text, out.frozen)).toBe('<p>Complies with (EU) 2019/2016 requirements.</p>');
+  });
+
+  it('thaws a match back as the STORED translation for the target language', () => {
+    const fh = freeze('<p>Keep out of reach of children.</p>');
+    const out = freezeVerbatims(fh, [v('Keep out of reach of children.', 'Außerhalb der Reichweite von Kindern aufbewahren.')]);
+    expect(out.text).not.toContain('Keep out of reach');
+    expect(thaw(out.text, out.frozen)).toBe('<p>Außerhalb der Reichweite von Kindern aufbewahren.</p>');
+  });
+
+  it('a blank stored translation falls back to keeping the source phrase', () => {
+    const fh = freeze('<p>See EN 60335 for details.</p>');
+    const out = freezeVerbatims(fh, [v('EN 60335', '  ')]);
+    expect(thaw(out.text, out.frozen)).toBe('<p>See EN 60335 for details.</p>');
+  });
+
+  it('replaces every occurrence of a phrase with the stored wording', () => {
+    const fh = freeze('<p>EN 60335 applies. See EN 60335 for details.</p>');
+    const out = freezeVerbatims(fh, [v('EN 60335', 'EN 60335-1')]);
+    expect(countTokens(out.text)).toBe(2);
+    expect(thaw(out.text, out.frozen)).toBe('<p>EN 60335-1 applies. See EN 60335-1 for details.</p>');
+  });
+
+  it('matches longest phrase first so a shorter overlap cannot split it', () => {
+    const fh = freeze('<p>Regulation (EU) 2019/2016 of the Commission</p>');
+    const out = freezeVerbatims(fh, [v('(EU) 2019/2016'), v('Regulation (EU) 2019/2016')]);
+    // The longer phrase wins; the shorter one finds nothing left to match.
+    expect(countTokens(out.text)).toBe(1);
+    expect(thaw(out.text, out.frozen)).toBe('<p>Regulation (EU) 2019/2016 of the Commission</p>');
+  });
+
+  it('never matches inside HTML tags', () => {
+    const html = '<p class="EN 60335">EN 60335</p>';
+    const out = freezeVerbatims(freeze(html), [v('EN 60335')]);
+    // Only the prose occurrence is frozen; the attribute stays literal.
+    expect(countTokens(out.text)).toBe(1);
+    expect(out.text).toContain('class="EN 60335"');
+    expect(thaw(out.text, out.frozen)).toBe(html);
+  });
+
+  it('never matches inside existing chip tokens and preserves chips through thaw', () => {
+    const html = '<p>Power: <span class="im-placeholder" data-id="watts">[EN 60335]</span> per EN 60335.</p>';
+    const fh = freeze(html); // the chip becomes {{FRZ_0}}
+    expect(countTokens(fh.text)).toBe(1);
+    const out = freezeVerbatims(fh, [v('EN 60335')]);
+    expect(countTokens(out.text)).toBe(2); // chip + one prose match only
+    expect(thaw(out.text, out.frozen)).toBe(html);
+  });
+
+  it('a later shorter phrase cannot match inside a freshly minted token', () => {
+    // "0" would otherwise match the digits inside a "{{FRZ_10}}"-style token.
+    const fh = freeze('<p>Value 2019/2016 and 0 more.</p>');
+    const out = freezeVerbatims(fh, [v('2019/2016'), v('0')]);
+    expect(thaw(out.text, out.frozen)).toBe('<p>Value 2019/2016 and 0 more.</p>');
+  });
+
+  it('is a no-op for empty entry lists and blank phrases', () => {
+    const fh = freeze('<p>Nothing to protect.</p>');
+    expect(freezeVerbatims(fh, [])).toEqual(fh);
+    expect(freezeVerbatims(fh, [v(''), v('  ')])).toEqual(fh);
   });
 });

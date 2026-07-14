@@ -67,6 +67,64 @@ export const freeze = (html: string): FrozenHtml => {
   return { text: out, frozen };
 };
 
+/** A verbatim to freeze: match `phrase`, thaw back `replacement` (default: the phrase itself). */
+export interface VerbatimEntry {
+  /** Exact (case-sensitive) source text to match. */
+  phrase: string;
+  /**
+   * What `thaw()` restores in place of the match — the officially approved
+   * wording for the TARGET language. Omitted/blank → the source phrase is kept
+   * unchanged (right for language-neutral identifiers like "(EU) 2019/2016").
+   */
+  replacement?: string;
+}
+
+/**
+ * Freeze exact (case-sensitive) occurrences of verbatim phrases — regulation
+ * text, standard identifiers — into additional `{{FRZ_n}}` tokens on an
+ * already chip-frozen fragment, so the translator physically cannot alter
+ * them. The frozen value is the entry's `replacement` (the stored official
+ * translation for the target language), so `thaw()` swaps the source phrase
+ * for the approved wording instead of a model translation. Phrases are
+ * matched longest-first (an overlapping shorter phrase can't partially eat a
+ * longer one) and only in prose OUTSIDE `<...>` tag regions and outside
+ * existing `{{FRZ_n}}` tokens, so markup and chips are never corrupted.
+ */
+export const freezeVerbatims = (fh: FrozenHtml, entries: VerbatimEntry[]): FrozenHtml => {
+  const candidates = entries
+    .filter((e) => e.phrase && e.phrase.trim())
+    .sort((a, b) => b.phrase.length - a.phrase.length);
+  if (!candidates.length) return fh;
+
+  const frozen = [...fh.frozen];
+  // Split into segments: tags and existing FRZ tokens stay untouched; phrase
+  // replacement only happens inside the plain-prose segments between them.
+  const segments = fh.text.split(/(<[^>]*>|\{\{FRZ_\d+\}\})/g);
+  const out = segments.map((seg, i) => {
+    if (i % 2 === 1) return seg; // a tag or an existing token (captured delimiter)
+    // Build a parts list where already-minted tokens are opaque objects, so a
+    // later (shorter) phrase can never match inside a token's own text.
+    let parts: Array<string | { tok: string }> = [seg];
+    for (const { phrase, replacement } of candidates) {
+      parts = parts.flatMap((part) => {
+        if (typeof part !== 'string' || !part.includes(phrase)) return [part];
+        const tok = { tok: `${FRZ_OPEN}${frozen.length}${FRZ_CLOSE}` };
+        frozen.push(replacement?.trim() ? replacement : phrase);
+        const pieces = part.split(phrase);
+        const expanded: Array<string | { tok: string }> = [];
+        pieces.forEach((p, idx) => {
+          if (idx > 0) expanded.push(tok);
+          expanded.push(p);
+        });
+        return expanded;
+      });
+    }
+    return parts.map((p) => (typeof p === 'string' ? p : p.tok)).join('');
+  }).join('');
+
+  return { text: out, frozen };
+};
+
 /** Restore the original chip / <img> fragments frozen by `freeze()`. */
 export const thaw = (text: string, frozen: string[]): string =>
   text.replace(/\{\{FRZ_(\d+)\}\}/g, (_m, n: string) => frozen[Number(n)] ?? '');

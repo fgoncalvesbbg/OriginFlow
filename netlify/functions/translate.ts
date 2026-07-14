@@ -16,7 +16,14 @@
  * prompt are filled in below; a hardcoded fallback covers the (unexpected) case
  * where the row is missing so translation still works.
  *
- * Request body:  { text: string, sourceLang: string, targetLang: string, model?: string }
+ * mode='qa' runs the second-pass proofreader instead (ai_prompts key
+ * 'im_translation_qa'): it receives ONLY the translated fragment — no source
+ * text, no other context — and fixes grammar/spelling/typos, never content.
+ * The caller invokes it as a separate request after the translate pass, so each
+ * function invocation stays a single model call (no timeout risk).
+ *
+ * Request body:  { text: string, targetLang: string, sourceLang?: string, mode?: 'translate' | 'qa', model?: string }
+ *                (sourceLang is required for mode='translate', ignored for 'qa')
  * Response body: { text: string }   |   { error: string }
  *
  * Server-only env (set in Netlify, NOT VITE_-prefixed):
@@ -34,6 +41,7 @@ interface NetlifyEvent {
 }
 
 const PROMPT_KEY = 'im_translation';
+const QA_PROMPT_KEY = 'im_translation_qa';
 const DEFAULT_MODEL = 'claude-sonnet-5';
 const DEFAULT_MAX_TOKENS = 8000;
 const FALLBACK_SYSTEM_TEMPLATE =
@@ -46,7 +54,22 @@ const FALLBACK_SYSTEM_TEMPLATE =
   `them. Keep each token where its surrounding sentence needs it.\n` +
   `3. Keep numbers, units, product/brand names and regulation identifiers ` +
   `(e.g. "(EU) 2019/2016") unchanged.\n` +
-  `4. Output ONLY the translated HTML fragment — no explanations, no markdown code fences.`;
+  `4. Write natural, fluent {{targetLang}} as used in professionally published instruction ` +
+  `manuals — not a word-for-word rendering. Use the imperative mood for instruction steps ` +
+  `where that is the convention in {{targetLang}}.\n` +
+  `5. Use consistent terminology: translate a recurring term the same way every time.\n` +
+  `6. Never add, remove, or summarize content.\n` +
+  `7. Output ONLY the translated HTML fragment — no explanations, no markdown code fences.`;
+const FALLBACK_QA_SYSTEM_TEMPLATE =
+  `You are a meticulous proofreader of {{targetLang}}.\n` +
+  `You receive one HTML fragment written in {{targetLang}}. Rules:\n` +
+  `1. Correct ONLY grammar, spelling, punctuation and typographical errors.\n` +
+  `2. Do NOT change meaning, terminology, tone, sentence order, or content in any way. ` +
+  `Do not rephrase text that is already correct.\n` +
+  `3. Keep every HTML tag, attribute, class and entity (e.g. &nbsp;) exactly as-is.\n` +
+  `4. Preserve every {{FRZ_n}} token VERBATIM — never translate, add, remove, or renumber them.\n` +
+  `5. If the fragment is already correct, return it unchanged.\n` +
+  `6. Output ONLY the corrected HTML fragment — no explanations, no markdown code fences.`;
 
 const json = (statusCode: number, payload: unknown) => ({
   statusCode,
@@ -72,19 +95,26 @@ export const handler = async (event: NetlifyEvent) => {
   }
 
   let text: string;
-  let sourceLang: string;
+  let sourceLang: string | undefined;
   let targetLang: string;
+  let mode: string | undefined;
   let model: string | undefined;
   try {
-    ({ text, sourceLang, targetLang, model } = JSON.parse(event.body || '{}'));
+    ({ text, sourceLang, targetLang, mode, model } = JSON.parse(event.body || '{}'));
   } catch {
     return json(400, { error: 'Invalid JSON body.' });
   }
-  if (typeof text !== 'string' || !text.trim() || !sourceLang || !targetLang) {
-    return json(400, { error: 'Request must include non-empty "text", "sourceLang" and "targetLang".' });
+  const isQa = mode === 'qa';
+  // The QA pass proofreads a fragment already in the target language — no source needed.
+  if (typeof text !== 'string' || !text.trim() || !targetLang || (!isQa && !sourceLang)) {
+    return json(400, {
+      error: isQa
+        ? 'Request must include non-empty "text" and "targetLang".'
+        : 'Request must include non-empty "text", "sourceLang" and "targetLang".',
+    });
   }
 
-  let systemTemplate = FALLBACK_SYSTEM_TEMPLATE;
+  let systemTemplate = isQa ? FALLBACK_QA_SYSTEM_TEMPLATE : FALLBACK_SYSTEM_TEMPLATE;
   let promptModel: string | undefined;
   let promptMaxTokens: number | undefined;
 
@@ -96,7 +126,7 @@ export const handler = async (event: NetlifyEvent) => {
       const { data } = await admin
         .from('ai_prompts')
         .select('system_prompt, model, max_tokens')
-        .eq('key', PROMPT_KEY)
+        .eq('key', isQa ? QA_PROMPT_KEY : PROMPT_KEY)
         .maybeSingle();
       if (data?.system_prompt) {
         systemTemplate = data.system_prompt;
@@ -109,7 +139,7 @@ export const handler = async (event: NetlifyEvent) => {
   }
 
   const system = systemTemplate
-    .replaceAll('{{sourceLang}}', langName(sourceLang))
+    .replaceAll('{{sourceLang}}', langName(sourceLang ?? ''))
     .replaceAll('{{targetLang}}', langName(targetLang));
 
   try {
