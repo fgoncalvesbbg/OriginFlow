@@ -69,6 +69,22 @@ const TRANSIENT_STATUSES = new Set([502, 503, 504, 529]);
 const MAX_ATTEMPTS = 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * True when `output` is implausibly long for a translation/proofread of `input`.
+ *
+ * The {{FRZ_n}} token-count check is NOT a sufficient safety net on its own: a
+ * short header or title routinely carries ZERO tokens (no placeholders, no
+ * verbatims), so "count before === count after" is trivially satisfied by ANY
+ * response — including a full conversational refusal (e.g. the model asking
+ * the user to "please paste the HTML fragment") — since 0 === 0 regardless of
+ * content. A real translation/correction of a short fragment stays roughly the
+ * same size (even verbose target languages don't 5x a two-word title), so a
+ * wildly longer response is a reliable signal that the model didn't do the
+ * requested task and must be rejected rather than adopted verbatim.
+ */
+const isImplausibleLength = (input: string, output: string): boolean =>
+  output.length > Math.max(80, input.length * 3);
+
 /** POST one frozen fragment to the proxy (retrying transient 5xx); returns the model output or throws. */
 const callProxy = async (body: Record<string, unknown>): Promise<string> => {
   for (let attempt = 1; ; attempt++) {
@@ -141,17 +157,23 @@ export const translateHtml = async (
   if (countTokens(translated) !== before) {
     throw new Error(`Placeholder mismatch after translating to ${targetLang} (${before} → ${countTokens(translated)}); fragment left untranslated.`);
   }
+  // Second safety net (see isImplausibleLength) — catches a non-conforming response
+  // (e.g. a conversational refusal) that the token count alone can't, on fragments
+  // with zero tokens to begin with (short headers/titles are the common case).
+  if (isImplausibleLength(text, translated)) {
+    throw new Error(`Translation to ${targetLang} returned an implausible result (${translated.length} chars for a ${text.length}-char fragment); fragment left untranslated.`);
+  }
 
   // Best-effort QA pass: proofread the (still frozen) translation with no other
-  // context. Any failure — network, proxy error, or a dropped token — keeps the
-  // first-pass translation; QA never fails the fragment.
+  // context. Any failure — network, proxy error, a dropped token, or an implausibly
+  // long response — keeps the first-pass translation; QA never fails the fragment.
   let final = translated;
   try {
     const proofread = await callProxy({ text: translated, targetLang, mode: 'qa' });
-    if (countTokens(proofread) === before) {
+    if (countTokens(proofread) === before && !isImplausibleLength(translated, proofread)) {
       final = proofread;
     } else {
-      console.warn(`[translation] QA pass dropped a token for ${targetLang}; keeping first-pass translation.`);
+      console.warn(`[translation] QA pass returned an implausible/mismatched result for ${targetLang}; keeping first-pass translation.`);
     }
   } catch (e) {
     console.warn(`[translation] QA pass failed for ${targetLang}; keeping first-pass translation.`, e);

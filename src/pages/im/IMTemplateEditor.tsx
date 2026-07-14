@@ -11,8 +11,10 @@ import { uploadIMAsset, listIMAssets } from '../../services/im/im-asset.service'
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
+import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
+import { parseTranslationXliff, applyTranslationImport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
@@ -49,6 +51,8 @@ interface TranslateRunReport {
   saved: boolean;
   okByLang: Record<string, number>;
   failures: Array<{ lang: string; label: string; error: string }>;
+  /** Which flow produced this report — AI "Translate", or an imported XLIFF file. Absent = AI (legacy reports). */
+  source?: 'ai' | 'xliff-import';
 }
 
 const IMTemplateEditor: React.FC = () => {
@@ -140,6 +144,20 @@ const IMTemplateEditor: React.FC = () => {
   const [translateReport, setTranslateReport] = useState<TranslateRunReport | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+
+  // Export for Translation (XLIFF) — target languages + skip-existing option.
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportTargets, setExportTargets] = useState<string[]>([]);
+  const [exportSkipExisting, setExportSkipExisting] = useState(true);
+  const [exporting, setExporting] = useState(false);
+
+  // Import Translation (XLIFF) — pick a file, preview what will change, then commit.
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
+  const [importParsed, setImportParsed] = useState<ParseTranslationXliffResult | null>(null);
+  const [importParseError, setImportParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [deletingTemplate, setDeletingTemplate] = useState(false);
@@ -1117,16 +1135,19 @@ const IMTemplateEditor: React.FC = () => {
   const downloadTranslateReport = () => {
     if (!translateReport) return;
     const r = translateReport;
+    const isImport = r.source === 'xliff-import';
     const lines = [
-      `AI translation run — ${template?.name ?? ''} — ${new Date(r.finishedAt).toLocaleString()}`,
+      `${isImport ? 'Translation import (XLIFF)' : 'AI translation run'} — ${template?.name ?? ''} — ${new Date(r.finishedAt).toLocaleString()}`,
       `Languages: ${r.targets.map(t => t.toUpperCase()).join(', ')}`,
-      `Fragments: ${r.total} total, ${r.ok} translated, ${r.failures.length} failed`,
+      `Fragments: ${r.total} total, ${r.ok} ${isImport ? 'imported' : 'translated'}, ${r.failures.length} failed`,
       `Saved to server: ${r.saved ? 'yes' : 'NO — retry Save All (work is backed up locally)'}`,
       '',
       'Per language:',
       ...r.targets.map(t => `  ${t.toUpperCase()}: ${r.okByLang[t] ?? 0} ok, ${r.failures.filter(f => f.lang === t).length} failed`),
       '',
-      ...(r.failures.length ? ['Failed fragments (left untranslated — re-run with "skip already-translated" checked to retry just these):',
+      ...(r.failures.length ? [isImport
+        ? 'Skipped fragments (left as-is — see reasons below):'
+        : 'Failed fragments (left untranslated — re-run with "skip already-translated" checked to retry just these):',
         ...r.failures.map(f => `  [${f.lang.toUpperCase()}] ${f.label} — ${f.error}`)] : ['No failures.']),
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
@@ -1135,6 +1156,115 @@ const IMTemplateEditor: React.FC = () => {
     a.download = `translation-log-${(template?.name ?? 'template').replace(/\s+/g, '_')}.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  const openExportModal = () => {
+    if (template?.isFinalized) return; // locked — unlock (pre-release) first
+    const others = templateLanguages.filter(c => c !== 'en');
+    setExportTargets(others.length ? others : ['de']);
+    setExportSkipExisting(true);
+    setIsExportModalOpen(true);
+  };
+
+  const toggleExportTarget = (code: string) =>
+    setExportTargets(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
+
+  /**
+   * Build an XLIFF 1.2 file (one <file> per selected language) for an external
+   * translator/TMS and download it. No AI call involved — chips, images, and
+   * verbatim phrases are protected the same way translateHtml protects them, via
+   * im-chip-freeze.ts, just encoded as XLIFF inline codes instead of {{FRZ_n}}
+   * tokens sent to the model.
+   */
+  const handleExportTranslation = async () => {
+    if (!template || !exportTargets.length || exporting) return;
+    setExporting(true);
+    try {
+      const xml = await buildTranslationXliff({
+        template,
+        sections,
+        targetLangs: exportTargets,
+        skipExisting: exportSkipExisting,
+      });
+      if (!xml) {
+        alert('Nothing to export — every fragment already has content in the selected language(s). Uncheck “skip already-translated” to export everything.');
+        return;
+      }
+      downloadTranslationXliff(xml, template.name, exportTargets);
+      setIsExportModalOpen(false);
+    } catch (e) {
+      console.error('Export for translation failed', e);
+      alert('Export failed — see console for details.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const openImportModal = () => {
+    if (template?.isFinalized) return;
+    setImportFileName(null);
+    setImportParsed(null);
+    setImportParseError(null);
+    setIsImportModalOpen(true);
+  };
+
+  /** Read + parse a chosen XLIFF file, showing a preview before anything is written. */
+  const handleImportFileSelected = async (file: File) => {
+    setImportFileName(file.name);
+    setImportParsed(null);
+    setImportParseError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseTranslationXliff(text);
+      if (!parsed.files.length) {
+        setImportParseError(parsed.errors[0] ?? 'No translatable content found in this file.');
+        return;
+      }
+      setImportParsed(parsed);
+    } catch (e) {
+      console.error('Failed to read/parse XLIFF file', e);
+      setImportParseError('Could not read this file — make sure it is the XLIFF file exported from OriginFlow (optionally edited by your translator).');
+    }
+  };
+
+  /**
+   * Apply every usable unit from the parsed XLIFF file onto the live template,
+   * persist the changed sections, enable any newly-imported language, and show
+   * the same run-report modal AI Translate uses (source: 'xliff-import').
+   */
+  const commitTranslationImport = async () => {
+    if (!template || !importParsed || importing) return;
+    setImporting(true);
+    try {
+      const { sections: updated, changedSectionIds, report } = applyTranslationImport(sections, importParsed);
+      setSections(updated);
+      const changedSections = updated.filter(s => changedSectionIds.has(s.id));
+      const savedOk = changedSections.length ? await persistSections(changedSections) : true;
+
+      // Enable any language that received at least one imported fragment, same
+      // tail behavior handleTranslate already has for the AI path.
+      const newLangs = report.targets.filter(t => !templateLanguages.includes(t) && (report.okByLang[t] ?? 0) > 0);
+      if (newLangs.length) {
+        const ordered = ALL_LANGUAGES.map(l => l.code).filter(c => c === 'en' || templateLanguages.includes(c) || newLangs.includes(c));
+        try {
+          await updateIMTemplate(template.id, { languages: ordered, lastUpdatedBy: user?.name });
+          setTemplateLanguages(ordered);
+          setTemplate(prev => prev ? ({ ...prev, languages: ordered }) : prev);
+        } catch (e) { console.error('Failed to enable languages after translation import', e); }
+      }
+
+      setIsImportModalOpen(false);
+      setImportParsed(null);
+      setImportFileName(null);
+      const fullReport: TranslateRunReport = { ...report, saved: savedOk };
+      setTranslateReport(fullReport);
+      if (reportKey) { try { localStorage.setItem(reportKey, JSON.stringify(fullReport)); } catch { /* quota — best-effort */ } }
+    } catch (e) {
+      console.error('Translation import failed', e);
+      alert('Import failed — see console for details. No partial changes were saved.');
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleSaveMetadata = async () => {
@@ -1290,6 +1420,8 @@ const IMTemplateEditor: React.FC = () => {
                <button onClick={openLangModal} disabled={locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Globe size={16} /> Languages <span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span></button>
                <button onClick={() => setIsSettingsModalOpen(true)} disabled={locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Settings size={16} /> Settings</button>
                <button onClick={openTranslateModal} disabled={translating || locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed">{translating ? <Loader2 size={16} className="animate-spin" /> : <LanguagesIcon size={16} />} Translate</button>
+               <button onClick={openExportModal} disabled={locked} title="Export English content as an XLIFF file for an external translator or TMS (e.g. XTM)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Download size={16} /> Export for Translation</button>
+               <button onClick={openImportModal} disabled={locked} title="Import a translated XLIFF file back into a specific language" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><FileUp size={16} /> Import Translation</button>
                {locked ? (
                  <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-amber-600 shadow ml-2"><Unlock size={16} /> Unlock to edit</button>
                ) : (
@@ -1975,6 +2107,148 @@ const IMTemplateEditor: React.FC = () => {
                   </div>
               </div>
           )}
+          {isExportModalOpen && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="font-bold text-lg flex items-center gap-2"><Download size={18} className="text-indigo-500" /> Export for Translation</h3>
+                          <button onClick={() => !exporting && setIsExportModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                      </div>
+                      <p className="text-xs text-muted mb-4">
+                          Downloads an XLIFF 1.2 file — the standard format XTM and most translation agencies/CAT tools import
+                          directly — with every section title and content row from <strong>English</strong>. Placeholders, images,
+                          formatting and regulation verbatims are protected as non-editable tags so a translator can't corrupt
+                          them. Shared (library) blocks aren't included — translate those from the Block Library instead.
+                      </p>
+                      <div className="mb-4">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-sm font-medium text-gray-700">Export for</label>
+                            <div className="flex gap-2 text-[11px]">
+                              <button
+                                type="button"
+                                disabled={exporting}
+                                onClick={() => setExportTargets(ALL_LANGUAGES.map(l => l.code).filter(c => c !== 'en'))}
+                                className="text-indigo-600 hover:underline disabled:opacity-50"
+                              >Select all</button>
+                              <button
+                                type="button"
+                                disabled={exporting}
+                                onClick={() => setExportTargets(templateLanguages.filter(c => c !== 'en'))}
+                                className="text-indigo-600 hover:underline disabled:opacity-50"
+                              >Enabled only</button>
+                              <button
+                                type="button"
+                                disabled={exporting}
+                                onClick={() => setExportTargets([])}
+                                className="text-gray-500 hover:underline disabled:opacity-50"
+                              >None</button>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto border border-gray-100 rounded p-2">
+                              {ALL_LANGUAGES.filter(l => l.code !== 'en').map(l => {
+                                const on = exportTargets.includes(l.code);
+                                const enabled = templateLanguages.includes(l.code);
+                                return (
+                                  <button
+                                    key={l.code}
+                                    type="button"
+                                    disabled={exporting}
+                                    onClick={() => toggleExportTarget(l.code)}
+                                    title={enabled ? l.label : `${l.label} — not on this template yet; will be enabled after import`}
+                                    className={`text-xs px-2 py-1 rounded border transition-colors disabled:opacity-60 ${on ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-medium' : 'bg-white border-gray-200 text-gray-600 hover:bg-light'}`}
+                                  >
+                                    {l.label}{enabled ? '' : ' +'}
+                                  </button>
+                                );
+                              })}
+                          </div>
+                          <p className="text-[11px] text-muted mt-1">Multiple languages are bundled into one XLIFF file (one &lt;file&gt; section each).</p>
+                      </div>
+                      <label className={`flex items-center gap-2 text-sm mb-4 ${exporting ? 'opacity-60' : 'cursor-pointer'}`}>
+                          <input type="checkbox" className="rounded accent-indigo-600" checked={exportSkipExisting} disabled={exporting} onChange={e => setExportSkipExisting(e.target.checked)} />
+                          Skip fragments already translated (uncheck to export everything)
+                      </label>
+                      <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                          <button onClick={() => setIsExportModalOpen(false)} disabled={exporting} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm disabled:opacity-50">Cancel</button>
+                          <button onClick={handleExportTranslation} disabled={exporting || !exportTargets.length} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                              {exporting ? <><Loader2 size={14} className="animate-spin" /> Preparing…</> : <><Download size={14} /> Download XLIFF{exportTargets.length > 1 ? ` (${exportTargets.length} languages)` : ''}</>}
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          )}
+          {isImportModalOpen && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 flex flex-col max-h-[85vh]">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="font-bold text-lg flex items-center gap-2"><FileUp size={18} className="text-indigo-500" /> Import Translation</h3>
+                          <button onClick={() => !importing && setIsImportModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                      </div>
+                      <p className="text-xs text-muted mb-4">
+                          Upload the XLIFF file back once your translator (XTM or otherwise) has filled in the
+                          &lt;target&gt; elements. Each language's content lands in that language only — nothing else changes.
+                      </p>
+                      <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-lg py-6 mb-3 text-sm text-gray-500 ${importing ? 'opacity-60' : 'cursor-pointer hover:border-indigo-300 hover:text-indigo-600'}`}>
+                          <FileUp size={20} />
+                          {importFileName ? <span className="font-medium text-gray-700">{importFileName}</span> : <span>Click to choose an .xliff / .xlf file</span>}
+                          <input
+                            type="file"
+                            accept=".xlf,.xliff,.xml"
+                            disabled={importing}
+                            className="hidden"
+                            onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFileSelected(f); e.target.value = ''; }}
+                          />
+                      </label>
+                      {importParseError && (
+                        <div className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded p-2.5 mb-3">{importParseError}</div>
+                      )}
+                      {importParsed && (
+                        <div className="flex-1 min-h-0 overflow-y-auto mb-3">
+                          <div className="border rounded divide-y text-xs mb-2">
+                            {importParsed.files.map(f => {
+                              const okCount = f.units.filter(u => u.html !== null).length;
+                              const warnCount = f.units.length - okCount;
+                              return (
+                                <div key={f.targetLang} className="flex items-center justify-between px-3 py-1.5">
+                                  <span className="font-bold uppercase">{ALL_LANGUAGES.find(l => l.code === f.targetLang)?.label ?? f.targetLang}</span>
+                                  <span>
+                                    <span className="text-emerald-700">{okCount} ready</span>
+                                    {warnCount > 0 && <span className="text-amber-600"> · {warnCount} skipped</span>}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {importParsed.errors.length > 0 && (
+                            <div className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded p-2 mb-2">
+                              {importParsed.errors.map((e, i) => <div key={i}>{e}</div>)}
+                            </div>
+                          )}
+                          {importParsed.files.some(f => f.units.some(u => u.html === null)) && (
+                            <details className="text-[11px] text-muted">
+                              <summary className="cursor-pointer hover:text-gray-700">Show skipped fragments</summary>
+                              <div className="border rounded divide-y mt-1 max-h-32 overflow-y-auto">
+                                {importParsed.files.flatMap(f => f.units.filter(u => u.html === null).map((u, i) => (
+                                  <div key={`${f.targetLang}-${i}`} className="px-2 py-1">
+                                    <span className="font-bold uppercase text-amber-600 mr-1">{f.targetLang}</span>
+                                    <span className="text-gray-700">{u.id}</span>
+                                    <div className="text-[10px] text-muted">{u.warning}</div>
+                                  </div>
+                                )))}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-auto">
+                          <button onClick={() => setIsImportModalOpen(false)} disabled={importing} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm disabled:opacity-50">Cancel</button>
+                          <button onClick={commitTranslationImport} disabled={importing || !importParsed} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                              {importing ? <><Loader2 size={14} className="animate-spin" /> Importing…</> : <><FileUp size={14} /> Commit Import</>}
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          )}
           {/* TRANSLATION RUN REPORT — what got translated, what failed, and whether it saved. */}
           {translateReport && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -1984,12 +2258,12 @@ const IMTemplateEditor: React.FC = () => {
                             {translateReport.failures.length === 0
                               ? <CheckCircle size={18} className="text-emerald-600" />
                               : <AlertTriangle size={18} className={translateReport.ok === 0 ? 'text-rose-500' : 'text-amber-500'} />}
-                            Translation run {translateReport.failures.length === 0 ? 'complete' : translateReport.ok === 0 ? 'failed' : 'partially complete'}
+                            {translateReport.source === 'xliff-import' ? 'Translation import' : 'Translation run'} {translateReport.failures.length === 0 ? 'complete' : translateReport.ok === 0 ? 'failed' : 'partially complete'}
                           </h3>
                           <button onClick={() => setTranslateReport(null)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
                       </div>
                       <p className="text-xs text-muted mb-3">
-                        {new Date(translateReport.finishedAt).toLocaleString()} · {translateReport.ok} of {translateReport.total} fragment(s) translated
+                        {new Date(translateReport.finishedAt).toLocaleString()} · {translateReport.ok} of {translateReport.total} fragment(s) {translateReport.source === 'xliff-import' ? 'imported' : 'translated'}
                         {translateReport.failures.length > 0 && <> · <span className="text-rose-600 font-medium">{translateReport.failures.length} failed</span></>}
                       </p>
 
@@ -2021,8 +2295,10 @@ const IMTemplateEditor: React.FC = () => {
                       {translateReport.failures.length > 0 && (
                         <>
                           <p className="text-[11px] text-muted mb-1">
-                            Failed fragments were left untranslated. Run Translate again with <strong>“skip already-translated”</strong> checked
-                            to retry exactly these gaps — everything already translated is skipped.
+                            {translateReport.source === 'xliff-import'
+                              ? 'These fragments were left unchanged — either the translation was missing/empty, a placeholder or tag was added/removed/altered, or the row no longer exists on this template. Fix the file with your translator and re-import to retry just these.'
+                              : <>Failed fragments were left untranslated. Run Translate again with <strong>“skip already-translated”</strong> checked
+                            to retry exactly these gaps — everything already translated is skipped.</>}
                           </p>
                           <div className="border rounded divide-y overflow-y-auto flex-1 min-h-0 max-h-48 text-xs mb-3">
                             {translateReport.failures.slice(0, 200).map((f, i) => (

@@ -103,6 +103,9 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [uploading, setUploading] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  // Per-part render progress ("Rendering DE… 3/12") — large multi-language books render
+  // one part per Netlify call, so this is real progress, not a guess.
+  const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PrintPdfResult | null>(null);
   // Saving the rendered PDF into the project's documents (via onRendered).
@@ -190,6 +193,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const handleGenerate = async () => {
     setBusy(true);
     setElapsed(0);
+    setProgress(null);
     setError(null);
     setResult(null);
     setAttachState('idle');
@@ -200,6 +204,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         languages: selected,
         pageSize,
         version,
+        onProgress: (label, done, total) => setProgress({ label, done, total }),
         ...(isLeaflet ? { leafletTextPt, leafletHeadingPt } : {}),
         cover: {
           title,
@@ -244,6 +249,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       setError(e instanceof Error ? e.message : 'Print render failed.');
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -559,6 +565,24 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                 ))}
               </div>
             </details>
+          )}
+
+          {busy && (
+            <div>
+              <div className="flex justify-between text-xs text-muted mb-1">
+                <span>{progress ? progress.label : 'Starting…'}</span>
+                <span>{progress ? `${progress.done} / ${progress.total} · ` : ''}{elapsed}s</span>
+              </div>
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${progress?.total ? Math.round((progress.done / progress.total) * 100) : 8}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-muted mt-1">
+                Large books render one part per language — this can take a while but has no size limit.
+              </p>
+            </div>
           )}
 
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</div>}
