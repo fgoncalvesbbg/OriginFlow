@@ -707,7 +707,7 @@ interface InlineHtmlRowProps {
   onVariantChange: (variant: CalloutVariant | undefined) => void;
   onInsertPlaceholder: (type: 'text' | 'image') => void;
   onInsertCondition: () => void;
-  /** Show a per-box "Translate from EN" button on non-English language tabs. */
+  /** Per-box AI translation: "Translate from EN" on non-English tabs, "Translate to all" on EN. */
   enableTranslate?: boolean;
 }
 
@@ -804,6 +804,37 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     }
   }, [translating]);
 
+  // Per-box "translate to ALL languages": one click re-translates JUST this row from
+  // English into every other enabled language (overwriting stale translations — the
+  // usual reason to reach for it is an edited EN source). Small pool, per-language
+  // failure list; results land via onChange for review, nothing persists here.
+  const [translatingAll, setTranslatingAll] = useState<{ done: number; total: number } | null>(null);
+  const handleTranslateRowAll = useCallback(async () => {
+    const source = contentRef.current['en'] ?? '';
+    if (!source.trim() || translating || translatingAll) return;
+    const targets = languagesRef.current.map(l => l.code).filter(c => c !== 'en');
+    if (!targets.length) return;
+    setTranslateErr(null);
+    setTranslatingAll({ done: 0, total: targets.length });
+    const failed: string[] = [];
+    let done = 0;
+    let cursor = 0;
+    const runner = async () => {
+      while (cursor < targets.length) {
+        const t = targets[cursor++];
+        try {
+          const out = await translateHtml(source, 'en', t);
+          onChangeRef.current(t, out);
+        } catch { failed.push(t.toUpperCase()); }
+        done += 1;
+        setTranslatingAll({ done, total: targets.length });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, targets.length) }, runner));
+    setTranslatingAll(null);
+    if (failed.length) setTranslateErr(`Translation failed for ${failed.join(', ')} — those languages were left unchanged. Try again.`);
+  }, [translating, translatingAll]);
+
   return (
     <div className="flex flex-col gap-2 p-3 resize-y overflow-hidden min-h-[280px]">
       {/* Callout box selector — wraps the ENTIRE row content in this ISO sign box on render */}
@@ -855,12 +886,26 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
           <button
             type="button"
             onClick={handleTranslateRow}
-            disabled={!canTranslate || translating}
+            disabled={!canTranslate || translating || !!translatingAll}
             title={enSource.trim() ? `Translate this box from English into ${activeCode.toUpperCase()} — review before saving` : 'Add English content first'}
             className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {translating ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
             {translating ? 'Translating…' : `Translate from EN`}
+          </button>
+        )}
+        {enableTranslate && activeCode === 'en' && languages.length > 1 && (
+          <button
+            type="button"
+            onClick={handleTranslateRowAll}
+            disabled={!enSource.trim() || !!translatingAll || translating}
+            title={enSource.trim()
+              ? 'Translate JUST this box from English into every enabled language (overwrites existing translations of this box) — review before saving'
+              : 'Add English content first'}
+            className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {translatingAll ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
+            {translatingAll ? `Translating… ${translatingAll.done}/${translatingAll.total}` : 'Translate to all'}
           </button>
         )}
       </div>
@@ -1169,7 +1214,7 @@ interface InlineBlockEditorProps {
   rowKey: string;
   onChange: (lang: string, html: string) => void;
   onVariantChange: (variant: CalloutVariant | undefined) => void;
-  /** Show a per-box "Translate from EN" button on non-English language tabs. */
+  /** Per-box AI translation: "Translate from EN" on non-English tabs, "Translate to all" on EN. */
   enableTranslate?: boolean;
 }
 

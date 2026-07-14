@@ -63,19 +63,35 @@ const ENDPOINT_MISSING_MESSAGE =
   'with `netlify dev` locally (plain `vite`/`npm run start`/`npm run serve` does not serve ' +
   'functions), or use the deployed site.';
 
-/** POST one frozen fragment to the proxy; returns the model output or throws. */
+// Gateway/overload statuses worth retrying: a mass translation run routinely hits
+// transient 502/504s from the function host or the model API under load.
+const TRANSIENT_STATUSES = new Set([502, 503, 504, 529]);
+const MAX_ATTEMPTS = 3;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** POST one frozen fragment to the proxy (retrying transient 5xx); returns the model output or throws. */
 const callProxy = async (body: Record<string, unknown>): Promise<string> => {
-  if (endpointMissing) throw new Error(ENDPOINT_MISSING_MESSAGE);
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  for (let attempt = 1; ; attempt++) {
+    if (endpointMissing) throw new Error(ENDPOINT_MISSING_MESSAGE);
+    const res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const { text } = (await res.json()) as { text: string };
+      return text;
+    }
     // 404 = the function endpoint itself isn't served (it only returns 400/405/500/502/200).
     if (res.status === 404) {
       endpointMissing = true;
       throw new Error(ENDPOINT_MISSING_MESSAGE);
+    }
+    if (TRANSIENT_STATUSES.has(res.status) && attempt < MAX_ATTEMPTS) {
+      const wait = 1000 * 3 ** (attempt - 1); // 1s, 3s
+      console.warn(`[translation] Transient ${res.status} from translate proxy — retrying in ${wait / 1000}s (attempt ${attempt}/${MAX_ATTEMPTS}).`);
+      await sleep(wait);
+      continue;
     }
     let message = `Translation failed (${res.status})`;
     try {
@@ -86,8 +102,6 @@ const callProxy = async (body: Record<string, unknown>): Promise<string> => {
     }
     throw new Error(message);
   }
-  const { text } = (await res.json()) as { text: string };
-  return text;
 };
 
 /**

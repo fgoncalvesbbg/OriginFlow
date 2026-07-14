@@ -130,6 +130,37 @@ export const saveProjectIM = async (
 };
 
 /**
+ * Merge a small patch into a project IM's placeholder_data WITHOUT touching any
+ * other column (status/version/content stay untouched). Used to remember cover
+ * preferences (__custom_logo / __custom_cover_image) chosen in the print-export
+ * dialog, so they become the defaults from then on. Best-effort: a missing row
+ * or a failed write only logs — preferences never break the main flow.
+ */
+export const updateProjectIMPlaceholders = async (
+  projectId: string,
+  templateType: IMTemplateType,
+  patch: Record<string, string>,
+): Promise<void> => {
+  if (!isLive || !Object.keys(patch).length) return;
+  const { data, error } = await supabase
+    .from('project_ims')
+    .select('id, placeholder_data')
+    .eq('project_id', projectId)
+    .eq('template_type', templateType)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error('[project-im] updateProjectIMPlaceholders lookup failed:', error.message);
+    return;
+  }
+  const merged = { ...(data.placeholder_data ?? {}), ...patch };
+  const { error: upErr } = await supabase
+    .from('project_ims')
+    .update({ placeholder_data: merged, updated_at: new Date().toISOString() })
+    .eq('id', data.id);
+  if (upErr) console.error('[project-im] updateProjectIMPlaceholders failed:', upErr.message);
+};
+
+/**
  * Delete a project's instance for a given template type (defaults to 'im').
  */
 export const deleteProjectIM = async (

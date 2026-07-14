@@ -13,7 +13,8 @@ import {
     addDocument, uploadFile, getProjectDocs, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
-    getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl
+    getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
+    updateProjectIMPlaceholders
 } from '../../services';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
@@ -719,6 +720,24 @@ const ProjectIMGenerator: React.FC = () => {
       });
 
       await uploadFile(targetDoc.id, file, false);
+  };
+
+  // Remember the cover choices made in the print dialog (logo / cover image) as this
+  // IM's defaults: mirror them into local form state (so the preview and the next
+  // dialog open use them immediately) and persist them into placeholder_data so they
+  // survive across sessions. Best-effort — never blocks the export flow.
+  const persistCoverPrefs = (prefs: { logoUrl: string; coverImageUrl?: string }) => {
+      if (!project) return;
+      const patch: Record<string, string> = { __custom_logo: prefs.logoUrl };
+      if (prefs.coverImageUrl !== undefined) patch.__custom_cover_image = prefs.coverImageUrl;
+      // If everything was saved before this, keep it reading as saved — the pref
+      // patch is persisted directly below, not via the draft/save pipeline.
+      const wasClean = savedSnapshotRef.current !== null && savedSnapshotRef.current === serializeDraft();
+      const nextForm = { ...formData, ...patch };
+      setFormData(nextForm);
+      if (wasClean) markSaved({ formData: nextForm });
+      updateProjectIMPlaceholders(project.id, templateType, patch)
+          .catch(e => console.error('Failed to persist cover preferences', e));
   };
 
   // ---------------- PROJECT CONTENT EDITOR ----------------
@@ -2779,6 +2798,7 @@ const ProjectIMGenerator: React.FC = () => {
              .filter(Boolean)}
            version={instance?.version}
            onRendered={attachPrintPdfToProject}
+           onCoverPrefs={persistCoverPrefs}
            onClose={() => setShowPrintDialog(false)}
          />
        )}

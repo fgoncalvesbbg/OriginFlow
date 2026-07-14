@@ -35,6 +35,12 @@ interface PrintExportDialogProps {
    * Failures are surfaced as a non-fatal warning; the PDF stays downloadable regardless.
    */
   onRendered?: (result: PrintPdfResult, languages: string[], pageSize: 'a4' | 'a5') => Promise<void>;
+  /**
+   * Called after a successful render with the cover choices made in this dialog, so the
+   * caller can remember them as the IM's defaults for next time (logo always; cover image
+   * omitted for leaflets, which have no cover). Fire-and-forget.
+   */
+  onCoverPrefs?: (prefs: { logoUrl: string; coverImageUrl?: string }) => void;
   onClose: () => void;
 }
 
@@ -48,6 +54,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   skus,
   version,
   onRendered,
+  onCoverPrefs,
   onClose,
 }) => {
   const meta = template?.metadata;
@@ -217,6 +224,9 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       setResult(res);
       if (res.render) setRenders((prev) => [res.render as PrintRender, ...prev]);
       setConfirmCredit(false);
+
+      // Remember the chosen logo/cover as this IM's defaults for next time.
+      onCoverPrefs?.(isLeaflet ? { logoUrl } : { logoUrl, coverImageUrl });
 
       // Persist the render as the project's "Generated …" document. Non-fatal: the PDF
       // is already rendered and downloadable — a failure here only shows a warning.

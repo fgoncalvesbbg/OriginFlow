@@ -147,6 +147,7 @@ export {
   deleteIMSection,
   getProjectIM,
   saveProjectIM,
+  updateProjectIMPlaceholders,
   deleteProjectIM,
   getAllProjectIMs,
   getIMBlocks,

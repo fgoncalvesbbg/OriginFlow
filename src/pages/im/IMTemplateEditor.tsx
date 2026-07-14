@@ -11,7 +11,7 @@ import { uploadIMAsset, listIMAssets } from '../../services/im/im-asset.service'
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
@@ -35,6 +35,22 @@ const SECTION_LAYOUT_OPTIONS: { value: IMMasterLayoutName; label: string }[] = [
 /** Stable serialization of a section, used to detect unsaved (dirty) changes. */
 const sectionSnapshotKey = (s: IMSection): string => JSON.stringify(s);
 
+/**
+ * Outcome log of an AI translation run — every fragment accounted for, so a
+ * partially-failed mass run is auditable. Shown in a modal after the run and
+ * kept in localStorage (per template) to survive a reload.
+ */
+interface TranslateRunReport {
+  finishedAt: string;
+  targets: string[];
+  total: number;
+  ok: number;
+  /** Whether the post-run section save reached the server (false → local only). */
+  saved: boolean;
+  okByLang: Record<string, number>;
+  failures: Array<{ lang: string; label: string; error: string }>;
+}
+
 const IMTemplateEditor: React.FC = () => {
   const { categoryId, templateType: templateTypeParam } = useParams<{ categoryId: string; templateType?: string }>();
   const templateType: IMTemplateType = templateTypeParam === 'warning_leaflet' ? 'warning_leaflet' : 'im';
@@ -56,6 +72,8 @@ const IMTemplateEditor: React.FC = () => {
   // A save that timed out / failed — surfaces an honest status instead of a stuck
   // "Saving…" and lets the user know autosave is still retrying in the background.
   const [saveError, setSaveError] = useState(false);
+  // Consecutive failed autosave passes — drives the autosave backoff delay.
+  const autosaveFailures = useRef(0);
   // Message of the last failed save, so the manual-save alert can say WHY
   // (e.g. an oversized payload) instead of just "see console".
   const lastSaveErrorRef = useRef<string | null>(null);
@@ -118,6 +136,8 @@ const IMTemplateEditor: React.FC = () => {
   const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
   const [translateTargets, setTranslateTargets] = useState<string[]>([]);
   const [translateSkipExisting, setTranslateSkipExisting] = useState(true);
+  // Post-run outcome report (also persisted to localStorage per template).
+  const [translateReport, setTranslateReport] = useState<TranslateRunReport | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
@@ -499,12 +519,14 @@ const IMTemplateEditor: React.FC = () => {
       setTemplate(prev => prev ? ({ ...prev, lastUpdatedBy: user?.name || 'User', updatedAt: new Date().toISOString() }) : null);
       setLastSaved(new Date());
       setSaveError(false);
+      autosaveFailures.current = 0;
       return true;
     } catch (e) {
       // Leave the sections dirty (snapshots untouched) so the next autosave retries.
       // The local draft (written on every edit) still holds the work regardless.
       console.error('Failed to save sections', e);
       lastSaveErrorRef.current = e instanceof Error ? e.message : String(e);
+      autosaveFailures.current += 1;
       setSaveError(true);
       return false;
     } finally {
@@ -514,6 +536,8 @@ const IMTemplateEditor: React.FC = () => {
 
   /** localStorage key holding this template's unsaved-edit draft. */
   const draftKey = template ? `im-draft:${template.id}` : null;
+  /** localStorage key holding this template's last AI-translation run report. */
+  const reportKey = template ? `im-translate-report:${template.id}` : null;
 
   const handleSaveAll = async () => {
     if (template?.isFinalized) return; // locked — unlock (pre-release) first
@@ -582,8 +606,10 @@ const IMTemplateEditor: React.FC = () => {
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     // persistSections → saveIMSection is bounded (withTimeout + refresh-and-retry), so a stalled
     // network can't wedge autosave; a failed tick leaves the sections dirty and the local draft
-    // intact, and the next edit re-triggers it.
-    autosaveTimer.current = setTimeout(() => { persistSections(dirty); }, 2500);
+    // intact. Consecutive failures back off exponentially (2.5s → 5s → … → 5min cap) so an
+    // outage isn't hammered in a tight save loop; a success or manual Save All resets the delay.
+    const delay = Math.min(2500 * 2 ** autosaveFailures.current, 300_000);
+    autosaveTimer.current = setTimeout(() => { persistSections(dirty); }, delay);
     return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
   }, [sections, loading, saving, translating, draftKey, pendingDraft, getDirtySections, persistSections, template?.isFinalized]);
 
@@ -972,24 +998,22 @@ const IMTemplateEditor: React.FC = () => {
     // Build the task list up front (per language) so we can show a real progress
     // total. Tasks re-read their target object AFTER each await, so concurrent
     // tasks writing different language keys on the same map never lose updates.
+    // Every fragment's outcome is logged into the run report (shown + stored
+    // afterwards), so a partially-failed mass run is fully auditable.
     const tasks: Array<() => Promise<void>> = [];
     const changed = new Set<string>();
-    const failures: string[] = [];
-    // First underlying error — surfaced directly when NOTHING translated (e.g. the
-    // translate function isn't served), instead of a per-fragment failure list.
-    let firstError: string | null = null;
-    const recordError = (e: unknown) => {
-      if (!firstError) firstError = e instanceof Error ? e.message : String(e);
-    };
+    const okByLang: Record<string, number> = {};
+    const failures: Array<{ lang: string; label: string; error: string }> = [];
+    const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    const logOk = (lang: string) => { okByLang[lang] = (okByLang[lang] ?? 0) + 1; };
 
     for (const target of targets) {
-      const tag = target.toUpperCase();
       for (const s of working) {
         const titleSrc = s.titleI18n?.[source] ?? s.title;
         if (needs(s.titleI18n, titleSrc, target)) {
           tasks.push(async () => {
-            try { s.titleI18n = { ...s.titleI18n, [target]: await translateHtml(titleSrc!, source, target) }; changed.add(s.id); }
-            catch (e) { recordError(e); failures.push(`title “${s.title}” (${tag})`); }
+            try { s.titleI18n = { ...s.titleI18n, [target]: await translateHtml(titleSrc!, source, target) }; changed.add(s.id); logOk(target); }
+            catch (e) { failures.push({ lang: target, label: `title “${s.title}”`, error: errMsg(e) }); }
           });
         }
         const refs = s.blockRefs ?? [];
@@ -1005,21 +1029,22 @@ const IMTemplateEditor: React.FC = () => {
                 // Mirror the first inline row into section.content for the legacy renderer path.
                 if (mirror) s.content = { ...s.content, [target]: out };
                 changed.add(s.id);
-              } catch (e) { recordError(e); failures.push(`section “${s.title}” (${tag})`); }
+                logOk(target);
+              } catch (e) { failures.push({ lang: target, label: `section “${s.title}” (row ${idx + 1})`, error: errMsg(e) }); }
             });
           } else if (ref.kind === 'sku_slot' && needs(ref.label, ref.label?.[source], target)) {
             const src = ref.label[source];
             tasks.push(async () => {
-              try { (s.blockRefs![idx] as SKUSlotRef).label = { ...(s.blockRefs![idx] as SKUSlotRef).label, [target]: await translateHtml(src, source, target) }; changed.add(s.id); }
-              catch (e) { recordError(e); failures.push(`field in “${s.title}” (${tag})`); }
+              try { (s.blockRefs![idx] as SKUSlotRef).label = { ...(s.blockRefs![idx] as SKUSlotRef).label, [target]: await translateHtml(src, source, target) }; changed.add(s.id); logOk(target); }
+              catch (e) { failures.push({ lang: target, label: `field in “${s.title}”`, error: errMsg(e) }); }
             });
           }
         });
         // Section with legacy content but no inline rows (rare after normalization).
         if (refs.length === 0 && needs(s.content, s.content?.[source], target)) {
           tasks.push(async () => {
-            try { s.content = { ...s.content, [target]: await translateHtml(s.content[source], source, target) }; changed.add(s.id); }
-            catch (e) { recordError(e); failures.push(`section “${s.title}” (${tag})`); }
+            try { s.content = { ...s.content, [target]: await translateHtml(s.content[source], source, target) }; changed.add(s.id); logOk(target); }
+            catch (e) { failures.push({ lang: target, label: `section “${s.title}”`, error: errMsg(e) }); }
           });
         }
       }
@@ -1048,9 +1073,12 @@ const IMTemplateEditor: React.FC = () => {
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, runner));
 
       // Commit UI state, then persist only the sections we actually changed.
+      // A failed persist is NON-fatal for the run: the translations live in local
+      // state + the localStorage draft, autosave keeps retrying with backoff, and
+      // the report below says so explicitly.
       setSections(working);
       const changedSections = working.filter(s => changed.has(s.id));
-      if (changedSections.length) await persistSections(changedSections);
+      const savedOk = changedSections.length ? await persistSections(changedSections) : true;
 
       // Enable every newly-translated language on the template in one write.
       const newLangs = targets.filter(t => !templateLanguages.includes(t));
@@ -1064,19 +1092,49 @@ const IMTemplateEditor: React.FC = () => {
       }
 
       setIsTranslateModalOpen(false);
-      const langLabels = targets.map(t => ALL_LANGUAGES.find(l => l.code === t)?.label ?? t.toUpperCase()).join(', ');
-      if (failures.length === tasks.length && firstError) {
-        // Every fragment failed for the same upstream reason — show the cause, not a list.
-        alert(`Translation failed — nothing was translated.\n\n${firstError}`);
-      } else if (failures.length) {
-        alert(`Translated to ${langLabels} with ${failures.length} fragment(s) skipped due to errors (left untranslated):\n\n• ${failures.slice(0, 12).join('\n• ')}${failures.length > 12 ? `\n…and ${failures.length - 12} more` : ''}`);
-      }
+      // Full run report — shown now, and kept in localStorage so "what got done"
+      // is still answerable after a reload.
+      const report: TranslateRunReport = {
+        finishedAt: new Date().toISOString(),
+        targets,
+        total: tasks.length,
+        ok: tasks.length - failures.length,
+        saved: savedOk,
+        okByLang,
+        failures,
+      };
+      setTranslateReport(report);
+      if (reportKey) { try { localStorage.setItem(reportKey, JSON.stringify(report)); } catch { /* quota — best-effort */ } }
     } catch (e) {
       console.error('Translation run failed', e);
       alert('Translation failed — see console for details. No partial changes were saved.');
     } finally {
       setTranslating(false);
     }
+  };
+
+  /** Plain-text download of the current run report (for records / retry planning). */
+  const downloadTranslateReport = () => {
+    if (!translateReport) return;
+    const r = translateReport;
+    const lines = [
+      `AI translation run — ${template?.name ?? ''} — ${new Date(r.finishedAt).toLocaleString()}`,
+      `Languages: ${r.targets.map(t => t.toUpperCase()).join(', ')}`,
+      `Fragments: ${r.total} total, ${r.ok} translated, ${r.failures.length} failed`,
+      `Saved to server: ${r.saved ? 'yes' : 'NO — retry Save All (work is backed up locally)'}`,
+      '',
+      'Per language:',
+      ...r.targets.map(t => `  ${t.toUpperCase()}: ${r.okByLang[t] ?? 0} ok, ${r.failures.filter(f => f.lang === t).length} failed`),
+      '',
+      ...(r.failures.length ? ['Failed fragments (left untranslated — re-run with "skip already-translated" checked to retry just these):',
+        ...r.failures.map(f => `  [${f.lang.toUpperCase()}] ${f.label} — ${f.error}`)] : ['No failures.']),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `translation-log-${(template?.name ?? 'template').replace(/\s+/g, '_')}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   const handleSaveMetadata = async () => {
@@ -1371,9 +1429,11 @@ const IMTemplateEditor: React.FC = () => {
                      </div>
 
                      <div className="flex items-center justify-between border-b border-gray-200 bg-light pr-2">
-                        <div className="flex overflow-x-auto">
+                        {/* Language tabs WRAP (compact, multi-row) instead of scrolling off-screen —
+                            a template with 20+ languages must never widen the editor pane. */}
+                        <div className="flex flex-wrap min-w-0 flex-1">
                            {availableLangsForTabs.map(lang => (
-                           <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-muted hover:text-gray-700'}`}>{lang.label}</button>
+                           <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-muted hover:text-gray-700'}`}>{lang.label}</button>
                            ))}
                         </div>
                      </div>
@@ -1478,6 +1538,7 @@ const IMTemplateEditor: React.FC = () => {
                                        onVariantChange={(v) => updateInlineRefVariant(index, v)}
                                        onInsertPlaceholder={handleInsertPlaceholder}
                                        onInsertCondition={handleOpenConditionModal}
+                                       enableTranslate
                                      />
                                      {/* Whole-row visibility condition — hides the row unless the condition is met */}
                                      {(() => {
@@ -1890,6 +1951,13 @@ const IMTemplateEditor: React.FC = () => {
                       <p className="text-[11px] text-muted mb-4 bg-amber-50 border border-amber-100 rounded p-2">
                           Note: text inside conditional chips isn't auto-translated — edit those by hand afterwards.
                       </p>
+                      {!translating && reportKey && localStorage.getItem(reportKey) && (
+                        <button
+                          type="button"
+                          onClick={() => { try { setTranslateReport(JSON.parse(localStorage.getItem(reportKey)!)); } catch { /* corrupt entry */ } }}
+                          className="text-[11px] text-indigo-600 hover:underline mb-4 block"
+                        >View last run report</button>
+                      )}
                       {translating && (
                         <div className="mb-4">
                           <div className="flex justify-between text-xs text-muted mb-1"><span>Translating…</span><span>{translateProgress.done} / {translateProgress.total}</span></div>
@@ -1903,6 +1971,79 @@ const IMTemplateEditor: React.FC = () => {
                           <button onClick={handleTranslate} disabled={translating || !translateTargets.length} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
                               {translating ? <><Loader2 size={14} className="animate-spin" /> Translating…</> : <><LanguagesIcon size={14} /> Translate{translateTargets.length > 1 ? ` (${translateTargets.length} languages)` : ''}</>}
                           </button>
+                      </div>
+                  </div>
+              </div>
+          )}
+          {/* TRANSLATION RUN REPORT — what got translated, what failed, and whether it saved. */}
+          {translateReport && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 flex flex-col max-h-[85vh]">
+                      <div className="flex justify-between items-center mb-1">
+                          <h3 className="font-bold text-lg flex items-center gap-2">
+                            {translateReport.failures.length === 0
+                              ? <CheckCircle size={18} className="text-emerald-600" />
+                              : <AlertTriangle size={18} className={translateReport.ok === 0 ? 'text-rose-500' : 'text-amber-500'} />}
+                            Translation run {translateReport.failures.length === 0 ? 'complete' : translateReport.ok === 0 ? 'failed' : 'partially complete'}
+                          </h3>
+                          <button onClick={() => setTranslateReport(null)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                      </div>
+                      <p className="text-xs text-muted mb-3">
+                        {new Date(translateReport.finishedAt).toLocaleString()} · {translateReport.ok} of {translateReport.total} fragment(s) translated
+                        {translateReport.failures.length > 0 && <> · <span className="text-rose-600 font-medium">{translateReport.failures.length} failed</span></>}
+                      </p>
+
+                      {!translateReport.saved && (
+                        <div className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded p-2.5 mb-3">
+                          <strong>Not saved to the server yet.</strong> The translations are held in this editor and backed up
+                          locally on this device — nothing is lost. Autosave keeps retrying in the background; you can also
+                          press <strong>Save All</strong> to retry now. Don't close the tab until the header shows “Saved”.
+                        </div>
+                      )}
+
+                      {/* Per-language outcome */}
+                      <div className="border rounded divide-y mb-3 text-xs">
+                        {translateReport.targets.map(t => {
+                          const failed = translateReport.failures.filter(f => f.lang === t).length;
+                          const ok = translateReport.okByLang[t] ?? 0;
+                          return (
+                            <div key={t} className="flex items-center justify-between px-3 py-1.5">
+                              <span className="font-bold uppercase">{ALL_LANGUAGES.find(l => l.code === t)?.label ?? t}</span>
+                              <span>
+                                <span className="text-emerald-700">{ok} ok</span>
+                                {failed > 0 && <span className="text-rose-600"> · {failed} failed</span>}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {translateReport.failures.length > 0 && (
+                        <>
+                          <p className="text-[11px] text-muted mb-1">
+                            Failed fragments were left untranslated. Run Translate again with <strong>“skip already-translated”</strong> checked
+                            to retry exactly these gaps — everything already translated is skipped.
+                          </p>
+                          <div className="border rounded divide-y overflow-y-auto flex-1 min-h-0 max-h-48 text-xs mb-3">
+                            {translateReport.failures.slice(0, 200).map((f, i) => (
+                              <div key={i} className="px-3 py-1.5">
+                                <span className="font-bold uppercase text-rose-600 mr-1.5">{f.lang}</span>
+                                <span className="text-gray-700">{f.label}</span>
+                                <div className="text-[10px] text-muted truncate" title={f.error}>{f.error}</div>
+                              </div>
+                            ))}
+                            {translateReport.failures.length > 200 && (
+                              <div className="px-3 py-1.5 text-muted">…and {translateReport.failures.length - 200} more (all included in the downloaded log)</div>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      <div className="flex justify-between gap-3 pt-3 border-t border-gray-100">
+                          <button onClick={downloadTranslateReport} className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-gray-700 rounded text-sm hover:bg-light">
+                            <FileDown size={14} /> Download log
+                          </button>
+                          <button onClick={() => setTranslateReport(null)} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700">Close</button>
                       </div>
                   </div>
               </div>
