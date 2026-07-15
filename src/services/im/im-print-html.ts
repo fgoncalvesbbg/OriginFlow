@@ -18,7 +18,7 @@
  * own resolver/publish pipeline and is trusted server-side, so it is injected verbatim.
  */
 
-import { getCalloutTitle } from './callout-titles.i18n';
+import { getCalloutTitle, getContentsLabel } from './callout-titles.i18n';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
 
 export type PrintPageSize = 'a4' | 'a5';
@@ -372,7 +372,7 @@ const buildTocPage = (manual: PrintManual): string => {
     .join('');
   return `
     <section class="im-page im-break im-page-toc">
-      <h2 class="im-toc-title">Contents</h2>
+      <h2 class="im-toc-title">${escapeHtml(getContentsLabel(manual.language))}</h2>
       <nav class="im-toc">${rows}</nav>
     </section>
   `;

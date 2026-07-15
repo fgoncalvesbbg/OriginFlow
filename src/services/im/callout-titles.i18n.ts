@@ -60,3 +60,18 @@ export const getAppliesToLabel = (lang?: string): string => {
   const code = (lang ?? 'en').toLowerCase().split('-')[0];
   return APPLIES_TO_I18N[code] ?? APPLIES_TO_I18N.en;
 };
+
+/**
+ * Localized "Contents" heading for the print PDF's table-of-contents page.
+ * English is the fallback.
+ */
+export const CONTENTS_I18N: Record<string, string> = {
+  en: 'Contents', de: 'Inhalt', fr: 'Sommaire', es: 'Índice', it: 'Indice', pt: 'Índice', nl: 'Inhoud', pl: 'Spis treści',
+  bg: 'Съдържание', hr: 'Sadržaj', cs: 'Obsah', da: 'Indhold', et: 'Sisukord', fi: 'Sisällys', el: 'Περιεχόμενα', hu: 'Tartalom', lv: 'Saturs', lt: 'Turinys', ro: 'Cuprins', sk: 'Obsah', sl: 'Vsebina', sv: 'Innehåll',
+};
+
+/** Localized "Contents" heading for the print PDF's TOC page. Normalizes BCP-47 → base code. */
+export const getContentsLabel = (lang?: string): string => {
+  const code = (lang ?? 'en').toLowerCase().split('-')[0];
+  return CONTENTS_I18N[code] ?? CONTENTS_I18N.en;
+};

@@ -57,6 +57,19 @@ describe('buildPrintHtml — section ordering + pagination', () => {
     const contentPages = html.match(/class="im-page im-break im-page-content"/g) ?? [];
     expect(contentPages).toHaveLength(1);
   });
+
+  it('the TOC heading is translated into the manual\'s language, not hardcoded English', () => {
+    const de: PrintManual = { ...manual, language: 'de' };
+    const html = buildPrintHtml([de], opts);
+    expect(html).toContain('<h2 class="im-toc-title">Inhalt</h2>');
+    expect(html).not.toContain('<h2 class="im-toc-title">Contents</h2>');
+  });
+
+  it('falls back to the English "Contents" heading for an unmapped language', () => {
+    const xx: PrintManual = { ...manual, language: 'xx' };
+    const html = buildPrintHtml([xx], opts);
+    expect(html).toContain('<h2 class="im-toc-title">Contents</h2>');
+  });
 });
 
 describe('buildPrintPartsHtml — Warning Leaflet compact layout', () => {
