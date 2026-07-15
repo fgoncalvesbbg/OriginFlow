@@ -1,5 +1,5 @@
 /**
- * Localized ISO callout titles (WARNING / CAUTION / ELECTRIC HAZARD / FLAMMABLE / INFO).
+ * Localized ISO callout titles (WARNING / CAUTION / ELECTRIC HAZARD / RISK OF FIRE / HOT SURFACE / INFO).
  *
  * The callout title is generated at render time from the block variant + the
  * language the manual is being shown in, so the header is always translated.
@@ -24,8 +24,12 @@ export const CALLOUT_TITLES_I18N: Record<string, Record<string, string>> = {
     bg: 'ОПАСНОСТ ОТ ЕЛЕКТРИЧЕСКИ УДАР', hr: 'OPASNOST OD ELEKTRIČNE STRUJE', cs: 'NEBEZPEČÍ ÚRAZU ELEKTRICKÝM PROUDEM', da: 'FARE FOR ELEKTRISK STØD', et: 'ELEKTRILÖÖGI OHT', fi: 'SÄHKÖISKUN VAARA', el: 'ΚΙΝΔΥΝΟΣ ΗΛΕΚΤΡΟΠΛΗΞΙΑΣ', hu: 'ÁRAMÜTÉS VESZÉLYE', lv: 'ELEKTROTRIECIENA RISKS', lt: 'ELEKTROS SMŪGIO PAVOJUS', ro: 'PERICOL DE ELECTROCUTARE', sk: 'NEBEZPEČENSTVO ÚRAZU ELEKTRICKÝM PRÚDOM', sl: 'NEVARNOST ELEKTRIČNEGA UDARA', sv: 'RISK FÖR ELEKTRISK STÖT',
   },
   flammable: {
-    en: 'FLAMMABLE', de: 'ENTZÜNDLICH', fr: 'INFLAMMABLE', es: 'INFLAMABLE', it: 'INFIAMMABILE', pt: 'INFLAMÁVEL', nl: 'ONTVLAMBAAR', pl: 'ŁATWOPALNE',
-    bg: 'ЗАПАЛИМО', hr: 'ZAPALJIVO', cs: 'HOŘLAVÉ', da: 'BRANDFARLIGT', et: 'TULEOHTLIK', fi: 'SYTTYVÄÄ', el: 'ΕΥΦΛΕΚΤΟ', hu: 'GYÚLÉKONY', lv: 'UZLIESMOJOŠS', lt: 'DEGUS', ro: 'INFLAMABIL', sk: 'HORĽAVÉ', sl: 'VNETLJIVO', sv: 'BRANDFARLIGT',
+    en: 'RISK OF FIRE', de: 'BRANDGEFAHR', fr: 'RISQUE D’INCENDIE', es: 'RIESGO DE INCENDIO', it: 'RISCHIO DI INCENDIO', pt: 'RISCO DE INCÊNDIO', nl: 'BRANDGEVAAR', pl: 'RYZYKO POŻARU',
+    bg: 'ОПАСНОСТ ОТ ПОЖАР', hr: 'OPASNOST OD POŽARA', cs: 'NEBEZPEČÍ POŽÁRU', da: 'BRANDFARE', et: 'TULEOHT', fi: 'TULIPALON VAARA', el: 'ΚΙΝΔΥΝΟΣ ΠΥΡΚΑΓΙΑΣ', hu: 'TŰZVESZÉLY', lv: 'UGUNSGRĒKA RISKS', lt: 'GAISRO PAVOJUS', ro: 'PERICOL DE INCENDIU', sk: 'NEBEZPEČENSTVO POŽIARU', sl: 'NEVARNOST POŽARA', sv: 'BRANDRISK',
+  },
+  hot_surface: {
+    en: 'HOT SURFACE', de: 'HEISSE OBERFLÄCHE', fr: 'SURFACE CHAUDE', es: 'SUPERFICIE CALIENTE', it: 'SUPERFICIE CALDA', pt: 'SUPERFÍCIE QUENTE', nl: 'HEET OPPERVLAK', pl: 'GORĄCA POWIERZCHNIA',
+    bg: 'ГОРЕЩА ПОВЪРХНОСТ', hr: 'VRUĆA POVRŠINA', cs: 'HORKÝ POVRCH', da: 'VARM OVERFLADE', et: 'KUUM PIND', fi: 'KUUMA PINTA', el: 'ΘΕΡΜΗ ΕΠΙΦΑΝΕΙΑ', hu: 'FORRÓ FELÜLET', lv: 'KARSTA VIRSMA', lt: 'KARŠTAS PAVIRŠIUS', ro: 'SUPRAFAȚĂ FIERBINTE', sk: 'HORÚCI POVRCH', sl: 'VROČA POVRŠINA', sv: 'HET YTA',
   },
   info: {
     en: 'INFO', de: 'HINWEIS', fr: 'INFORMATION', es: 'INFORMACIÓN', it: 'INFORMAZIONI', pt: 'INFORMAÇÃO', nl: 'INFORMATIE', pl: 'INFORMACJA',

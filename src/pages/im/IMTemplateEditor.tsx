@@ -1634,6 +1634,7 @@ const IMTemplateEditor: React.FC = () => {
                                              blk?.blockType === 'caution' ? 'bg-orange-100 text-orange-700' :
                                              blk?.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' :
                                              blk?.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' :
+                                             blk?.blockType === 'hot_surface' ? 'bg-amber-100 text-amber-800' :
                                              blk?.blockType === 'info'    ? 'bg-sky-100 text-sky-700' :
                                                                              'bg-indigo-100 text-indigo-700'
                                            }`}>{(blk?.blockType ?? 'block').toUpperCase()}</span>
@@ -2680,7 +2681,7 @@ const IMTemplateEditor: React.FC = () => {
                           disabled={already}
                           className={`w-full text-left flex items-start gap-3 p-3 rounded-lg border transition-colors ${already ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed' : 'border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 cursor-pointer'}`}
                         >
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${blk.blockType === 'warning' ? 'bg-amber-100 text-amber-700' : blk.blockType === 'caution' ? 'bg-orange-100 text-orange-700' : blk.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' : blk.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' : blk.blockType === 'info' ? 'bg-sky-100 text-sky-700' : 'bg-blue-100 text-blue-700'}`}>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${blk.blockType === 'warning' ? 'bg-amber-100 text-amber-700' : blk.blockType === 'caution' ? 'bg-orange-100 text-orange-700' : blk.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' : blk.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' : blk.blockType === 'hot_surface' ? 'bg-amber-100 text-amber-800' : blk.blockType === 'info' ? 'bg-sky-100 text-sky-700' : 'bg-blue-100 text-blue-700'}`}>
                             {blk.blockType.toUpperCase()}
                           </span>
                           <div className="flex-1 min-w-0">

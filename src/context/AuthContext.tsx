@@ -7,8 +7,19 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User } from '../types';
 import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services';
 import { supabase } from '../services/core/supabase.client';
+import { withTimeout } from '../services/core/with-timeout';
 import { isLive } from '../config/environment.config';
 import { isPortalRoute } from '../config/routes.config';
+
+/**
+ * Hard ceiling on how long the app may sit behind the "Loading session…" gate.
+ * If session init hasn't settled by now (e.g. a hung getSession on a stale
+ * connection), we force the app to render rather than freeze forever — the user
+ * lands on login or the app shell and the connection banner takes over.
+ */
+const AUTH_INIT_WATCHDOG_MS = 12000;
+/** Bound for the initial getSession/profile reads so init can't hang. */
+const AUTH_REQUEST_TIMEOUT_MS = 10000;
 
 interface AuthContextType {
   user: User | null;
@@ -29,10 +40,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const fetchProfile = async (userId: string) => {
     try {
-      const profile = await getUserProfile(userId);
+      const profile = await withTimeout(
+        Promise.resolve(getUserProfile(userId)),
+        AUTH_REQUEST_TIMEOUT_MS,
+      );
       setUser(profile);
     } catch (e: any) {
-      console.warn("[Auth] Failed to fetch profile (may be non-PM user):", e.message);
+      console.warn("[Auth] Failed to fetch profile (timeout or non-PM user):", e?.message ?? e);
       setUser(null);
     }
   };
@@ -51,6 +65,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Added comment above fix: Subscribing to auth changes on component mount
   useEffect(() => {
     let isMounted = true;
+    let settled = false;
     let subscription: { unsubscribe: () => void } | undefined;
 
     if (!isLive) {
@@ -61,6 +76,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    // Watchdog: never let the "Loading session…" gate hang forever. If init has
+    // not settled within the deadline (e.g. getSession stuck on a stale socket),
+    // force the app to render and log it so the freeze is traceable.
+    const stopLoading = () => {
+      settled = true;
+      if (isMounted) setIsLoading(false);
+    };
+    const watchdog = setTimeout(() => {
+      if (!settled) {
+        console.error(
+          `[Auth] Session init did not complete within ${AUTH_INIT_WATCHDOG_MS / 1000}s — forcing render. ` +
+          'The Supabase connection may be unavailable; the reconnect banner will guide recovery.',
+        );
+        stopLoading();
+      }
+    }, AUTH_INIT_WATCHDOG_MS);
+
     const initializeAuth = async () => {
       // Determine if we are on a public portal route
       const isPortal = isPortalRoute();
@@ -69,13 +101,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // If on portal, we bypass session fetching to avoid Lock conflicts
         if (isPortal) {
            console.debug("[Auth] Public Portal detected. Bypassing PM profile initialization.");
-           setIsLoading(false);
            return;
         }
 
-        // 1. Check initial session for PM/Admin users
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
+        // 1. Check initial session for PM/Admin users (bounded so a stale
+        // connection can't wedge the whole app on the loading screen)
+        const { data: { session }, error } = await withTimeout(
+          supabase.auth.getSession(),
+          AUTH_REQUEST_TIMEOUT_MS,
+        );
+
         if (error) {
            console.warn("[Auth] Session check failed (common on public portals):", error.message);
         }
@@ -85,21 +120,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       } catch (e: any) {
         // Log but don't block app mount
-        console.warn("[Auth] Caught error during session init:", e.message);
+        console.warn("[Auth] Caught error during session init:", e?.message ?? e);
       } finally {
-        if (isMounted) setIsLoading(false);
+        clearTimeout(watchdog);
+        stopLoading();
       }
 
       // 2. Listen for session changes
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         console.debug('[Auth] Session event:', event);
-        if (isMounted) {
+        if (!isMounted) return;
+        try {
           if (session?.user) {
             await fetchProfile(session.user.id);
           } else {
             setUser(null);
           }
-          setIsLoading(false);
+        } finally {
+          // Always release the gate, even if fetchProfile throws — otherwise a
+          // failed profile fetch on TOKEN_REFRESHED could latch the spinner.
+          stopLoading();
         }
       });
       subscription = data.subscription;
@@ -109,6 +149,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return () => {
       isMounted = false;
+      clearTimeout(watchdog);
       subscription?.unsubscribe();
     };
   }, []);

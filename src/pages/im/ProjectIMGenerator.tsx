@@ -836,7 +836,7 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Map a shared block's type to its callout variant so a flattened copy keeps its look.
   const blockTypeToVariant = (blockType?: string): CalloutVariant | undefined => {
-      const map: Record<string, CalloutVariant> = { warning: 'warning', caution: 'caution', electric: 'electric', flammable: 'flammable', info: 'info' };
+      const map: Record<string, CalloutVariant> = { warning: 'warning', caution: 'caution', electric: 'electric', flammable: 'flammable', hot_surface: 'hot_surface', info: 'info' };
       return blockType ? map[blockType] : undefined;
   };
 

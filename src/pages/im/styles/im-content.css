@@ -127,6 +127,15 @@
   color: #c2410c;
 }
 
+.im-block-hot_surface {
+  background-color: #fffbeb;
+  border-left-color: #f59e0b;
+}
+
+.im-block-hot_surface .im-block-title {
+  color: #b45309;
+}
+
 .im-block-info {
   background-color: #eff6ff;
   border-left-color: #3b82f6;

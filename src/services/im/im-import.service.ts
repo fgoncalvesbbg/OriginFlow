@@ -77,7 +77,7 @@ export interface ImImportDoc {
   };
 }
 
-const CALLOUT_VARIANTS: CalloutVariant[] = ['warning', 'caution', 'electric', 'flammable', 'info'];
+const CALLOUT_VARIANTS: CalloutVariant[] = ['warning', 'caution', 'electric', 'flammable', 'hot_surface', 'info'];
 const BLOCK_TYPES: ImImportBlockType[] = ['paragraph', 'heading', 'callout', 'table', 'image'];
 const SCOPES: ImImportScope[] = ['generic', 'model-specific'];
 

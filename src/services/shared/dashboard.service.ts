@@ -4,32 +4,43 @@
  */
 
 import { supabase } from '../core/supabase.client';
+import { withTimeout } from '../core/with-timeout';
 import { isLive } from '../../config/environment.config';
 import { DashboardStats, DeadlineItem, ProjectOverallStatus } from '../../types';
+
+/** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
+const READ_TIMEOUT_MS = 20000;
+const EMPTY_STATS = { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 };
 
 /**
  * Get dashboard statistics including active projects, pending reviews, overdue items, and upcoming deadlines
  */
 export const getDashboardStats = async (): Promise<DashboardStats & { newProposals: number }> => {
-    if (!isLive) return { activeProjects: 0, pendingReviews: 0, overdueCount: 0, upcomingDeadlines: [], newProposals: 0 };
+    if (!isLive) return EMPTY_STATS;
 
     const today = new Date();
     const nextPeriod = new Date();
     nextPeriod.setDate(today.getDate() + 14);
 
-    const [projectsRes, docsRes, proposalsRes, tcfRes, deadlineDocsRes] = await Promise.all([
-        supabase.from('projects').select('status').limit(1000),
-        supabase.from('project_documents').select('*, projects!inner(name)').eq('status', 'uploaded').limit(500),
-        supabase.from('supplier_proposals').select('id').eq('status', 'new').limit(500),
-        supabase.from('compliance_requests').select('*, projects!inner(name)').eq('status', 'pending_supplier').limit(500),
-        supabase.from('project_documents')
+    const results = await Promise.all([
+        withTimeout(supabase.from('projects').select('status').limit(1000), READ_TIMEOUT_MS),
+        withTimeout(supabase.from('project_documents').select('*, projects!inner(name)').eq('status', 'uploaded').limit(500), READ_TIMEOUT_MS),
+        withTimeout(supabase.from('supplier_proposals').select('id').eq('status', 'new').limit(500), READ_TIMEOUT_MS),
+        withTimeout(supabase.from('compliance_requests').select('*, projects!inner(name)').eq('status', 'pending_supplier').limit(500), READ_TIMEOUT_MS),
+        withTimeout(supabase.from('project_documents')
             .select('*, projects!inner(name)')
             .not('deadline', 'is', null)
             .neq('status', 'approved')
             .lte('deadline', nextPeriod.toISOString())
             .order('deadline')
-            .limit(500)
-    ]);
+            .limit(500), READ_TIMEOUT_MS)
+    ]).catch((e) => {
+        console.error("[read] getDashboardStats timed out or failed", e);
+        return null;
+    });
+
+    if (!results) return EMPTY_STATS;
+    const [projectsRes, docsRes, proposalsRes, tcfRes, deadlineDocsRes] = results;
 
     const projects = projectsRes.data || [];
     const activeProjects = projects.filter(p => p.status === ProjectOverallStatus.IN_PROGRESS).length;

@@ -9,18 +9,27 @@ import { Supplier, User, Project } from '../../types';
 import { mapSupplier, mapProfile, mapProject } from '../../utils/mappers.utils';
 import { handleError, generateUUID, generateNumericCode } from '../../utils';
 import { runMutation, runQuery } from '../core/db';
+import { withTimeout } from '../core/with-timeout';
+
+/** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
+const READ_TIMEOUT_MS = 20000;
 
 /**
  * Get all suppliers
  */
 export const getSuppliers = async (): Promise<Supplier[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('suppliers').select('*');
-    if (error) {
-        console.error("getSuppliers failed", error);
+    try {
+        const { data, error } = await withTimeout(supabase.from('suppliers').select('*'), READ_TIMEOUT_MS);
+        if (error) {
+            console.error("getSuppliers failed", error);
+            return [];
+        }
+        return (data || []).map(mapSupplier);
+    } catch (e) {
+        console.error("[read] getSuppliers timed out or failed", e);
         return [];
     }
-    return (data || []).map(mapSupplier);
 };
 
 /**

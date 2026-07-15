@@ -8,7 +8,7 @@ import { IMBlock, CategoryL3, CategoryAttribute } from '../../types';
 import { sanitizeHtml } from '../../utils';
 import {
   Layers, Plus, Search, CheckCircle2, Clock, Edit2, Trash2, X,
-  ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame,
+  ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame, Thermometer,
   Code, Bold, Italic, Underline, Languages as LanguagesIcon
 } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
@@ -22,7 +22,8 @@ const BLOCK_TYPES = [
   { value: 'warning',     label: 'Warning',   color: 'bg-amber-100 text-amber-700' },
   { value: 'caution',     label: 'Caution',   color: 'bg-orange-100 text-orange-700' },
   { value: 'electric',    label: 'Electric',  color: 'bg-yellow-100 text-yellow-700' },
-  { value: 'flammable',   label: 'Flammable', color: 'bg-rose-100 text-orange-700' },
+  { value: 'flammable',   label: 'Risk of Fire',  color: 'bg-rose-100 text-orange-700' },
+  { value: 'hot_surface', label: 'Hot Surface',   color: 'bg-amber-100 text-amber-800' },
   { value: 'info',        label: 'Info',      color: 'bg-sky-100 text-sky-700' },
   { value: 'legacy_html', label: 'Legacy',    color: 'bg-gray-100 text-gray-600' },
 ] as const;
@@ -42,6 +43,7 @@ const blockTypeIcon = (bt: string) => {
   if (bt === 'caution')  return <AlertCircle   size={12} />;
   if (bt === 'electric') return <Zap           size={12} />;
   if (bt === 'flammable') return <Flame        size={12} />;
+  if (bt === 'hot_surface') return <Thermometer size={12} />;
   if (bt === 'info')     return <Info          size={12} />;
   return <FileText size={12} />;
 };

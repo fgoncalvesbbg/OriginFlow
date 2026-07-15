@@ -187,7 +187,7 @@ export interface ProjectExtraSection {
 // ---------------------------------------------------------------------------
 
 /** Callout variants — a hazard/info box with an official ISO 7010 sign. */
-export type CalloutVariant = 'warning' | 'caution' | 'electric' | 'flammable' | 'info';
+export type CalloutVariant = 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info';
 
 /**
  * Visibility condition shared by inline and shared-block refs — the ref only
@@ -240,7 +240,7 @@ export interface IMBlock {
   id: string;
   slug: string;
   title: string;
-  blockType: 'content' | 'warning' | 'caution' | 'electric' | 'flammable' | 'info' | 'legacy_html';
+  blockType: 'content' | 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info' | 'legacy_html';
   sourceLanguage: string;
   content: Record<string, string>; // lang -> html
   placeholders: string[];

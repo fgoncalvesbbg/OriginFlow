@@ -9,18 +9,27 @@ import { Project, ProjectOverallStatus, ProjectMilestones, ProjectStep, ProjectD
 import { mapProject, mapProjectStep, mapProjectDocument } from '../../utils/mappers.utils';
 import { handleError, generateUUID } from '../../utils';
 import { runMutation, runQuery } from '../core/db';
+import { withTimeout } from '../core/with-timeout';
+
+/** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
+const READ_TIMEOUT_MS = 20000;
 
 /**
  * Get all projects
  */
 export const getProjects = async (): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('projects').select('*');
-    if (error) {
-        console.error("getProjects failed", error);
+    try {
+        const { data, error } = await withTimeout(supabase.from('projects').select('*'), READ_TIMEOUT_MS);
+        if (error) {
+            console.error("getProjects failed", error);
+            return [];
+        }
+        return (data || []).map(mapProject);
+    } catch (e) {
+        console.error("[read] getProjects timed out or failed", e);
         return [];
     }
-    return (data || []).map(mapProject);
 };
 
 /**

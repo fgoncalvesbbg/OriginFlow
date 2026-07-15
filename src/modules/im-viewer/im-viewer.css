@@ -288,6 +288,10 @@
 .imv-block-caution .imv-block-title { color: #854d0e; }
 .imv-block-electric { background: #fef2f2; border-left-color: #dc2626; }
 .imv-block-electric .imv-block-title { color: #b91c1c; }
+.imv-block-flammable { background: #fff1f2; border-left-color: #ea580c; }
+.imv-block-flammable .imv-block-title { color: #c2410c; }
+.imv-block-hot_surface { background: #fffbeb; border-left-color: #f59e0b; }
+.imv-block-hot_surface .imv-block-title { color: #b45309; }
 .imv-block-info { background: #eff6ff; border-left-color: #3b82f6; }
 .imv-block-info .imv-block-title { color: #1d4ed8; }
 

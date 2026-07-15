@@ -4,9 +4,11 @@ import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider, ToastContext } from '../context/ToastContext';
+import { ConnectionProvider } from '../context/ConnectionContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminRoute from '../components/AdminRoute';
 import { ToastContainer } from '../components/common/Toast';
+import { ConnectionBanner } from '../components/common/ConnectionBanner';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { checkComplianceDeadlines } from '../services';
 
@@ -56,6 +58,7 @@ const AppContent: React.FC = () => {
 
   return (
     <>
+      <ConnectionBanner />
       <Router>
         <Routes>
           {/* Public Routes */}
@@ -198,9 +201,11 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <ToastProvider>
-          <AppContent />
-        </ToastProvider>
+        <ConnectionProvider>
+          <ToastProvider>
+            <AppContent />
+          </ToastProvider>
+        </ConnectionProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

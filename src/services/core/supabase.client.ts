@@ -41,6 +41,45 @@ const timeoutLock = async <R>(
 };
 
 /**
+ * Network-level backstop so NO request can hang forever.
+ *
+ * The idle-tab freeze is caused by requests that never settle: after a tab is
+ * backgrounded long enough for the access token to expire, the keep-alive socket
+ * is often silently dropped. On return, supabase-js's internal token refresh (and
+ * any getSession/read that waits on it) can stay pending indefinitely — the OS
+ * never delivers an error for the dead socket. Neither `withTimeout` (only wraps
+ * explicit call sites) nor `timeoutLock` (only bounds lock acquisition) covers
+ * that internal refresh fetch. Bounding fetch itself does.
+ *
+ * This is deliberately generous (100s) — LONGER than save-retry's MAX_TIMEOUT_MS
+ * (90s) — so it never aborts a legitimately slow large upload; the per-call
+ * `withTimeout` bounds (12-90s) always fire first for those. It exists purely to
+ * convert an infinite hang into a normal fetch error the app can recover from.
+ * The connection-recovery layer (ConnectionContext) surfaces failures to the user
+ * much faster (~8s) via its own short-bounded probe.
+ */
+const GLOBAL_FETCH_TIMEOUT_MS = 100_000;
+
+const fetchWithTimeout: typeof fetch = (input, init) => {
+  const controller = new AbortController();
+  const external = init?.signal ?? undefined;
+  const onExternalAbort = () => controller.abort((external as AbortSignal).reason);
+  if (external) {
+    if (external.aborted) controller.abort(external.reason);
+    else external.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as Request).url);
+    console.warn(`[supabase] request aborted by ${GLOBAL_FETCH_TIMEOUT_MS / 1000}s network backstop — likely a dropped connection`, url);
+    controller.abort(new DOMException(`Request exceeded ${GLOBAL_FETCH_TIMEOUT_MS}ms network backstop`, 'TimeoutError'));
+  }, GLOBAL_FETCH_TIMEOUT_MS);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+    clearTimeout(timer);
+    if (external) external.removeEventListener('abort', onExternalAbort);
+  });
+};
+
+/**
  * Standard Supabase client for authenticated requests
  * Credentials are loaded from environment variables only
  */
@@ -54,7 +93,8 @@ export const supabase = createClient(
       detectSessionInUrl: true,
       storageKey: 'sb-auth-token',
       lock: timeoutLock
-    }
+    },
+    global: { fetch: fetchWithTimeout }
   }
 );
 
@@ -71,6 +111,7 @@ export const portalClient = createClient(
       autoRefreshToken: false,
       detectSessionInUrl: false,
       storageKey: 'sb-portal-auth-token'
-    }
+    },
+    global: { fetch: fetchWithTimeout }
   }
 );

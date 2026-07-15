@@ -1,25 +1,47 @@
 /**
- * useRefetchOnFocus — re-runs the given callback when the window/tab regains focus, so pages
- * refresh stale data when the user returns to them.
+ * useRefetchOnFocus — re-runs the given callback when the tab regains focus (or the
+ * connection is recovered), so pages refresh stale data when the user returns.
  */
 import { useEffect, useRef } from 'react';
+import { RECONNECTED_EVENT } from '../context/ConnectionContext';
 
 /**
- * Calls `refetch` whenever the browser tab becomes visible again.
- * Prevents stale data after the user switches tabs or returns to the app.
+ * Calls `refetch` whenever the browser tab becomes visible again or the app
+ * recovers from a lost connection.
+ *
+ * Guards against overlapping runs: without this, returning to a tab fired a fresh
+ * `loadData` on every page at once, and if one stalled it could pile up. The
+ * in-flight ref drops re-entrant triggers, and errors are caught + logged so a
+ * failed refetch is traceable rather than silent.
  */
-export function useRefetchOnFocus(refetch: () => void) {
+export function useRefetchOnFocus(refetch: () => void | Promise<void>) {
   const refetchRef = useRef(refetch);
   refetchRef.current = refetch;
+  const inFlight = useRef(false);
 
   useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        refetchRef.current();
+    const run = async (trigger: string) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      try {
+        await refetchRef.current();
+      } catch (e) {
+        console.warn(`[refetch-on-focus] refetch (${trigger}) failed`, e);
+      } finally {
+        inFlight.current = false;
       }
     };
 
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') run('visibility');
+    };
+    const onReconnected = () => run('reconnect');
+
     document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener(RECONNECTED_EVENT, onReconnected);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener(RECONNECTED_EVENT, onReconnected);
+    };
   }, []);
 }

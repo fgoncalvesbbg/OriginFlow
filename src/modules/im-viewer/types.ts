@@ -55,7 +55,7 @@ export interface HtmlNode {
   sourceBlock?: string;
 }
 
-export type CalloutVariant = 'warning' | 'caution' | 'electric' | 'flammable' | 'info';
+export type CalloutVariant = 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info';
 
 export interface CalloutNode {
   type: 'callout';
