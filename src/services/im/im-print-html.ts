@@ -173,12 +173,18 @@ const LANGUAGE_NAMES: Record<string, string> = {
 const languageName = (code: string) => LANGUAGE_NAMES[code] ?? code.toUpperCase();
 
 /** "Instruction Manual" per language — used for the multilingual cover subtitle. */
+// Every language in src/config/im-languages.ts (IM_LANGUAGES) must have an entry here —
+// a missing one falls back to the raw code (e.g. "BG" instead of a translated phrase),
+// which is exactly the bug this map exists to prevent. Keep the two lists in sync.
 const INSTRUCTION_MANUAL_NAMES: Record<string, string> = {
   en: 'INSTRUCTION MANUAL', de: 'BEDIENUNGSANLEITUNG', fr: "MODE D'EMPLOI",
   es: 'MANUAL DE INSTRUCCIONES', it: 'MANUALE DI ISTRUZIONI', nl: 'GEBRUIKSAANWIJZING',
   pt: 'MANUAL DE INSTRUÇÕES', pl: 'INSTRUKCJA OBSŁUGI', cs: 'NÁVOD K POUŽITÍ',
   sv: 'BRUKSANVISNING', da: 'BRUGSANVISNING', fi: 'KÄYTTÖOHJE', no: 'BRUKSANVISNING',
   ro: 'MANUAL DE UTILIZARE', hu: 'HASZNÁLATI ÚTMUTATÓ',
+  bg: 'ИНСТРУКЦИЯ ЗА УПОТРЕБА', hr: 'UPUTE ZA UPORABU', et: 'KASUTUSJUHEND',
+  el: 'ΟΔΗΓΙΕΣ ΧΡΗΣΗΣ', lv: 'LIETOŠANAS INSTRUKCIJA', lt: 'NAUDOJIMO INSTRUKCIJA',
+  sk: 'NÁVOD NA POUŽITIE', sl: 'NAVODILA ZA UPORABO',
 };
 
 /** "Instruction Manual" rendered in each printed language (deduped, in order). */

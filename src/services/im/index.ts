@@ -38,7 +38,7 @@ export {
 } from './im-block.service';
 
 export { resolveManual } from './im-resolver';
-export { publishResolvedManuals, normalizeResolverData, getPublishedManifestUrl } from './im-publish.service';
+export { publishResolvedManuals, normalizeResolverData, getPublishedManifestUrl, getProjectRequiredLanguages } from './im-publish.service';
 export type { PublishResult } from './im-publish.service';
 export {
   getStaleProjectIMDetails,

@@ -2,12 +2,14 @@ import { describe, it, expect } from 'vitest';
 import {
   buildPrintHtml,
   buildPrintPartsHtml,
+  buildCoverPartHtml,
   DEFAULT_LEAFLET_TEXT_PT,
   DEFAULT_LEAFLET_HEADING_PT,
   PrintManual,
   PrintHtmlOptions,
 } from './im-print-html';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
+import { IM_LANGUAGES } from '../../config/im-languages';
 
 // A manual whose section `order` is assigned per sibling-group (10/20 within each parent).
 // Roots: A(10) with child A1(10); B(20) with child B1(10). Correct reading order is the
@@ -151,5 +153,23 @@ describe('default logo fallback — normalized-empty companyLogoUrl', () => {
     });
     expect(part.html).toContain('https://example.com/custom.png');
     expect(part.html).not.toContain(DEFAULT_LEAFLET_LOGO_URL);
+  });
+});
+
+describe('cover language directory — every supported language has a translated name', () => {
+  // Regression guard: INSTRUCTION_MANUAL_NAMES (im-print-html.ts) is a hand-maintained
+  // map keyed by language code; a language present in IM_LANGUAGES but missing from that
+  // map silently falls back to the bare code (e.g. "BG" instead of a translated phrase) —
+  // exactly the bug a real cover PDF shipped with. This drives every canonical language
+  // through the actual directory-row builder and fails if ANY of them still falls back.
+  it('never falls back to the bare code for any IM_LANGUAGES entry', () => {
+    const manuals: PrintManual[] = IM_LANGUAGES.map((l) => ({ ...manual, language: l.code }));
+    const html = buildCoverPartHtml(manuals, opts, manuals.map(() => null));
+    const rows = [...html.matchAll(/im-cix-code">([^<]*)<\/span><span class="im-cix-name">([^<]*)</g)]
+      .map((m) => ({ code: m[1], name: m[2] }));
+    expect(rows).toHaveLength(IM_LANGUAGES.length);
+    for (const { code, name } of rows) {
+      expect(name).not.toBe(code);
+    }
   });
 });

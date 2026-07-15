@@ -74,22 +74,49 @@ export const normalizeResolverData = (
 /**
  * The languages a project actually produces — a subset of the template's, English
  * always included. Stored per project as `__required_languages`; absent = all
- * template languages. Shared by publish and the staleness check so both agree.
+ * template languages, in the template's own order. Shared by publish, the print
+ * export, and the staleness check so they all agree.
+ *
+ * Display/output ORDER is a separate, optional preference — `__language_order`
+ * (e.g. "German, English, French, Italian, then others") — so a project can
+ * publish/print in a custom language order without changing which languages are
+ * enabled. Only reorders already-enabled languages; any enabled language absent
+ * from the stored order is appended at the end in template order ("then others").
+ * Absent/invalid → falls back to the template's own order, unchanged from before.
  */
 export const getProjectRequiredLanguages = (
   template: IMTemplate,
   placeholderData: Record<string, string>,
 ): string[] => {
   const templateLangs = template.languages?.length ? template.languages : ['en'];
+
+  let enabled = templateLangs;
   try {
     const raw = placeholderData?.['__required_languages'];
     if (raw) {
       const arr = JSON.parse(raw) as string[];
       const filtered = templateLangs.filter((l) => l === 'en' || arr.includes(l));
-      if (filtered.length) return filtered;
+      if (filtered.length) enabled = filtered;
     }
   } catch { /* fall through to all template languages */ }
-  return templateLangs;
+
+  try {
+    const orderRaw = placeholderData?.['__language_order'];
+    if (orderRaw) {
+      const seen = new Set<string>();
+      const order = (JSON.parse(orderRaw) as string[]).filter((l) => {
+        if (!enabled.includes(l) || seen.has(l)) return false;
+        seen.add(l);
+        return true;
+      });
+      if (order.length) {
+        const rest = enabled.filter((l) => !seen.has(l));
+        return [...order, ...rest];
+      }
+    }
+  } catch { /* fall through to template order */ }
+
+  return enabled;
 };
 
 /**

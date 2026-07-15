@@ -14,7 +14,7 @@ import {
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
     getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
-    updateProjectIMPlaceholders
+    updateProjectIMPlaceholders, getProjectRequiredLanguages
 } from '../../services';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
@@ -2112,21 +2112,15 @@ const ProjectIMGenerator: React.FC = () => {
 
   // --- Per-project required languages ------------------------------------------
   // A project produces a subset of the template's languages (English always
-  // included as source/fallback). Persisted as `__required_languages` in formData;
-  // absent = all template languages. Drives the editor tabs, preview dropdown,
-  // pre-publish checklist, and what gets published.
+  // included as source/fallback), in either the template's own order or a custom
+  // order the PM sets below (e.g. "German, English, French, Italian, then others").
+  // Persisted as `__required_languages` (membership) + `__language_order` (display/
+  // publish order) in formData; both absent = all template languages, template order.
+  // Drives the editor tabs, preview dropdown, pre-publish checklist, print export
+  // language list, and what gets published — see getProjectRequiredLanguages, the
+  // single source of truth this mirrors so publish/print never disagree with the editor.
   const templateLangs = template?.languages || ['en'];
-  const requiredLanguages = (() => {
-    try {
-      const raw = formData['__required_languages'];
-      if (raw) {
-        const arr = JSON.parse(raw) as string[];
-        const filtered = templateLangs.filter(l => l === 'en' || arr.includes(l));
-        if (filtered.length) return filtered;
-      }
-    } catch { /* fall through to all template languages */ }
-    return templateLangs;
-  })();
+  const requiredLanguages = template ? getProjectRequiredLanguages(template, formData) : ['en'];
 
   const toggleRequiredLanguage = (code: string) => {
     if (code === 'en') return; // English is always required (source/fallback).
@@ -2135,7 +2129,22 @@ const ProjectIMGenerator: React.FC = () => {
       : [...requiredLanguages, code];
     // Store the explicit non-English subset; English stays implicit.
     handleInputChange('__required_languages', JSON.stringify(templateLangs.filter(l => l !== 'en' && next.includes(l))));
+    // Newly added languages land at the END of the custom order ("then others"); a
+    // removed language is simply dropped from the stored order along with membership.
+    handleInputChange('__language_order', JSON.stringify(next));
     if (!next.includes(activeLang)) setActiveLang('en');
+  };
+
+  // Move a required language up/down in the custom display/publish order. Persists
+  // the FULL resulting order (not just the moved pair) so it stays authoritative
+  // even if some entries were previously implied by template order.
+  const moveRequiredLanguage = (code: string, direction: 'up' | 'down') => {
+    const idx = requiredLanguages.indexOf(code);
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+    if (idx < 0 || swapWith < 0 || swapWith >= requiredLanguages.length) return;
+    const next = [...requiredLanguages];
+    [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+    handleInputChange('__language_order', JSON.stringify(next));
   };
 
   // Language list for the project content editor (one tab per REQUIRED language).
@@ -3158,33 +3167,67 @@ const ProjectIMGenerator: React.FC = () => {
                          )}
                        </div>
 
-                       {/* REQUIRED LANGUAGES — the subset of template languages this project produces */}
+                       {/* REQUIRED LANGUAGES — which template languages this project produces, and in
+                           what order (drives the editor tabs, publish, and print-export language list). */}
                        {templateLangs.length > 1 && (
                          <div className="border-b border-gray-100 pb-6">
                            <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-sm">
                              <Globe size={14} className="text-indigo-500" /> Required Languages
                            </h4>
-                           <p className="text-xs text-muted mb-3">Pick the languages this manual must be published in. English is always included.</p>
-                           <div className="flex flex-wrap gap-1.5">
-                             {templateLangs.map(code => {
-                               const on = requiredLanguages.includes(code);
+                           <p className="text-xs text-muted mb-3">
+                             Pick the languages this manual must be published in, and reorder them — e.g. German
+                             first, then English, French, Italian. English is always included.
+                           </p>
+                           <div className="space-y-1 mb-2">
+                             {requiredLanguages.map((code, i) => {
                                const locked = code === 'en';
                                return (
-                                 <button
-                                   key={code}
-                                   type="button"
-                                   disabled={locked}
-                                   onClick={() => toggleRequiredLanguage(code)}
-                                   className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
-                                     on ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
-                                   } ${locked ? 'opacity-90 cursor-default' : ''}`}
-                                   title={locked ? 'English is always required' : on ? 'Click to exclude' : 'Click to include'}
-                                 >
-                                   {code.toUpperCase()}{locked && ' ·'}
-                                 </button>
+                                 <div key={code} className="flex items-center gap-1 bg-light border border-gray-200 rounded px-2 py-1">
+                                   <span className="text-xs font-bold text-gray-700 flex-1">
+                                     {code.toUpperCase()}{locked && <span className="text-muted font-normal"> · always included</span>}
+                                   </span>
+                                   <button
+                                     type="button"
+                                     onClick={() => moveRequiredLanguage(code, 'up')}
+                                     disabled={i === 0}
+                                     title="Move up"
+                                     className="p-0.5 text-gray-400 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                                   ><ChevronUp size={13} /></button>
+                                   <button
+                                     type="button"
+                                     onClick={() => moveRequiredLanguage(code, 'down')}
+                                     disabled={i === requiredLanguages.length - 1}
+                                     title="Move down"
+                                     className="p-0.5 text-gray-400 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                                   ><ChevronDown size={13} /></button>
+                                   {!locked && (
+                                     <button
+                                       type="button"
+                                       onClick={() => toggleRequiredLanguage(code)}
+                                       title="Remove from this manual"
+                                       className="p-0.5 text-gray-400 hover:text-rose-600"
+                                     ><X size={13} /></button>
+                                   )}
+                                 </div>
                                );
                              })}
                            </div>
+                           {templateLangs.some(c => !requiredLanguages.includes(c)) && (
+                             <>
+                               <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Add a language</p>
+                               <div className="flex flex-wrap gap-1.5">
+                                 {templateLangs.filter(c => !requiredLanguages.includes(c)).map(code => (
+                                   <button
+                                     key={code}
+                                     type="button"
+                                     onClick={() => toggleRequiredLanguage(code)}
+                                     title="Click to include"
+                                     className="px-2.5 py-1 rounded text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 hover:border-gray-400"
+                                   >+ {code.toUpperCase()}</button>
+                                 ))}
+                               </div>
+                             </>
+                           )}
                          </div>
                        )}
 

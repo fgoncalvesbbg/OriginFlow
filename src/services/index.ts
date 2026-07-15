@@ -159,6 +159,7 @@ export {
   publishResolvedManuals,
   normalizeResolverData,
   getPublishedManifestUrl,
+  getProjectRequiredLanguages,
   getStaleProjectIMDetails,
   getProjectIMStaleReasons,
   republishProjectIM,
