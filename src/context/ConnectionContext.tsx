@@ -1,159 +1,70 @@
 /**
- * Connection health / recovery layer.
+ * Connection status layer — passive and non-disruptive by design.
  *
- * Root problem this addresses: after a tab has been idle in the background, the
- * Supabase keep-alive socket is often dropped and the access token expires. When
- * the user returns, data requests (and the internal token refresh) can fail or
- * stall. Previously nothing detected this — pages just sat on a spinner.
+ * IMPORTANT: this must NEVER navigate, reload, refresh the session, or sign the
+ * user out on its own. Earlier versions actively probed on every tab-refocus and
+ * could flip to a "lost" state (and trigger auth churn) while a long operation —
+ * e.g. an AI translation — was in flight, breaking it. All of that is removed.
  *
- * This provider watches `visibilitychange`, `online`, and `offline`. Whenever the
- * tab regains focus or the browser reports it is back online, it runs a short
- * BOUNDED connectivity probe. If the probe succeeds it stays silent (and, if we
- * had previously lost the connection, fires `originflow:reconnected` so pages
- * re-fetch). If the probe fails it flips to a `lost` state, which renders the
- * ConnectionBanner telling the user to reconnect or reload. A manual `reconnect()`
- * forces a token refresh + re-probe.
+ * What remains: it reflects the browser's own `online`/`offline` signal so we can
+ * show a passive banner when the device is genuinely offline. Recovery from a
+ * stale/slow connection is handled invisibly by bounded requests (with-timeout)
+ * and the auth watchdog — pages fail fast and surface their own error/retry UI
+ * rather than hanging. The user is only ever asked to act via explicit buttons.
  */
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from 'react';
-import { supabase } from '../services/core/supabase.client';
-import { withTimeout } from '../services/core/with-timeout';
+import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { isLive } from '../config/environment.config';
-import { isPortalRoute } from '../config/routes.config';
 
-export type ConnectionStatus = 'online' | 'offline' | 'reconnecting' | 'lost';
+export type ConnectionStatus = 'online' | 'offline';
 
 interface ConnectionContextType {
   status: ConnectionStatus;
-  /** Manually re-establish the connection (forces a token refresh + re-probe). */
-  reconnect: () => Promise<void>;
+  /** Re-check connectivity and, if back online, ask pages to refresh their data. */
+  reconnect: () => void;
 }
 
 const ConnectionContext = createContext<ConnectionContextType | undefined>(undefined);
 
-/** Event pages can listen to (via useRefetchOnFocus) to reload after recovery. */
+/** Event pages can listen to (via useRefetchOnFocus) to reload after coming back online. */
 export const RECONNECTED_EVENT = 'originflow:reconnected';
-
-const PROBE_SESSION_TIMEOUT_MS = 6000;
-const PROBE_QUERY_TIMEOUT_MS = 8000;
-const REFRESH_TIMEOUT_MS = 8000;
 
 export const ConnectionProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<ConnectionStatus>(
     typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'online',
   );
-  // Prevents overlapping probes (focus + online can fire together).
-  const probing = useRef(false);
 
-  /**
-   * Bounded connectivity probe against the real data path. Returns true if the
-   * connection is healthy (or there is no session to check — e.g. login page).
-   */
-  const probe = useCallback(async (): Promise<boolean> => {
-    try {
-      const { data: { session } } = await withTimeout(supabase.auth.getSession(), PROBE_SESSION_TIMEOUT_MS);
-      // No session → unauthenticated view; nothing to verify, treat as fine.
-      if (!session) return true;
-      const { error } = await withTimeout(
-        supabase.from('profiles').select('id').limit(1),
-        PROBE_QUERY_TIMEOUT_MS,
-      );
-      if (error) {
-        console.warn('[conn] connectivity probe returned an error', error);
-        return false;
-      }
-      return true;
-    } catch (e) {
-      console.warn('[conn] connectivity probe failed (timeout or network)', e);
-      return false;
+  const reconnect = useCallback(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setStatus('offline');
+      return;
     }
-  }, []);
-
-  const markOnline = useCallback((wasDegraded: boolean) => {
     setStatus('online');
-    if (wasDegraded) {
-      console.info('[conn] connection restored — refreshing data');
-      window.dispatchEvent(new Event(RECONNECTED_EVENT));
-    }
+    console.info('[conn] connectivity confirmed — refreshing data');
+    window.dispatchEvent(new Event(RECONNECTED_EVENT));
   }, []);
-
-  /** Silent auto-check used on focus/online — never shows the "reconnecting" state. */
-  const silentCheck = useCallback(async () => {
-    if (!isLive || isPortalRoute()) return;
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setStatus('offline');
-      return;
-    }
-    if (probing.current) return;
-    probing.current = true;
-    try {
-      const ok = await probe();
-      setStatus(prev => {
-        if (ok) {
-          if (prev !== 'online') {
-            console.info('[conn] connection restored — refreshing data');
-            window.dispatchEvent(new Event(RECONNECTED_EVENT));
-          }
-          return 'online';
-        }
-        if (prev !== 'lost') {
-          console.error('[conn] connection lost — data requests are failing. Showing reconnect banner.');
-        }
-        return 'lost';
-      });
-    } finally {
-      probing.current = false;
-    }
-  }, [probe]);
-
-  /** Manual reconnect from the banner: force a token refresh, then re-probe. */
-  const reconnect = useCallback(async () => {
-    if (probing.current) return;
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setStatus('offline');
-      return;
-    }
-    probing.current = true;
-    setStatus('reconnecting');
-    console.info('[conn] manual reconnect requested');
-    try {
-      await withTimeout(supabase.auth.refreshSession(), REFRESH_TIMEOUT_MS).catch(() => {});
-      const ok = await probe();
-      if (ok) {
-        markOnline(true);
-        console.info('[conn] reconnect succeeded');
-      } else {
-        setStatus('lost');
-        console.error('[conn] reconnect failed — the user should reload the page.');
-      }
-    } finally {
-      probing.current = false;
-    }
-  }, [probe, markOnline]);
 
   useEffect(() => {
     if (!isLive) return;
 
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') silentCheck();
-    };
     const onOnline = () => {
-      console.info('[conn] browser reports online — verifying connection');
-      silentCheck();
+      console.info('[conn] browser reports online');
+      setStatus('online');
+      // Let pages that opted into useRefetchOnFocus reload any data that went
+      // stale while offline. This does not navigate — it only re-fetches.
+      window.dispatchEvent(new Event(RECONNECTED_EVENT));
     };
     const onOffline = () => {
       console.warn('[conn] browser reports offline');
       setStatus('offline');
     };
 
-    document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => {
-      document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, [silentCheck]);
+  }, []);
 
   return (
     <ConnectionContext.Provider value={{ status, reconnect }}>

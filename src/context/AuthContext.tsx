@@ -3,7 +3,7 @@
  * Auth context: tracks the Supabase session and current user profile, exposes useAuth(), and
  * subscribes to auth-state changes for the app.
  */
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { User } from '../types';
 import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services';
 import { supabase } from '../services/core/supabase.client';
@@ -37,6 +37,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Added comment above fix: Managing user and loading state
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Mirror of `user` readable inside async callbacks without stale closures.
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -44,10 +47,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         Promise.resolve(getUserProfile(userId)),
         AUTH_REQUEST_TIMEOUT_MS,
       );
-      setUser(profile);
+      if (profile) {
+        setUser(profile);
+      } else if (!userRef.current) {
+        // No profile row AND no existing session (fresh load) → unauthenticated.
+        setUser(null);
+      }
+      // Otherwise keep the user we already have.
     } catch (e: any) {
-      console.warn("[Auth] Failed to fetch profile (timeout or non-PM user):", e?.message ?? e);
-      setUser(null);
+      // NEVER drop an authenticated user on a transient/timeout failure — doing so
+      // logs them out mid-operation (e.g. during an AI translation) and bounces
+      // them to /login. Only clear if we never had a user to begin with.
+      console.warn("[Auth] Profile fetch failed; keeping existing session:", e?.message ?? e);
+      if (!userRef.current) setUser(null);
     }
   };
 
@@ -131,14 +143,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.debug('[Auth] Session event:', event);
         if (!isMounted) return;
         try {
-          if (session?.user) {
-            await fetchProfile(session.user.id);
-          } else {
+          if (event === 'SIGNED_OUT' || !session?.user) {
+            // Only an explicit sign-out clears the user (and lets ProtectedRoute
+            // navigate to /login). Nothing else may log the user out.
             setUser(null);
+          } else if (!userRef.current) {
+            // Populate the profile on sign-in / initial session only. On
+            // TOKEN_REFRESHED (or any event where we already hold the user) we do
+            // NOT refetch — a slow profile read must never drop an active session.
+            await fetchProfile(session.user.id);
           }
         } finally {
-          // Always release the gate, even if fetchProfile throws — otherwise a
-          // failed profile fetch on TOKEN_REFRESHED could latch the spinner.
           stopLoading();
         }
       });
