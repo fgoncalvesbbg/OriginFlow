@@ -22,6 +22,7 @@ import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.ut
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { AttributePicker } from './editor/AttributePicker';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 
 import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
@@ -434,7 +435,7 @@ const IMTemplateEditor: React.FC = () => {
       let featureName = "";
       let conditionLabel = "";
       if (condFeatureId !== 'manual') {
-          const feat = categoryAttributes.find(f => f.id === condFeatureId);
+          const feat = categoryFeatures.find(f => f.id === condFeatureId);
           if (feat) { featureName = feat.name; }
           if (!condAnyValue) conditionLabel = buildConditionValue();
       }
@@ -817,7 +818,7 @@ const IMTemplateEditor: React.FC = () => {
       setBlockCondAttrId(existing?.requires_feature ?? '');
       // Restore value state from existing condition
       if (existing?.requires_feature_label) {
-        const attr = categoryAttributes.find(a => a.id === existing.requires_feature);
+        const attr = categoryFeatures.find(a => a.id === existing.requires_feature);
         if (attr?.dataType === 'enum') setBlockCondEnumSelected(existing.requires_feature_label.split(',').map(s => s.trim()).filter(Boolean));
         else if (attr?.dataType === 'boolean') setBlockCondBoolValue(existing.requires_feature_label === 'Yes' ? 'true' : 'false');
         else setBlockCondTextValue(existing.requires_feature_label);
@@ -833,7 +834,7 @@ const IMTemplateEditor: React.FC = () => {
   };
 
   const buildBlockConditionValue = (): string => {
-    const attr = categoryAttributes.find(a => a.id === blockCondAttrId);
+    const attr = categoryFeatures.find(a => a.id === blockCondAttrId);
     if (!attr) return '';
     switch (attr.dataType) {
       case 'enum':    return blockCondEnumSelected.join(', ');
@@ -851,7 +852,7 @@ const IMTemplateEditor: React.FC = () => {
 
   const handleSaveBlockCondition = () => {
     if (!blockCondAttrId) return;
-    const attr = categoryAttributes.find(a => a.id === blockCondAttrId);
+    const attr = categoryFeatures.find(a => a.id === blockCondAttrId);
     const isNumeric = attr?.dataType === 'integer' || attr?.dataType === 'decimal';
     const label = buildBlockConditionValue();
     setSections(prev => prev.map(s => {
@@ -876,7 +877,7 @@ const IMTemplateEditor: React.FC = () => {
   const describeRefCondition = (ref: FeatureConditionFields): string | null => {
     const condAttrId = ref.requires_feature ?? ref.requires_feature_absent ?? null;
     if (!condAttrId) return null;
-    const condAttr = categoryAttributes.find(a => a.id === condAttrId);
+    const condAttr = categoryFeatures.find(a => a.id === condAttrId);
     if (!condAttr) return null;
     if (ref.requires_feature_absent) return `${condAttr.name}: absent`;
     if (ref.requires_feature_label) return `${condAttr.name} ∈ ${ref.requires_feature_label}`;
@@ -1723,7 +1724,7 @@ const IMTemplateEditor: React.FC = () => {
                                    const preview = (blk?.content['en'] ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
                                    const condAttrId = ref.requires_feature ?? ref.requires_feature_absent ?? null;
                                    const isAbsent = !!ref.requires_feature_absent;
-                                   const condAttr = condAttrId ? categoryAttributes.find(a => a.id === condAttrId) : null;
+                                   const condAttr = condAttrId ? categoryFeatures.find(a => a.id === condAttrId) : null;
 
                                    // Build a human-readable condition description
                                    const condDesc = (() => {
@@ -2331,12 +2332,12 @@ const IMTemplateEditor: React.FC = () => {
                       <h3 className="font-bold text-lg mb-4">Add Condition</h3>
                       <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Condition Trigger</label>
-                        <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={condFeatureId} onChange={(e) => { setCondFeatureId(e.target.value); resetCondValue(); }}>
-                            <option value="manual">Manual Selection (Optional Block)</option>
-                            <optgroup label="Auto-include based on Attribute">
-                                {categoryFeatures.map(f => <option key={f.id} value={f.id}>{f.name} ({f.dataType})</option>)}
-                            </optgroup>
-                        </select>
+                        <AttributePicker
+                          attributes={categoryFeatures}
+                          value={condFeatureId}
+                          onChange={(id) => { setCondFeatureId(id); resetCondValue(); }}
+                          leadingOptions={[{ id: 'manual', label: 'Manual Selection', hint: 'Optional block — user decides at generation time' }]}
+                        />
                         <p className="text-xs text-muted mt-1">{condFeatureId === 'manual' ? "User decides whether to include this text when generating the manual." : condAnyValue ? "The attribute's value will be injected inline — always visible, no condition needed." : "Text is automatically included if this attribute matches the selected value."}</p>
                       </div>
 
@@ -2546,16 +2547,12 @@ const IMTemplateEditor: React.FC = () => {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Attribute</label>
-                      <select
-                        className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                      <AttributePicker
+                        attributes={categoryFeatures}
                         value={secCondAttrId}
-                        onChange={e => { setSecCondAttrId(e.target.value); setSecCondEnumSelected([]); setSecCondNumMin(''); setSecCondNumMax(''); setSecCondBoolValue('true'); setSecCondTextValue(''); }}
-                      >
-                        <option value="">— Select attribute —</option>
-                        {categoryFeatures.map(f => (
-                          <option key={f.id} value={f.id}>{f.name} ({f.dataType})</option>
-                        ))}
-                      </select>
+                        accent="violet"
+                        onChange={id => { setSecCondAttrId(id); setSecCondEnumSelected([]); setSecCondNumMin(''); setSecCondNumMax(''); setSecCondBoolValue('true'); setSecCondTextValue(''); }}
+                      />
                     </div>
 
                     {attr && (
@@ -2639,7 +2636,7 @@ const IMTemplateEditor: React.FC = () => {
             const pickerBlocks = availableBlocks.filter(b => {
               if (blockPickerSearch) {
                 const q = blockPickerSearch.toLowerCase();
-                return b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q);
+                return b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q) || (b.internalTitle ?? '').toLowerCase().includes(q);
               }
               return true;
             });
@@ -2692,6 +2689,7 @@ const IMTemplateEditor: React.FC = () => {
                                 : <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold">DRAFT</span>}
                               {already && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">ADDED</span>}
                             </div>
+                            {blk.internalTitle && <p className="text-[11px] text-violet-500 italic truncate">{blk.internalTitle}</p>}
                             <p className="text-[11px] font-mono text-gray-400 truncate">{blk.slug}</p>
                           </div>
                         </button>
@@ -2705,7 +2703,7 @@ const IMTemplateEditor: React.FC = () => {
 
           {/* Block Condition Modal */}
           {isBlockCondModalOpen && (() => {
-            const attr = categoryAttributes.find(a => a.id === blockCondAttrId);
+            const attr = categoryFeatures.find(a => a.id === blockCondAttrId);
             const canSave = !!blockCondAttrId && (blockCondMode === 'absent' || !!buildBlockConditionValue() ||
               (attr?.dataType === 'integer' || attr?.dataType === 'decimal' ? (!!blockCondNumMin || !!blockCondNumMax) : false));
             return (
@@ -2730,15 +2728,11 @@ const IMTemplateEditor: React.FC = () => {
                   {/* Attribute selector */}
                   <div className="mb-4">
                     <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Attribute</label>
-                    <select className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    <AttributePicker
+                      attributes={categoryFeatures}
                       value={blockCondAttrId}
-                      onChange={e => { setBlockCondAttrId(e.target.value); setBlockCondEnumSelected([]); setBlockCondNumMin(''); setBlockCondNumMax(''); setBlockCondTextValue(''); setBlockCondBoolValue('true'); }}
-                    >
-                      <option value="">— select attribute —</option>
-                      {categoryAttributes.map(a => (
-                        <option key={a.id} value={a.id}>{a.name} ({a.dataType})</option>
-                      ))}
-                    </select>
+                      onChange={id => { setBlockCondAttrId(id); setBlockCondEnumSelected([]); setBlockCondNumMin(''); setBlockCondNumMax(''); setBlockCondTextValue(''); setBlockCondBoolValue('true'); }}
+                    />
                   </div>
 
                   {/* Value input — only shown for 'present' mode */}

@@ -227,6 +227,20 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
             />
           </div>
 
+          {/* Internal title — for differentiating blocks internally; never printed on IMs */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Internal Title</label>
+            <input
+              className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              value={draft.internalTitle ?? ''}
+              onChange={e => set({ internalTitle: e.target.value })}
+              placeholder="e.g. EU variant · rev 2024"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">
+              A private label to tell similar blocks apart in the library. Never shown on generated manuals.
+            </p>
+          </div>
+
           {/* Slug — auto-generated, editable */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">
@@ -533,6 +547,9 @@ const BlockCard: React.FC<BlockCardProps> = ({ block, onEdit, onDelete, categori
               )}
             </div>
             <h3 className="font-bold text-gray-800 truncate">{block.title}</h3>
+            {block.internalTitle && (
+              <p className="text-xs text-violet-500 truncate italic" title={block.internalTitle}>{block.internalTitle}</p>
+            )}
             <p className="text-xs font-mono text-gray-400 truncate">{block.slug}</p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -656,7 +673,7 @@ export const BlockLibraryContent: React.FC = () => {
     if (filterStatus !== 'all' && b.approvalStatus !== filterStatus) return false;
     if (searchText) {
       const q = searchText.toLowerCase();
-      return b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q);
+      return b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q) || (b.internalTitle ?? '').toLowerCase().includes(q);
     }
     return true;
   });

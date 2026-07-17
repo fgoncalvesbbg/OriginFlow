@@ -240,6 +240,8 @@ export interface IMBlock {
   id: string;
   slug: string;
   title: string;
+  /** Brief internal-only label to differentiate blocks in the library/pickers. Never printed on generated IMs. */
+  internalTitle?: string | null;
   blockType: 'content' | 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info' | 'legacy_html';
   sourceLanguage: string;
   content: Record<string, string>; // lang -> html

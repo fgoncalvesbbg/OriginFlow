@@ -7,7 +7,7 @@ import {
   getCategories, saveCategory,
   deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
-  unassignAttributeFromCategory, makeAttributeGlobal,
+  unassignAttributeFromCategory, makeAttributeGlobal, assignAttributeToCategory,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS,
@@ -89,6 +89,10 @@ const AdminDashboard: React.FC = () => {
   const [assignAttrModal, setAssignAttrModal] = useState(false);
   const [assignAttrSearch, setAssignAttrSearch] = useState('');
   const [assigningAttrId, setAssigningAttrId] = useState<string | null>(null);
+  // "Link an attribute from another category into this one" modal (shared assignment, no duplication).
+  const [linkAttrModal, setLinkAttrModal] = useState(false);
+  const [linkAttrSearch, setLinkAttrSearch] = useState('');
+  const [linkingAttrId, setLinkingAttrId] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -332,6 +336,27 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const openLinkModal = () => {
+    setLinkAttrSearch('');
+    setLinkingAttrId(null);
+    setLinkAttrModal(true);
+  };
+
+  // Share an attribute owned by another category into the current one (adds this category to
+  // its assignedCategoryIds — no duplicate row is created; edits stay in sync across categories).
+  const handleLinkAttribute = async (attributeId: string) => {
+    if (!selectedCategoryDetail) return;
+    setLinkingAttrId(attributeId);
+    try {
+      await assignAttributeToCategory(attributeId, selectedCategoryDetail);
+      await loadData();
+      setLinkAttrModal(false);
+    } catch (e: any) {
+      alert(`Failed to link attribute: ${e.message}`);
+    }
+    setLinkingAttrId(null);
+  };
+
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -501,6 +526,12 @@ const AdminDashboard: React.FC = () => {
                         <h3 className="text-xl font-bold text-primary">{category?.name}</h3>
                         <p className="text-sm text-muted mt-1">Attributes</p>
                     </div>
+                    <button
+                        onClick={openLinkModal}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 text-sm font-medium shadow-sm"
+                    >
+                        <LinkIcon size={16} /> Link from another category
+                    </button>
                 </div>
 
                 <div className="space-y-4">
@@ -1698,6 +1729,90 @@ const AdminDashboard: React.FC = () => {
               <div className="flex justify-end pt-4 border-t border-gray-100 mt-3">
                 <button
                   onClick={() => setAssignAttrModal(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Link an attribute owned by another category into the current one (shared assignment). */}
+      {linkAttrModal && (() => {
+        const targetName = categories.find(c => c.id === selectedCategoryDetail)?.name ?? 'this category';
+        // Candidates: category-scoped attributes that live in a *different* category and aren't
+        // already linked here. Globals are excluded (they already apply to every category).
+        const linkable = attributes.filter(a =>
+          a.categoryId !== null &&
+          a.categoryId !== selectedCategoryDetail &&
+          !(a.assignedCategoryIds ?? []).includes(selectedCategoryDetail!)
+        );
+        const q = linkAttrSearch.toLowerCase();
+        const filtered = linkable.filter(a =>
+          a.name.toLowerCase().includes(q) ||
+          (a.group ?? 'Category Specific').toLowerCase().includes(q) ||
+          (categories.find(c => c.id === a.categoryId)?.name ?? '').toLowerCase().includes(q)
+        );
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[80vh]">
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="font-bold text-lg text-gray-800">Link Attribute from Another Category</h3>
+                <button onClick={() => setLinkAttrModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+              </div>
+              <p className="text-xs text-muted mb-4">
+                Reuse an attribute defined in another category by linking it into <span className="font-semibold text-gray-700">{targetName}</span>. It stays a single shared definition — no duplicate is created, and edits apply everywhere it's used.
+              </p>
+
+              <div className="relative mb-3">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search by name, group or category…"
+                  value={linkAttrSearch}
+                  onChange={e => setLinkAttrSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+                />
+              </div>
+
+              <div className="overflow-y-auto flex-1 border border-gray-200 rounded-lg divide-y divide-slate-100">
+                {filtered.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-gray-400 italic">
+                    {linkable.length === 0
+                      ? 'No attributes from other categories available to link.'
+                      : 'No attributes match your search.'}
+                  </div>
+                ) : filtered.map(a => {
+                  const originName = categories.find(c => c.id === a.categoryId)?.name ?? 'Unknown';
+                  const groupName = a.group ?? 'Category Specific';
+                  const alsoSharedCount = (a.assignedCategoryIds ?? []).length;
+                  return (
+                    <div key={a.id} className="flex items-center justify-between px-4 py-3 hover:bg-light transition-colors">
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm text-gray-800 truncate">{a.name}</div>
+                        <div className="text-xs text-muted mt-0.5 capitalize">
+                          {a.dataType}{a.validationRules?.unit ? ` · ${a.validationRules.unit}` : ''} · <span className="text-indigo-500 normal-case">{groupName}</span> · from <span className="text-violet-500 normal-case">{originName}</span>
+                          {alsoSharedCount > 0 && <span className="normal-case text-gray-400"> · shared into {alsoSharedCount} other{alsoSharedCount === 1 ? '' : 's'}</span>}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleLinkAttribute(a.id)}
+                        disabled={linkingAttrId === a.id}
+                        className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded border border-violet-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                      >
+                        <LinkIcon size={12} /> {linkingAttrId === a.id ? 'Linking…' : 'Link here'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-gray-100 mt-3">
+                <button
+                  onClick={() => setLinkAttrModal(false)}
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
                 >
                   Close
