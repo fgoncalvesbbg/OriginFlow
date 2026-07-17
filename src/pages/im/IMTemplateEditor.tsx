@@ -2656,7 +2656,7 @@ const IMTemplateEditor: React.FC = () => {
                     <input
                       autoFocus
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                      placeholder="Search by title or slug…"
+                      placeholder="Search by title, internal title or slug…"
                       value={blockPickerSearch}
                       onChange={e => setBlockPickerSearch(e.target.value)}
                     />

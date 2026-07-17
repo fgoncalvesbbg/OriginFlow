@@ -3642,7 +3642,7 @@ const ProjectIMGenerator: React.FC = () => {
                 const q = blockPickerSearch.trim().toLowerCase();
                 const candidates = blockLibrary
                     .filter(b => b.approvalStatus === 'approved')
-                    .filter(b => !q || b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q));
+                    .filter(b => !q || b.title.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q) || (b.internalTitle ?? '').toLowerCase().includes(q));
                 return (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setSharedPickerFor(null)}>
                         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden" onMouseDown={e => e.stopPropagation()}>
@@ -3655,7 +3655,7 @@ const ProjectIMGenerator: React.FC = () => {
                                     autoFocus
                                     value={blockPickerSearch}
                                     onChange={e => setBlockPickerSearch(e.target.value)}
-                                    placeholder="Search approved blocks by title or slug…"
+                                    placeholder="Search approved blocks by title, internal title or slug…"
                                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
                                 />
                             </div>
@@ -3671,6 +3671,7 @@ const ProjectIMGenerator: React.FC = () => {
                                             <span className="text-sm font-semibold text-gray-800">{b.title}</span>
                                             <span className="text-[9px] font-bold uppercase tracking-wide bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{b.blockType}</span>
                                         </div>
+                                        {b.internalTitle && <div className="text-[11px] text-violet-500 italic truncate">{b.internalTitle}</div>}
                                         <div className="text-[11px] font-mono text-gray-400 truncate">{b.slug}</div>
                                     </button>
                                 ))}

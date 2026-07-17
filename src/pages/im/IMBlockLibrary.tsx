@@ -686,7 +686,7 @@ export const BlockLibraryContent: React.FC = () => {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-            placeholder="Search by title or slug…"
+            placeholder="Search by title, internal title or slug…"
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
           />
