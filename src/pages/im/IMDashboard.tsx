@@ -52,6 +52,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCat, setFilterCat] = useState<string>('all');
+  const [filterProject, setFilterProject] = useState('');
   // Published manuals whose source changed since publish, keyed by
   // `projectId::templateType` → drill-down reasons. Computed after mount.
   const [staleInfo, setStaleInfo] = useState<Map<string, StaleManual>>(new Map());
@@ -82,10 +83,15 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
     if (filterStatus === 'stale') { if (!isStale(im)) return false; }
     else if (filterStatus !== 'all' && im.status !== filterStatus) return false;
     if (filterCat !== 'all' && im.categoryId !== filterCat) return false;
+    if (filterProject) {
+      const pq = filterProject.toLowerCase();
+      if (!(im.projectCode ?? '').toLowerCase().includes(pq) && !im.projectName.toLowerCase().includes(pq)) return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
         im.projectName.toLowerCase().includes(q) ||
+        (im.projectCode ?? '').toLowerCase().includes(q) ||
         (im.templateName ?? '').toLowerCase().includes(q) ||
         (im.categoryId ? catMap[im.categoryId] ?? '' : '').toLowerCase().includes(q) ||
         im.skus.some(s => s.toLowerCase().includes(q))
@@ -129,11 +135,17 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-            placeholder="Search by project, SKU, template or category…"
+            placeholder="Search by project, ID, SKU, template or category…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
+        <input
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white w-44 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          placeholder="Filter by Project ID…"
+          value={filterProject}
+          onChange={e => setFilterProject(e.target.value)}
+        />
         <select
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
           value={filterStatus}
@@ -208,6 +220,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                   />
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Project</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Project ID</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">SKU</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Template</th>
@@ -234,6 +247,11 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                     </td>
                     <td className="px-4 py-3">
                       <span className="font-semibold text-gray-800">{im.projectName}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {im.projectCode
+                        ? <span className="text-[11px] font-mono text-gray-500">{im.projectCode}</span>
+                        : <span className="text-gray-300 text-xs">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       {im.skus.length === 0 ? (

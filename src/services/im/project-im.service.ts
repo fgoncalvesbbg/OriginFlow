@@ -196,6 +196,7 @@ export const getGeneratedProjectIMs = async (): Promise<Array<{ projectId: strin
 export interface ProjectIMSummary {
   id: string;
   projectId: string;        // projects.id (UUID) — used in URL
+  projectCode: string | null; // projects.project_id_code — human-readable project ID shown to users
   projectName: string;
   categoryId: string | null;
   templateId: string;
@@ -222,7 +223,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       status,
       updated_at,
       bound_sku_ids,
-      project:projects ( id, name, category_id ),
+      project:projects ( id, name, category_id, project_id_code ),
       template:im_templates ( name )
     `)
     .order('updated_at', { ascending: false });
@@ -257,6 +258,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
     return {
       id: row.id,
       projectId,
+      projectCode: row.project?.project_id_code ?? null,
       projectName: row.project?.name ?? 'Unknown Project',
       categoryId: row.project?.category_id ?? null,
       templateId: row.template_id,

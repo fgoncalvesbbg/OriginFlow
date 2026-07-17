@@ -2,24 +2,57 @@
 /** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject } from '../services';
-import { Project, Supplier, UserRole, DashboardStats, ProjectOverallStatus } from '../types';
+import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles } from '../services';
+import { Project, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
-import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle } from 'lucide-react';
+import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
+
+// Column keys used for per-column filtering and sorting in the projects table.
+type ProjectColKey = 'name' | 'projectId' | 'pm' | 'supplier' | 'step' | 'status';
+type SortDir = 'asc' | 'desc';
+
+/** Clickable table header that toggles sorting for its column. */
+const SortableTh: React.FC<{
+  label: string;
+  colKey: ProjectColKey;
+  sortKey: ProjectColKey;
+  sortDir: SortDir;
+  onSort: (k: ProjectColKey) => void;
+  className?: string;
+}> = ({ label, colKey, sortKey, sortDir, onSort, className }) => {
+  const active = sortKey === colKey;
+  return (
+    <th className={`px-6 py-4 font-semibold text-gray-700 ${className ?? ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`inline-flex items-center gap-1 hover:text-indigo-600 transition-colors ${active ? 'text-indigo-600' : ''}`}
+      >
+        {label}
+        {active ? (sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />) : <ChevronsUpDown size={13} className="text-gray-300" />}
+      </button>
+    </th>
+  );
+};
 
 const PMDashboard: React.FC = () => {
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [profiles, setProfiles] = useState<User[]>([]);
   const [stats, setStats] = useState<(DashboardStats & { newProposals: number }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showArchived, setShowArchived] = useState(false);
-  
+  // Per-column filters + sort state for the projects table.
+  const [colFilters, setColFilters] = useState<Record<ProjectColKey, string>>({ name: '', projectId: '', pm: '', supplier: '', step: '', status: 'all' });
+  const [sortKey, setSortKey] = useState<ProjectColKey>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,13 +63,15 @@ const PMDashboard: React.FC = () => {
     setLoading(true);
     setErrorMsg('');
     try {
-      const [pData, sData, statsData] = await Promise.all([
-        getProjects(), 
+      const [pData, sData, statsData, profileData] = await Promise.all([
+        getProjects(),
         getSuppliers(),
-        getDashboardStats()
+        getDashboardStats(),
+        getProfiles().catch(() => [] as User[])
       ]);
       setProjects(pData);
       setSuppliers(sData);
+      setProfiles(profileData);
       setStats(statsData);
     } catch (e: any) {
       console.error("Failed to load dashboard data", e);
@@ -48,18 +83,63 @@ const PMDashboard: React.FC = () => {
 
   useRefetchOnFocus(loadData);
 
-  const filteredProjects = projects.filter(p => {
-    if (!showArchived && p.status === ProjectOverallStatus.ARCHIVED) return false;
-    if (showArchived && p.status !== ProjectOverallStatus.ARCHIVED) return false;
-
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          p.projectId.toLowerCase().includes(searchTerm.toLowerCase());
-
-    return matchesSearch;
-    // RLS policies on the database handle PM access control server-side
-  });
-
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';
+  const getPmName = (id: string) => {
+    const u = profiles.find(p => p.id === id);
+    return u?.name || u?.email || (id ? 'Unassigned' : 'Unassigned');
+  };
+
+  // Per-column accessors — string values used for both filtering and sorting.
+  const colValue = (p: Project, key: ProjectColKey): string => {
+    switch (key) {
+      case 'name': return p.name;
+      case 'projectId': return p.projectId;
+      case 'pm': return getPmName(p.pmId);
+      case 'supplier': return getSupplierName(p.supplierId);
+      case 'step': return String(p.currentStep);
+      case 'status': return p.status;
+    }
+  };
+
+  // Distinct PMs and statuses present, for the dropdown filters.
+  const pmOptions = [...new Set(projects.map(p => getPmName(p.pmId)))].sort((a, b) => a.localeCompare(b));
+  const statusOptions = [...new Set(projects.map(p => p.status))];
+
+  const setFilter = (key: ProjectColKey, value: string) =>
+    setColFilters(prev => ({ ...prev, [key]: value }));
+
+  const onSort = (key: ProjectColKey) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+
+  const filteredProjects = projects
+    .filter(p => {
+      if (!showArchived && p.status === ProjectOverallStatus.ARCHIVED) return false;
+      if (showArchived && p.status !== ProjectOverallStatus.ARCHIVED) return false;
+
+      // Global search across name + human project ID.
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        if (!p.name.toLowerCase().includes(q) && !p.projectId.toLowerCase().includes(q)) return false;
+      }
+
+      // Per-column filters. Status/PM are exact-match dropdowns ('all' = no filter); the rest are substring.
+      for (const key of ['name', 'projectId', 'pm', 'supplier', 'step', 'status'] as ProjectColKey[]) {
+        const f = colFilters[key];
+        if (!f || f === 'all') continue;
+        const v = colValue(p, key).toLowerCase();
+        if (key === 'status' || key === 'pm') { if (v !== f.toLowerCase()) return false; }
+        else if (!v.includes(f.toLowerCase())) return false;
+      }
+      return true;
+      // RLS policies on the database handle PM access control server-side
+    })
+    .sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      if (sortKey === 'step') return (a.currentStep - b.currentStep) * dir;
+      return colValue(a, sortKey).localeCompare(colValue(b, sortKey), undefined, { numeric: true }) * dir;
+    });
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -195,17 +275,53 @@ const PMDashboard: React.FC = () => {
           <table className="w-full text-left text-sm">
             <thead className="bg-light border-b border-gray-200">
               <tr>
-                <th className="px-6 py-4 font-semibold text-gray-700">Project</th>
-                <th className="px-6 py-4 font-semibold text-gray-700">Supplier</th>
-                <th className="px-6 py-4 font-semibold text-gray-700">Current Step</th>
-                <th className="px-6 py-4 font-semibold text-gray-700">Status</th>
+                <SortableTh label="Project" colKey="name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                <SortableTh label="Project ID" colKey="projectId" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                <SortableTh label="PM" colKey="pm" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                <SortableTh label="Supplier" colKey="supplier" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                <SortableTh label="Current Step" colKey="step" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                <SortableTh label="Status" colKey="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                 <th className="px-6 py-4 font-semibold text-gray-700"></th>
+              </tr>
+              {/* Per-column filter row */}
+              <tr className="border-t border-gray-100 bg-white/60">
+                <th className="px-6 py-2">
+                  <input value={colFilters.name} onChange={e => setFilter('name', e.target.value)} placeholder="Filter…"
+                    className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                </th>
+                <th className="px-6 py-2">
+                  <input value={colFilters.projectId} onChange={e => setFilter('projectId', e.target.value)} placeholder="Filter…"
+                    className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                </th>
+                <th className="px-6 py-2">
+                  <select value={colFilters.pm} onChange={e => setFilter('pm', e.target.value)}
+                    className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400">
+                    <option value="">All PMs</option>
+                    {pmOptions.map(pm => <option key={pm} value={pm}>{pm}</option>)}
+                  </select>
+                </th>
+                <th className="px-6 py-2">
+                  <input value={colFilters.supplier} onChange={e => setFilter('supplier', e.target.value)} placeholder="Filter…"
+                    className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                </th>
+                <th className="px-6 py-2">
+                  <input value={colFilters.step} onChange={e => setFilter('step', e.target.value)} placeholder="Filter…"
+                    className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                </th>
+                <th className="px-6 py-2">
+                  <select value={colFilters.status} onChange={e => setFilter('status', e.target.value)}
+                    className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400">
+                    <option value="all">All</option>
+                    {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </th>
+                <th className="px-6 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-muted">
+                  <td colSpan={7} className="px-6 py-12 text-center text-muted">
                     <div className="flex flex-col items-center gap-2">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
                       <span>Loading projects...</span>
@@ -214,7 +330,7 @@ const PMDashboard: React.FC = () => {
                 </tr>
               ) : filteredProjects.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-muted">
+                  <td colSpan={7} className="px-6 py-12 text-center text-muted">
                     <div className="flex flex-col items-center gap-2 opacity-50">
                        <Search size={32} />
                        <span>No projects found.</span>
@@ -225,10 +341,13 @@ const PMDashboard: React.FC = () => {
                 filteredProjects.map((project) => (
                   <tr key={project.id} className="hover:bg-light transition-colors group relative">
                     <td className="px-6 py-4">
-                      <div>
-                        <div className="font-bold text-primary">{project.name}</div>
-                        <div className="text-[10px] text-muted font-mono tracking-tight">{project.projectId}</div>
-                      </div>
+                      <div className="font-bold text-primary">{project.name}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs text-muted font-mono tracking-tight">{project.projectId}</span>
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {getPmName(project.pmId)}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
                       {getSupplierName(project.supplierId)}
