@@ -701,6 +701,102 @@ const AdminDashboard: React.FC = () => {
 
   const renderAttributeGrid = () => {
     const dirtyCount = gridRows.filter(r => gridDirty.has(r.id)).length;
+    const COLS = 8;
+    // Section the working rows by their group, in ATTRIBUTE_GROUPS order.
+    const grouped = (ATTRIBUTE_GROUPS as readonly string[])
+      .map(group => ({ group, rows: gridRows.filter(r => (r.group ?? 'Category Specific') === group) }))
+      .filter(g => g.rows.length > 0);
+
+    const renderGridRow = (r: CategoryAttribute) => {
+      const isGlobal = r.categoryId === null;
+      const isShared = r.categoryId !== null && r.categoryId !== selectedCategoryDetail;
+      const dirty = gridDirty.has(r.id);
+      return (
+        <tr key={r.id} className={dirty ? 'bg-amber-50/40' : 'hover:bg-light'}>
+          <td className="px-2 py-1.5">
+            <input
+              type="text"
+              value={r.name}
+              onChange={e => updateGridRow(r.id, { name: e.target.value })}
+              placeholder="Attribute name"
+              className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none"
+            />
+          </td>
+          <td className="px-2 py-1.5">
+            <div className="flex items-center gap-1">
+              <select
+                value={r.group ?? 'Category Specific'}
+                onChange={e => changeGridGroup(r.id, e.target.value)}
+                className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+              >
+                {(ATTRIBUTE_GROUPS as readonly string[]).map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+              <span
+                className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase shrink-0 ${isGlobal ? 'text-indigo-500 bg-indigo-50' : isShared ? 'text-violet-500 bg-violet-50' : 'text-slate-500 bg-slate-100'}`}
+                title={isGlobal ? 'Global — edits apply to every category' : isShared ? 'Shared from another category — edits apply everywhere it is used' : 'Specific to this category'}
+              >
+                {isGlobal ? 'Global' : isShared ? 'Shared' : 'Cat'}
+              </span>
+            </div>
+          </td>
+          <td className="px-2 py-1.5">
+            <input
+              type="text"
+              value={r.akeneoId ?? ''}
+              onChange={e => updateGridRow(r.id, { akeneoId: e.target.value || undefined })}
+              placeholder="akeneo_code"
+              className="w-full px-2 py-1 border border-gray-200 rounded text-xs font-mono text-gray-600 focus:ring-1 focus:ring-indigo-400 outline-none"
+            />
+          </td>
+          <td className="px-2 py-1.5">
+            <select
+              value={r.dataType}
+              onChange={e => updateGridRow(r.id, { dataType: e.target.value as AttributeDataType })}
+              className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white capitalize focus:ring-1 focus:ring-indigo-400 outline-none"
+            >
+              {DATA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </td>
+          <td className="px-2 py-1.5">
+            <input
+              type="text"
+              value={gridOptionsText[r.id] ?? ''}
+              onChange={e => changeGridOptions(r.id, e.target.value)}
+              disabled={r.dataType !== 'enum'}
+              placeholder={r.dataType === 'enum' ? 'Option A, Option B, …' : '—'}
+              className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
+            />
+          </td>
+          <td className="px-2 py-1.5">
+            <input
+              type="text"
+              value={r.validationRules?.unit ?? ''}
+              onChange={e => updateGridRules(r.id, { unit: e.target.value || undefined })}
+              disabled={r.dataType !== 'integer' && r.dataType !== 'decimal'}
+              placeholder={r.dataType === 'integer' || r.dataType === 'decimal' ? 'L, cm…' : '—'}
+              className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
+            />
+          </td>
+          <td className="px-2 py-1.5 text-center">
+            <input
+              type="checkbox"
+              checked={!!r.validationRules?.required}
+              onChange={e => updateGridRules(r.id, { required: e.target.checked || undefined })}
+            />
+          </td>
+          <td className="px-2 py-1.5 text-center">
+            <button
+              onClick={() => removeGridRow(r.id)}
+              className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+              title="Delete attribute"
+            >
+              <Trash2 size={14} />
+            </button>
+          </td>
+        </tr>
+      );
+    };
+
     return (
       <div className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 bg-light border-b border-gray-200">
@@ -730,6 +826,7 @@ const AdminDashboard: React.FC = () => {
               <tr>
                 <th className="px-2 py-2 min-w-[180px]">Name</th>
                 <th className="px-2 py-2 min-w-[160px]">Group</th>
+                <th className="px-2 py-2 min-w-[150px]">Akeneo ID</th>
                 <th className="px-2 py-2 min-w-[110px]">Type</th>
                 <th className="px-2 py-2 min-w-[220px]">Options (enum)</th>
                 <th className="px-2 py-2 min-w-[80px]">Unit</th>
@@ -739,87 +836,17 @@ const AdminDashboard: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {gridRows.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 italic">No attributes yet. Click <strong>Add attribute</strong> or import a CSV.</td></tr>
-              ) : gridRows.map(r => {
-                const isGlobal = r.categoryId === null;
-                const isShared = r.categoryId !== null && r.categoryId !== selectedCategoryDetail;
-                const dirty = gridDirty.has(r.id);
-                return (
-                  <tr key={r.id} className={dirty ? 'bg-amber-50/40' : 'hover:bg-light'}>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="text"
-                        value={r.name}
-                        onChange={e => updateGridRow(r.id, { name: e.target.value })}
-                        placeholder="Attribute name"
-                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none"
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center gap-1">
-                        <select
-                          value={r.group ?? 'Category Specific'}
-                          onChange={e => changeGridGroup(r.id, e.target.value)}
-                          className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
-                        >
-                          {(ATTRIBUTE_GROUPS as readonly string[]).map(g => <option key={g} value={g}>{g}</option>)}
-                        </select>
-                        <span
-                          className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase shrink-0 ${isGlobal ? 'text-indigo-500 bg-indigo-50' : isShared ? 'text-violet-500 bg-violet-50' : 'text-slate-500 bg-slate-100'}`}
-                          title={isGlobal ? 'Global — edits apply to every category' : isShared ? 'Shared from another category — edits apply everywhere it is used' : 'Specific to this category'}
-                        >
-                          {isGlobal ? 'Global' : isShared ? 'Shared' : 'Cat'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <select
-                        value={r.dataType}
-                        onChange={e => updateGridRow(r.id, { dataType: e.target.value as AttributeDataType })}
-                        className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white capitalize focus:ring-1 focus:ring-indigo-400 outline-none"
-                      >
-                        {DATA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="text"
-                        value={gridOptionsText[r.id] ?? ''}
-                        onChange={e => changeGridOptions(r.id, e.target.value)}
-                        disabled={r.dataType !== 'enum'}
-                        placeholder={r.dataType === 'enum' ? 'Option A, Option B, …' : '—'}
-                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="text"
-                        value={r.validationRules?.unit ?? ''}
-                        onChange={e => updateGridRules(r.id, { unit: e.target.value || undefined })}
-                        disabled={r.dataType !== 'integer' && r.dataType !== 'decimal'}
-                        placeholder={r.dataType === 'integer' || r.dataType === 'decimal' ? 'L, cm…' : '—'}
-                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
-                      />
-                    </td>
-                    <td className="px-2 py-1.5 text-center">
-                      <input
-                        type="checkbox"
-                        checked={!!r.validationRules?.required}
-                        onChange={e => updateGridRules(r.id, { required: e.target.checked || undefined })}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5 text-center">
-                      <button
-                        onClick={() => removeGridRow(r.id)}
-                        className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                        title="Delete attribute"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                <tr><td colSpan={COLS} className="px-4 py-8 text-center text-gray-400 italic">No attributes yet. Click <strong>Add attribute</strong> or import a CSV.</td></tr>
+              ) : grouped.map(({ group, rows }) => (
+                <React.Fragment key={group}>
+                  <tr>
+                    <td colSpan={COLS} className="px-3 py-1.5 bg-indigo-50/60 border-y border-indigo-100 text-[11px] font-bold uppercase tracking-wide text-indigo-600">
+                      {group} <span className="text-indigo-300 font-normal normal-case">({rows.length})</span>
                     </td>
                   </tr>
-                );
-              })}
+                  {rows.map(renderGridRow)}
+                </React.Fragment>
+              ))}
             </tbody>
           </table>
         </div>

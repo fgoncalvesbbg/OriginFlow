@@ -132,9 +132,21 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
  */
 export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<void> => {
     const isPredefinedGroup = !!attr.group && PREDEFINED_ATTRIBUTE_GROUPS.includes(attr.group);
+    const intendedCategoryId = isPredefinedGroup ? null : (attr.categoryId ?? null);
+
+    // Akeneo ID is the global identity of an attribute — the same code must not exist twice
+    // across categories. If a save would introduce a code already owned by another attribute,
+    // reuse that attribute instead of creating a duplicate (link it into the intended category,
+    // or promote it to global). Editing an attribute's own fields (code unchanged) is untouched.
+    const code = attr.akeneoId?.trim();
+    if (code) {
+        const dup = await reuseExistingByAkeneoId(code, attr.id, intendedCategoryId);
+        if (dup) return;
+    }
+
     const payload = {
         id: attr.id,
-        category_id: isPredefinedGroup ? null : (attr.categoryId ?? null),
+        category_id: intendedCategoryId,
         assigned_category_ids: attr.assignedCategoryIds ?? [],
         name: attr.name,
         data_type: attr.dataType,
@@ -143,6 +155,52 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         akeneo_id: attr.akeneoId ?? null,
     };
     await runMutation(supabase.from('category_attributes').upsert(payload), 'saveCategoryAttribute');
+};
+
+/**
+ * If an attribute with `code` already exists under a DIFFERENT row than `selfId`, reuse it rather
+ * than creating a duplicate: ensure it applies to `intendedCategoryId` (share it in, or promote to
+ * global) and return true (caller should skip its own write). Returns false when there is no
+ * conflict — i.e. this is the attribute that owns the code, or the code is unused.
+ */
+const reuseExistingByAkeneoId = async (
+    code: string,
+    selfId: string,
+    intendedCategoryId: string | null,
+): Promise<boolean> => {
+    const { data, error } = await supabase
+        .from('category_attributes')
+        .select('id, category_id, assigned_category_ids')
+        .eq('akeneo_id', code);
+    if (error) return false;
+    const rows = data ?? [];
+    const selfOwnsCode = rows.some((r: any) => r.id === selfId);
+    const others = rows.filter((r: any) => r.id !== selfId);
+    if (selfOwnsCode || others.length === 0) return false; // no conflict → normal write
+
+    const target = others[0];
+    if (intendedCategoryId === null) {
+        // Intended global: make the existing attribute global so it applies everywhere.
+        if (target.category_id !== null) {
+            await runMutation(
+                supabase.from('category_attributes').update({ category_id: null }).eq('id', target.id),
+                'saveCategoryAttribute:promoteGlobal',
+            );
+        }
+    } else if (target.category_id !== null && target.category_id !== intendedCategoryId) {
+        // Existing is scoped to another category: share it into the intended one (no duplicate).
+        const assigned: string[] = target.assigned_category_ids ?? [];
+        if (!assigned.includes(intendedCategoryId)) {
+            await runMutation(
+                supabase.from('category_attributes')
+                    .update({ assigned_category_ids: [...assigned, intendedCategoryId] })
+                    .eq('id', target.id),
+                'saveCategoryAttribute:link',
+            );
+        }
+    }
+    // If target.category_id is null (already global) or already this category, it already applies.
+    return true;
 };
 
 export interface ImportAttributesResult {
@@ -183,11 +241,14 @@ export const importCategoryAttributes = async (
         const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group);
         const code = row.akeneoId ? norm(row.akeneoId) : '';
 
-        // Look for an existing attribute anywhere (any category, or global) in the same group.
+        // Match an existing attribute. Akeneo ID is the GLOBAL identity — if the row has a code,
+        // match by code across ALL attributes regardless of group (a code must map to one
+        // attribute). Without a code, fall back to name within the same group.
         const match = existing.find(a =>
             !consumedIds.has(a.id) &&
-            a.group === row.group &&
-            (code ? norm(a.akeneoId ?? '') === code : norm(a.name) === norm(row.name)),
+            (code
+                ? norm(a.akeneoId ?? '') === code
+                : a.group === row.group && norm(a.name) === norm(row.name)),
         );
 
         if (match) {
