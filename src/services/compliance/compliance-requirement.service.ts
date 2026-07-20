@@ -8,6 +8,8 @@ import { isLive } from '../../config/environment.config';
 import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { handleError, generateUUID } from '../../utils';
 import { runMutation } from '../core/db';
+import { PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';
+import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
 
 /**
  * Get all compliance requirements
@@ -129,7 +131,7 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
  * Save/update a category attribute
  */
 export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<void> => {
-    const isPredefinedGroup = attr.group && attr.group !== 'Category Specific';
+    const isPredefinedGroup = !!attr.group && PREDEFINED_ATTRIBUTE_GROUPS.includes(attr.group);
     const payload = {
         id: attr.id,
         category_id: isPredefinedGroup ? null : (attr.categoryId ?? null),
@@ -141,6 +143,91 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         akeneo_id: attr.akeneoId ?? null,
     };
     await runMutation(supabase.from('category_attributes').upsert(payload), 'saveCategoryAttribute');
+};
+
+export interface ImportAttributesResult {
+    created: number;
+    linked: number;
+    skipped: number;
+}
+
+/**
+ * Bulk-import parsed CSV rows as attributes for a category (see attribute-csv-import.utils).
+ *
+ * Never duplicates an attribute that already exists — existing definitions are reused as-is:
+ *  - Match key: Akeneo code (case-insensitive) within the same group, else the normalized
+ *    name. A given existing attribute is consumed at most once per run, so a file that reuses
+ *    a code (e.g. package_1_contents ×3) still creates the distinct rows it needs.
+ *  - If a match already applies to this category (a global attribute, an attribute owned by
+ *    this category, or one already shared into it) → nothing to do (skipped).
+ *  - If a match exists but only in ANOTHER category → it is SHARED into this category via
+ *    assigned_category_ids (linked), not re-created and not overwritten.
+ *  - No match → a new attribute is created (global when the group is predefined, else scoped
+ *    to this category).
+ *
+ * Persisting goes through saveCategoryAttribute / assignAttributeToCategory so the
+ * null-category rule and the shared-assignment logic live in one place.
+ */
+export const importCategoryAttributes = async (
+    categoryId: string,
+    rows: ParsedAttributeRow[],
+): Promise<ImportAttributesResult> => {
+    const existing = await getCategoryAttributes();
+    const norm = (s: string) => (s ?? '').trim().toLowerCase();
+    const result: ImportAttributesResult = { created: 0, linked: 0, skipped: 0 };
+    const consumedIds = new Set<string>();
+
+    for (const row of rows) {
+        if (!row.name?.trim()) { result.skipped++; continue; }
+
+        const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group);
+        const code = row.akeneoId ? norm(row.akeneoId) : '';
+
+        // Look for an existing attribute anywhere (any category, or global) in the same group.
+        const match = existing.find(a =>
+            !consumedIds.has(a.id) &&
+            a.group === row.group &&
+            (code ? norm(a.akeneoId ?? '') === code : norm(a.name) === norm(row.name)),
+        );
+
+        if (match) {
+            consumedIds.add(match.id);
+            const appliesHere =
+                match.categoryId === null ||
+                match.categoryId === categoryId ||
+                (match.assignedCategoryIds ?? []).includes(categoryId);
+            if (appliesHere) {
+                result.skipped++;
+            } else {
+                // Exists in another category — share it in rather than duplicating.
+                await assignAttributeToCategory(match.id, categoryId);
+                result.linked++;
+            }
+            continue;
+        }
+
+        // No existing attribute — create a fresh one.
+        const validationRules: CategoryAttribute['validationRules'] = {};
+        if (row.unit) validationRules.unit = row.unit;
+        if (row.dataType === 'enum') validationRules.enumOptions = row.enumOptions ?? [];
+
+        const created: CategoryAttribute = {
+            id: generateUUID(),
+            categoryId: isGlobal ? null : categoryId,
+            assignedCategoryIds: [],
+            name: row.name,
+            dataType: row.dataType,
+            validationRules: Object.keys(validationRules).length ? validationRules : undefined,
+            group: row.group,
+            akeneoId: row.akeneoId,
+        };
+        await saveCategoryAttribute(created);
+        existing.push(created); // so later rows in this run can match it (prevents in-file dupes)
+        consumedIds.add(created.id);
+        result.created++;
+    }
+
+    return result;
 };
 
 /**

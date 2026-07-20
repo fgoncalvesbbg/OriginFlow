@@ -1,0 +1,75 @@
+﻿,,,,,
+,,,,,
+,,,,,
+Attribute,Type,Akeneo Code,Suggested Data Type,Options / Range,Notes
+Family Name,Category & Segmentation,item_family,Text,,
+Project ID,Category & Segmentation,project_number,Text,,
+Segment 1,Category & Segmentation,segment_1,Simple select,Thermo; Compressor,
+Segment 2,Category & Segmentation,segment_2,Simple select,XS (up to 30); S (31-60); M (61-90); L (91-120); XL (above 120),Capacity-size bucket for this family.
+Segment 3,Category & Segmentation,segment_3,Simple select,Mechanic; Electronic,Control type for this family.
+Segment 4,Category & Segmentation,segment_4,Simple select,Solid; Glass; Metal; Mirrorred Glass,Door construction for this family.
+Segment 5,Category & Segmentation,segment_5,Simple select,0 (none); A; B; C; D; E; F; G,Energy class bucket incl. a 'none' option.
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+Variation 1,Listing & Data,VARIATION 1,Simple select,Capacity (axis name),Stores which attribute drives variant axis 1.
+Variation 1 - Value,Listing & Data,VARIATION 1 - VALUE,Number,Observed range: 9–306,Actual liters value for variant axis 1 (Capacity).
+Variation 2,Listing & Data,VARIATION 2,Simple select,Color (axis name),Variant axis 2 is always Color in this data.
+Variation 2 - Value,Listing & Data,VARIATION 2 - VALUE,Simple select,Black; Black/White; Silver; Silver/Black; Black/Black; White; Silver/White; Copper/Black; Light Grey; Printing; Red; Cream,Matches Main Color option set.
+Variation 3,Listing & Data,VARIATION 3,Simple select,Energy Class; Frame Color,Variant axis 3 name — varies by product.
+Variation 3 - Value,Listing & Data,VARIATION 3 - VALUE,Simple select,F; Black; Silver; C,Mixed set because the axis (row above) changes — values are either an energy letter or a color depending on axis.
+Installation Type [Freestanding/Built in],1 . Category Specific Attributes,installation_type,Simple select,Freestanding; Built-in,"Current config says Multi select, but a unit is normally either Freestanding OR Built-in — recommend Simple select. Only 'Freestanding' seen in data; 'Built-in' implied by attribute name/label."
+Type of cooling system [Compressor/Thermo],1 . Category Specific Attributes,cooling_system,Simple select,Thermo; Compressor,—
+Refrigerant type,1 . Category Specific Attributes,coolant,Simple select,R600a,"Configured as 'text' but refrigerant types are a fixed chemical list (R600a, R290, R134a, etc.) — recommend Simple select even though only one value observed."
+Refrigerant weight [g],1 . Category Specific Attributes,coolant_weight,Number,Observed range: 17–42 (g),—
+Nominal capacity [L],1 . Category Specific Attributes,volume_capacity_name,Number,Observed range: 9–306 (L),"Configured as Simple select, but the field actually stores a continuous liter value, not a named bucket — recommend Number."
+No. of Bottles,1 . Category Specific Attributes,bottle_capacity_zone_1,Number (integer),Observed range: 18–336,—
+Min temperature [°C],1 . Category Specific Attributes,min_temperature,Number,Observed range: 0–12,—
+Max temperature [°C],1 . Category Specific Attributes,max_temperature,Number,Observed range: 10–22,—
+"Temperature control [Mechanic, Electronic]",1 . Category Specific Attributes,control,Simple select,Mechanic; Electronic,"Configured as Multi select, but a unit has one control type — recommend Simple select."
+Defrost Type,1 . Category Specific Attributes,defrost_system_type,Simple select,No Frost; Manual; Auto Defrost,—
+Number of shelfs,1 . Category Specific Attributes,NEW3,Number (integer),Observed range: 1–5,Akeneo code 'NEW3' looks like a placeholder — confirm real attribute code before mapping.
+Adjustable Shelves Height [Y/N],1 . Category Specific Attributes,has_adjustable_shelves,Boolean (Yes/No),Yes; No,—
+Door hinge position [Right/Left],1 . Category Specific Attributes,door_hinge_position,Simple select,Right; Top,"Label implies Right/Left, but observed data shows 'Right' and 'Top' — check for a data-entry inconsistency; full option set should likely be Right/Left."
+Door hinge changeable [Y/N],1 . Category Specific Attributes,door_hinge_changeable,Boolean (Yes/No),Yes; No,—
+Door Material,1 . Category Specific Attributes,main_door_material,Reference entity (single link),Solid; Glass; Metal; Mirrorred Glass; PVC,Linked to an Akeneo Reference Entity table rather than a plain select list.
+Safety lock [Y/N],1 . Category Specific Attributes,safety_lock,Boolean (Yes/No),Yes; No,—
+Interior lighting [Y/N],1 . Category Specific Attributes,interior_lighting,Boolean (Yes/No),Yes; No,—
+Door Open Alarm [Y/N],1 . Category Specific Attributes,warning_signal_when_the_door_is_open,Boolean (Yes/No),Yes; No,Only 'No' observed in data; option set inferred from label.
+Temperature alarm [Y/N],1 . Category Specific Attributes,has_temperature_alarm,Boolean (Yes/No),Yes; No,—
+Height adjustable feet [Y/N],1 . Category Specific Attributes,height_adjustable_feet,Boolean (Yes/No),Yes; No,—
+Handle Type,1 . Category Specific Attributes,handle_type,Simple select,Recessed; Bar,—
+Main Color,2. Standard Specs,main_color,Simple select (color swatch),Black; Silver; White; Copper; Light Gray; Printing; Red; Cream,"Configured as Akeneo 'color' type — a finite named-swatch list, not a free color picker."
+Secondary Color,2. Standard Specs,secondary_color,Simple select (color swatch),Black; White; Silver,—
+IoT/Smart,2. Standard Specs,app_control,Boolean (Yes/No),Yes; No,—
+Special Attribute 1,2. Standard Specs,special_1,Text,Free text (e.g. 'Replacement off:'),"Internal note field, not a structured attribute."
+Special Attribute 2,2. Standard Specs,special_2,Text,Free text (e.g. SKU range '10027671 to 10041891'),—
+Special Attribute 3,2. Standard Specs,special_3,Text,No data populated yet,—
+Special Attribute 4,2. Standard Specs,special_4,Text,No data populated yet,—
+Special Attribute 5,2. Standard Specs,special_5,Text,No data populated yet,—
+Energy efficiency class,2. Standard Specs,energy_efficiency_scale,Simple select,A; B; C; D; E; F; G,"Configured as 'Text', but data is the fixed EU energy label set — recommend Simple select."
+Annual energy consumption [kWh/year],2. Standard Specs,energy_consumption_annum,Number,Observed range: 47–799,—
+Voltage Range [V / Hz],2. Standard Specs,voltage_range,Simple select,220-240 V ~ 50/60 Hz; 220-240 V ~ 50Hz,"Configured as Multi select, but only one voltage spec applies per unit — recommend Simple select."
+Type of plug,2. Standard Specs,power_plug_type,Simple select,Type E/F - 2 pin (German) - Schuko; Type C 16A - 2 pin (Europlug),"Configured as 'measurement', which is wrong — this is a categorical plug-type list, recommend Simple select."
+Power cord length [m],2. Standard Specs,power_cord_length,Number,Observed range: 1.2–2.6 (m),"Configured as Multi select, but data is a continuous length in meters — recommend Number."
+IEC protection class [Schutzklasse],2. Standard Specs,iec_protection_class,Simple select,"I (only value observed; standard set is I, II, III)","Configured as 'measurement', but protection class is categorical — recommend Simple select."
+Power [W],2. Standard Specs,total_power,Number,Observed range: 45–200,—
+Noise Emission [dB],2. Standard Specs,max_noise_level,Number,Observed range: 23–43 (some blank/'na'),—
+Product Height [cm],3. Product Dimensions,hoehe,Number,Observed range: 30.3–192,—
+Product Width [cm],3. Product Dimensions,breite,Number,Observed range: 29.5–59.5,—
+Product Depth [cm],3. Product Dimensions,laenge,Number,Observed range: 31.5–57.5,—
+Product weight [kg],3. Product Dimensions,gewicht,Number,Observed range: 7–60,—
+,,,,,
+Number of batteries in accessories [qty],4. Battery Information,number_of_batteries_in_accessories,Number (integer),Observed: 0,—
+Type of batteries in accessories [type],4. Battery Information,battery_type_in_accessories,Simple select,"No data — recommend standard set (AA, AAA, 9V, CR2032, etc.)",No data currently populated.
+Weight of one battery in accessories [g],4. Battery Information,weight_of_batteries_in_accessories,Number,No data populated yet,—
+Number of batteries main unit [qty],4. Battery Information,number_of_batteries,Number (integer),Observed: 0,—
+Type of batteries main unit [type],4. Battery Information,battery_type,Simple select,"No data — recommend standard set (AA, AAA, 9V, CR2032, etc.)",No data currently populated.
+Weight of one battery main unit [g],4. Battery Information,weight_of_batteries,Number,No data populated yet,—
+ISTA Level,5. Packaging,ista_level,Simple select,ISTA 1A; Other,"Configured as 'text', but data is a fixed packaging-test-standard list — recommend Simple select."
+How Many Boxes? [qty],5. Packaging,how_many_boxes___qty_,Number (integer),Observed: 1,—
+Box 1 - Content [what's inside?],5. Packaging,package_1_contents,Text,Free text (e.g. 'Beverage Cooler + Instruction Manual'),—
+Box 2 - Content [what's inside?],5. Packaging,package_1_contents,Text,Free text (e.g. 'Beverage Cooler + Instruction Manual'),—
+Box 3 - Content [what's inside?],5. Packaging,package_1_contents,Text,Free text (e.g. 'Beverage Cooler + Instruction Manual'),—
+,,,,,

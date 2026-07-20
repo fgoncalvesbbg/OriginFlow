@@ -61,9 +61,19 @@ export {
   getFlagsForSkus,
   upsertSkuAttributeFlag,
   setSkuAttributeFlagResolved,
-  deleteSkuAttributeFlag
+  deleteSkuAttributeFlag,
+  getCatalogSkus,
+  createCatalogSku,
+  bulkUpsertCatalogSkus,
+  setSkuFinal,
+  logSkuChanges,
+  logSkuCreated,
+  logSkuDeleted,
+  markSkusExported,
+  getSkuChangeLog
 } from './project';
 export type { CategorySku } from './project';
+export type { ParsedSkuRow, BulkUpsertSkuResult, ChangeActor, SkuFieldChange } from './project';
 
 // Supplier module
 export {
@@ -122,6 +132,7 @@ export {
   deleteComplianceSection,
   getCategoryAttributes,
   saveCategoryAttribute,
+  importCategoryAttributes,
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
@@ -130,6 +141,7 @@ export {
   ATTRIBUTE_GROUPS,
   PREDEFINED_ATTRIBUTE_GROUPS
 } from './compliance';
+export type { ImportAttributesResult } from './compliance';
 
 // IM module
 export {

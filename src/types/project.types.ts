@@ -113,13 +113,37 @@ export interface SkuAttributeValue {
 
 export interface ProjectSku {
   id: string;
-  projectId: string;
+  projectId: string | null; // null = project-less catalog SKU (legacy item)
+  categoryId?: string | null; // category the SKU belongs to; drives its attribute set
   skuNumber: string;
   skuTitle: string;
   attributeValues: SkuAttributeValue[];
   sortOrder: number;
+  isFinal: boolean; // locked: no edits without unlocking (which is logged)
+  pendingExport: boolean; // has changes not yet exported to Akeneo
+  lastExportedAt: string | null; // when it was last exported to Akeneo
   createdAt: string;
   updatedAt: string;
+}
+
+/** A SKU enriched with the owning project's name (null for catalog SKUs). */
+export interface CatalogSku extends ProjectSku {
+  projectName: string | null;
+}
+
+/** One append-only entry in a SKU's change/audit log (see sku_change_log). */
+export interface SkuChangeLogEntry {
+  id: string;
+  projectSkuId: string | null;
+  skuNumber: string;
+  action: 'finalize' | 'unlock' | 'update' | 'create' | 'delete';
+  field: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  note: string;
+  changedBy: string | null;
+  changedByName: string;
+  createdAt: string;
 }
 
 /**

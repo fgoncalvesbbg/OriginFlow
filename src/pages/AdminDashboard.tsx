@@ -7,6 +7,7 @@ import {
   getCategories, saveCategory,
   deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
+  importCategoryAttributes,
   unassignAttributeFromCategory, makeAttributeGlobal, assignAttributeToCategory,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
@@ -15,9 +16,10 @@ import {
   getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry,
   getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim
 } from '../services';
-import { generateUUID, getAttributesForCategory } from '../utils';
-import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen } from 'lucide-react';
+import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../utils';
+import type { ParsedAttributeRow } from '../utils';
+import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
@@ -94,6 +96,21 @@ const AdminDashboard: React.FC = () => {
   const [linkAttrSearch, setLinkAttrSearch] = useState('');
   const [linkingAttrId, setLinkingAttrId] = useState<string | null>(null);
 
+  // "Import attributes from CSV" modal — bulk-create attributes for the open category.
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ParsedAttributeRow[]>([]);
+  const [importIncluded, setImportIncluded] = useState<boolean[]>([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  // Bulk grid editor for the open category's attributes.
+  const [attrView, setAttrView] = useState<'list' | 'grid'>('list');
+  const [gridRows, setGridRows] = useState<CategoryAttribute[]>([]);
+  const [gridOptionsText, setGridOptionsText] = useState<Record<string, string>>({});
+  const [gridDirty, setGridDirty] = useState<Set<string>>(new Set());
+  const [gridSaving, setGridSaving] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -120,6 +137,23 @@ const AdminDashboard: React.FC = () => {
   };
 
   useRefetchOnFocus(loadData);
+
+  // Rebuild the grid editor's working copy from the loaded attributes whenever the open
+  // category or the underlying data changes — but not while the user has unsaved edits
+  // (so a background refetch never clobbers in-progress changes).
+  useEffect(() => {
+    if (!selectedCategoryDetail) return;
+    if (gridDirty.size > 0) return;
+    const rows = getAttributesForCategory(attributes, selectedCategoryDetail)
+      .slice()
+      .sort((a, b) => {
+        const gi = (ATTRIBUTE_GROUPS as readonly string[]).indexOf(a.group ?? 'Category Specific')
+          - (ATTRIBUTE_GROUPS as readonly string[]).indexOf(b.group ?? 'Category Specific');
+        return gi !== 0 ? gi : a.name.localeCompare(b.name);
+      });
+    setGridRows(rows.map(r => ({ ...r, validationRules: { ...(r.validationRules ?? {}) } })));
+    setGridOptionsText(Object.fromEntries(rows.map(r => [r.id, (r.validationRules?.enumOptions ?? []).join(', ')])));
+  }, [attributes, selectedCategoryDetail, gridDirty.size]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -234,7 +268,7 @@ const AdminDashboard: React.FC = () => {
       setEditingItem({ name: '', active: true, isFinalized: false });
     } else {
         if (!selectedCategoryDetail) return;
-        const isPredefined = group && group !== 'Category Specific';
+        const isPredefined = !!group && PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
         setEditingItem({ name: '', categoryId: isPredefined ? null : selectedCategoryDetail, dataType: 'text', validationRules: {}, group: group ?? 'Category Specific' });
         setEnumOptionsDraft('');
     }
@@ -355,6 +389,161 @@ const AdminDashboard: React.FC = () => {
       alert(`Failed to link attribute: ${e.message}`);
     }
     setLinkingAttrId(null);
+  };
+
+  // --- CSV ATTRIBUTE IMPORT ---
+  const openImportModal = () => {
+    setImportRows([]);
+    setImportIncluded([]);
+    setImportFileName('');
+    setImportError(null);
+    setImporting(false);
+    setImportModalOpen(true);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportError(null);
+    setImportFileName(file.name);
+    try {
+      const buf = await file.arrayBuffer();
+      const rows = parseAttributeCsv(buf);
+      setImportRows(rows);
+      setImportIncluded(rows.map(() => true));
+      if (rows.length === 0) {
+        setImportError('No attribute rows found. Check the file has a header row with "Attribute" and "Akeneo Code" columns.');
+      }
+    } catch (err: any) {
+      setImportError(`Could not read file: ${err.message}`);
+      setImportRows([]);
+      setImportIncluded([]);
+    }
+    // Allow re-selecting the same file after a fix.
+    e.target.value = '';
+  };
+
+  const setImportRowGroup = (index: number, group: string) => {
+    setImportRows(prev => prev.map((r, i) => i === index ? { ...r, group } : r));
+  };
+
+  // Best-effort preview mirroring importCategoryAttributes:
+  //  'new'    → no existing match; a new attribute will be created.
+  //  'link'   → exists in another category; it will be shared into this one (no duplicate).
+  //  'exists' → already applies here (global / owned / already shared); nothing to do.
+  const importRowStatus = (row: ParsedAttributeRow): 'new' | 'link' | 'exists' => {
+    const norm = (s?: string) => (s ?? '').trim().toLowerCase();
+    const code = norm(row.akeneoId);
+    const match = attributes.find(a =>
+      a.group === row.group &&
+      (code ? norm(a.akeneoId) === code : norm(a.name) === norm(row.name)),
+    );
+    if (!match) return 'new';
+    const appliesHere =
+      match.categoryId === null ||
+      match.categoryId === selectedCategoryDetail ||
+      (match.assignedCategoryIds ?? []).includes(selectedCategoryDetail!);
+    return appliesHere ? 'exists' : 'link';
+  };
+
+  const handleConfirmImport = async () => {
+    if (!selectedCategoryDetail) return;
+    const included = importRows.filter((_, i) => importIncluded[i]);
+    if (included.length === 0) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const res = await importCategoryAttributes(selectedCategoryDetail, included);
+      await loadData();
+      setImportModalOpen(false);
+      alert(`Import complete: ${res.created} created, ${res.linked} linked${res.skipped ? `, ${res.skipped} already present` : ''}.`);
+    } catch (e: any) {
+      setImportError(`Import failed: ${e.message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // --- BULK GRID EDITOR ---
+  const markGridDirty = (id: string) => setGridDirty(prev => new Set(prev).add(id));
+
+  const updateGridRow = (id: string, patch: Partial<CategoryAttribute>) => {
+    setGridRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
+    markGridDirty(id);
+  };
+
+  const updateGridRules = (id: string, patch: Partial<CategoryAttribute['validationRules']>) => {
+    setGridRows(prev => prev.map(r =>
+      r.id === id ? { ...r, validationRules: { ...(r.validationRules ?? {}), ...patch } } : r,
+    ));
+    markGridDirty(id);
+  };
+
+  const changeGridGroup = (id: string, group: string) => {
+    const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
+    setGridRows(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      // Keep categoryId consistent with the new scope: converting a global attribute to a
+      // category-scoped group must attach it to THIS category (saveCategoryAttribute only
+      // nulls the id for predefined groups, it never fills a null one).
+      const categoryId = isGlobal ? r.categoryId : (r.categoryId ?? selectedCategoryDetail ?? null);
+      return { ...r, group, categoryId };
+    }));
+    markGridDirty(id);
+  };
+
+  const changeGridOptions = (id: string, text: string) => {
+    setGridOptionsText(prev => ({ ...prev, [id]: text }));
+    const enumOptions = text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    updateGridRules(id, { enumOptions });
+  };
+
+  const addGridRow = () => {
+    if (!selectedCategoryDetail) return;
+    const id = generateUUID();
+    const row: CategoryAttribute = {
+      id,
+      categoryId: selectedCategoryDetail,
+      assignedCategoryIds: [],
+      name: '',
+      dataType: 'text',
+      validationRules: {},
+      group: 'Category Specific',
+    };
+    setGridRows(prev => [...prev, row]);
+    setGridOptionsText(prev => ({ ...prev, [id]: '' }));
+    markGridDirty(id);
+  };
+
+  const removeGridRow = (id: string) => {
+    const existsInDb = attributes.some(a => a.id === id);
+    if (!existsInDb) {
+      // Never persisted — just drop it from the working copy.
+      setGridRows(prev => prev.filter(r => r.id !== id));
+      setGridDirty(prev => { const n = new Set(prev); n.delete(id); return n; });
+      return;
+    }
+    handleDeleteAttribute(id); // reuse the existing confirm + delete + reload flow
+  };
+
+  const handleSaveGrid = async () => {
+    const changed = gridRows.filter(r => gridDirty.has(r.id) && r.name.trim());
+    if (changed.length === 0) { setGridDirty(new Set()); return; }
+    setGridSaving(true);
+    try {
+      for (const r of changed) {
+        await saveCategoryAttribute({
+          ...r,
+          validationRules: r.validationRules && Object.keys(r.validationRules).length ? r.validationRules : undefined,
+        });
+      }
+      setGridDirty(new Set());
+      await loadData();
+    } catch (e: any) {
+      alert(`Error saving changes: ${e.message}`);
+    } finally {
+      setGridSaving(false);
+    }
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
@@ -508,6 +697,139 @@ const AdminDashboard: React.FC = () => {
 
   // --- RENDERERS ---
 
+  const DATA_TYPES: AttributeDataType[] = ['text', 'integer', 'decimal', 'boolean', 'enum', 'image'];
+
+  const renderAttributeGrid = () => {
+    const dirtyCount = gridRows.filter(r => gridDirty.has(r.id)).length;
+    return (
+      <div className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 bg-light border-b border-gray-200">
+          <div className="text-xs text-muted">
+            {gridRows.length} attribute{gridRows.length === 1 ? '' : 's'} for this category
+            {dirtyCount > 0 && <span className="ml-2 text-amber-600 font-medium">· {dirtyCount} unsaved</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={addGridRow}
+              className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1.5 rounded border border-indigo-100 transition-colors"
+            >
+              <Plus size={13} /> Add attribute
+            </button>
+            <button
+              onClick={handleSaveGrid}
+              disabled={gridSaving || dirtyCount === 0}
+              className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-xs font-medium shadow disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <CheckCircle size={13} /> {gridSaving ? 'Saving…' : `Save all changes${dirtyCount ? ` (${dirtyCount})` : ''}`}
+            </button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-left text-gray-500 border-b border-gray-200">
+              <tr>
+                <th className="px-2 py-2 min-w-[180px]">Name</th>
+                <th className="px-2 py-2 min-w-[160px]">Group</th>
+                <th className="px-2 py-2 min-w-[110px]">Type</th>
+                <th className="px-2 py-2 min-w-[220px]">Options (enum)</th>
+                <th className="px-2 py-2 min-w-[80px]">Unit</th>
+                <th className="px-2 py-2 text-center">Req</th>
+                <th className="px-2 py-2 w-8"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {gridRows.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 italic">No attributes yet. Click <strong>Add attribute</strong> or import a CSV.</td></tr>
+              ) : gridRows.map(r => {
+                const isGlobal = r.categoryId === null;
+                const isShared = r.categoryId !== null && r.categoryId !== selectedCategoryDetail;
+                const dirty = gridDirty.has(r.id);
+                return (
+                  <tr key={r.id} className={dirty ? 'bg-amber-50/40' : 'hover:bg-light'}>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        value={r.name}
+                        onChange={e => updateGridRow(r.id, { name: e.target.value })}
+                        placeholder="Attribute name"
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center gap-1">
+                        <select
+                          value={r.group ?? 'Category Specific'}
+                          onChange={e => changeGridGroup(r.id, e.target.value)}
+                          className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
+                        >
+                          {(ATTRIBUTE_GROUPS as readonly string[]).map(g => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                        <span
+                          className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase shrink-0 ${isGlobal ? 'text-indigo-500 bg-indigo-50' : isShared ? 'text-violet-500 bg-violet-50' : 'text-slate-500 bg-slate-100'}`}
+                          title={isGlobal ? 'Global — edits apply to every category' : isShared ? 'Shared from another category — edits apply everywhere it is used' : 'Specific to this category'}
+                        >
+                          {isGlobal ? 'Global' : isShared ? 'Shared' : 'Cat'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <select
+                        value={r.dataType}
+                        onChange={e => updateGridRow(r.id, { dataType: e.target.value as AttributeDataType })}
+                        className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white capitalize focus:ring-1 focus:ring-indigo-400 outline-none"
+                      >
+                        {DATA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        value={gridOptionsText[r.id] ?? ''}
+                        onChange={e => changeGridOptions(r.id, e.target.value)}
+                        disabled={r.dataType !== 'enum'}
+                        placeholder={r.dataType === 'enum' ? 'Option A, Option B, …' : '—'}
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="text"
+                        value={r.validationRules?.unit ?? ''}
+                        onChange={e => updateGridRules(r.id, { unit: e.target.value || undefined })}
+                        disabled={r.dataType !== 'integer' && r.dataType !== 'decimal'}
+                        placeholder={r.dataType === 'integer' || r.dataType === 'decimal' ? 'L, cm…' : '—'}
+                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={!!r.validationRules?.required}
+                        onChange={e => updateGridRules(r.id, { required: e.target.checked || undefined })}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 text-center">
+                      <button
+                        onClick={() => removeGridRow(r.id)}
+                        className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                        title="Delete attribute"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-400">
+          Editing a <span className="text-indigo-500 font-medium">Global</span> or <span className="text-violet-500 font-medium">Shared</span> attribute changes it for every category that uses it. Changing the Group moves an attribute between global and category scope.
+        </div>
+      </div>
+    );
+  };
+
   const renderCategoriesTab = () => {
     if (selectedCategoryDetail) {
         const category = categories.find(c => c.id === selectedCategoryDetail);
@@ -526,14 +848,39 @@ const AdminDashboard: React.FC = () => {
                         <h3 className="text-xl font-bold text-primary">{category?.name}</h3>
                         <p className="text-sm text-muted mt-1">Attributes</p>
                     </div>
-                    <button
-                        onClick={openLinkModal}
-                        className="flex items-center gap-2 px-4 py-2 bg-white text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 text-sm font-medium shadow-sm"
-                    >
-                        <LinkIcon size={16} /> Link from another category
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center rounded-md border border-gray-200 bg-white p-0.5 shadow-sm mr-1">
+                            <button
+                                onClick={() => setAttrView('list')}
+                                className={`px-3 py-1.5 text-sm font-medium rounded ${attrView === 'list' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}
+                            >
+                                List
+                            </button>
+                            <button
+                                onClick={() => setAttrView('grid')}
+                                className={`px-3 py-1.5 text-sm font-medium rounded ${attrView === 'grid' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}
+                            >
+                                Grid
+                            </button>
+                        </div>
+                        <button
+                            onClick={openImportModal}
+                            className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-50 text-sm font-medium shadow-sm"
+                        >
+                            <Upload size={16} /> Import from CSV
+                        </button>
+                        <button
+                            onClick={openLinkModal}
+                            className="flex items-center gap-2 px-4 py-2 bg-white text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 text-sm font-medium shadow-sm"
+                        >
+                            <LinkIcon size={16} /> Link from another category
+                        </button>
+                    </div>
                 </div>
 
+                {attrView === 'grid' && renderAttributeGrid()}
+
+                {attrView === 'list' && (
                 <div className="space-y-4">
                     {ATTRIBUTE_GROUPS.map(group => {
                         const isPredefined = PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
@@ -616,6 +963,7 @@ const AdminDashboard: React.FC = () => {
                         );
                     })}
                 </div>
+                )}
             </div>
         );
     }
@@ -1816,6 +2164,151 @@ const AdminDashboard: React.FC = () => {
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {importModalOpen && (() => {
+        const targetName = categories.find(c => c.id === selectedCategoryDetail)?.name ?? 'this category';
+        const includedCount = importIncluded.filter(Boolean).length;
+        const flaggedCount = importRows.filter((r, i) => importIncluded[i] && r.flags.length > 0).length;
+        let newCount = 0, linkCount = 0, existsCount = 0;
+        importRows.forEach((r, i) => {
+          if (!importIncluded[i]) return;
+          const s = importRowStatus(r);
+          if (s === 'link') linkCount++;
+          else if (s === 'exists') existsCount++;
+          else newCount++;
+        });
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[88vh]">
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="font-bold text-lg text-gray-800">Import Attributes from CSV</h3>
+                <button onClick={() => setImportModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+              </div>
+              <p className="text-xs text-muted mb-4">
+                Bulk-create attributes for <span className="font-semibold text-gray-700">{targetName}</span> from a spreadsheet.
+                <span className="font-medium text-slate-600"> Category</span> rows are added only to this category;
+                <span className="font-medium text-indigo-600"> Global</span> rows are shared across every category.
+                Change any row's <strong>Group</strong> below before importing to move it between scopes. Re-importing updates existing rows instead of duplicating them.
+              </p>
+
+              <div className="flex items-center gap-3 mb-4">
+                <label className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow cursor-pointer">
+                  <Upload size={16} /> Choose CSV file
+                  <input type="file" accept=".csv,text/csv,application/vnd.ms-excel,.xlsx" onChange={handleImportFile} className="hidden" />
+                </label>
+                {importFileName && <span className="text-sm text-gray-600 truncate">{importFileName}</span>}
+              </div>
+
+              {importError && (
+                <div className="mb-3 flex items-start gap-2 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" /> <span>{importError}</span>
+                </div>
+              )}
+
+              {importRows.length > 0 && (
+                <>
+                  <div className="text-xs text-gray-600 mb-2">
+                    <span className="font-semibold">{includedCount}</span> selected of {importRows.length} ·{' '}
+                    <span className="text-emerald-600 font-medium">{newCount} new</span> ·{' '}
+                    <span className="text-violet-600 font-medium">{linkCount} link</span> ·{' '}
+                    <span className="text-gray-500 font-medium">{existsCount} already here</span>
+                    {flaggedCount > 0 && <> · <span className="text-rose-600 font-medium">{flaggedCount} flagged</span></>}
+                  </div>
+                  <div className="overflow-auto flex-1 border border-gray-200 rounded-lg">
+                    <table className="w-full text-xs">
+                      <thead className="bg-light sticky top-0">
+                        <tr className="text-left text-gray-500">
+                          <th className="px-2 py-2 w-8"></th>
+                          <th className="px-2 py-2">Attribute</th>
+                          <th className="px-2 py-2">Group</th>
+                          <th className="px-2 py-2">Type</th>
+                          <th className="px-2 py-2">Options / Unit</th>
+                          <th className="px-2 py-2">Akeneo</th>
+                          <th className="px-2 py-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {importRows.map((r, i) => {
+                          const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(r.group);
+                          const status = importRowStatus(r);
+                          return (
+                            <tr key={i} className={`hover:bg-light ${!importIncluded[i] ? 'opacity-40' : ''}`}>
+                              <td className="px-2 py-1.5">
+                                <input
+                                  type="checkbox"
+                                  checked={importIncluded[i]}
+                                  onChange={() => setImportIncluded(prev => prev.map((v, j) => j === i ? !v : v))}
+                                />
+                              </td>
+                              <td className="px-2 py-1.5 font-medium text-gray-800">{r.name}</td>
+                              <td className="px-2 py-1.5">
+                                <div className="flex items-center gap-1">
+                                  <select
+                                    value={r.group}
+                                    onChange={e => setImportRowGroup(i, e.target.value)}
+                                    className="border border-gray-200 rounded px-1 py-0.5 text-xs text-indigo-700 bg-white max-w-[150px] focus:ring-1 focus:ring-indigo-400 outline-none"
+                                  >
+                                    {(ATTRIBUTE_GROUPS as readonly string[]).map(g => (
+                                      <option key={g} value={g}>{g}</option>
+                                    ))}
+                                  </select>
+                                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase ${isGlobal ? 'text-indigo-500 bg-indigo-50' : 'text-slate-500 bg-slate-100'}`}>
+                                    {isGlobal ? 'Global' : 'Category'}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-2 py-1.5 capitalize">{r.dataType}</td>
+                              <td className="px-2 py-1.5 text-gray-500 max-w-[220px] truncate">
+                                {r.dataType === 'enum'
+                                  ? (r.enumOptions?.length ? `${r.enumOptions.length}: ${r.enumOptions.join(', ')}` : '—')
+                                  : (r.unit ? `unit: ${r.unit}` : '—')}
+                              </td>
+                              <td className="px-2 py-1.5 text-gray-400 font-mono text-[10px]">{r.akeneoId ?? '—'}</td>
+                              <td className="px-2 py-1.5">
+                                {status === 'link'
+                                  ? <span className="text-violet-600 font-medium" title="Already exists in another category — will be shared into this one">Link</span>
+                                  : status === 'exists'
+                                    ? <span className="text-gray-400 font-medium" title="Already applies to this category — nothing to do">Already here</span>
+                                    : <span className="text-emerald-600 font-medium">New</span>}
+                                {r.flags.length > 0 && (
+                                  <span className="ml-1 inline-flex items-center gap-0.5 text-rose-500" title={r.flags.join('\n')}>
+                                    <AlertTriangle size={11} />
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {flaggedCount > 0 && (
+                    <p className="text-[11px] text-gray-400 mt-2">
+                      ⚠ = needs review (hover the icon). Flagged rows are still importable — you can fix them afterward in the attribute editor.
+                    </p>
+                  )}
+                </>
+              )}
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 mt-3">
+                <button
+                  onClick={() => setImportModalOpen(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmImport}
+                  disabled={importing || includedCount === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Upload size={16} /> {importing ? 'Importing…' : `Import ${includedCount} attribute${includedCount === 1 ? '' : 's'}`}
                 </button>
               </div>
             </div>

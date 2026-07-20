@@ -51,8 +51,26 @@ export {
   updateProjectSku,
   deleteProjectSku,
   getEffectiveSkuValue,
-  collapseSkuAttributeValues
+  collapseSkuAttributeValues,
+  mapProjectSku
 } from './project-sku.service';
+
+export {
+  getCatalogSkus,
+  createCatalogSku,
+  bulkUpsertCatalogSkus
+} from './sku-catalog.service';
+export type { ParsedSkuRow, BulkUpsertSkuResult } from './sku-catalog.service';
+
+export {
+  setSkuFinal,
+  logSkuChanges,
+  logSkuCreated,
+  logSkuDeleted,
+  markSkusExported,
+  getSkuChangeLog
+} from './sku-log.service';
+export type { ChangeActor, SkuFieldChange } from './sku-log.service';
 
 export {
   getSkusByCategory,

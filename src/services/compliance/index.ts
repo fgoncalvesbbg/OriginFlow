@@ -33,10 +33,12 @@ export {
   deleteComplianceSection,
   getCategoryAttributes,
   saveCategoryAttribute,
+  importCategoryAttributes,
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
   makeAttributeGlobal
 } from './compliance-requirement.service';
+export type { ImportAttributesResult } from './compliance-requirement.service';
 
 export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';

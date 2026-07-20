@@ -18,8 +18,10 @@ export type {
   DocumentComment,
   ProjectAttributeRequest,
   ProjectSku,
+  CatalogSku,
   SkuAttributeValue,
-  SkuAttributeFlag
+  SkuAttributeFlag,
+  SkuChangeLogEntry
 } from './project.types';
 
 // Compliance types

@@ -21,7 +21,11 @@ export const skuSyntheticAttribute = (): CategoryAttribute => ({
 });
 
 export const ATTRIBUTE_GROUPS = [
+    // 'Category Specific' is the only category-scoped group (carries a real category_id).
     'Category Specific',
+    // Global/predefined groups (category_id = null, shared across every category).
+    'Segmentation',
+    'Variation Axes',
     'Standard Electric Specs',
     'Product Dimensions',
     'Battery Information',
@@ -30,12 +34,20 @@ export const ATTRIBUTE_GROUPS = [
     'Product Images',
 ] as const;
 
-// Standard image-slot attributes that live in the global "Product Images" group.
-// These are seeded by db_migrations/51_add_product_images_attribute_group.sql and
-// apply to every category (category_id = null). Listed here so the UI/IM editor can
-// recognise the canonical image slots without another DB round-trip.
-// Groups 2-6: always present on every category, cannot be removed
-export const PREDEFINED_ATTRIBUTE_GROUPS = ATTRIBUTE_GROUPS.slice(1) as unknown as string[];
+// Global/predefined groups: attributes here have category_id = null and apply to every
+// category (see saveCategoryAttribute and getAttributesForCategory). This is an EXPLICIT
+// list — everything except 'Category Specific'. 'Product Images' is additionally seeded by
+// db_migrations/51_add_product_images_attribute_group.sql.
+export const PREDEFINED_ATTRIBUTE_GROUPS = [
+    'Segmentation',
+    'Variation Axes',
+    'Standard Electric Specs',
+    'Product Dimensions',
+    'Battery Information',
+    'Packaging',
+    'Accessories',
+    'Product Images',
+] as unknown as string[];
 
 export const COMPLIANCE_SECTIONS = [
     'General Requirements',

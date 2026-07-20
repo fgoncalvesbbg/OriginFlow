@@ -9,16 +9,22 @@ import { SKU_ATTRIBUTE_ID } from '../../config/compliance.constants';
 
 export const MAX_SKUS_PER_PROJECT = 10;
 
-const map = (r: any): ProjectSku => ({
+export const mapProjectSku = (r: any): ProjectSku => ({
   id: r.id,
-  projectId: r.project_id,
+  projectId: r.project_id ?? null,
+  categoryId: r.category_id ?? null,
   skuNumber: r.sku_number ?? '',
   skuTitle: r.sku_title ?? '',
   attributeValues: r.attribute_values ?? [],
   sortOrder: r.sort_order ?? 0,
+  isFinal: r.is_final ?? false,
+  pendingExport: r.pending_export ?? false,
+  lastExportedAt: r.last_exported_at ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
+
+const map = mapProjectSku;
 
 export const getProjectSkus = async (projectId: string): Promise<ProjectSku[]> => {
   if (!isLive) return [];
@@ -70,15 +76,17 @@ export const createProjectSku = async (
 
 export const updateProjectSku = async (
   id: string,
-  updates: Partial<Pick<ProjectSku, 'skuNumber' | 'skuTitle' | 'attributeValues' | 'sortOrder'>>
+  updates: Partial<Pick<ProjectSku, 'skuNumber' | 'skuTitle' | 'attributeValues' | 'sortOrder' | 'categoryId'>>
 ): Promise<ProjectSku> => {
   if (!isLive) throw new Error('Database not configured.');
 
-  const payload: Record<string, any> = { updated_at: new Date().toISOString() };
+  // Any data edit marks the SKU as needing a fresh Akeneo export.
+  const payload: Record<string, any> = { updated_at: new Date().toISOString(), pending_export: true };
   if (updates.skuNumber !== undefined) payload.sku_number = updates.skuNumber;
   if (updates.skuTitle !== undefined) payload.sku_title = updates.skuTitle;
   if (updates.attributeValues !== undefined) payload.attribute_values = updates.attributeValues;
   if (updates.sortOrder !== undefined) payload.sort_order = updates.sortOrder;
+  if (updates.categoryId !== undefined) payload.category_id = updates.categoryId;
 
   const { data, error } = await supabase
     .from('project_skus')
