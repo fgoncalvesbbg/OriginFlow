@@ -26,8 +26,10 @@ import { uploadIMAsset, listIMAssets, externalizeHtmlImages, externalizeFormData
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate } from 'lucide-react';
-import { InlineBlockEditor } from './editor/InlineBlockEditor';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
+import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { useUndoRedo } from './editor/useUndoRedo';
+import { insertToActiveEditor } from './editor/insertTarget';
 import { ProjectImImportDialog } from './ProjectImImportDialog';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { getIMThemeVariables } from './styles/im-theme';
@@ -123,11 +125,17 @@ const ProjectIMGenerator: React.FC = () => {
   const [saving, setSaving] = useState(false);
   // Brief "Saved!" confirmation shown on the Save Draft button after a successful save.
   const [savedTick, setSavedTick] = useState(false);
+  // Background (debounced) server autosave — separate from the blocking manual Save.
+  const [autosaving, setAutosaving] = useState(false);
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<Date | null>(null);
   const [generating, setGenerating] = useState(false);
   // Live phase text during publish ("Rendering PDF…", "Publishing 3/12 (de)…") so the long
   // publish shows visible progress instead of an opaque, seemingly-stuck spinner.
   const [publishStatus, setPublishStatus] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  // Settings menu holds destructive/rare actions (Delete Draft / Reset) so they
+  // aren't a single misclick away in the toolbar.
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   // Pre-publish checklist: populated when the user clicks Publish and something is
@@ -170,7 +178,30 @@ const ProjectIMGenerator: React.FC = () => {
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
   const [showImport, setShowImport] = useState(false);
+
+  // Block drag-and-drop within one section's editable list (extra-section blocks or a
+  // placeholder section's override blocks). Keyed by a listId so the single top-level
+  // state can serve whichever section is currently rendered; arrow buttons remain.
+  const [blockDrag, setBlockDrag] = useState<{ listId: string; index: number } | null>(null);
+  const [blockOver, setBlockOver] = useState<{ listId: string; index: number } | null>(null);
+  // Additions drag-and-drop is id-based (they render in position-anchored groups, so array
+  // indices don't map to visual order). Kept separate from the index-based blockDnd.
+  const [addDrag, setAddDrag] = useState<{ sectionId: string; addId: string } | null>(null);
+  const [addOver, setAddOver] = useState<{ sectionId: string; addId: string } | null>(null);
+  // Generic confirm dialog for destructive block deletes (#7).
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  // Cross-section block clipboard (#11) — holds a deep copy of a copied block ref.
+  // sku_slot refs are never copyable (no copy affordance on locked template refs).
+  const [clipboardBlock, setClipboardBlock] = useState<InlineBlockRef | SharedBlockRef | null>(null);
+  // Local reusable snippets (#12), persisted per browser.
+  const [snippets, setSnippets] = useState<{ name: string; block: InlineBlockRef }[]>(() => {
+      try { return JSON.parse(localStorage.getItem('im-block-snippets') || '[]'); } catch { return []; }
+  });
+  const [showSnippetsFor, setShowSnippetsFor] = useState<string | null>(null);
+  // Jump-to-section search (#5).
+  const [sectionSearch, setSectionSearch] = useState('');
 
   useEffect(() => {
     if (projectId) loadData();
@@ -200,6 +231,9 @@ const ProjectIMGenerator: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
         if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
             setShowExportMenu(false);
+        }
+        if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
+            setShowSettingsMenu(false);
         }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -472,11 +506,9 @@ const ProjectIMGenerator: React.FC = () => {
     if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
   };
 
-  const restoreDraft = () => {
-    if (!pendingDraft) return;
-    const s = pendingDraft.state;
-    // Apply the recovered edits but leave savedSnapshotRef at the DB baseline, so the
-    // restored state registers as dirty and gets re-backed-up / offered for saving.
+  // Apply a serialized editable-state snapshot to all the overlay setters. Shared by
+  // draft recovery and by undo/redo.
+  const applyDraftState = (s: DraftState) => {
     setFormData(s.formData ?? {});
     setFieldBindings(s.fieldBindings ?? {});
     setConditions(s.conditions ?? {});
@@ -490,8 +522,23 @@ const ProjectIMGenerator: React.FC = () => {
     setBlockOverrides(s.blockOverrides ?? {});
     if (Array.isArray(s.boundSkuIds)) setBoundSkuIds(s.boundSkuIds);
     if (s.activeLang) setActiveLang(s.activeLang);
+  };
+
+  const restoreDraft = () => {
+    if (!pendingDraft) return;
+    // Apply the recovered edits but leave savedSnapshotRef at the DB baseline, so the
+    // restored state registers as dirty and gets re-backed-up / offered for saving.
+    applyDraftState(pendingDraft.state);
     setPendingDraft(null);
   };
+
+  // Undo/redo over the whole editable overlay set (reuses the draft snapshot shape).
+  // Disabled until load completes and while a recovered draft awaits a decision.
+  const undoRedo = useUndoRedo(
+    serializeDraft(),
+    (json) => { try { applyDraftState(JSON.parse(json) as DraftState); } catch { /* ignore malformed */ } },
+    { enabled: !loading && !pendingDraft },
+  );
 
   const discardDraft = () => {
     if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } }
@@ -547,14 +594,17 @@ const ProjectIMGenerator: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handler);
   });
 
-  const handleSaveDraft = async () => {
+  // Persist the draft to the server. `silent` drives background autosave: no blocking
+  // overlay, no success tick, and a failure is logged (and retried on the next change)
+  // rather than alerted — the local backup remains the crash net either way.
+  const persistDraft = async (opts?: { silent?: boolean }) => {
       if (!projectId || !selectedTemplateId) return;
       // Never let a save start on top of another operation (Publish/Translate/another Save):
       // overlapping writes to the same row queue behind each other's row lock (see with-timeout.ts).
       if (isBusy) return;
-      setSavedTick(false);
-      setSaving(true);
-      await yieldToPaint();
+      const silent = opts?.silent ?? false;
+      if (silent) setAutosaving(true);
+      else { setSavedTick(false); setSaving(true); await yieldToPaint(); }
 
       try {
           // Move any base64 images out of the row (formData + overlay content) into storage
@@ -572,17 +622,43 @@ const ProjectIMGenerator: React.FC = () => {
           setInstance(saved);
           // Baseline = exactly what we persisted, so the local draft clears and nothing shows dirty.
           markSaved({ formData: extForm, sectionAdditions: ext.sectionAdditions, sectionOverrides: ext.sectionOverrides, blockOverrides: ext.blockOverrides, extraSections: ext.extraSections });
-          // Transient inline confirmation instead of a blocking alert.
-          setSavedTick(true);
-          setTimeout(() => setSavedTick(false), 2500);
+          setLastAutoSavedAt(new Date());
+          if (!silent) {
+              // Transient inline confirmation instead of a blocking alert.
+              setSavedTick(true);
+              setTimeout(() => setSavedTick(false), 2500);
+          }
       } catch (e) {
           console.error(e);
-          const detail = e instanceof Error && e.message ? `\n\nDetails: ${e.message}` : '';
-          alert(`Failed to save draft. Your work is backed up locally on this device — try Save again.${detail}`);
+          if (!silent) {
+              const detail = e instanceof Error && e.message ? `\n\nDetails: ${e.message}` : '';
+              alert(`Failed to save draft. Your work is backed up locally on this device — try Save again.${detail}`);
+          } else {
+              console.warn('[ProjectIMGenerator] autosave failed — will retry on next change (work is backed up locally).');
+          }
       } finally {
-          setSaving(false);
+          if (silent) setAutosaving(false);
+          else setSaving(false);
       }
   };
+
+  const handleSaveDraft = () => persistDraft();
+
+  // Debounced background server autosave (on top of the instant local backup): 4s after
+  // edits settle, silently persist to the DB so closing the tab never strands work on the
+  // server. Skipped while loading, while a recovered draft awaits a decision, during any
+  // other operation, and when nothing is unsaved.
+  useEffect(() => {
+      if (loading || pendingDraft || isBusy) return;
+      if (!projectId || !selectedTemplateId || savedSnapshotRef.current === null) return;
+      if (serializeDraft() === savedSnapshotRef.current) return; // nothing unsaved
+      const t = setTimeout(() => { void persistDraft({ silent: true }); }, 4000);
+      return () => clearTimeout(t);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serializeDraft(), loading, pendingDraft, isBusy, projectId, selectedTemplateId]);
+
+  // Unsaved-work indicator: current editable state differs from the last-persisted baseline.
+  const isDirty = savedSnapshotRef.current !== null && serializeDraft() !== savedSnapshotRef.current;
 
   const handleDeleteDraft = () => {
       setShowDeleteConfirm(true);
@@ -797,6 +873,35 @@ const ProjectIMGenerator: React.FC = () => {
       });
   };
 
+  // Drag-and-drop reorder of additions by id: drop the dragged addition into the target's
+  // anchor position, immediately before the target in array order. Works within a section.
+  const reorderAdditionById = (sectionId: string, draggedId: string, targetId: string) => {
+      setSectionAdditions(prev => {
+          const list = [...(prev[sectionId] ?? [])];
+          const from = list.findIndex(a => a.id === draggedId);
+          if (from < 0 || draggedId === targetId) return prev;
+          const targetPos = list.find(a => a.id === targetId)?.position;
+          if (targetPos === undefined) return prev;
+          const [moved] = list.splice(from, 1);
+          const insertAt = list.findIndex(a => a.id === targetId);
+          list.splice(insertAt < 0 ? list.length : insertAt, 0, { ...moved, position: targetPos });
+          return { ...prev, [sectionId]: list };
+      });
+  };
+
+  // Deep-clone an addition (fresh id, same anchor position) and insert it right after
+  // the source so the copy sits next to the original.
+  const duplicateAddition = (sectionId: string, addId: string) => {
+      setSectionAdditions(prev => {
+          const list = [...(prev[sectionId] ?? [])];
+          const i = list.findIndex(a => a.id === addId);
+          if (i < 0) return prev;
+          const clone = { ...structuredClone(list[i]), id: `add-${Math.random().toString(36).slice(2, 11)}` };
+          list.splice(i + 1, 0, clone);
+          return { ...prev, [sectionId]: list };
+      });
+  };
+
   // --- Project-only extra sections ---
   const addExtraSection = (parentId: string | null) => {
       // Order it after the last existing sibling so it appends to that group.
@@ -943,12 +1048,13 @@ const ProjectIMGenerator: React.FC = () => {
   // Insert a library asset at the caret of the last-focused inline editor (the editor
   // registers itself as the insert target on focus and restores its saved selection).
   const handleInsertAsset = (src: string) => {
-      const insert = (window as any).currentEditorInsertHtml;
-      if (!insert) {
+      const alt = window.prompt('Describe this image for accessibility (alt text). Leave blank to skip:', '')?.trim() ?? '';
+      const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
+      const ok = insertToActiveEditor(`<img src="${src}"${altAttr} style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`);
+      if (!ok) {
           alert('Click into a text block where you want the image, then pick an asset.');
           return;
       }
-      insert(`<img src="${src}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`);
       setShowAssets(false);
   };
 
@@ -956,6 +1062,18 @@ const ProjectIMGenerator: React.FC = () => {
       setExtraSections(prev => prev.map(s => s.id === id
           ? { ...s, blocks: s.blocks.filter((_, i) => i !== idx) }
           : s));
+  };
+
+  // Deep-clone a project-section block and insert the copy directly after it.
+  const duplicateExtraBlock = (id: string, idx: number) => {
+      setExtraSections(prev => prev.map(s => {
+          if (s.id !== id) return s;
+          const source = s.blocks[idx];
+          if (!source) return s;
+          const blocks = [...s.blocks];
+          blocks.splice(idx + 1, 0, structuredClone(source));
+          return { ...s, blocks };
+      }));
   };
 
   // Reorder a block within a project section (works for inline and shared blocks).
@@ -966,6 +1084,18 @@ const ProjectIMGenerator: React.FC = () => {
           if (j < 0 || j >= s.blocks.length) return s;
           const blocks = [...s.blocks];
           [blocks[idx], blocks[j]] = [blocks[j], blocks[idx]];
+          return { ...s, blocks };
+      }));
+  };
+
+  // Arbitrary from→to reorder of a project-section's blocks (drag-and-drop).
+  const reorderExtraBlock = (id: string, from: number, to: number) => {
+      setExtraSections(prev => prev.map(s => {
+          if (s.id !== id) return s;
+          if (from < 0 || to < 0 || from >= s.blocks.length || to >= s.blocks.length) return s;
+          const blocks = [...s.blocks];
+          const [moved] = blocks.splice(from, 1);
+          blocks.splice(to, 0, moved);
           return { ...s, blocks };
       }));
   };
@@ -1005,6 +1135,15 @@ const ProjectIMGenerator: React.FC = () => {
   const removeOverrideBlock = (section: IMSection, idx: number) =>
       editOverride(section, blocks => blocks.filter((_, i) => i !== idx));
 
+  const duplicateOverrideBlock = (section: IMSection, idx: number) =>
+      editOverride(section, blocks => {
+          const source = blocks[idx];
+          if (!source) return blocks;
+          const next = [...blocks];
+          next.splice(idx + 1, 0, structuredClone(source));
+          return next;
+      });
+
   const moveOverrideBlock = (section: IMSection, idx: number, dir: -1 | 1) =>
       editOverride(section, blocks => {
           const j = idx + dir;
@@ -1013,6 +1152,145 @@ const ProjectIMGenerator: React.FC = () => {
           [next[idx], next[j]] = [next[j], next[idx]];
           return next;
       });
+
+  // Arbitrary from→to reorder of a placeholder section's override blocks (drag-and-drop).
+  const reorderOverrideBlock = (section: IMSection, from: number, to: number) =>
+      editOverride(section, blocks => {
+          if (from < 0 || to < 0 || from >= blocks.length || to >= blocks.length) return blocks;
+          const next = [...blocks];
+          const [moved] = next.splice(from, 1);
+          next.splice(to, 0, moved);
+          return next;
+      });
+
+  // Native drag-and-drop wiring for a section's block list. `listId` is the extra
+  // section id, or `ov:<sectionId>` for a placeholder section's override blocks; the
+  // drop handler dispatches to the matching arbitrary-reorder above. Dragging is on a
+  // dedicated handle (the editors host contentEditable — a draggable card would eat the
+  // text selection).
+  const blockDnd = {
+    handleProps: (listId: string, index: number) => ({
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => {
+        setBlockDrag({ listId, index });
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(index)); } catch { /* noop */ }
+      },
+      onDragEnd: () => { setBlockDrag(null); setBlockOver(null); },
+    }),
+    dropProps: (listId: string, index: number) => ({
+      onDragOver: (e: React.DragEvent) => {
+        if (!blockDrag || blockDrag.listId !== listId || blockDrag.index === index) return;
+        e.preventDefault();
+        if (blockOver?.listId !== listId || blockOver?.index !== index) setBlockOver({ listId, index });
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        const src = blockDrag;
+        setBlockDrag(null); setBlockOver(null);
+        if (!src || src.listId !== listId || src.index === index) return;
+        if (listId.startsWith('ov:')) {
+          const section = sections.find(s => s.id === listId.slice(3));
+          if (section) reorderOverrideBlock(section, src.index, index);
+        } else {
+          reorderExtraBlock(listId, src.index, index);
+        }
+      },
+    }),
+    isDragging: (listId: string, index: number) => blockDrag?.listId === listId && blockDrag.index === index,
+    isOver: (listId: string, index: number) =>
+      blockOver?.listId === listId && blockOver.index === index && !(blockDrag?.listId === listId && blockDrag.index === index),
+  };
+
+  // Id-based drag-and-drop for section additions (see reorderAdditionById).
+  const additionDnd = {
+    handleProps: (sectionId: string, addId: string) => ({
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => {
+        setAddDrag({ sectionId, addId });
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', addId); } catch { /* noop */ }
+      },
+      onDragEnd: () => { setAddDrag(null); setAddOver(null); },
+    }),
+    dropProps: (sectionId: string, addId: string) => ({
+      onDragOver: (e: React.DragEvent) => {
+        if (!addDrag || addDrag.sectionId !== sectionId || addDrag.addId === addId) return;
+        e.preventDefault();
+        if (addOver?.sectionId !== sectionId || addOver?.addId !== addId) setAddOver({ sectionId, addId });
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        const src = addDrag;
+        setAddDrag(null); setAddOver(null);
+        if (!src || src.sectionId !== sectionId || src.addId === addId) return;
+        reorderAdditionById(sectionId, src.addId, addId);
+      },
+    }),
+    isDragging: (sectionId: string, addId: string) => addDrag?.sectionId === sectionId && addDrag.addId === addId,
+    isOver: (sectionId: string, addId: string) =>
+      addOver?.sectionId === sectionId && addOver.addId === addId && !(addDrag?.sectionId === sectionId && addDrag.addId === addId),
+  };
+
+  // --- Delete confirmation (#7): confirm only when there's content to lose ---
+  const isInlineBlockEmpty = (block: InlineBlockRef): boolean =>
+      Object.values(block.content || {}).every(v => !String(v || '').replace(/<[^>]*>/g, '').trim());
+  const requestDeleteBlock = (isEmpty: boolean, onConfirm: () => void) => {
+      if (isEmpty) { onConfirm(); return; }
+      setPendingConfirm({
+          title: 'Delete this block?',
+          message: 'This block has content. Deleting it removes it from this project. You can undo with Ctrl/Cmd+Z.',
+          onConfirm,
+      });
+  };
+
+  // --- Block clipboard (#11): copy any block ref, paste a clone into a section ---
+  const isExtraSection = (section: IMSection): boolean => (section as any).__projectExtra === true;
+  const appendBlockToSection = (section: IMSection, ref: InlineBlockRef | SharedBlockRef) => {
+      const clone = structuredClone(ref);
+      if (isExtraSection(section)) {
+          setExtraSections(prev => prev.map(s => s.id === section.id ? { ...s, blocks: [...s.blocks, clone] } : s));
+      } else if (ref.kind !== 'inline') {
+          // Shared/sku refs can only live in project-only sections; ignore elsewhere.
+          alert('Standardized blocks can only be pasted into a project section.');
+      } else if (section.isPlaceholder) {
+          editOverride(section, blocks => [...blocks, clone as InlineBlockRef]);
+      } else {
+          setSectionAdditions(prev => {
+              const list = [...(prev[section.id] ?? [])];
+              list.push({ id: `add-${Math.random().toString(36).slice(2, 11)}`, position: (section.blockRefs?.length ?? 0), block: clone as InlineBlockRef });
+              return { ...prev, [section.id]: list };
+          });
+      }
+  };
+  const pasteIntoSection = (section: IMSection) => { if (clipboardBlock) appendBlockToSection(section, clipboardBlock); };
+
+  // --- Bulk callout variant (#12): set the box style on every inline block in a section ---
+  const setAllVariantsInSection = (section: IMSection, variant: CalloutVariant | undefined) => {
+      if (isExtraSection(section)) {
+          setExtraSections(prev => prev.map(s => s.id === section.id
+              ? { ...s, blocks: s.blocks.map(b => b.kind === 'inline' ? { ...b, variant } : b) } : s));
+      } else if (section.isPlaceholder) {
+          editOverride(section, blocks => blocks.map(b => ({ ...b, variant })));
+      } else {
+          setSectionAdditions(prev => ({
+              ...prev,
+              [section.id]: (prev[section.id] ?? []).map(a => ({ ...a, block: { ...a.block, variant } })),
+          }));
+      }
+  };
+
+  // --- Local snippets (#12): save/reuse a block's content across projects (per browser) ---
+  const persistSnippets = (next: { name: string; block: InlineBlockRef }[]) => {
+      setSnippets(next);
+      try { localStorage.setItem('im-block-snippets', JSON.stringify(next)); } catch { /* quota — ignore */ }
+  };
+  const saveBlockAsSnippet = (block: InlineBlockRef) => {
+      const name = window.prompt('Save this block as a reusable snippet. Name:')?.trim();
+      if (!name) return;
+      persistSnippets([...snippets.filter(s => s.name !== name), { name, block: structuredClone(block) }]);
+  };
+  const deleteSnippet = (name: string) => persistSnippets(snippets.filter(s => s.name !== name));
 
   // --- Per-project overrides of individual inline template blocks (e.g. tables) ---
   // True when an inline ref's content contains a table in any language — the only case
@@ -2380,14 +2658,18 @@ const ProjectIMGenerator: React.FC = () => {
   // Editable card for one project-authored inline block.
   const renderAdditionEditor = (
     block: InlineBlockRef,
-    opts: { onChange: (lang: string, html: string) => void; onVariant: (v: CalloutVariant | undefined) => void; onRemove: () => void; onUp?: () => void; onDown?: () => void; rowKey: string },
+    opts: { onChange: (lang: string, html: string) => void; onVariant: (v: CalloutVariant | undefined) => void; onRemove: () => void; onUp?: () => void; onDown?: () => void; onDuplicate?: () => void; onCopy?: () => void; onSaveSnippet?: () => void; rowKey: string; dnd?: { handleProps: object; dropProps: object; dragging: boolean; over: boolean } },
   ) => (
-    <div className="border border-indigo-200 rounded-lg bg-indigo-50/40">
+    <div {...(opts.dnd?.dropProps ?? {})} className={`border border-indigo-200 rounded-lg bg-indigo-50/40 transition-shadow ${opts.dnd?.dragging ? 'opacity-50' : ''} ${opts.dnd?.over ? 'ring-2 ring-indigo-300' : ''}`}>
       <div className="flex items-center justify-between px-2 py-1 border-b border-indigo-100">
         <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-500 flex items-center gap-1"><FilePlus2 size={11} /> Project content</span>
         <div className="flex items-center gap-1">
+          {opts.dnd && <span {...opts.dnd.handleProps} title="Drag to reorder" className="cursor-grab active:cursor-grabbing p-1 text-gray-400 hover:text-indigo-600"><GripVertical size={13} /></span>}
           {opts.onUp && <button onClick={opts.onUp} title="Move up" className="p-1 text-gray-400 hover:text-indigo-600"><ChevronUp size={13} /></button>}
           {opts.onDown && <button onClick={opts.onDown} title="Move down" className="p-1 text-gray-400 hover:text-indigo-600"><ChevronDown size={13} /></button>}
+          {opts.onCopy && <button onClick={opts.onCopy} title="Copy block (paste into another section)" className="p-1 text-gray-400 hover:text-indigo-600"><ClipboardCopy size={13} /></button>}
+          {opts.onSaveSnippet && <button onClick={opts.onSaveSnippet} title="Save as reusable snippet" className="p-1 text-gray-400 hover:text-indigo-600"><Bookmark size={13} /></button>}
+          {opts.onDuplicate && <button onClick={opts.onDuplicate} title="Duplicate" className="p-1 text-gray-400 hover:text-indigo-600"><Copy size={13} /></button>}
           <button onClick={opts.onRemove} title="Remove" className="p-1 text-gray-400 hover:text-rose-600"><Trash2 size={13} /></button>
         </div>
       </div>
@@ -2409,19 +2691,22 @@ const ProjectIMGenerator: React.FC = () => {
   // Library); the resolver pulls their current content at publish time.
   const renderSharedBlockCard = (
     ref: SharedBlockRef,
-    opts: { onRemove: () => void; onUp?: () => void; onDown?: () => void },
+    opts: { onRemove: () => void; onUp?: () => void; onDown?: () => void; onDuplicate?: () => void; onCopy?: () => void; dnd?: { handleProps: object; dropProps: object; dragging: boolean; over: boolean } },
   ) => {
     const meta = blockLibrary.find(b => b.id === ref.block_id);
     const html = templateRefPreviewHtml(ref);
     return (
-      <div className="border border-amber-200 rounded-lg bg-amber-50/40">
+      <div {...(opts.dnd?.dropProps ?? {})} className={`border border-amber-200 rounded-lg bg-amber-50/40 transition-shadow ${opts.dnd?.dragging ? 'opacity-50' : ''} ${opts.dnd?.over ? 'ring-2 ring-indigo-300' : ''}`}>
         <div className="flex items-center justify-between px-2 py-1 border-b border-amber-100">
           <span className="text-[10px] font-bold uppercase tracking-wide text-amber-600 flex items-center gap-1">
             <Lock size={11} /> Standardized block{meta?.title ? `: ${meta.title}` : ''}
           </span>
           <div className="flex items-center gap-1">
+            {opts.dnd && <span {...opts.dnd.handleProps} title="Drag to reorder" className="cursor-grab active:cursor-grabbing p-1 text-gray-400 hover:text-indigo-600"><GripVertical size={13} /></span>}
             {opts.onUp && <button onClick={opts.onUp} title="Move up" className="p-1 text-gray-400 hover:text-indigo-600"><ChevronUp size={13} /></button>}
             {opts.onDown && <button onClick={opts.onDown} title="Move down" className="p-1 text-gray-400 hover:text-indigo-600"><ChevronDown size={13} /></button>}
+            {opts.onCopy && <button onClick={opts.onCopy} title="Copy block (paste into another section)" className="p-1 text-gray-400 hover:text-indigo-600"><ClipboardCopy size={13} /></button>}
+            {opts.onDuplicate && <button onClick={opts.onDuplicate} title="Duplicate" className="p-1 text-gray-400 hover:text-indigo-600"><Copy size={13} /></button>}
             <button onClick={opts.onRemove} title="Remove" className="p-1 text-gray-400 hover:text-rose-600"><Trash2 size={13} /></button>
           </div>
         </div>
@@ -2433,6 +2718,46 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // Editor pane for ONE selected section (extracted from the old flat list). Handles the
+  // Section-level authoring actions shared across section types (#11 paste, #12 bulk box + snippets).
+  const renderSectionActions = (section: IMSection) => (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      {clipboardBlock && (
+        <button onClick={() => pasteIntoSection(section)} title="Paste the copied block here" className="flex items-center gap-1 py-1 px-2 text-[11px] font-medium text-indigo-600 border border-indigo-200 rounded hover:bg-indigo-50">
+          <ClipboardPaste size={12} /> Paste block
+        </button>
+      )}
+      <div className="flex items-center gap-1 text-[11px] text-gray-500">
+        <span>Set all boxes:</span>
+        <select
+          value=""
+          onChange={(e) => { if (e.target.value) setAllVariantsInSection(section, e.target.value === 'none' ? undefined : e.target.value as CalloutVariant); e.target.selectedIndex = 0; }}
+          className="border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 text-[11px]"
+        >
+          <option value="">Choose…</option>
+          <option value="none">No box (plain)</option>
+          {CALLOUT_VARIANTS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+        </select>
+      </div>
+      <div className="relative">
+        <button onClick={() => setShowSnippetsFor(showSnippetsFor === section.id ? null : section.id)} className="flex items-center gap-1 py-1 px-2 text-[11px] font-medium text-gray-600 border border-gray-200 rounded hover:bg-light">
+          <Bookmark size={12} /> Snippets{snippets.length ? ` (${snippets.length})` : ''}
+        </button>
+        {showSnippetsFor === section.id && (
+          <div className="absolute z-30 mt-1 w-60 bg-white border border-gray-200 rounded-lg shadow-xl py-1 max-h-64 overflow-y-auto">
+            {snippets.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-gray-400 italic">No snippets yet. Use the bookmark icon on a block to save one.</p>
+            ) : snippets.map(sn => (
+              <div key={sn.name} className="flex items-center justify-between px-2 py-1 hover:bg-light">
+                <button onClick={() => { appendBlockToSection(section, structuredClone(sn.block)); setShowSnippetsFor(null); }} className="flex-1 text-left text-xs text-gray-700 truncate" title={`Insert "${sn.name}"`}>{sn.name}</button>
+                <button onClick={() => deleteSnippet(sn.name)} title="Delete snippet" className="p-1 text-gray-300 hover:text-rose-600"><Trash2 size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   // three kinds — project/extra, placeholder, and locked template — plus a hidden banner.
   const renderSectionContentEditor = (section: IMSection & { __projectExtra?: true }) => {
     const isExtra = (section as any).__projectExtra === true;
@@ -2475,10 +2800,14 @@ const ProjectIMGenerator: React.FC = () => {
                           rowKey: `${extra.id}-${idx}`,
                           onChange: (lang, html) => updateExtraBlock(extra.id, idx, lang, html),
                           onVariant: (v) => setExtraBlockVariant(extra.id, idx, v),
-                          onRemove: () => removeExtraBlock(extra.id, idx),
+                          onRemove: () => requestDeleteBlock(isInlineBlockEmpty(block), () => removeExtraBlock(extra.id, idx)),
+                          onDuplicate: () => duplicateExtraBlock(extra.id, idx),
+                          onCopy: () => setClipboardBlock(block),
+                          onSaveSnippet: () => saveBlockAsSnippet(block),
                           onUp, onDown,
+                          dnd: { handleProps: blockDnd.handleProps(extra.id, idx), dropProps: blockDnd.dropProps(extra.id, idx), dragging: blockDnd.isDragging(extra.id, idx), over: blockDnd.isOver(extra.id, idx) },
                         })
-                      : renderSharedBlockCard(block, { onRemove: () => removeExtraBlock(extra.id, idx), onUp, onDown })}
+                      : renderSharedBlockCard(block, { onRemove: () => setPendingConfirm({ title: 'Remove this block?', message: 'This removes the standardized block from this section. You can undo with Ctrl/Cmd+Z.', onConfirm: () => removeExtraBlock(extra.id, idx) }), onDuplicate: () => duplicateExtraBlock(extra.id, idx), onCopy: () => setClipboardBlock(block), onUp, onDown, dnd: { handleProps: blockDnd.handleProps(extra.id, idx), dropProps: blockDnd.dropProps(extra.id, idx), dragging: blockDnd.isDragging(extra.id, idx), over: blockDnd.isOver(extra.id, idx) } })}
                   </div>
                 );
               })}
@@ -2486,6 +2815,7 @@ const ProjectIMGenerator: React.FC = () => {
                 <button onClick={() => addBlockToExtra(extra.id)} className="flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
                 <button onClick={() => { setBlockPickerSearch(''); setSharedPickerFor(extra.id); }} className="flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-amber-500 border border-dashed border-amber-300 rounded hover:bg-amber-50 hover:text-amber-700 transition-colors"><Lock size={12} /> Add standardized block</button>
               </div>
+              {renderSectionActions(section)}
               {renderAddChapterButton(extra)}
               {renderDuplicateChapterButton(section)}
             </div>
@@ -2516,13 +2846,18 @@ const ProjectIMGenerator: React.FC = () => {
                     rowKey: `${section.id}-ov-${idx}`,
                     onChange: (lang, html) => updateOverrideBlock(section, idx, lang, html),
                     onVariant: (v) => setOverrideVariant(section, idx, v),
-                    onRemove: () => removeOverrideBlock(section, idx),
+                    onRemove: () => requestDeleteBlock(isInlineBlockEmpty(block), () => removeOverrideBlock(section, idx)),
+                    onDuplicate: () => duplicateOverrideBlock(section, idx),
+                    onCopy: () => setClipboardBlock(block),
+                    onSaveSnippet: () => saveBlockAsSnippet(block),
                     onUp: idx > 0 ? () => moveOverrideBlock(section, idx, -1) : undefined,
                     onDown: idx < blocks.length - 1 ? () => moveOverrideBlock(section, idx, 1) : undefined,
+                    dnd: { handleProps: blockDnd.handleProps(`ov:${section.id}`, idx), dropProps: blockDnd.dropProps(`ov:${section.id}`, idx), dragging: blockDnd.isDragging(`ov:${section.id}`, idx), over: blockDnd.isOver(`ov:${section.id}`, idx) },
                   })}
                 </div>
               ))}
               <button onClick={() => addOverrideBlock(section)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-indigo-400 border border-dashed border-indigo-200 rounded hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><Type size={12} /> Add text block</button>
+              {renderSectionActions(section)}
               {renderAddChapterButton(section)}
               {renderDuplicateChapterButton(section)}
             </div>
@@ -2547,9 +2882,13 @@ const ProjectIMGenerator: React.FC = () => {
                 rowKey: a.id,
                 onChange: (lang, html) => updateAdditionContent(section.id, a.id, lang, html),
                 onVariant: (v) => setAdditionVariant(section.id, a.id, v),
-                onRemove: () => removeAddition(section.id, a.id),
+                onRemove: () => requestDeleteBlock(isInlineBlockEmpty(a.block), () => removeAddition(section.id, a.id)),
+                onDuplicate: () => duplicateAddition(section.id, a.id),
+                onCopy: () => setClipboardBlock(a.block),
+                onSaveSnippet: () => saveBlockAsSnippet(a.block),
                 onUp: i > 0 ? () => moveAddition(section.id, a.id, -1) : undefined,
                 onDown: i < arr.length - 1 ? () => moveAddition(section.id, a.id, 1) : undefined,
+                dnd: { handleProps: additionDnd.handleProps(section.id, a.id), dropProps: additionDnd.dropProps(section.id, a.id), dragging: additionDnd.isDragging(section.id, a.id), over: additionDnd.isOver(section.id, a.id) },
               })}</div>
             ))}
 
@@ -2599,13 +2938,18 @@ const ProjectIMGenerator: React.FC = () => {
                     rowKey: a.id,
                     onChange: (lang, html) => updateAdditionContent(section.id, a.id, lang, html),
                     onVariant: (v) => setAdditionVariant(section.id, a.id, v),
-                    onRemove: () => removeAddition(section.id, a.id),
+                    onRemove: () => requestDeleteBlock(isInlineBlockEmpty(a.block), () => removeAddition(section.id, a.id)),
+                    onDuplicate: () => duplicateAddition(section.id, a.id),
+                    onCopy: () => setClipboardBlock(a.block),
+                    onSaveSnippet: () => saveBlockAsSnippet(a.block),
                     onUp: idx > 0 ? () => moveAddition(section.id, a.id, -1) : undefined,
                     onDown: idx < arr.length - 1 ? () => moveAddition(section.id, a.id, 1) : undefined,
+                    dnd: { handleProps: additionDnd.handleProps(section.id, a.id), dropProps: additionDnd.dropProps(section.id, a.id), dragging: additionDnd.isDragging(section.id, a.id), over: additionDnd.isOver(section.id, a.id) },
                   })}</div>
                 ))}
               </React.Fragment>
             ))}
+            {renderSectionActions(section)}
             <div className="pt-1">{renderAddChapterButton(section)}</div>
             <div className="pt-1">{renderDuplicateChapterButton(section)}</div>
           </div>
@@ -2669,8 +3013,21 @@ const ProjectIMGenerator: React.FC = () => {
             <button onClick={() => addExtraSection(null)} title="Add chapter at document root" className="text-indigo-600 hover:bg-indigo-100 p-1 rounded"><Plus size={14} /></button>
           </div>
         </div>
+        {/* Jump-to-section search (#5) */}
+        <div className="px-2 pt-2">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} placeholder="Find a section…" className="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" />
+          </div>
+        </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-          {roots.length ? roots.map((s, idx) => renderProjectTreeRow(s, `${idx + 1}.`, 0))
+          {sectionSearch.trim() ? (() => {
+            const q = sectionSearch.trim().toLowerCase();
+            const matches = all.filter(s => s.title !== '__METADATA__' && localizedSectionTitle(s, activeLang).toLowerCase().includes(q));
+            return matches.length ? matches.map(s => (
+              <button key={s.id} onClick={() => setSelectedContentSectionId(s.id)} className={`w-full text-left px-2 py-1.5 rounded text-sm truncate ${selectedContentSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-light'}`} title={localizedSectionTitle(s, activeLang)}>{localizedSectionTitle(s, activeLang)}</button>
+            )) : <p className="text-xs text-gray-400 italic px-2 py-4 text-center">No sections match “{sectionSearch}”.</p>;
+          })() : roots.length ? roots.map((s, idx) => renderProjectTreeRow(s, `${idx + 1}.`, 0))
             : <div className="text-xs text-gray-400 text-center py-6">No sections yet.</div>}
         </div>
       </div>
@@ -2720,6 +3077,17 @@ const ProjectIMGenerator: React.FC = () => {
          message={instance ? "Are you sure you want to delete this saved draft? All progress will be lost permanently." : "Are you sure you want to reset? Any unsaved changes will be lost."}
          onConfirm={confirmDeleteDraft}
          onCancel={() => setShowDeleteConfirm(false)}
+       />
+
+       {/* Generic block-delete confirmation (#7) */}
+       <ConfirmationModal
+         variant="danger"
+         isOpen={!!pendingConfirm}
+         title={pendingConfirm?.title ?? ''}
+         message={pendingConfirm?.message ?? ''}
+         confirmLabel="Delete"
+         onConfirm={() => { pendingConfirm?.onConfirm(); setPendingConfirm(null); }}
+         onCancel={() => setPendingConfirm(null)}
        />
 
        {/* Blocking overlay while a save/publish is in flight — stops the user navigating away
@@ -3028,15 +3396,18 @@ const ProjectIMGenerator: React.FC = () => {
                    </div>
                </div>
                <div className="flex gap-3 items-center">
-                   <button
-                        onClick={handleDeleteDraft}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-xl text-sm font-medium hover:bg-rose-50 transition-colors disabled:opacity-60"
-                        disabled={loading || isBusy}
-                   >
-                       {instance ? <Trash2 size={16} /> : <RotateCcw size={16} />}
-                       {instance ? 'Delete Draft' : 'Reset'}
-                   </button>
-
+                   {/* Autosave / unsaved status — mirrors the template editor's honesty about save state. */}
+                   <span className="text-xs text-muted min-w-[90px] text-right hidden sm:block">
+                       {autosaving ? <span className="flex items-center justify-end gap-1"><Loader2 size={12} className="animate-spin" /> Autosaving…</span>
+                        : isDirty ? <span className="text-amber-600">Unsaved changes</span>
+                        : lastAutoSavedAt ? `Saved ${lastAutoSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                        : instance ? 'All changes saved' : ''}
+                   </span>
+                   <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden">
+                       <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo || isBusy} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
+                       <div className="w-px h-5 bg-gray-200" />
+                       <button onClick={undoRedo.redo} disabled={!undoRedo.canRedo || isBusy} title="Redo (Ctrl/Cmd+Shift+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
+                   </div>
                    <button onClick={handleSaveDraft} disabled={isBusy} className={`flex items-center gap-2 px-4 py-2 bg-white border rounded-xl text-sm font-medium hover:bg-light disabled:opacity-80 ${savedTick ? 'border-emerald-300 text-emerald-700' : 'border-gray-300 text-gray-700'}`}>
                       {saving ? <Loader2 size={16} className="animate-spin" /> : savedTick ? <CheckCircle size={16} className="text-emerald-600" /> : <Save size={16} />}
                       {saving ? 'Saving…' : savedTick ? 'Saved!' : 'Save Draft'}
@@ -3089,6 +3460,31 @@ const ProjectIMGenerator: React.FC = () => {
                       {(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
                       <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${activeLang.toUpperCase()})`}</span>
                    </button>
+
+                   {/* Settings menu — houses destructive/rare actions (Delete Draft / Reset)
+                       so they can't be triggered by a single stray click in the toolbar. */}
+                   <div className="relative" ref={settingsMenuRef}>
+                       <button
+                          onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                          disabled={loading || isBusy}
+                          className="flex items-center justify-center w-10 h-10 bg-white border border-gray-300 text-gray-600 rounded-xl hover:bg-light disabled:opacity-60"
+                          title="Settings"
+                       >
+                          <Settings size={16} />
+                       </button>
+                       {showSettingsMenu && (
+                           <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
+                               <button
+                                  onClick={() => { setShowSettingsMenu(false); handleDeleteDraft(); }}
+                                  disabled={loading || isBusy}
+                                  className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2 disabled:opacity-60"
+                               >
+                                  {instance ? <Trash2 size={16} /> : <RotateCcw size={16} />}
+                                  {instance ? 'Delete Draft' : 'Reset'}
+                               </button>
+                           </div>
+                       )}
+                   </div>
                </div>
            </div>
 

@@ -3,8 +3,8 @@ name: OriginFlow PLM
 description: Internal product-launch (PLM) platform — calm, precise, status-legible operational UI.
 colors:
   primary: "#1a1f35"
-  accent: "#4f46e5"
-  accent-hover: "#4338ca"
+  accent: "#3f5b73"
+  accent-hover: "#324a5e"
   secondary: "#6b7280"
   muted: "#9ca3af"
   light: "#f9fafb"
@@ -98,9 +98,15 @@ OriginFlow is the room a product manager runs many launches from: a calm, fixed 
 rail framing a bright, uncluttered work canvas, where the status of every project, document, and
 compliance request is legible at a glance. Nothing on the canvas competes for attention except the
 thing that needs a decision. Color is spent almost entirely on *state* (what's done, what's blocked,
-what's waiting) and on the single indigo accent that marks the current selection or the primary
+what's waiting) and on the single Steel Slate accent that marks the current selection or the primary
 action. The personality is calm, precise, and trustworthy: the interface earns confidence by being
 predictable and honest about state, not by impressing.
+
+> **Accent note:** the shipped accent is **Steel Slate `#3f5b73`** (hover `#324a5e`), a muted
+> corporate blue-gray chosen over a saturated indigo for a calmer, more professional feel. The
+> Tailwind `indigo-*` and `blue-*` scales are deliberately remapped onto this steel ramp
+> (`index.html`), so existing `indigo-*` / `blue-*` utility classes render as the steel accent.
+> Where this doc says "indigo" as a *status* tone (in-progress / active), it now renders steel.
 
 This system is built for internal power users who live here all day, so it favors **density with
 hierarchy**: it will show a lot, but always ranked, so the eye lands on what matters first. Familiar
@@ -115,8 +121,8 @@ sake, no playful illustration. This is operational software, not a campaign.
 
 **Key Characteristics:**
 - Dark fixed rail + bright canvas; a two-layer neutral system, not a flat single surface.
-- Indigo accent reserved for action, selection, and active state, never decoration.
-- A consistent four-hue status vocabulary (indigo / emerald / rose / gray) used everywhere.
+- Steel Slate accent reserved for action, selection, and active state, never decoration.
+- A consistent four-hue status vocabulary (steel / emerald / rose / gray) used everywhere.
 - Dense but ranked: small type, tight spacing, clear hierarchy.
 - Inter only. No display face, no second family.
 
@@ -130,9 +136,10 @@ A restrained, near-neutral palette where saturated color almost always means *st
   makes the bright canvas read as calm rather than empty.
 
 ### Secondary
-- **Action Indigo** (#4f46e5): the one accent. Primary buttons, the active nav item, current
-  selection, focus rings, unread/active indicators. **Hover** deepens to Indigo-Deep (#4338ca).
-  Spend it sparingly; its rarity is what makes it read as "this is the action."
+- **Action Steel** (#3f5b73, "Steel Slate"): the one accent. Primary buttons, the active nav item,
+  current selection, focus rings, unread/active indicators. **Hover** deepens to Steel-Deep (#324a5e).
+  Spend it sparingly; its rarity is what makes it read as "this is the action." (Exposed as the
+  `accent` token and via the remapped `indigo-*` / `blue-*` scales.)
 
 ### Tertiary
 The semantic state hues. Each appears as a tinted pill (`-50` background, `-700` text, `-200`
@@ -205,10 +212,10 @@ rail → overlay). Resting content stays low; don't shadow things that aren't fl
 
 ### Buttons
 - **Shape:** gently rounded (4px); compact padding (8px 16px), `text-sm`/`text-xs` weight 500–600.
-- **Primary:** Action Indigo (#4f46e5) on white text; hover deepens to #4338ca.
+- **Primary:** Action Steel (#3f5b73) on white text; hover deepens to #324a5e.
 - **Danger:** Blocked Rose solid (#e11d48) on white; hover #be123c. For destructive confirmations.
 - **Ghost / Cancel:** no fill, Refined Gray (#6b7280) text, hover `background #f3f4f6`.
-- **Focus:** visible focus ring in Action Indigo; never remove the outline without replacing it.
+- **Focus:** visible focus ring in Action Steel; never remove the outline without replacing it.
 
 ### Status Badges (signature)
 - **Style:** pill (12px radius), `text-xs` weight 500, tinted `-50` background + `-700` text + `-200`
@@ -224,20 +231,20 @@ rail → overlay). Resting content stays low; don't shadow things that aren't fl
 ### Inputs / Fields
 - **Style:** white background, 4px radius, 1px border. Default border `#d1d5db`; an unfilled/required
   field may use an amber border to signal "needs value".
-- **Focus:** `ring-2` in Action Indigo, border shifts to indigo. Always visible.
+- **Focus:** `ring-2` in Action Steel, border shifts to indigo. Always visible.
 - **Error / Warning:** rose border + helper text for errors; amber for "needs value".
 
 ### Navigation (signature: the rail)
 - **Style:** fixed 16rem dark rail (Control-Room Ink, #1a1f35), white wordmark, item rows at 12px
   radius, `text-sm` weight 500.
-- **States:** active = Action Indigo fill + white text + subtle shadow; inactive = Soft Gray text;
+- **States:** active = Action Steel fill + white text + subtle shadow; inactive = Soft Gray text;
   hover = `background gray-800` + white text.
 - **Mobile:** the rail is hidden below `md`; navigation collapses to a top-bar affordance.
 
 ## 6. Do's and Don'ts
 
 ### Do:
-- **Do** reserve Action Indigo (#4f46e5) for primary action, current selection, and active state.
+- **Do** reserve Action Steel (#3f5b73) for primary action, current selection, and active state.
   Everything non-active is gray.
 - **Do** convey every status with hue **and** a text label (and icon where space allows), never color
   alone.

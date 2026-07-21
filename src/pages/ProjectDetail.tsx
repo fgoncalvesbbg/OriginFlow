@@ -30,6 +30,7 @@ import {
   getCategories,
   getProjectIM,
   getProjectIMStaleReasons,
+  getPrintRenders,
   getProductionUpdates,
   saveProductionUpdate,
   createAttributeRequest,
@@ -50,10 +51,11 @@ import {
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason,
   ProjectAttributeRequest, ProjectSku, SkuAttributeValue
 } from '../types';
+import type { PrintRender } from '../services';
 import { StatusBadge } from '../components/StatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
-  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes
+  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes, FileDown
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import AttributeInput from '../components/common/AttributeInput';
@@ -101,6 +103,9 @@ const ProjectDetail: React.FC = () => {
   // Drill-down reasons a published manual is out of date (empty = up to date).
   const [imStaleReasons, setImStaleReasons] = useState<import('../services').StaleReason[]>([]);
   const [leafletStaleReasons, setLeafletStaleReasons] = useState<import('../services').StaleReason[]>([]);
+  // Historical print-PDF renders (PDFShift final versions), newest first — one list per doc type.
+  const [imRenders, setImRenders] = useState<PrintRender[]>([]);
+  const [leafletRenders, setLeafletRenders] = useState<PrintRender[]>([]);
 
   // Manufacturing State
   const [productionUpdates, setProductionUpdates] = useState<ProductionUpdate[]>([]);
@@ -246,6 +251,60 @@ const ProjectDetail: React.FC = () => {
     return [blocks.length ? `Block${blocks.length > 1 ? 's' : ''}: ${blocks.join(', ')}` : '', ...others].filter(Boolean).join(' · ');
   };
 
+  const fmtRenderBytes = (bytes: number | null) => {
+    if (!bytes) return '';
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  };
+
+  // Vertical timeline of every generated print PDF (PDFShift final version) for one doc
+  // type, newest first. Each node links to that exact historical PDF in storage.
+  const renderPrintTimeline = (renders: PrintRender[], accent: 'indigo' | 'amber') => {
+    if (!renders.length) return null;
+    const dot = accent === 'indigo' ? 'bg-indigo-500' : 'bg-amber-500';
+    const chip = accent === 'indigo' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-800 border-amber-200';
+    return (
+      <div className="mt-6 bg-white p-6 rounded-xl border border-gray-200 shadow">
+        <h4 className="text-xs font-bold text-muted uppercase mb-4 flex items-center gap-2">
+          <FileDown size={14} /> Generated PDF versions ({renders.length})
+        </h4>
+        <ol className="relative border-l border-gray-200 ml-2">
+          {renders.map((r, i) => (
+            <li key={r.id} className="ml-5 pb-5 last:pb-0">
+              <span className={`absolute -left-[7px] mt-1.5 h-3.5 w-3.5 rounded-full border-2 border-white ${i === 0 ? dot : 'bg-gray-300'}`} />
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {r.imVersion != null && (
+                      <span className={`inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full border ${chip}`}>v{r.imVersion}</span>
+                    )}
+                    {i === 0 && (
+                      <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Latest</span>
+                    )}
+                    <span className="text-sm font-semibold text-gray-800 uppercase">{r.languages.join(', ')}</span>
+                    <span className="text-xs text-muted">· {r.pageSize?.toUpperCase()}{r.bytes ? ` · ${fmtRenderBytes(r.bytes)}` : ''}</span>
+                  </div>
+                  <div className="text-xs text-muted mt-1 flex items-center gap-1.5 flex-wrap">
+                    <Clock size={11} /> {new Date(r.createdAt).toLocaleString()}
+                    {r.createdBy && <span className="flex items-center gap-1"><UserIcon size={11} /> {r.createdBy}</span>}
+                  </div>
+                </div>
+                <a
+                  href={r.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-light"
+                >
+                  <Download size={13} /> Download
+                </a>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  };
+
   const loadProjectData = async () => {
     if (!id) return;
     try {
@@ -280,6 +339,10 @@ const ProjectDetail: React.FC = () => {
         setProjectIM(imData || null);
         setProjectLeaflet(leafletData || null);
         setProductionUpdates(prodUpdates);
+
+        // Historical print-PDF renders for each doc type (best-effort — [] off-line/on error).
+        getPrintRenders(p.id, 'im').then(setImRenders).catch(() => {});
+        getPrintRenders(p.id, 'warning_leaflet').then(setLeafletRenders).catch(() => {});
 
         // Load attribute requests, attribute definitions, and defined SKUs
         try {
@@ -1996,6 +2059,8 @@ const ProjectDetail: React.FC = () => {
                </div>
             )}
 
+            {renderPrintTimeline(imRenders, 'indigo')}
+
             {/* Warning Leaflet */}
             <div className="mt-8 bg-gradient-to-br from-amber-900 to-amber-950 rounded-xl p-8 text-white shadow-lg flex justify-between items-center">
                <div>
@@ -2030,6 +2095,8 @@ const ProjectDetail: React.FC = () => {
                   </div>
                </div>
             )}
+
+            {renderPrintTimeline(leafletRenders, 'amber')}
          </div>
       )}
 

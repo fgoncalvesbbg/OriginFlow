@@ -6,6 +6,7 @@ import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProj
 import { Project, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
+import { Card } from '../components/common/Card';
 import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
@@ -163,7 +164,7 @@ const PMDashboard: React.FC = () => {
       {/* ACTION WIDGETS */}
       {stats && !showArchived && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow flex items-center justify-between group hover:border-indigo-300 transition-colors">
+          <Card className="p-6 flex items-center justify-between group hover:border-indigo-300 transition-colors">
             <div>
               <p className="text-sm font-medium text-muted mb-1">Active Projects</p>
               <h3 className="text-3xl font-bold text-primary">{stats.activeProjects}</h3>
@@ -171,28 +172,22 @@ const PMDashboard: React.FC = () => {
             <div className="p-4 bg-indigo-50 rounded-full text-indigo-600 group-hover:scale-110 transition-transform">
               <LayoutIcon size={24} />
             </div>
-          </div>
+          </Card>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow flex items-center justify-between relative overflow-hidden group hover:border-indigo-200 transition-colors">
-            {stats.pendingReviews > 0 && (
-              <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
-            )}
+          <Card className="p-6 flex items-center justify-between group hover:border-indigo-200 transition-colors">
             <div>
               <p className="text-sm font-medium text-muted mb-1">Pending Reviews</p>
               <h3 className="text-3xl font-bold text-primary">{stats.pendingReviews}</h3>
               {stats.pendingReviews > 0 && (
-                 <p className="text-xs text-amber-600 font-medium mt-1">Requires attention</p>
+                 <p className="text-xs text-amber-700 font-medium mt-1">Requires attention</p>
               )}
             </div>
-            <div className={`p-4 rounded-full group-hover:scale-110 transition-transform ${stats.pendingReviews > 0 ? 'bg-amber-50 text-amber-600' : 'bg-light text-gray-400'}`}>
+            <div className={`p-4 rounded-full group-hover:scale-110 transition-transform ${stats.pendingReviews > 0 ? 'bg-amber-50 text-amber-700' : 'bg-light text-gray-400'}`}>
               <FileText size={24} />
             </div>
-          </div>
+          </Card>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow flex items-center justify-between group hover:border-rose-200 transition-colors relative overflow-hidden">
-            {stats.overdueCount > 0 && (
-              <div className="absolute top-0 left-0 w-1 h-full bg-rose-600 animate-pulse"></div>
-            )}
+          <Card className="p-6 flex items-center justify-between group hover:border-rose-200 transition-colors">
             <div>
               <p className="text-sm font-medium text-muted mb-1">Overdue Items</p>
               <h3 className={`text-3xl font-bold ${stats.overdueCount > 0 ? 'text-rose-600' : 'text-primary'}`}>{stats.overdueCount}</h3>
@@ -203,9 +198,9 @@ const PMDashboard: React.FC = () => {
             <div className={`p-4 rounded-full group-hover:scale-110 transition-transform ${stats.overdueCount > 0 ? 'bg-rose-50 text-rose-600' : 'bg-light text-gray-400'}`}>
               <AlertTriangle size={24} />
             </div>
-          </div>
+          </Card>
 
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow flex flex-col group hover:border-indigo-300 transition-colors">
+          <Card className="p-5 flex flex-col group hover:border-indigo-300 transition-colors">
             <div className="flex items-center justify-between mb-3">
                <p className="text-sm font-medium text-muted flex items-center gap-1">
                  <Clock size={14} /> Near Deadlines (14d)
@@ -234,12 +229,12 @@ const PMDashboard: React.FC = () => {
                 ))
               )}
             </div>
-          </div>
+          </Card>
         </div>
       )}
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-xl shadow border border-gray-200 mb-6 flex flex-col sm:flex-row gap-4 items-center justify-between">
+      <Card className="p-4 mb-6 flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="relative w-full sm:w-96">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
           <input 
@@ -267,10 +262,10 @@ const PMDashboard: React.FC = () => {
             + New Project
           </Link>
         </div>
-      </div>
+      </Card>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden min-h-[400px]">
+      <Card className="overflow-hidden min-h-[400px]">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-light border-b border-gray-200">
@@ -374,7 +369,7 @@ const PMDashboard: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
     </Layout>
   );
 };

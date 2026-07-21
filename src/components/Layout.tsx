@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Plus, LogOut, Box, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, type LucideIcon } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
+import { Logo } from './Logo';
 import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
 
 interface LayoutProps {
@@ -32,6 +33,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     try { localStorage.setItem('originflow.sidebarCollapsed', next ? '1' : '0'); } catch { /* ignore */ }
     return next;
   });
+
+  // Mobile nav is an overlay drawer (the rail is off-canvas below md); close it on navigation.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => { setMobileNavOpen(false); }, [location.pathname]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -74,106 +79,108 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     navigate('/login');
   };
 
-  // One nav vocabulary for every rail item: active = Action Indigo fill; inactive = soft gray that
+  // Icon-rail collapse hides labels on desktop only; the mobile drawer always shows full labels.
+  const railCollapsed = sidebarCollapsed;
+
+  // One nav vocabulary for every rail item: active = Action Steel fill; inactive = soft gray that
   // brightens on hover. Keyboard focus is always visible (ring), never silently removed.
   const navItemClass = (active: boolean) =>
-    `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
-      active ? "bg-accent text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white"
-    }`;
+    `flex items-center gap-3 py-3 rounded-xl text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+      railCollapsed ? 'px-4 md:px-0 md:justify-center' : 'px-4'
+    } ${active ? 'bg-accent text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`;
+
+  const NAV_MAIN: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
+    { to: '/', label: 'Dashboard', Icon: LayoutDashboard, match: p => p === '/' },
+    { to: '/timeline', label: 'Timeline', Icon: CalendarClock, match: p => p === '/timeline' },
+  ];
+  const NAV_MODULES: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
+    { to: '/sourcing', label: 'Sourcing & RFQ', Icon: ShoppingBag, match: p => p.startsWith('/sourcing') },
+    { to: '/suppliers', label: 'Suppliers', Icon: Truck, match: p => p === '/suppliers' },
+    { to: '/compliance', label: 'Compliance', Icon: ShieldCheck, match: p => p.startsWith('/compliance') },
+    { to: '/im', label: 'Instruction Manuals', Icon: BookOpen, match: p => p.startsWith('/im') },
+    { to: '/attributes', label: 'Attribute Viewer', Icon: Table2, match: p => p.startsWith('/attributes') },
+    { to: '/products', label: 'SKU Catalog', Icon: Package, match: p => p.startsWith('/products') },
+  ];
+
+  const renderNavLink = ({ to, label, Icon, match }: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }) => (
+    <Link key={to} to={to} className={navItemClass(match(location.pathname))} title={railCollapsed ? label : undefined}>
+      <Icon size={18} className="shrink-0" />
+      <span className={railCollapsed ? 'md:hidden' : ''}>{label}</span>
+    </Link>
+  );
+
+  // Section eyebrow, hidden on the desktop icon-rail (still shown in the mobile drawer).
+  const sectionLabel = (text: string) => (
+    <div className={`pt-6 pb-2 px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest ${railCollapsed ? 'md:hidden' : ''}`}>{text}</div>
+  );
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
     <div className="flex min-h-screen bg-light">
-      {/* Sidebar */}
-      <aside className={`w-64 bg-primary text-white flex-col fixed h-full z-30 shadow-lg ${sidebarCollapsed ? 'hidden' : 'hidden md:flex'}`}>
-        <div className="p-6 border-b border-gray-700">
-          <h1 className="text-xl font-bold flex items-center gap-2 tracking-tight">
-            <Box className="w-6 h-6 text-indigo-400" />
-            OriginFlow
-          </h1>
-          <p className="text-xs text-gray-400 mt-1 pl-8">Beta V1.5</p>
+      {/* Mobile drawer backdrop */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 bg-black/40 z-30 md:hidden" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
+      )}
+
+      {/* Sidebar — off-canvas drawer on mobile, fixed rail on md+ (icon-rail when collapsed). */}
+      <aside className={`bg-primary text-white flex-col fixed h-full z-40 shadow-lg transition-[width] ${mobileNavOpen ? 'flex w-64' : 'hidden'} md:flex ${railCollapsed ? 'md:w-16' : 'md:w-64'}`}>
+        <div className={`p-4 border-b border-gray-700 flex items-center gap-3 ${railCollapsed ? 'md:justify-center' : ''}`}>
+          <Logo size={30} className="shrink-0" />
+          <div className={`min-w-0 ${railCollapsed ? 'md:hidden' : ''}`}>
+            <h1 className="text-lg font-bold tracking-tight leading-none">OriginFlow</h1>
+            <p className="text-[10px] text-gray-400 mt-1">Beta V1.5</p>
+          </div>
+          {/* Close affordance inside the mobile drawer */}
+          <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="md:hidden ml-auto p-1.5 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white">
+            <X size={18} />
+          </button>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 mt-4">
-          <Link to="/" className={navItemClass(location.pathname === '/')}>
-            <LayoutDashboard size={18} />
-            Dashboard
-          </Link>
-
-          <Link to="/timeline" className={navItemClass(location.pathname === '/timeline')}>
-            <CalendarClock size={18} />
-            Timeline
-          </Link>
-
-          <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Modules</div>
-
-          <Link to="/sourcing" className={navItemClass(location.pathname.startsWith('/sourcing'))}>
-            <ShoppingBag size={18} />
-            Sourcing & RFQ
-          </Link>
-
-          <Link to="/suppliers" className={navItemClass(location.pathname === '/suppliers')}>
-            <Truck size={18} />
-            Suppliers
-          </Link>
-
-          <Link to="/compliance" className={navItemClass(location.pathname.startsWith('/compliance'))}>
-            <ShieldCheck size={18} />
-            Compliance
-          </Link>
-
-          <Link to="/im" className={navItemClass(location.pathname.startsWith('/im'))}>
-            <BookOpen size={18} />
-            Instruction Manuals
-          </Link>
-
-          <Link to="/attributes" className={navItemClass(location.pathname.startsWith('/attributes'))}>
-            <Table2 size={18} />
-            Attribute Viewer
-          </Link>
-
-          <Link to="/products" className={navItemClass(location.pathname.startsWith('/products'))}>
-            <Package size={18} />
-            SKU Catalog
-          </Link>
-
+        <nav className="flex-1 p-4 space-y-2 mt-2 overflow-y-auto">
+          {NAV_MAIN.map(renderNavLink)}
+          {sectionLabel('Modules')}
+          {NAV_MODULES.map(renderNavLink)}
           {user?.role === UserRole.ADMIN && (
             <>
-              <div className="pt-6 pb-2 px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Admin</div>
-              <Link to="/admin" className={navItemClass(location.pathname === '/admin')}>
-                <Lock size={18} />
-                Admin Panel
-              </Link>
+              {sectionLabel('Admin')}
+              {renderNavLink({ to: '/admin', label: 'Admin Panel', Icon: Lock, match: p => p === '/admin' })}
             </>
           )}
         </nav>
 
         <div className="p-4 border-t border-gray-700">
-          <div className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl mb-4">
-             <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-white">
+          <div className={`flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl mb-4 ${railCollapsed ? 'md:justify-center md:bg-transparent md:p-0 md:mb-2' : ''}`}>
+             <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-white shrink-0" title={user?.name}>
                 {user?.name?.charAt(0) || 'U'}
              </div>
-             <div className="overflow-hidden">
+             <div className={`overflow-hidden ${railCollapsed ? 'md:hidden' : ''}`}>
                 <div className="text-xs font-bold truncate">{user?.name}</div>
                 <div className="text-[10px] text-gray-400">{user?.role}</div>
              </div>
           </div>
-          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-2 w-full text-left text-xs font-medium text-gray-400 rounded-lg hover:text-rose-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
-            <LogOut size={16} />
-            Sign Out
+          <button onClick={handleLogout} title={railCollapsed ? 'Sign out' : undefined} className={`flex items-center gap-3 py-2 w-full text-xs font-medium text-gray-400 rounded-lg hover:text-rose-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${railCollapsed ? 'px-4 md:px-0 md:justify-center' : 'px-4 text-left'}`}>
+            <LogOut size={16} className="shrink-0" />
+            <span className={railCollapsed ? 'md:hidden' : ''}>Sign Out</span>
           </button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 min-h-screen flex flex-col transition-[margin] ${sidebarCollapsed ? 'md:ml-0' : 'md:ml-64'}`}>
+      <main className={`flex-1 min-h-screen flex flex-col transition-[margin] ${railCollapsed ? 'md:ml-16' : 'md:ml-64'}`}>
         <div className="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center sticky top-0 z-20 shadow">
           <div className="flex-1 flex items-center gap-3 min-w-0">
              <button
+               onClick={() => setMobileNavOpen(true)}
+               aria-label="Open navigation"
+               className="md:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent shrink-0"
+             >
+               <Menu size={20} />
+             </button>
+             <button
                onClick={toggleSidebar}
-               aria-label={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'}
-               title={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'}
+               aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+               title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
                className="hidden md:inline-flex p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent shrink-0"
              >
                {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}

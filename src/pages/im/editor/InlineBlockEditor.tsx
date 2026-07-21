@@ -17,6 +17,8 @@ import { translateHtml } from '../../../services/ai/translation.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { CalloutVariant, CategoryAttribute } from '../../../types';
+import { AttributePicker } from './AttributePicker';
+import { setInsertTarget, clearInsertTarget, insertToActiveEditor, setCommitPlaceholderTarget, clearCommitPlaceholderTarget, commitPlaceholder as commitPlaceholderToTarget } from './insertTarget';
 
 // --- ISO 7010 / 7000 callout signs (shared by the editor preview and serializer) ---
 // W001 General Warning, W012 Electrical Hazard, W021 Flammable (Risk of Fire), W017 Hot Surface, M002 Information.
@@ -31,6 +33,16 @@ const ISO_W017 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" 
 const CALLOUT_ICONS: Record<CalloutVariant, string> = { warning: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002 };
 const CALLOUT_TITLES: Record<CalloutVariant, string> = { warning: 'WARNING', caution: 'CAUTION', electric: 'ELECTRIC HAZARD', flammable: 'RISK OF FIRE', hot_surface: 'HOT SURFACE', info: 'INFO' };
 
+// Default body text seeded when a callout box is inserted inline (per variant).
+const CALLOUT_DEFAULT_TEXT: Record<CalloutVariant, string> = {
+  warning: 'Indicates a hazardous situation which, if not avoided, could result in serious injury or death.',
+  caution: 'Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.',
+  electric: 'Risk of electric shock. Disconnect power before servicing.',
+  flammable: 'Risk of fire. Keep away from open flames and flammable materials.',
+  hot_surface: 'Hot surface. Do not touch during or immediately after use — allow to cool first.',
+  info: 'Offers helpful tips and information for using your product.',
+};
+
 // Editor-only chrome for the row variant selector + framing (the final PDF uses the CSS classes).
 export const CALLOUT_VARIANTS: { value: CalloutVariant; label: string; Icon: LucideIcon; frame: string; chip: string }[] = [
   { value: 'warning',   label: 'Warning',         Icon: AlertTriangle, frame: 'border-orange-300 bg-orange-50',  chip: 'bg-orange-100 text-orange-700 border-orange-200' },
@@ -42,7 +54,7 @@ export const CALLOUT_VARIANTS: { value: CalloutVariant; label: string; Icon: Luc
 ];
 
 // --- Structured Rich Text Editor ---
-type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric';
+type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric' | 'flammable' | 'hot_surface';
 
 type InlineNode =
   | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
@@ -55,7 +67,7 @@ type InlineNode =
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
-  | { id: string; type: 'callout'; variant: 'warning' | 'caution' | 'electric' | 'info'; content: InlineNode[] }
+  | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
   | { id: string; type: 'image'; src: string; alt?: string; width?: string }
   | { id: string; type: 'list'; ordered: boolean; items: InlineNode[][] }
   | { id: string; type: 'table'; rows: InlineNode[][][] }
@@ -155,11 +167,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const handleImgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Prompt for alt text on explicit upload (accessibility of the generated manual).
+    // Defaults to the file name; paste/drop keep the filename silently to stay frictionless.
+    const altInput = window.prompt('Describe this image for accessibility (alt text):', file.name.replace(/\.[^.]+$/, ''))?.trim();
+    const alt = (altInput || file.name).replace(/"/g, '&quot;');
     setUploadingImg(true);
     try {
       const url = await uploadIMAsset(file, 'blocks');
       // Insert at the cursor (matches placeholder/condition behaviour) instead of appending.
-      insertHtmlAtCursor(`<img src="${url}" alt="${file.name}" style="max-width:100%;height:auto;border-radius:0.375rem;margin:1rem 0;" />`);
+      insertHtmlAtCursor(`<img src="${url}" alt="${alt}" style="max-width:100%;height:auto;border-radius:0.375rem;margin:1rem 0;" />`);
     } catch (err: any) {
       console.error('[SimpleRichTextEditor] image upload failed:', err);
       alert(err?.message ?? 'Image upload failed — see console for details.');
@@ -289,7 +305,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       }
       if (el.classList.contains('im-block-wrapper')) {
         const contentEl = el.querySelector('.im-block-content') as HTMLElement | null;
-        const variant = (['warning', 'caution', 'electric', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as 'warning' | 'caution' | 'electric' | 'info';
+        const variant = (['warning', 'caution', 'electric', 'flammable', 'hot_surface', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as CalloutVariant;
         // Use only the <p> body — the .im-block-title strong is re-generated on serialize, exclude it
         const bodyEl = contentEl?.querySelector('p') as HTMLElement | null;
         parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(bodyEl || contentEl || el) });
@@ -490,6 +506,22 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
   }, [deserializeHtmlToBlocks]);
 
+  // Run a formatting/list execCommand, then re-sync `blocks` from the live DOM.
+  // We can't rely on the command's own `input` event to do this: browsers don't
+  // reliably fire `input` for list toggles (insertOrdered/UnorderedList). When it
+  // doesn't fire, `blocks` keeps the pre-command paragraphs, and the next render's
+  // DOM-sync effect rewrites the editor from those stale blocks — so a numbered
+  // list reverts to plain paragraphs and is never emitted/saved. Reading innerHTML
+  // right after execCommand (synchronous) captures the change deterministically.
+  const execCmd = useCallback((command: string) => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.focus();
+    document.execCommand(command);
+    isUserEditingRef.current = true; // keep the native DOM; just sync blocks + emit
+    setBlocks(deserializeHtmlToBlocks(el.innerHTML));
+  }, [deserializeHtmlToBlocks]);
+
   useEffect(() => {
     if (isUserEditingRef.current) {
       isUserEditingRef.current = false;
@@ -505,7 +537,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const insertBlock = (type: BlockInsertType) => {
     const newBlock: EditorBlock = type === 'table'
       ? { id: createId(), type: 'table', rows: [[textCell('Header 1'), textCell('Header 2')], [textCell('Row 1 Col 1'), textCell('Row 1 Col 2')]] }
-      : { id: createId(), type: 'callout', variant: type, content: [{ type: 'text', text: type === 'warning' ? 'Indicates a hazardous situation which, if not avoided, could result in serious injury or death.' : type === 'caution' ? 'Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.' : type === 'electric' ? 'Risk of electric shock. Disconnect power before servicing.' : 'Offers helpful tips and information for using your product.' }] };
+      : { id: createId(), type: 'callout', variant: type, content: [{ type: 'text', text: CALLOUT_DEFAULT_TEXT[type] }] };
     setBlocks((prev) => [...prev, newBlock]);
     setSelectedBlockId(newBlock.id);
   };
@@ -581,21 +613,19 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // rows (× languages) each mount their own editor, so registering on mount would
   // make the last-mounted one win regardless of focus.
   const registerAsInsertTarget = useCallback(() => {
-    (window as any).currentEditorInsertHtml = insertHtmlAtCursor;
+    setInsertTarget(insertHtmlAtCursor);
   }, [insertHtmlAtCursor]);
 
   useEffect(() => {
-    return () => {
-      if ((window as any).currentEditorInsertHtml === insertHtmlAtCursor) {
-        (window as any).currentEditorInsertHtml = undefined;
-      }
-    };
+    return () => clearInsertTarget(insertHtmlAtCursor);
   }, [insertHtmlAtCursor]);
 
   return (
-    <div className={`flex flex-col flex-1 min-h-0 border rounded-xl transition-colors overflow-hidden ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
+    <div className={`flex flex-col flex-1 min-h-0 border rounded-xl transition-colors ${isFocused ? 'border-indigo-400 ring-1 ring-indigo-100' : 'border-gray-300'}`}>
 
-      <div className="flex-none flex items-center gap-1 p-2 bg-light border-b border-gray-200 select-none z-10 flex-wrap">
+      {/* Sticky within the surrounding scroll pane so formatting stays reachable in long rows.
+          `overflow-hidden` is intentionally NOT on the container above — it would clip sticky. */}
+      <div className="flex-none sticky top-0 flex items-center gap-1 p-2 bg-light border-b border-gray-200 rounded-t-xl select-none z-20 flex-wrap">
         {mode === 'rich' && (
           <>
             <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 1, content: [{ type: 'text', text: 'Heading 1' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H1</button>
@@ -603,13 +633,13 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 3, content: [{ type: 'text', text: 'Heading 3' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H3</button>
             <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'paragraph', content: [] }]); }} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Paragraph</button>
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            {/* Inline formatting — applies to the current selection via execCommand; onInput re-parses the marks */}
-            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold (Ctrl+B)"><Bold size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic (Ctrl+I)"><Italic size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline (Ctrl+U)"><Underline size={16} /></button>
-            {/* Lists — execCommand toggles the current line(s); onInput re-parses into a list block */}
-            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bulleted list"><List size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); document.execCommand('insertOrderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Numbered list"><ListOrdered size={16} /></button>
+            {/* Inline formatting — applies to the current selection; execCmd re-parses the marks from the DOM */}
+            <button onMouseDown={(e) => { e.preventDefault(); execCmd('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold (Ctrl+B)"><Bold size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); execCmd('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic (Ctrl+I)"><Italic size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); execCmd('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline (Ctrl+U)"><Underline size={16} /></button>
+            {/* Lists — execCmd toggles the current line(s) and re-parses into a list block (numbers/bullets persist) */}
+            <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bulleted list"><List size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertOrderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Numbered list"><ListOrdered size={16} /></button>
           </>
         )}
         {mode === 'rich' && !minimal && (
@@ -745,7 +775,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     const active = activeCodeRef.current;
     const cnt = contentRef.current;
     if (!hasPlaceholderId(cnt[active], id)) {
-      (window as any).currentEditorInsertHtml?.(chipHtml);
+      insertToActiveEditor(chipHtml);
     }
     langs.forEach(l => {
       if (l.code === active) return;
@@ -760,15 +790,11 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
   // placeholder button is pressed (the toolbar mousedown already pointed
   // currentEditorInsertHtml at this row's editor), then open the parent modal.
   const handleInsertPlaceholder = useCallback((type: 'text' | 'image') => {
-    (window as any).currentEditorCommitPlaceholder = commitPlaceholder;
+    setCommitPlaceholderTarget(commitPlaceholder);
     onInsertPlaceholder(type);
   }, [commitPlaceholder, onInsertPlaceholder]);
 
-  useEffect(() => () => {
-    if ((window as any).currentEditorCommitPlaceholder === commitPlaceholder) {
-      (window as any).currentEditorCommitPlaceholder = undefined;
-    }
-  }, [commitPlaceholder]);
+  useEffect(() => () => clearCommitPlaceholderTarget(commitPlaceholder), [commitPlaceholder]);
 
   // Switching to a language that has no content yet backfills the placeholder
   // chips from the reference language (English) so placeholders created before
@@ -944,11 +970,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
 // ---------------------------------------------------------------------------
 
 /** Routes an insert to whichever SimpleRichTextEditor most recently had focus. */
-const insertHtmlToCurrentEditor = (html: string) => {
-  if ((window as any).currentEditorInsertHtml) {
-    (window as any).currentEditorInsertHtml(html);
-  }
-};
+const insertHtmlToCurrentEditor = (html: string) => { insertToActiveEditor(html); };
 
 const PlaceholderModal: React.FC<{
   type: 'text' | 'image';
@@ -972,11 +994,7 @@ const PlaceholderModal: React.FC<{
     const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}"${attrAttr} data-label="${encodeURIComponent(finalLabel)}">[${finalLabel}]</span>&nbsp;`;
     // Prefer the row-aware fan-out (shares the placeholder across all languages);
     // fall back to a plain caret insert if no row registered one.
-    if ((window as any).currentEditorCommitPlaceholder) {
-      (window as any).currentEditorCommitPlaceholder(html);
-    } else {
-      insertHtmlToCurrentEditor(html);
-    }
+    commitPlaceholderToTarget(html);
     onClose();
   };
 
@@ -987,23 +1005,17 @@ const PlaceholderModal: React.FC<{
         {attrOptions.length > 0 && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">From Attribute (optional)</label>
-            <select
-              className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+            <AttributePicker
+              attributes={attrOptions}
               value={attrId}
-              onChange={e => {
-                const id = e.target.value;
+              onChange={id => {
                 setAttrId(id);
                 const attr = attributes.find(f => f.id === id);
                 setLabel(id && attr ? attr.name : '');
               }}
-            >
-              <option value="">— Custom label —</option>
-              <optgroup label={type === 'image' ? 'Product Image Attributes' : 'Category Attributes'}>
-                {attrOptions.map(f => (
-                  <option key={f.id} value={f.id}>{f.name} ({(f as any).dataType})</option>
-                ))}
-              </optgroup>
-            </select>
+              leadingOptions={[{ id: '', label: 'Custom label', hint: 'Enter your own label below' }]}
+              searchPlaceholder={type === 'image' ? 'Search image attributes…' : 'Search attributes…'}
+            />
             <p className="text-xs text-muted mt-1">
               {type === 'image'
                 ? 'Bind to a product image so the uploaded photo renders here automatically.'
@@ -1095,12 +1107,12 @@ const ConditionModal: React.FC<{
         <h3 className="font-bold text-lg mb-4">Add Condition</h3>
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">Condition Trigger</label>
-          <select className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={featureId} onChange={(e) => { setFeatureId(e.target.value); resetValue(); }}>
-            <option value="manual">Manual Selection (Optional Block)</option>
-            <optgroup label="Auto-include based on Attribute">
-              {attributes.map(f => <option key={f.id} value={f.id}>{f.name} ({(f as any).dataType})</option>)}
-            </optgroup>
-          </select>
+          <AttributePicker
+            attributes={attributes}
+            value={featureId}
+            onChange={(id) => { setFeatureId(id); resetValue(); }}
+            leadingOptions={[{ id: 'manual', label: 'Manual Selection', hint: 'Optional block — user decides at generation time' }]}
+          />
           <p className="text-xs text-muted mt-1">{featureId === 'manual' ? 'User decides whether to include this text when generating the manual.' : anyValue ? "The attribute's value will be injected inline — always visible, no condition needed." : 'Text is automatically included if this attribute matches the selected value.'}</p>
         </div>
 

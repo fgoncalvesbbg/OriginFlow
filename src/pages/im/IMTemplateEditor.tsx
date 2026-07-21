@@ -6,12 +6,14 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, deleteIMTemplate, getProjectIMCountForTemplate, getCategoryAttributes, getIMBlocks } from '../../services';
+import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, deleteIMTemplate, getProjectIMCountForTemplate, getCategoryAttributes, getIMBlocks, resolveManual } from '../../services';
+import { wrapBlockCallout } from '../../services/im/im-resolver';
+import { sanitizeHtml } from '../../utils';
 import { uploadIMAsset, listIMAssets } from '../../services/im/im-asset.service';
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
-import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp } from 'lucide-react';
+import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle, ResolvedSection } from '../../types';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
 import { parseTranslationXliff, applyTranslationImport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
@@ -23,6 +25,9 @@ import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { AttributePicker } from './editor/AttributePicker';
+import { useListDnd } from './editor/useListDnd';
+import { useUndoRedo } from './editor/useUndoRedo';
+import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } from './editor/insertTarget';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 
 import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
@@ -284,11 +289,7 @@ const IMTemplateEditor: React.FC = () => {
     }
   };
 
-  const insertHtmlToCurrentEditor = (html: string) => {
-      if ((window as any).currentEditorInsertHtml) {
-          (window as any).currentEditorInsertHtml(html);
-      }
-  };
+  const insertHtmlToCurrentEditor = (html: string) => { insertToActiveEditor(html); };
 
   const handleInsertPlaceholder = (type: 'text' | 'image') => {
     setPlaceholderConfig({ type, label: '' });
@@ -308,11 +309,7 @@ const IMTemplateEditor: React.FC = () => {
     const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}"${attrAttr} data-label="${labelAttr}">[${label}]</span>&nbsp;`;
     // Prefer the row-aware fan-out (shares the placeholder across all languages);
     // fall back to a plain caret insert if no row registered one.
-    if ((window as any).currentEditorCommitPlaceholder) {
-      (window as any).currentEditorCommitPlaceholder(html);
-    } else {
-      insertHtmlToCurrentEditor(html);
-    }
+    commitPlaceholderToTarget(html);
     setIsPlaceholderModalOpen(false);
   };
 
@@ -337,7 +334,9 @@ const IMTemplateEditor: React.FC = () => {
   };
 
   const handleInsertAsset = (src: string) => {
-      const html = `<img src="${src}" style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`;
+      const alt = window.prompt('Describe this image for accessibility (alt text). Leave blank to skip:', '')?.trim() ?? '';
+      const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
+      const html = `<img src="${src}"${altAttr} style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`;
       insertHtmlToCurrentEditor(html);
   };
 
@@ -699,30 +698,43 @@ const IMTemplateEditor: React.FC = () => {
     const item = siblings[currentIndex];
     siblings.splice(currentIndex, 1);
     siblings.splice(targetIndex, 0, item);
-    
-    // Reassign sequential orders to avoid collision (10, 20, 30...)
-    const updates = siblings.map((s, idx) => ({
-        ...s,
-        order: (idx + 1) * 10
-    }));
-    
-    // Optimistic update
-    const newSections = sections.map(s => {
-        const update = updates.find(u => u.id === s.id);
-        return update ? update : s;
-    });
-    setSections(newSections);
-    
-    // Save all modified siblings (bounded — see persistSections)
+    await commitReorderedSiblings(siblings);
+  };
+
+  // Persist a reordered sibling list: reassign collision-free orders (10, 20, 30…),
+  // optimistically update, then save each moved sibling and re-baseline its snapshot so
+  // the new order isn't flagged dirty. Shared by the arrow buttons and drag-and-drop.
+  const commitReorderedSiblings = async (siblings: IMSection[]) => {
+    if (!template) return;
+    const updates = siblings.map((s, idx) => ({ ...s, order: (idx + 1) * 10 }));
+    setSections(prev => prev.map(s => updates.find(u => u.id === s.id) ?? s));
     try {
         await mapWithConcurrency(updates, 4, u => saveIMSection({ id: u.id, templateId: template.id, order: u.order }));
-        // Re-baseline the moved sections so the new order isn't seen as dirty.
         updates.forEach(u => savedSnapshot.current.set(u.id, sectionSnapshotKey(u)));
         setLastSaved(new Date());
     } catch (e) {
         console.error("Reorder failed", e);
         loadData();
     }
+  };
+
+  // Drag-and-drop reorder of the section tree — constrained to siblings of the same
+  // parent (cross-parent re-nesting stays an explicit add/sub-section action).
+  const handleSectionDrop = async (draggedId: string, targetId: string) => {
+    if (!template || template.isFinalized || draggedId === targetId) return;
+    const getParentId = (p?: string | null) => p || 'root';
+    const dragged = sections.find(s => s.id === draggedId);
+    const target = sections.find(s => s.id === targetId);
+    if (!dragged || !target || getParentId(dragged.parentId) !== getParentId(target.parentId)) return;
+    const siblings = sections
+        .filter(s => getParentId(s.parentId) === getParentId(dragged.parentId))
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const from = siblings.findIndex(s => s.id === draggedId);
+    const to = siblings.findIndex(s => s.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [item] = siblings.splice(from, 1);
+    siblings.splice(to, 0, item);
+    await commitReorderedSiblings(siblings);
   };
 
   const updateCurrentSection = (updates: Partial<IMSection>) => {
@@ -805,6 +817,132 @@ const IMTemplateEditor: React.FC = () => {
         ? { ...s, blockRefs: (s.blockRefs ?? []).filter((_, i) => i !== index) }
         : s
     ));
+  };
+
+  // Deep-clone the row at `index` and insert the copy directly after it. Block refs
+  // are plain JSONB (no ref-level id to collide), so a structural clone is enough.
+  const duplicateRow = (index: number) => {
+    setSections(prev => prev.map(s => {
+      if (s.id !== selectedSectionId) return s;
+      const refs = [...(s.blockRefs ?? [])];
+      const source = refs[index];
+      if (!source) return s;
+      refs.splice(index + 1, 0, structuredClone(source));
+      return { ...s, blockRefs: refs };
+    }));
+  };
+
+  // Drag-and-drop reordering of the selected section's rows (arrow buttons remain).
+  const rowDnd = useListDnd((from, to) => { if (!template?.isFinalized) moveRow(from, to); });
+  // Section-tree drag-and-drop (id-based, same-parent only). Arrow buttons remain.
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+
+  // Undo/redo over the section model (autosave then persists the restored state).
+  // Disabled while loading or on a FINAL (read-only) template.
+  const undoRedo = useUndoRedo(
+    JSON.stringify(sections),
+    (json) => { try { setSections(JSON.parse(json)); } catch { /* ignore malformed */ } },
+    { enabled: !loading && !!template && !template.isFinalized },
+  );
+
+  // Inline preview drawer (#2): resolves the whole document for the active language and
+  // renders it read-only, so authors don't have to leave for the standalone /im/preview route.
+  const [showPreview, setShowPreview] = useState(false);
+  // Jump-to-section search (#5).
+  const [sectionSearch, setSectionSearch] = useState('');
+  // Confirm-on-delete for content rows (#7): only prompts when there's content to lose.
+  const [pendingRowDelete, setPendingRowDelete] = useState<number | null>(null);
+
+  // Remove a row, confirming first when it holds content (empty inline rows delete silently).
+  const requestRemoveRow = (index: number) => {
+    const ref = (sections.find(s => s.id === selectedSectionId)?.blockRefs ?? [])[index];
+    const isEmptyInline = ref?.kind === 'inline'
+      && Object.values((ref as InlineBlockRef).content || {}).every(v => !String(v || '').replace(/<[^>]*>/g, '').trim());
+    if (!ref || isEmptyInline) { removeRef(index); return; }
+    setPendingRowDelete(index);
+  };
+
+  // Cross-section row clipboard (#11) and local snippets (#12, shared with the project
+  // generator via the same localStorage key).
+  const [rowClipboard, setRowClipboard] = useState<BlockRef | null>(null);
+  const [rowSnippets, setRowSnippets] = useState<{ name: string; block: InlineBlockRef }[]>(() => {
+    try { return JSON.parse(localStorage.getItem('im-block-snippets') || '[]'); } catch { return []; }
+  });
+  const [showRowSnippets, setShowRowSnippets] = useState(false);
+
+  const copyRow = (index: number) => {
+    const ref = (sections.find(s => s.id === selectedSectionId)?.blockRefs ?? [])[index];
+    if (ref) setRowClipboard(structuredClone(ref));
+  };
+  const pasteRow = () => {
+    if (!rowClipboard) return;
+    setSections(prev => prev.map(s => s.id === selectedSectionId
+      ? { ...s, blockRefs: [...(s.blockRefs ?? []), structuredClone(rowClipboard)] } : s));
+  };
+  const setAllRowVariants = (variant: CalloutVariant | undefined) => {
+    setSections(prev => prev.map(s => s.id === selectedSectionId
+      ? { ...s, blockRefs: (s.blockRefs ?? []).map(r => r.kind === 'inline' ? { ...r, variant } : r) } : s));
+  };
+  const persistRowSnippets = (next: { name: string; block: InlineBlockRef }[]) => {
+    setRowSnippets(next);
+    try { localStorage.setItem('im-block-snippets', JSON.stringify(next)); } catch { /* quota — ignore */ }
+  };
+  const saveRowSnippet = (index: number) => {
+    const ref = (sections.find(s => s.id === selectedSectionId)?.blockRefs ?? [])[index];
+    if (ref?.kind !== 'inline') return;
+    const name = window.prompt('Save this row as a reusable snippet. Name:')?.trim();
+    if (!name) return;
+    persistRowSnippets([...rowSnippets.filter(s => s.name !== name), { name, block: structuredClone(ref as InlineBlockRef) }]);
+  };
+  const insertRowSnippet = (block: InlineBlockRef) => {
+    setSections(prev => prev.map(s => s.id === selectedSectionId
+      ? { ...s, blockRefs: [...(s.blockRefs ?? []), structuredClone(block)] } : s));
+    setShowRowSnippets(false);
+  };
+
+  const renderPreviewDrawer = () => {
+    if (!showPreview || !template) return null;
+    const resolved = resolveManual(template, sections, {}, null, activeLang);
+    const byId: Record<string, ResolvedSection> = {};
+    for (const rs of resolved.sections) byId[rs.id] = rs;
+    const nodesToHtml = (rs?: ResolvedSection): string => !rs ? '' : rs.nodes.map(n =>
+      n.type === 'html' ? n.html
+      : n.type === 'callout' ? wrapBlockCallout(n.variant, n.html, activeLang)
+      : `<p class="text-gray-400 italic text-sm">[${n.type} — rendered in project view]</p>`).join('');
+    const roots = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const renderSec = (s: IMSection, prefix: string, level: number): React.ReactNode => {
+      const children = sections.filter(c => c.parentId === s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+      const html = nodesToHtml(byId[s.id]);
+      return (
+        <div key={s.id} className={level > 0 ? 'mt-5 ml-6' : 'mt-8'}>
+          <div className="flex items-baseline gap-2 mb-2">
+            <span className="text-gray-300 font-bold">{prefix}</span>
+            <h3 className={level > 0 ? 'text-base font-bold text-gray-700' : 'text-lg font-bold text-gray-800'}>{localizedSectionTitle(s, activeLang)}</h3>
+          </div>
+          {s.isPlaceholder
+            ? <p className="text-xs text-gray-400 italic border border-dashed border-gray-300 rounded p-3">Placeholder — content is filled per project.</p>
+            : html
+              ? <div className="im-content text-sm text-gray-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
+              : <p className="text-xs text-gray-300 italic">No content for {activeLang.toUpperCase()}.</p>}
+          {children.map((c, i) => renderSec(c, `${prefix}${i + 1}.`, level + 1))}
+        </div>
+      );
+    };
+    return (
+      <div className="fixed inset-0 z-40 flex justify-end">
+        <div className="absolute inset-0 bg-black/30" onClick={() => setShowPreview(false)} />
+        <div className="relative w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col" style={getIMThemeVariables(metaSettings)}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2"><Eye size={18} /> Preview — {activeLang.toUpperCase()}</h3>
+            <button onClick={() => setShowPreview(false)} className="p-1 text-gray-400 hover:text-gray-700"><X size={18} /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {roots.length ? roots.map((s, i) => renderSec(s, `${i + 1}.`, 0)) : <p className="text-sm text-gray-400 italic mt-8">No sections yet.</p>}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const openBlockCondModal = (sectionId: string, refIdx: number, existing?: FeatureConditionFields) => {
@@ -1331,12 +1469,25 @@ const IMTemplateEditor: React.FC = () => {
      const selectedLayout = metaSettings.sectionLayoutMap?.[s.id] || 'body';
      return (
        <div key={s.id} className="flex flex-col">
-           <div onClick={() => setSelectedSectionId(s.id)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`} style={{ paddingLeft: `${(level * 12) + 8}px` }}>
+           <div
+              onClick={() => setSelectedSectionId(s.id)}
+              onDragOver={(e) => { if (draggedSectionId && draggedSectionId !== s.id) { e.preventDefault(); if (dragOverSectionId !== s.id) setDragOverSectionId(s.id); } }}
+              onDrop={(e) => { e.preventDefault(); if (draggedSectionId) handleSectionDrop(draggedSectionId, s.id); setDraggedSectionId(null); setDragOverSectionId(null); }}
+              className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm group transition-colors ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'} ${draggedSectionId === s.id ? 'opacity-50' : ''} ${dragOverSectionId === s.id && draggedSectionId !== s.id ? 'ring-2 ring-indigo-300' : ''}`}
+              style={{ paddingLeft: `${(level * 12) + 8}px` }}>
               <span className="text-gray-400 text-xs font-mono min-w-[24px]">{indexPrefix}</span>
               <span className="truncate flex-1" title={localizedSectionTitle(s, activeLang)}>{localizedSectionTitle(s, activeLang)}</span>
               {!locked && (
                 <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
                     {level === 0 && <button onClick={(e) => { e.stopPropagation(); handleAddSubSection(s.id); }} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>}
+                    <span
+                      draggable
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => { setDraggedSectionId(s.id); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', s.id); } catch { /* noop */ } }}
+                      onDragEnd={() => { setDraggedSectionId(null); setDragOverSectionId(null); }}
+                      title="Drag to reorder"
+                      className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"
+                    ><GripVertical size={12} /></span>
                     <div className="flex flex-col">
                        <button onClick={(e) => handleReorder(e, s.id, 'up')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronUp size={12} /></button>
                        <button onClick={(e) => handleReorder(e, s.id, 'down')} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><ChevronDown size={12} /></button>
@@ -1423,6 +1574,14 @@ const IMTemplateEditor: React.FC = () => {
                <button onClick={openTranslateModal} disabled={translating || locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed">{translating ? <Loader2 size={16} className="animate-spin" /> : <LanguagesIcon size={16} />} Translate</button>
                <button onClick={openExportModal} disabled={locked} title="Export English content as an XLIFF file for an external translator or TMS (e.g. XTM)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Download size={16} /> Export for Translation</button>
                <button onClick={openImportModal} disabled={locked} title="Import a translated XLIFF file back into a specific language" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><FileUp size={16} /> Import Translation</button>
+               <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Eye size={16} /> Preview</button>
+               {!locked && (
+                 <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow ml-2">
+                   <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
+                   <div className="w-px h-5 bg-gray-200" />
+                   <button onClick={undoRedo.redo} disabled={!undoRedo.canRedo} title="Redo (Ctrl/Cmd+Shift+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
+                 </div>
+               )}
                {locked ? (
                  <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-amber-600 shadow ml-2"><Unlock size={16} /> Unlock to edit</button>
                ) : (
@@ -1469,8 +1628,21 @@ const IMTemplateEditor: React.FC = () => {
                         <span className="text-xs font-bold text-muted uppercase">Section Tree</span>
                         {!locked && <button onClick={handleAddSection} className={`text-indigo-600 hover:bg-indigo-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>}
                      </div>
+                     {/* Jump-to-section search (#5) */}
+                     <div className="px-2 pt-2">
+                        <div className="relative">
+                           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                           <input value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} placeholder="Find a section…" className="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" />
+                        </div>
+                     </div>
                      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                        {rootSections.map((s, idx) => renderSidebarItem(s, `${idx + 1}.`, 0))}
+                        {sectionSearch.trim() ? (() => {
+                           const q = sectionSearch.trim().toLowerCase();
+                           const matches = sections.filter(s => localizedSectionTitle(s, activeLang).toLowerCase().includes(q));
+                           return matches.length ? matches.map(s => (
+                             <button key={s.id} onClick={() => setSelectedSectionId(s.id)} className={`w-full text-left px-2 py-1.5 rounded text-sm truncate ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-light'}`} title={localizedSectionTitle(s, activeLang)}>{localizedSectionTitle(s, activeLang)}</button>
+                           )) : <p className="text-xs text-gray-400 italic px-2 py-4 text-center">No sections match “{sectionSearch}”.</p>;
+                        })() : rootSections.map((s, idx) => renderSidebarItem(s, `${idx + 1}.`, 0))}
                      </div>
                    </>
                 )}
@@ -1588,13 +1760,18 @@ const IMTemplateEditor: React.FC = () => {
                            const isFirst = index === 0;
                            const isLast = index === refs.length - 1;
                            return (
-                             <div key={`${currentSection.id}-row-${index}`} className="flex gap-2 items-start">
-                               {/* Reorder */}
-                               <div className="flex flex-col gap-0.5 pt-2.5 shrink-0">
+                             <div key={`${currentSection.id}-row-${index}`}
+                               {...rowDnd.dropProps(index)}
+                               className={`flex gap-2 items-start rounded-xl transition-shadow ${rowDnd.dragIndex === index ? 'opacity-50' : ''} ${rowDnd.overIndex === index && rowDnd.dragIndex !== index ? 'ring-2 ring-indigo-300' : ''}`}>
+                               {/* Reorder + drag handle */}
+                               <div className="flex flex-col items-center gap-0.5 pt-2.5 shrink-0">
                                  <button onClick={() => moveRow(index, index - 1)} disabled={isFirst}
                                    className="p-0.5 text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed rounded">
                                    <ChevronUp size={13} />
                                  </button>
+                                 <span {...rowDnd.handleProps(index)} title="Drag to reorder" className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-600">
+                                   <GripVertical size={13} />
+                                 </span>
                                  <button onClick={() => moveRow(index, index + 1)} disabled={isLast}
                                    className="p-0.5 text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed rounded">
                                    <ChevronDown size={13} />
@@ -1655,9 +1832,22 @@ const IMTemplateEditor: React.FC = () => {
                                        </>
                                      )}
                                    </div>
-                                   <button onClick={() => removeRef(index)} className="text-gray-300 hover:text-rose-500 p-0.5 ml-2 shrink-0">
-                                     <X size={13} />
-                                   </button>
+                                   <div className="flex items-center gap-0.5 ml-2 shrink-0">
+                                     <button onClick={() => copyRow(index)} title="Copy this row (paste elsewhere)" className="text-gray-300 hover:text-indigo-500 p-0.5">
+                                       <ClipboardCopy size={13} />
+                                     </button>
+                                     {ref.kind === 'inline' && (
+                                       <button onClick={() => saveRowSnippet(index)} title="Save as reusable snippet" className="text-gray-300 hover:text-indigo-500 p-0.5">
+                                         <Bookmark size={13} />
+                                       </button>
+                                     )}
+                                     <button onClick={() => duplicateRow(index)} title="Duplicate this row" className="text-gray-300 hover:text-indigo-500 p-0.5">
+                                       <Copy size={13} />
+                                     </button>
+                                     <button onClick={() => requestRemoveRow(index)} title="Remove this row" className="text-gray-300 hover:text-rose-500 p-0.5">
+                                       <X size={13} />
+                                     </button>
+                                   </div>
                                  </div>
                                  {/* Card body */}
                                  {ref.kind === 'inline' && (
@@ -1791,6 +1981,40 @@ const IMTemplateEditor: React.FC = () => {
                            className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 font-medium">
                            <Grid size={11} /> SKU Slot
                          </button>
+
+                         <div className="w-px h-5 bg-gray-200 mx-1" />
+                         {/* Paste / bulk box / snippets (#11, #12) */}
+                         {rowClipboard && (
+                           <button onClick={pasteRow} title="Paste the copied row here" className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-indigo-600 hover:bg-indigo-50 font-medium">
+                             <ClipboardPaste size={11} /> Paste row
+                           </button>
+                         )}
+                         <div className="flex items-center gap-1 text-[11px] text-gray-500">
+                           <span>Set all boxes:</span>
+                           <select value="" onChange={(e) => { if (e.target.value) setAllRowVariants(e.target.value === 'none' ? undefined : e.target.value as CalloutVariant); e.currentTarget.selectedIndex = 0; }}
+                             className="border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 text-[11px]">
+                             <option value="">Choose…</option>
+                             <option value="none">No box (plain)</option>
+                             {CALLOUT_VARIANTS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                           </select>
+                         </div>
+                         <div className="relative">
+                           <button onClick={() => setShowRowSnippets(!showRowSnippets)} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-light font-medium">
+                             <Bookmark size={11} /> Snippets{rowSnippets.length ? ` (${rowSnippets.length})` : ''}
+                           </button>
+                           {showRowSnippets && (
+                             <div className="absolute z-30 mt-1 w-60 bg-white border border-gray-200 rounded-lg shadow-xl py-1 max-h-64 overflow-y-auto">
+                               {rowSnippets.length === 0 ? (
+                                 <p className="px-3 py-2 text-[11px] text-gray-400 italic">No snippets yet. Use the bookmark icon on an inline row to save one.</p>
+                               ) : rowSnippets.map(sn => (
+                                 <div key={sn.name} className="flex items-center justify-between px-2 py-1 hover:bg-light">
+                                   <button onClick={() => insertRowSnippet(sn.block)} className="flex-1 text-left text-xs text-gray-700 truncate" title={`Insert "${sn.name}"`}>{sn.name}</button>
+                                   <button onClick={() => persistRowSnippets(rowSnippets.filter(s => s.name !== sn.name))} title="Delete snippet" className="p-1 text-gray-300 hover:text-rose-600"><Trash2 size={12} /></button>
+                                 </div>
+                               ))}
+                             </div>
+                           )}
+                         </div>
                        </div>
 
                        {/* SKU slot form (inline, above add-row bar) */}
@@ -2622,6 +2846,17 @@ const IMTemplateEditor: React.FC = () => {
             onCancel={() => setDeleteModal({ isOpen: false, sectionId: null })}
           />
 
+          {/* Row-delete confirmation (#7) */}
+          <ConfirmationModal
+            variant="danger"
+            isOpen={pendingRowDelete !== null}
+            title="Delete this row?"
+            message="This row has content. Deleting it removes it from the template. You can undo with Ctrl/Cmd+Z."
+            confirmLabel="Delete"
+            onConfirm={() => { if (pendingRowDelete !== null) removeRef(pendingRowDelete); setPendingRowDelete(null); }}
+            onCancel={() => setPendingRowDelete(null)}
+          />
+
           <ConfirmationModal
             isOpen={isUnlockModalOpen}
             title="Unlock final template?"
@@ -2792,6 +3027,7 @@ const IMTemplateEditor: React.FC = () => {
             );
           })()}
        </div>
+       {renderPreviewDrawer()}
     </Layout>
   );
 };
