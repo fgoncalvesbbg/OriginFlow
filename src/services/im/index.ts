@@ -25,6 +25,7 @@ export {
   getProjectIM,
   saveProjectIM,
   updateProjectIMPlaceholders,
+  setProjectIMFinalized,
   deleteProjectIM,
   getAllProjectIMs
 } from './project-im.service';

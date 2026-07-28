@@ -72,15 +72,11 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     isLeaflet ? 'a5' : meta?.pageSize === 'a5' ? 'a5' : 'a4',
   );
 
-  // Shared cover, prefilled from existing override hooks + template metadata.
+  // Shared cover, prefilled from existing override hooks + template metadata. Subtitle and
+  // the cover-footer manual name are intentionally NOT configurable — the subtitle always
+  // auto-fills and the manual-name line is always empty (see handleGenerate).
   const [title, setTitle] = useState(formData['__cover_title'] ?? projectName);
-  // Empty subtitle → builder auto-fills "Instruction Manual" in every printed language.
-  const [subtitle, setSubtitle] = useState(formData['__cover_subtitle'] ?? '');
   const [skuText, setSkuText] = useState(skus.join(', '));
-  // Manual name shown in the cover footer. Prefilled from the template name, but editable —
-  // internal template names (e.g. "Blank Standardized Template") shouldn't leak into print.
-  // Empty → the footer line is omitted entirely.
-  const [imName, setImName] = useState(template?.name ?? '');
   // `||` (not `??`): normalizeIMTemplateMetadata coerces a missing companyLogoUrl to '',
   // which must still fall through to the standard default so the logo is prelinked.
   const [logoUrl, setLogoUrl] = useState(
@@ -89,16 +85,10 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [coverImageUrl, setCoverImageUrl] = useState(
     formData['__custom_cover_image'] ?? meta?.coverImageUrl ?? '',
   );
-  const [coverMarks, setCoverMarks] = useState<string[]>([]);
 
   // Leaflet typography — applied to ALL body text / headings in the compact PDF (leaflets only).
   const [leafletTextPt, setLeafletTextPt] = useState<number>(DEFAULT_LEAFLET_TEXT_PT);
   const [leafletHeadingPt, setLeafletHeadingPt] = useState<number>(DEFAULT_LEAFLET_HEADING_PT);
-
-  // Shared back cover.
-  const [backContent, setBackContent] = useState(meta?.backPageContent ?? '');
-  const [backLogoUrl, setBackLogoUrl] = useState('');
-  const [backMarks, setBackMarks] = useState<string[]>([]);
 
   const [uploading, setUploading] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,18 +168,6 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     }
   };
 
-  const uploadMark = async (slot: string, file: File, add: (url: string) => void) => {
-    setUploading(slot);
-    try {
-      const url = await uploadIMAsset(file, 'cover');
-      add(url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed.');
-    } finally {
-      setUploading(null);
-    }
-  };
-
   const handleGenerate = async () => {
     setBusy(true);
     setElapsed(0);
@@ -208,23 +186,20 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         ...(isLeaflet ? { leafletTextPt, leafletHeadingPt } : {}),
         cover: {
           title,
-          subtitle: subtitle.trim() || undefined,
+          // Subtitle is never configured here — always left empty so the builder
+          // auto-fills "Instruction Manual" in every selected language.
           logoUrl: logoUrl || undefined,
           coverImageUrl: coverImageUrl || undefined,
-          markUrls: coverMarks.length ? coverMarks : undefined,
           skus: skuText
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean),
-          imName: imName.trim() || undefined,
+          // imName intentionally omitted — the cover footer manual-name line is always empty.
           companyName: meta?.companyName,
           footerText: formData['__custom_footer'] ?? meta?.footerText,
         },
-        back: {
-          contentHtml: backContent || undefined,
-          logoUrl: backLogoUrl || undefined,
-          markUrls: backMarks.length ? backMarks : undefined,
-        },
+        // Back cover is always empty — no content, logo, or marks are configured.
+        back: {},
       });
       setResult(res);
       if (res.render) setRenders((prev) => [res.render as PrintRender, ...prev]);
@@ -284,43 +259,6 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             <Trash2 size={14} />
           </button>
         )}
-      </div>
-    </div>
-  );
-
-  const MarkList: React.FC<{
-    label: string;
-    slot: string;
-    marks: string[];
-    setMarks: React.Dispatch<React.SetStateAction<string[]>>;
-  }> = ({ label, slot, marks, setMarks }) => (
-    <div>
-      <label className="text-xs font-semibold text-gray-500 uppercase">{label}</label>
-      <div className="flex flex-wrap items-center gap-2 mt-1">
-        {marks.map((m, i) => (
-          <div key={i} className="relative">
-            <img src={m} alt="" className="h-10 w-10 object-contain border rounded bg-white" />
-            <button
-              onClick={() => setMarks((prev) => prev.filter((_, j) => j !== i))}
-              className="absolute -top-2 -right-2 bg-white border rounded-full text-gray-400 hover:text-red-600"
-              title="Remove mark"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-        <label className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50 cursor-pointer flex items-center gap-1">
-          {uploading === slot ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-          Add mark
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) =>
-              e.target.files?.[0] && uploadMark(slot, e.target.files[0], (url) => setMarks((p) => [...p, url]))
-            }
-          />
-        </label>
       </div>
     </div>
   );
@@ -423,24 +361,13 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             <>
               <div className="border rounded-lg p-4 space-y-3">
                 <div className="text-sm font-semibold text-gray-700">Front cover</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase">Title</label>
-                    <input
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase">Subtitle</label>
-                    <input
-                      value={subtitle}
-                      onChange={(e) => setSubtitle(e.target.value)}
-                      placeholder='Auto: "Instruction Manual" in all selected languages'
-                      className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                    />
-                  </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Title</label>
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase">SKU / Article number(s)</label>
@@ -452,16 +379,6 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                   />
                   <p className="text-[11px] text-gray-400 mt-1">Shown on the cover. Prefilled from the SKUs bound to this manual.</p>
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Manual name (cover footer)</label>
-                  <input
-                    value={imName}
-                    onChange={(e) => setImName(e.target.value)}
-                    placeholder="Leave empty to omit this line"
-                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1">Prefilled from the template name. Clear it to leave the line out of the PDF.</p>
-                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
                   <ImgField
@@ -472,31 +389,6 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                     onClear={() => setCoverImageUrl('')}
                   />
                 </div>
-                <MarkList label="Marks (CE, UKCA, WEEE…)" slot="cover-mark" marks={coverMarks} setMarks={setCoverMarks} />
-              </div>
-
-              {/* Back cover */}
-              <div className="border rounded-lg p-4 space-y-3">
-                <div className="text-sm font-semibold text-gray-700">Back cover</div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Content (HTML)</label>
-                  <textarea
-                    value={backContent}
-                    onChange={(e) => setBackContent(e.target.value)}
-                    rows={3}
-                    className="w-full text-sm border rounded px-2 py-1.5 mt-1 font-mono"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <ImgField
-                    label="Logo"
-                    slot="back-logo"
-                    value={backLogoUrl}
-                    onSet={setBackLogoUrl}
-                    onClear={() => setBackLogoUrl('')}
-                  />
-                </div>
-                <MarkList label="Marks" slot="back-mark" marks={backMarks} setMarks={setBackMarks} />
               </div>
             </>
           )}

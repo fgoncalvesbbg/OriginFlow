@@ -18,6 +18,8 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   placeholderData: data.placeholder_data,
   skuContent: data.sku_content ?? {},
   status: data.status,
+  isFinalized: data.is_finalized ?? false,
+  finalizedAt: data.finalized_at ?? null,
   updatedAt: data.updated_at,
   version: data.version ?? 0,
   boundSkuIds: data.bound_sku_ids ?? [],
@@ -111,15 +113,18 @@ export const saveProjectIM = async (
     if (boundSkuIds !== undefined) payload.bound_sku_ids = boundSkuIds;
 
     // Echo back only the cheap columns we can't know client-side (row id on insert,
-    // the stored version when a draft save omits it) — never the full jsonb row,
-    // which would download the whole payload again after every save.
+    // the stored version when a draft save omits it, plus the finalize flag which this
+    // write never touches) — never the full jsonb row, which would download the whole
+    // payload again after every save. Echoing is_finalized keeps a publish/save of a
+    // FINAL manual from wrongly clearing the lock in the caller's mapped instance.
     const context = existing ? 'saveProjectIM update' : 'saveProjectIM insert';
+    const cols = 'id, version, updated_at, is_finalized, finalized_at';
     const runWrite = (timeoutMs: number) =>
-        runQuery<{ id: string; version: number; updated_at: string }>(
+        runQuery<{ id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null }>(
           withTimeout(
             existing
-              ? supabase.from('project_ims').update(payload).eq('id', existing.id).select('id, version, updated_at').single()
-              : supabase.from('project_ims').insert(payload).select('id, version, updated_at').single(),
+              ? supabase.from('project_ims').update(payload).eq('id', existing.id).select(cols).single()
+              : supabase.from('project_ims').insert(payload).select(cols).single(),
             timeoutMs,
           ),
           context,
@@ -158,6 +163,28 @@ export const updateProjectIMPlaceholders = async (
     .update({ placeholder_data: merged, updated_at: new Date().toISOString() })
     .eq('id', data.id);
   if (upErr) console.error('[project-im] updateProjectIMPlaceholders failed:', upErr.message);
+};
+
+/**
+ * Mark a project IM as final (locked) or unlock it, touching ONLY the finalize columns
+ * so it never races with the large content save payload. `finalized_at` is stamped when
+ * finalizing and cleared on unlock. Returns the updated finalize state so the caller can
+ * refresh its `instance` without re-fetching the whole row.
+ */
+export const setProjectIMFinalized = async (
+  projectId: string,
+  templateType: IMTemplateType,
+  isFinalized: boolean,
+): Promise<{ isFinalized: boolean; finalizedAt: string | null; updatedAt: string }> => {
+  const finalizedAt = isFinalized ? new Date().toISOString() : null;
+  const updatedAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('project_ims')
+    .update({ is_finalized: isFinalized, finalized_at: finalizedAt, updated_at: updatedAt })
+    .eq('project_id', projectId)
+    .eq('template_type', templateType);
+  if (error) handleError(error, 'setProjectIMFinalized');
+  return { isFinalized, finalizedAt, updatedAt };
 };
 
 /**

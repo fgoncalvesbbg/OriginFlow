@@ -9,7 +9,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
     getProjectById, getIMTemplateById, getIMSections,
-    getIMTemplates, getProjectIM, saveProjectIM, deleteProjectIM,
+    getIMTemplates, getProjectIM, saveProjectIM, setProjectIMFinalized, deleteProjectIM,
     addDocument, uploadFile, getProjectDocs, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
@@ -26,7 +26,7 @@ import { uploadIMAsset, listIMAssets, externalizeHtmlImages, externalizeFormData
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useUndoRedo } from './editor/useUndoRedo';
 import { insertToActiveEditor } from './editor/insertTarget';
@@ -163,9 +163,21 @@ const ProjectIMGenerator: React.FC = () => {
   // Modal State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Finalization: a FINAL manual is locked read-only until explicitly unlocked. `finalizing`
+  // guards the toggle network call; the two flags drive the confirm modals.
+  const [finalizing, setFinalizing] = useState(false);
+  const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false);
+  // True when the manual is marked FINAL — mirrors IMTemplate.isFinalized. Every editing
+  // surface, save, autosave, translate, import and delete is gated on this being false.
+  const locked = instance?.isFinalized ?? false;
+  // Neutralizes every editing surface in one class: no clicks, no text cursor (same idiom
+  // as the template editor).
+  const lockedCls = locked ? 'pointer-events-none select-none opacity-70' : '';
+
   // Any network write is in flight — blocks re-entry and mutating actions, and drives the
   // blocking save overlay so the user can't navigate away and wedge the session mid-save.
-  const isBusy = saving || generating || translating || checkingChanges;
+  const isBusy = saving || generating || translating || checkingChanges || finalizing;
 
   // Crash-safe local draft. `savedSnapshotRef` holds a serialization of the last-persisted
   // editable state (the DB baseline); the current state differing from it = "unsaved edits",
@@ -451,6 +463,7 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   const handlePreviewClick = (e: React.MouseEvent) => {
+      if (locked) return; // read-only while FINAL — no inline edits from the preview
       const target = (e.target as HTMLElement).closest('[data-interactive="true"]');
       if (!target) return;
       
@@ -599,6 +612,8 @@ const ProjectIMGenerator: React.FC = () => {
   // rather than alerted — the local backup remains the crash net either way.
   const persistDraft = async (opts?: { silent?: boolean }) => {
       if (!projectId || !selectedTemplateId) return;
+      // A FINAL manual is read-only — never persist (this also short-circuits autosave).
+      if (locked) return;
       // Never let a save start on top of another operation (Publish/Translate/another Save):
       // overlapping writes to the same row queue behind each other's row lock (see with-timeout.ts).
       if (isBusy) return;
@@ -643,6 +658,29 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   const handleSaveDraft = () => persistDraft();
+
+  // Toggle the FINAL lock. Finalizing persists any unsaved edits first (so what's locked is
+  // exactly what's on the server), then flips the flag; unlocking just clears it. Touches
+  // only the finalize columns via setProjectIMFinalized, so it never races the content save.
+  const applyFinalized = async (next: boolean) => {
+      if (!projectId || isBusy) return;
+      try {
+          // Persist first (persistDraft manages its own `saving`/isBusy flag and bails if
+          // isBusy) — only then raise `finalizing`, so its guard doesn't skip the save.
+          if (next && isDirty) await persistDraft();
+          setFinalizing(true);
+          const res = await setProjectIMFinalized(projectId, templateType, next);
+          setInstance(prev => prev ? { ...prev, isFinalized: res.isFinalized, finalizedAt: res.finalizedAt, updatedAt: res.updatedAt } : prev);
+      } catch (e) {
+          console.error('[ProjectIMGenerator] finalize toggle failed', e);
+          alert(`Could not ${next ? 'mark this manual as final' : 'unlock this manual'} — see console for details.`);
+      } finally {
+          setFinalizing(false);
+      }
+  };
+
+  const handleMarkFinal = () => { setShowFinalizeConfirm(false); applyFinalized(true); };
+  const handleUnlock = () => { setShowUnlockConfirm(false); applyFinalized(false); };
 
   // Debounced background server autosave (on top of the instant local backup): 4s after
   // edits settle, silently persist to the DB so closing the tab never strands work on the
@@ -3090,6 +3128,26 @@ const ProjectIMGenerator: React.FC = () => {
          onCancel={() => setPendingConfirm(null)}
        />
 
+       {/* Mark this manual FINAL (locks it read-only until unlocked). */}
+       <ConfirmationModal
+         isOpen={showFinalizeConfirm}
+         title={`Mark this ${typeLabel.toLowerCase()} as final?`}
+         message={`Marking it final locks it against changes${isDirty ? ' (your unsaved edits are saved first)' : ''}. Nobody can edit, translate, import into or delete it until it is explicitly unlocked. You can still publish and export it.`}
+         confirmLabel="Mark as final"
+         onConfirm={handleMarkFinal}
+         onCancel={() => setShowFinalizeConfirm(false)}
+       />
+
+       {/* Unlock a FINAL manual so it can be edited again. */}
+       <ConfirmationModal
+         isOpen={showUnlockConfirm}
+         title="Unlock this manual for editing?"
+         message="This manual is marked FINAL. Unlocking removes the lock and makes it editable again. You can mark it final again once you're done."
+         confirmLabel="Unlock for editing"
+         onConfirm={handleUnlock}
+         onCancel={() => setShowUnlockConfirm(false)}
+       />
+
        {/* Blocking overlay while a save/publish is in flight — stops the user navigating away
            and wedging the session. Guaranteed to clear because every network call in the save
            path is time-bounded (see with-timeout.ts / saveProjectIM). Translation is excluded:
@@ -3392,6 +3450,7 @@ const ProjectIMGenerator: React.FC = () => {
                        <div className="flex items-center gap-2 text-xs text-muted">
                           <span>For: {project?.name}</span>
                           {instance?.status === 'generated' && <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">GENERATED</span>}
+                          {locked && <span className="flex items-center gap-1 bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"><Lock size={10} /> Final</span>}
                        </div>
                    </div>
                </div>
@@ -3404,16 +3463,22 @@ const ProjectIMGenerator: React.FC = () => {
                         : instance ? 'All changes saved' : ''}
                    </span>
                    <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden">
-                       <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo || isBusy} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
+                       <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo || isBusy || locked} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
                        <div className="w-px h-5 bg-gray-200" />
-                       <button onClick={undoRedo.redo} disabled={!undoRedo.canRedo || isBusy} title="Redo (Ctrl/Cmd+Shift+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
+                       <button onClick={undoRedo.redo} disabled={!undoRedo.canRedo || isBusy || locked} title="Redo (Ctrl/Cmd+Shift+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
                    </div>
+                   {locked ? (
+                     <button onClick={() => setShowUnlockConfirm(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-medium hover:bg-amber-600 disabled:opacity-70">
+                        {finalizing ? <Loader2 size={16} className="animate-spin" /> : <Unlock size={16} />} Unlock to edit
+                     </button>
+                   ) : (
                    <button onClick={handleSaveDraft} disabled={isBusy} className={`flex items-center gap-2 px-4 py-2 bg-white border rounded-xl text-sm font-medium hover:bg-light disabled:opacity-80 ${savedTick ? 'border-emerald-300 text-emerald-700' : 'border-gray-300 text-gray-700'}`}>
                       {saving ? <Loader2 size={16} className="animate-spin" /> : savedTick ? <CheckCircle size={16} className="text-emerald-600" /> : <Save size={16} />}
                       {saving ? 'Saving…' : savedTick ? 'Saved!' : 'Save Draft'}
                    </button>
+                   )}
 
-                   {otherRequiredLangs.length > 0 && (
+                   {!locked && otherRequiredLangs.length > 0 && (
                      <button onClick={() => setIsTranslateModalOpen(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Review & auto-translate project-authored sections">
                         <Globe size={16} /> Translations
                         {untranslatedSectionLabels.size > 0 && (
@@ -3422,11 +3487,11 @@ const ProjectIMGenerator: React.FC = () => {
                      </button>
                    )}
 
-                   <button onClick={() => { listIMAssets().then(setAssets).catch(() => {}); setShowAssets(true); }} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Upload & insert images from the shared asset library">
+                   <button onClick={() => { listIMAssets().then(setAssets).catch(() => {}); setShowAssets(true); }} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Upload & insert images from the shared asset library">
                       <ImageIcon size={16} /> Assets
                    </button>
 
-                   <button onClick={() => setShowImport(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Replace this manual by importing a reviewed JSON">
+                   <button onClick={() => setShowImport(true)} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Replace this manual by importing a reviewed JSON">
                       <FileJson size={16} /> Import
                    </button>
 
@@ -3473,10 +3538,29 @@ const ProjectIMGenerator: React.FC = () => {
                           <Settings size={16} />
                        </button>
                        {showSettingsMenu && (
-                           <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
+                           <div className="absolute top-full right-0 mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
+                               {instance && (
+                                 locked ? (
+                                   <button
+                                      onClick={() => { setShowSettingsMenu(false); setShowUnlockConfirm(true); }}
+                                      disabled={loading || isBusy}
+                                      className="w-full text-left px-4 py-2 text-sm text-amber-700 hover:bg-amber-50 flex items-center gap-2 disabled:opacity-60"
+                                   >
+                                      <Unlock size={16} /> Unlock to edit
+                                   </button>
+                                 ) : (
+                                   <button
+                                      onClick={() => { setShowSettingsMenu(false); setShowFinalizeConfirm(true); }}
+                                      disabled={loading || isBusy}
+                                      className="w-full text-left px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 flex items-center gap-2 disabled:opacity-60"
+                                   >
+                                      <Lock size={16} /> Mark as final
+                                   </button>
+                                 )
+                               )}
                                <button
                                   onClick={() => { setShowSettingsMenu(false); handleDeleteDraft(); }}
-                                  disabled={loading || isBusy}
+                                  disabled={loading || isBusy || locked}
                                   className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2 disabled:opacity-60"
                                >
                                   {instance ? <Trash2 size={16} /> : <RotateCcw size={16} />}
@@ -3488,9 +3572,22 @@ const ProjectIMGenerator: React.FC = () => {
                </div>
            </div>
 
+           {locked && (
+             <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900">
+               <Lock size={18} className="shrink-0 text-emerald-600" />
+               <div className="text-sm flex-1">
+                 <span className="font-semibold">This {typeLabel.toLowerCase()} is marked FINAL and is locked against changes.</span>{' '}
+                 {instance?.finalizedAt && <>Finalized {new Date(instance.finalizedAt).toLocaleString()}. </>}
+                 To make changes, unlock it first — this prevents accidental edits to a finalized manual. You can still publish and export it.
+               </div>
+               <button onClick={() => setShowUnlockConfirm(true)} disabled={isBusy} className="flex items-center gap-1.5 bg-white border border-emerald-300 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-emerald-100 disabled:opacity-60"><Unlock size={14} /> Unlock to edit</button>
+             </div>
+           )}
+
            <div className="flex flex-1 gap-6 overflow-hidden">
-               {/* LEFT: INPUTS — wider in "Add content" mode to fit the section tree + editor. */}
-               <div className={`${editorMode === 'content' ? 'w-1/2' : 'w-1/3'} bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden transition-all`}>
+               {/* LEFT: INPUTS — wider in "Add content" mode to fit the section tree + editor.
+                   `lockedCls` neutralizes every editing surface when the manual is FINAL. */}
+               <div className={`${editorMode === 'content' ? 'w-1/2' : 'w-1/3'} bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden transition-all ${lockedCls}`}>
                    <div className="bg-light border-b border-gray-200">
                        <div className="p-4 pb-2 font-bold text-gray-700 flex items-center justify-between">
                            <div className="flex items-center gap-2"><Settings size={16} /> Configuration</div>

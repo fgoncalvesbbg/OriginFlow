@@ -160,6 +160,7 @@ export {
   getProjectIM,
   saveProjectIM,
   updateProjectIMPlaceholders,
+  setProjectIMFinalized,
   deleteProjectIM,
   getAllProjectIMs,
   getIMBlocks,

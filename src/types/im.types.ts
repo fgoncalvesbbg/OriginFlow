@@ -127,6 +127,11 @@ export interface ProjectIM {
   placeholderData: Record<string, string>;
   skuContent: Record<string, SKUContentValue>; // slot name → typed SKU content
   status: 'draft' | 'generated';
+  // When true the manual is marked FINAL and locked: the editor is read-only and no
+  // save/translate/import/delete is allowed until it is explicitly unlocked. Mirrors
+  // IMTemplate.isFinalized. Defaults to false for existing/legacy rows.
+  isFinalized?: boolean;
+  finalizedAt?: string | null;
   updatedAt: string;
   // Monotonic publish counter — 0/absent while only ever saved as a draft, then
   // +1 on each publish (status='generated'). Stamped in the generated PDF footer.
