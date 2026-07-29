@@ -90,6 +90,10 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [leafletTextPt, setLeafletTextPt] = useState<number>(DEFAULT_LEAFLET_TEXT_PT);
   const [leafletHeadingPt, setLeafletHeadingPt] = useState<number>(DEFAULT_LEAFLET_HEADING_PT);
 
+  // Required change note for this generation — every new PDF must say what changed. Shown
+  // (per render) in the export history so the render log doubles as a changelog.
+  const [comment, setComment] = useState('');
+
   const [uploading, setUploading] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -142,7 +146,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
   // Generating the SAME version again wastes a credit → require explicit confirmation.
   const needsConfirm = status === 'current' || status === 'unknown';
-  const canGenerate = !!selected.length && !busy && (!needsConfirm || confirmCredit);
+  const hasComment = comment.trim().length > 0;
+  const canGenerate = !!selected.length && hasComment && !busy && (!needsConfirm || confirmCredit);
 
   // Re-evaluate confirmation whenever the selection (and thus the match) changes.
   useEffect(() => {
@@ -182,6 +187,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         languages: selected,
         pageSize,
         version,
+        comment: comment.trim(),
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         ...(isLeaflet ? { leafletTextPt, leafletHeadingPt } : {}),
         cover: {
@@ -204,6 +210,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       setResult(res);
       if (res.render) setRenders((prev) => [res.render as PrintRender, ...prev]);
       setConfirmCredit(false);
+      setComment('');
 
       // Remember the chosen logo/cover as this IM's defaults for next time.
       onCoverPrefs?.(isLeaflet ? { logoUrl } : { logoUrl, coverImageUrl });
@@ -393,6 +400,25 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </>
           )}
 
+          {/* Required change note — captured per generation, shown in the history below. */}
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase">
+              Change note <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={2}
+              placeholder="What changed in this version? (required)"
+              className={`w-full text-sm border rounded px-2 py-1.5 mt-1 resize-y ${
+                hasComment ? '' : 'border-red-300 focus:border-red-400'
+              }`}
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Required. Saved with this PDF and shown in the export history below.
+            </p>
+          </div>
+
           {/* Existing-version / regeneration guard for the current selection */}
           {!loadingHistory && match && (
             <div
@@ -444,13 +470,18 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
               </summary>
               <div className="divide-y border-t max-h-40 overflow-auto">
                 {renders.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between px-3 py-2 text-xs">
-                    <span className="text-gray-600">
-                      <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize?.toUpperCase()}
-                      {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
-                      {r.createdBy && <> · {r.createdBy}</>}
-                    </span>
-                    <a href={r.url} target="_blank" rel="noreferrer" className="px-2 py-1 border rounded hover:bg-gray-50">
+                  <div key={r.id} className="flex items-start justify-between gap-3 px-3 py-2 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-gray-600">
+                        <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize?.toUpperCase()}
+                        {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
+                        {r.createdBy && <> · {r.createdBy}</>}
+                      </span>
+                      {r.comment && (
+                        <p className="text-gray-500 mt-0.5 whitespace-pre-wrap break-words">{r.comment}</p>
+                      )}
+                    </div>
+                    <a href={r.url} target="_blank" rel="noreferrer" className="shrink-0 px-2 py-1 border rounded hover:bg-gray-50">
                       Download
                     </a>
                   </div>
@@ -516,7 +547,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
           <button
             onClick={handleGenerate}
             disabled={!canGenerate}
-            title={!selected.length ? 'Select at least one language' : needsConfirm && !confirmCredit ? 'This selection already exists — confirm to spend a credit' : ''}
+            title={!selected.length ? 'Select at least one language' : !hasComment ? 'Add a change note first' : needsConfirm && !confirmCredit ? 'This selection already exists — confirm to spend a credit' : ''}
             className="text-sm px-4 py-2 bg-primary text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}

@@ -65,6 +65,8 @@ export interface PrintRender {
   bytes: number | null;
   createdBy: string | null;
   createdAt: string;
+  /** Required change note captured when this PDF was generated. '' for legacy rows. */
+  comment: string;
 }
 
 export interface PrintBackInput {
@@ -83,6 +85,8 @@ export interface RequestPrintPdfParams {
   back: PrintBackInput;
   /** Publish version stamped into the footer (optional). */
   version?: number;
+  /** Required change note describing this generation; shown in the export history. */
+  comment: string;
   /** Compact-leaflet typography (points), applied to ALL body text / headings. Leaflets only. */
   leafletTextPt?: number;
   leafletHeadingPt?: number;
@@ -110,6 +114,7 @@ const mapRender = (r: any): PrintRender => ({
   bytes: r.bytes ?? null,
   createdBy: r.created_by ?? null,
   createdAt: r.created_at,
+  comment: r.comment ?? '',
 });
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -240,6 +245,7 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     cover: params.cover,
     back: params.back,
     version: params.version,
+    comment: params.comment,
     leafletTextPt: params.leafletTextPt,
     leafletHeadingPt: params.leafletHeadingPt,
   };

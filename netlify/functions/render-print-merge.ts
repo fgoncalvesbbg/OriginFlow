@@ -42,6 +42,21 @@ const isValidMergeRequest = (b: unknown): b is MergeRequest => {
 
 const MM_TO_PT = 72 / 25.4;
 
+/**
+ * Human-friendly download filename: "SKU - Name - Instruction Manual.pdf".
+ * SKU = the article number(s) on the cover, Name = the cover title. Empty segments are
+ * dropped so a missing SKU/title doesn't leave stray " - " in the name. Characters that
+ * are illegal in filenames are stripped; the browser gets this via the ?download= param.
+ */
+const buildDownloadName = (req: MergeRequest): string => {
+  const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+  const kind = req.templateType === 'warning_leaflet' ? 'Warning Leaflet' : 'Instruction Manual';
+  const sku = (req.cover.skus ?? []).map((s) => s.trim()).filter(Boolean).join(', ');
+  const name = (req.cover.title ?? '').trim();
+  const base = [sku, name, kind].map(sanitize).filter(Boolean).join(' - ');
+  return `${base || kind}.pdf`;
+};
+
 /** Strip diacritics / non-ASCII so the stamped footer is safe for pdf-lib's standard font. */
 const toAscii = (text: string): string =>
   text.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '').trim();
@@ -214,9 +229,12 @@ export const handler = async (event: NetlifyEvent) => {
     });
     if (upErr) throw new Error(`Upload failed (${storagePath}): ${upErr.message}`);
 
+    // Serve the download under a friendly "SKU - Name - Instruction Manual.pdf" name via the
+    // ?download= param (Supabase sets Content-Disposition from it), instead of the opaque
+    // versioned storage key. Stored on the row so history downloads keep the same name.
     const {
       data: { publicUrl },
-    } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+    } = supabase.storage.from(BUCKET).getPublicUrl(storagePath, { download: buildDownloadName(req) });
 
     // Record the render so the app can show history + guard against unchanged duplicates.
     const { data: row, error: insErr } = await supabase
@@ -231,6 +249,7 @@ export const handler = async (event: NetlifyEvent) => {
         url: publicUrl,
         bytes: pdf.byteLength,
         created_by: createdBy,
+        comment: req.comment ?? '',
       })
       .select()
       .single();

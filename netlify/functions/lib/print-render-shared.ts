@@ -42,6 +42,8 @@ export interface RenderRequestBase {
   cover: PrintHtmlOptions['cover'];
   back: PrintHtmlOptions['back'];
   version?: number;
+  /** Required change note describing this generation; stored in im_print_renders.comment. */
+  comment?: string;
   /** Compact-leaflet typography (points), applied to ALL text / headings. Optional. */
   leafletTextPt?: number;
   leafletHeadingPt?: number;
