@@ -3,42 +3,41 @@
  * Manages production updates and ETD tracking
  */
 
-import { portalClient } from '../core/supabase.client';
+import { db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProductionUpdate } from '../../types';
 import { mapProductionUpdate } from '../../utils/mappers.utils';
-import { handleError } from '../../utils/error.utils';
-import { supabase } from '../core/supabase.client';
 
 /**
  * Get all production updates for a specific project
  */
 export const getProductionUpdates = async (projectId: string): Promise<ProductionUpdate[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('production_updates')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: false });
-    if (error) return [];
-    return (data || []).map(mapProductionUpdate);
+    const rows = await orEmpty(
+        db.select<Row>('production_updates', {
+            where: { project_id: projectId },
+            order: { column: 'created_at', ascending: false },
+        }),
+        'getProductionUpdates',
+    );
+    return rows.map(mapProductionUpdate);
 };
 
 /**
  * Production updates across a supplier's projects, for the portal dashboard.
- * Gated by portal token + access code via a SECURITY DEFINER RPC (anon no longer
+ * Gated by portal token + access code via a SECURITY DEFINER routine (anon no longer
  * reads production_updates directly).
  */
 export const getProductionUpdatesForSupplier = async (token: string, code: string): Promise<ProductionUpdate[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.rpc('get_production_updates_by_supplier', {
-        p_supplier_token: token,
-        p_code: code,
-    });
-    if (error) {
-        console.error('getProductionUpdatesForSupplier error:', error);
-        return [];
-    }
-    return (data || []).map(mapProductionUpdate);
+    const rows = await orEmpty(
+        portalDb.rpc<Row[]>('get_production_updates_by_supplier', {
+            p_supplier_token: token,
+            p_code: code,
+        }),
+        'getProductionUpdatesForSupplier',
+    );
+    return (rows || []).map(mapProductionUpdate);
 };
 
 /**
@@ -46,11 +45,11 @@ export const getProductionUpdatesForSupplier = async (token: string, code: strin
  */
 export const getAllProductionUpdates = async (): Promise<ProductionUpdate[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('production_updates')
-        .select('*')
-        .order('created_at', { ascending: true });
-    if (error) return [];
-    return (data || []).map(mapProductionUpdate);
+    const rows = await orEmpty(
+        db.select<Row>('production_updates', { order: { column: 'created_at', ascending: true } }),
+        'getAllProductionUpdates',
+    );
+    return rows.map(mapProductionUpdate);
 };
 
 /**
@@ -58,24 +57,23 @@ export const getAllProductionUpdates = async (): Promise<ProductionUpdate[]> => 
  */
 export const saveProductionUpdate = async (
     update: Partial<ProductionUpdate>,
-    auth?: { token: string; code: string }
+    portalAuth?: { token: string; code: string }
 ): Promise<ProductionUpdate> => {
     if (!update.newEtd) {
         throw new Error("New ETD date is required");
     }
 
-    let data: any;
-    let error: any;
+    let data: Row | Row[] | null;
 
     if (update.isSupplierUpdate) {
-        // Supplier portal (anon): gated by portal token + access code; the RPC
+        // Supplier portal (anon): gated by portal token + access code; the routine
         // validates the project belongs to this supplier before writing.
-        if (!auth?.token || !auth?.code) {
+        if (!portalAuth?.token || !portalAuth?.code) {
             throw new Error("Supplier production updates require portal authorization.");
         }
-        ({ data, error } = await portalClient.rpc('submit_supplier_production_update', {
-            p_supplier_token: auth.token,
-            p_code: auth.code,
+        data = await portalDb.rpc<Row | Row[] | null>('submit_supplier_production_update', {
+            p_supplier_token: portalAuth.token,
+            p_code: portalAuth.code,
             p_project_id: update.projectId,
             p_previous_etd: update.previousEtd || null,
             p_new_etd: update.newEtd,
@@ -83,10 +81,10 @@ export const saveProductionUpdate = async (
             p_delay_reason: update.delayReason || null,
             p_notes: update.notes || null,
             p_updated_by: update.updatedBy,
-        }));
+        });
     } else {
         // PM (authenticated): uses the authenticated session, not the anon client.
-        ({ data, error } = await supabase.rpc('submit_production_update', {
+        data = await db.rpc<Row | Row[] | null>('submit_production_update', {
             p_project_id: update.projectId,
             p_previous_etd: update.previousEtd || null,
             p_new_etd: update.newEtd,
@@ -95,10 +93,8 @@ export const saveProductionUpdate = async (
             p_notes: update.notes || null,
             p_updated_by: update.updatedBy,
             p_is_supplier: false,
-        }));
+        });
     }
-
-    if (error) handleError(error, 'saveProductionUpdate');
 
     let record = data;
     if (Array.isArray(data)) {

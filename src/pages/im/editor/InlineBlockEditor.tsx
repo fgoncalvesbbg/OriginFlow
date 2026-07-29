@@ -12,7 +12,7 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Bold, Italic, Underline, List, ListOrdered, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, type LucideIcon } from 'lucide-react';
+import { Bold, Italic, Underline, List, ListOrdered, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, type LucideIcon } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
@@ -61,14 +61,15 @@ type InlineNode =
   | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string; attrId?: string }
   | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string }
   // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
-  // `width` is the optional CSS width set via the resize control (e.g. "50%").
-  | { type: 'image'; src: string; alt?: string; width?: string };
+  // `width` is the optional CSS width set via the resize control (e.g. "50%");
+  // `align` is the chosen inline/left/right/center placement.
+  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign };
 
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
-  | { id: string; type: 'image'; src: string; alt?: string; width?: string }
+  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign }
   | { id: string; type: 'list'; ordered: boolean; items: InlineNode[][] }
   | { id: string; type: 'table'; rows: InlineNode[][][] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
@@ -84,6 +85,45 @@ interface EditorProps {
 }
 
 const createId = () => Math.random().toString(36).slice(2, 11);
+
+// --- Image sizing + alignment -------------------------------------------------
+// Editor images carry an optional CSS width (from the size control) and an
+// alignment. Alignment is persisted as a `data-align` attribute (the source of
+// truth read back on every parse) AND baked into the inline `style` so it renders
+// identically in the editor, the print PDF, and the viewer. Because the
+// serializers rebuild the <img> style from scratch, anything not captured on the
+// node is lost on round-trip — hence align lives on the node, like width.
+export type ImgAlign = 'inline' | 'left' | 'right' | 'center';
+const IMG_ALIGNS: ImgAlign[] = ['inline', 'left', 'right', 'center'];
+
+/**
+ * Inline style for an editor image. Width caps to the container (max-width:100%).
+ * center → block with auto side-margins; left/right → float so text wraps beside it;
+ * inline → sits within the text run; unset → legacy block with vertical margin.
+ */
+const imgStyleFor = (width?: string, align?: ImgAlign): string => {
+  const w = width ? `width:${width};` : '';
+  const base = `${w}max-width:100%;height:auto;border-radius:0.375rem;`;
+  switch (align) {
+    case 'center': return `${base}display:block;margin:1rem auto;`;
+    case 'left':   return `${base}float:left;margin:0.25rem 1rem 0.5rem 0;`;
+    case 'right':  return `${base}float:right;margin:0.25rem 0 0.5rem 1rem;`;
+    case 'inline': return `${base}display:inline;vertical-align:middle;margin:0 0.35rem;`;
+    default:       return `${base}margin:1rem 0;`;
+  }
+};
+
+/** Full <img> tag with size + alignment (align mirrored to data-align for re-parse). */
+const imgTag = (src: string, alt: string, width?: string, align?: ImgAlign): string => {
+  const alignAttr = align ? ` data-align="${align}"` : '';
+  return `<img src="${src}" alt="${alt}"${alignAttr} style="${imgStyleFor(width, align)}" />`;
+};
+
+/** Read a valid alignment off an <img> element, or undefined. */
+const readImgAlign = (el: Element): ImgAlign | undefined => {
+  const a = el.getAttribute('data-align') as ImgAlign | null;
+  return a && IMG_ALIGNS.includes(a) ? a : undefined;
+};
 
 /** A table cell holding a single plain-text run (used for defaults/fallbacks). */
 const textCell = (text: string): InlineNode[] => [{ type: 'text', text }];
@@ -113,8 +153,12 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Editing surface: 'rich' = structured WYSIWYG, 'html' = raw HTML source.
   const [mode, setMode] = useState<'rich' | 'html'>('rich');
   const [htmlDraft, setHtmlDraft] = useState('');
-  // The image the user last clicked in the editor — target of the resize buttons.
+  // The image the user last clicked in the editor — target of the size/align controls.
   const [imgSelected, setImgSelected] = useState(false);
+  // Mirror of the selected image's current width + alignment, so the toolbar can
+  // highlight the active choice. Kept in sync on selection and on every apply.
+  const [imgWidth, setImgWidth] = useState<string>('');
+  const [imgAlign, setImgAlign] = useState<ImgAlign | undefined>(undefined);
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -175,7 +219,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     try {
       const url = await uploadIMAsset(file, 'blocks');
       // Insert at the cursor (matches placeholder/condition behaviour) instead of appending.
-      insertHtmlAtCursor(`<img src="${url}" alt="${alt}" style="max-width:100%;height:auto;border-radius:0.375rem;margin:1rem 0;" />`);
+      insertHtmlAtCursor(imgTag(url, alt));
     } catch (err: any) {
       console.error('[SimpleRichTextEditor] image upload failed:', err);
       alert(err?.message ?? 'Image upload failed — see console for details.');
@@ -232,7 +276,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       // are silently dropped on the deserialize→serialize round-trip — i.e. they
       // render but never save. `width` carries any resize the user applied.
       if (el.tagName === 'IMG') {
-        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined });
+        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el) });
         return;
       }
 
@@ -263,8 +307,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
 
     if (inline.type === 'image') {
-      const sizing = inline.width ? `width:${inline.width};max-width:100%;` : 'max-width:100%;';
-      return `<img src="${inline.src}" alt="${inline.alt || ''}" style="${sizing}height:auto;border-radius:0.375rem;margin:1rem 0;" />`;
+      return imgTag(inline.src, inline.alt || '', inline.width, inline.align);
     }
 
     let textHtml = inline.text
@@ -312,7 +355,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
       if (el.tagName === 'IMG') {
-        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined });
+        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el) });
         return;
       }
       if (el.tagName === 'UL' || el.tagName === 'OL') {
@@ -351,8 +394,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
       }
       if (block.type === 'image') {
-        const sizing = block.width ? `width:${block.width};max-width:100%;` : 'max-width:100%;';
-        return `<img src="${block.src}" alt="${block.alt || ''}" style="${sizing}height:auto;border-radius:0.375rem;margin:1rem 0;" />`;
+        return imgTag(block.src, block.alt || '', block.width, block.align);
       }
       if (block.type === 'list') {
         const tag = block.ordered ? 'ol' : 'ul';
@@ -415,7 +457,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     try {
       for (const file of files) {
         const url = await uploadIMAsset(file, 'blocks');
-        insertHtmlAtCursor(`<img src="${url}" alt="${file.name}" style="max-width:100%;height:auto;border-radius:0.375rem;margin:1rem 0;" />`);
+        insertHtmlAtCursor(imgTag(url, file.name));
       }
     } catch (err: any) {
       console.error('[SimpleRichTextEditor] pasted/dropped image upload failed:', err);
@@ -484,9 +526,12 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const prev = selectedImgRef.current;
     if (prev && prev !== target) prev.style.outline = '';
     if (target.tagName === 'IMG') {
-      selectedImgRef.current = target as HTMLImageElement;
-      (target as HTMLImageElement).style.outline = '2px solid #6366f1';
+      const img = target as HTMLImageElement;
+      selectedImgRef.current = img;
+      img.style.outline = '2px solid #6366f1';
       setImgSelected(true);
+      setImgWidth(img.style.width || '');
+      setImgAlign(readImgAlign(img));
     } else {
       selectedImgRef.current = null;
       setImgSelected(false);
@@ -494,17 +539,45 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     refreshCaretTable();
   }, [refreshCaretTable]);
 
-  // Resize the selected image. Setting the DOM width then re-parsing persists the
-  // width into blocks (and the emitted HTML) while keeping the live node in place.
-  // `width === ''` clears the override → back to natural size (capped at 100%).
-  const applyImgWidth = useCallback((width: string) => {
+  // Resize / re-align the selected image. Both rebuild the whole inline style (via
+  // imgStyleFor) so a previous float/margin is fully cleared, preserve the OTHER
+  // dimension (align keeps the current width, size keeps the current align), re-add
+  // the selection outline the rebuild wiped, then re-parse so the change persists
+  // into blocks + emitted HTML while the live node stays in place.
+  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign) => {
     const img = selectedImgRef.current;
     const el = contentRef.current;
     if (!img || !el) return;
-    img.style.width = width;
+    if (align) img.setAttribute('data-align', align);
+    img.style.cssText = imgStyleFor(width, align);
+    img.style.outline = '2px solid #6366f1'; // rebuild wiped it — keep the selection visible
     isUserEditingRef.current = true; // keep the DOM node; just sync blocks + emit
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
   }, [deserializeHtmlToBlocks]);
+
+  // `width === ''` clears the override → back to natural size (capped at 100%).
+  const applyImgWidth = useCallback((width: string) => {
+    const img = selectedImgRef.current;
+    if (!img) return;
+    setImgWidth(width);
+    restyleSelectedImg(width || undefined, readImgAlign(img));
+  }, [restyleSelectedImg]);
+
+  const applyImgAlign = useCallback((align: ImgAlign) => {
+    const img = selectedImgRef.current;
+    if (!img) return;
+    setImgAlign(align);
+    restyleSelectedImg(img.style.width || undefined, align);
+  }, [restyleSelectedImg]);
+
+  // Apply the free-typed width. Empty → natural size; a bare number → px; otherwise a
+  // valid CSS length (px/%/rem/em) is accepted, anything else is ignored (no-op).
+  const commitCustomWidth = useCallback(() => {
+    const v = imgWidth.trim();
+    if (v === '') { applyImgWidth(''); return; }
+    const norm = /^\d+(\.\d+)?$/.test(v) ? `${v}px` : v;
+    if (/^\d+(\.\d+)?(px|%|rem|em)$/.test(norm)) applyImgWidth(norm);
+  }, [imgWidth, applyImgWidth]);
 
   // Run a formatting/list execCommand, then re-sync `blocks` from the live DOM.
   // We can't rely on the command's own `input` event to do this: browsers don't
@@ -668,11 +741,45 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         {mode === 'rich' && imgSelected && (
           <>
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Resize the selected image">Image</span>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Size of the selected image">Size</span>
             {['25%', '50%', '75%', '100%'].map((w) => (
-              <button key={w} onMouseDown={(e) => { e.preventDefault(); applyImgWidth(w); }} className="px-1.5 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 rounded">{w}</button>
+              <button
+                key={w}
+                onMouseDown={(e) => { e.preventDefault(); applyImgWidth(w); }}
+                className={`px-1.5 py-1 text-[11px] rounded ${imgWidth === w ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
+              >{w}</button>
             ))}
-            <button onMouseDown={(e) => { e.preventDefault(); applyImgWidth(''); }} className="px-1.5 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 rounded" title="Reset to original size">Auto</button>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); applyImgWidth(''); }}
+              className={`px-1.5 py-1 text-[11px] rounded ${imgWidth === '' ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
+              title="Reset to original size"
+            >Auto</button>
+            {/* Free-typed exact size, e.g. 320px or 60% */}
+            <input
+              value={imgWidth}
+              onChange={(e) => setImgWidth(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitCustomWidth(); } }}
+              onBlur={commitCustomWidth}
+              placeholder="e.g. 320px"
+              className="w-20 px-1.5 py-1 text-[11px] border border-gray-300 rounded"
+              title="Exact width — a number (px) or a CSS length like 60%"
+            />
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Placement of the selected image">Align</span>
+            {([
+              { value: 'inline', Icon: WrapText,    title: 'Inline — sits within the text line' },
+              { value: 'left',   Icon: AlignLeft,   title: 'Left — text wraps to the right' },
+              { value: 'center', Icon: AlignCenter, title: 'Centered on its own line' },
+              { value: 'right',  Icon: AlignRight,  title: 'Right — text wraps to the left' },
+            ] as const).map(({ value, Icon, title }) => (
+              <button
+                key={value}
+                onMouseDown={(e) => { e.preventDefault(); applyImgAlign(value); }}
+                className={`p-1.5 rounded ${imgAlign === value ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}
+                title={title}
+              ><Icon size={16} /></button>
+            ))}
           </>
         )}
         {mode === 'html' && (

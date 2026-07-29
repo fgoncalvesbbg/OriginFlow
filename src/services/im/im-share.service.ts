@@ -5,7 +5,7 @@
  * type) mapping in `im_shares` (see db_migrations/84_create_im_shares.sql).
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { auth, db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import type { IMTemplateType } from '../../types';
 
@@ -35,18 +35,18 @@ export const getIMShares = async (
   templateType: IMTemplateType = 'im',
 ): Promise<IMShare[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('im_shares')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('template_type', templateType)
-    .is('revoked_at', null)
-    .order('created_at', { ascending: false });
-  if (error) {
-    console.error('[getIMShares] error:', error);
-    return [];
-  }
-  return (data || []).map(mapRow);
+  const rows = await orEmpty(
+    db.select<Row>('im_shares', {
+      where: {
+        project_id: projectId,
+        template_type: templateType,
+        revoked_at: { op: 'isNull' },
+      },
+      order: { column: 'created_at', ascending: false },
+    }),
+    '[getIMShares]',
+  );
+  return rows.map(mapRow);
 };
 
 /** Mint a new public share link for a manual. */
@@ -54,37 +54,34 @@ export const createIMShare = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
 ): Promise<IMShare> => {
-  const { data: userData } = await supabase.auth.getUser();
-  const createdBy = userData?.user?.email ?? userData?.user?.id ?? null;
-  const { data, error } = await supabase
-    .from('im_shares')
-    .insert({ project_id: projectId, template_type: templateType, created_by: createdBy })
-    .select()
-    .single();
-  if (error) throw new Error(`Failed to create share link: ${error.message}`);
-  return mapRow(data);
+  const user = await auth.getUser();
+  const createdBy = user?.email ?? user?.id ?? null;
+  const created = await db.insert<Row>('im_shares', {
+    project_id: projectId,
+    template_type: templateType,
+    created_by: createdBy,
+  });
+  return mapRow(created);
 };
 
 /** Revoke a share link — the public URL stops resolving immediately. */
 export const revokeIMShare = async (id: string): Promise<void> => {
-  const { error } = await supabase
-    .from('im_shares')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw new Error(`Failed to revoke share link: ${error.message}`);
+  await db.updateWhere('im_shares', { revoked_at: new Date().toISOString() }, { where: { id } });
 };
 
 /**
  * Resolve a public token to its (project, template type), via the anon-callable
- * `get_im_share_by_token` RPC. Returns null for an unknown or revoked token.
+ * `get_im_share_by_token` routine. Returns null for an unknown or revoked token.
  */
 export const resolveIMShareToken = async (
   token: string,
 ): Promise<{ projectId: string; templateType: IMTemplateType } | null> => {
   if (!isLive) return null;
-  const { data, error } = await portalClient.rpc('get_im_share_by_token', { p_token: token });
-  if (error) {
-    console.error('[resolveIMShareToken] error:', error);
+  let data: Row | Row[] | null;
+  try {
+    data = await portalDb.rpc<Row | Row[] | null>('get_im_share_by_token', { p_token: token });
+  } catch (e) {
+    console.error('[resolveIMShareToken] error:', e);
     return null;
   }
   const row = Array.isArray(data) ? data[0] : data;

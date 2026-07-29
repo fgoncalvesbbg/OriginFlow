@@ -3,27 +3,24 @@
  * Manages RFQ entries and supplier responses
  */
 
-import { portalClient } from '../core/supabase.client';
+import { portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { RFQEntry } from '../../types';
-import { runMutation } from '../core/db';
 
 /**
  * Get all RFQs available for a supplier
  */
 export const getRFQsForSupplier = async (token: string, code: string): Promise<RFQEntry[]> => {
     if (!isLive || !token || !code) return [];
-    const { data, error } = await portalClient.rpc('get_rfqs_for_supplier', {
-        p_supplier_token: token,
-        p_code: code,
-    });
+    const rows = await orEmpty(
+        portalDb.rpc<Row[]>('get_rfqs_for_supplier', {
+            p_supplier_token: token,
+            p_code: code,
+        }),
+        'getRFQsForSupplier',
+    );
 
-    if (error) {
-        console.error('getRFQsForSupplier error:', error);
-        return [];
-    }
-
-    return (data || []).map((e: any) => ({
+    return (rows || []).map((e: any) => ({
       id: e.id,
       rfqId: e.rfq_id,
       supplierId: e.supplier_id,
@@ -47,7 +44,7 @@ export const getRFQsForSupplier = async (token: string, code: string): Promise<R
 
 /**
  * Submit an RFQ entry response from a supplier, authorized by the entry's
- * capability token. The SECURITY DEFINER RPC updates only the matching row, so
+ * capability token. The SECURITY DEFINER routine updates only the matching row, so
  * anon can no longer update arbitrary entries by id.
  */
 export const submitRFQEntry = async (token: string, data: Partial<RFQEntry>): Promise<void> => {
@@ -63,5 +60,5 @@ export const submitRFQEntry = async (token: string, data: Partial<RFQEntry>): Pr
         attribute_responses: data.attributeResponses ?? []
     };
 
-    await runMutation(portalClient.rpc('submit_rfq_entry_secure', { p_token: token, p_payload: payload }), 'submitRFQEntry');
+    await portalDb.rpc('submit_rfq_entry_secure', { p_token: token, p_payload: payload });
 };

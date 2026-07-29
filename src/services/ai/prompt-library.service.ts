@@ -6,10 +6,9 @@
  * and used directly in Claude chat outside the app.
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { PromptLibraryEntry } from '../../types';
-import { runMutation } from '../core/db';
 
 const mapRow = (row: any): PromptLibraryEntry => ({
   id: row.id,
@@ -23,50 +22,41 @@ const mapRow = (row: any): PromptLibraryEntry => ({
 
 export const getPromptLibrary = async (): Promise<PromptLibraryEntry[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase.from('prompt_library').select('*').order('title');
-  if (error) {
-    console.error('[prompt-library] getPromptLibrary failed:', error.message);
-    return [];
-  }
-  return (data || []).map(mapRow);
+  const rows = await orEmpty(
+    db.select<Row>('prompt_library', { order: { column: 'title' } }),
+    '[prompt-library] getPromptLibrary',
+  );
+  return rows.map(mapRow);
 };
 
 export const createPromptLibraryEntry = async (
   entry: { title: string; description?: string; promptText: string },
   createdBy?: string,
 ): Promise<void> => {
-  await runMutation(
-    supabase.from('prompt_library').insert({
-      title: entry.title,
-      description: entry.description || null,
-      prompt_text: entry.promptText,
-      ...(createdBy !== undefined && { created_by: createdBy }),
-    }),
-    'createPromptLibraryEntry',
-  );
+  await db.insertMany('prompt_library', [{
+    title: entry.title,
+    description: entry.description || null,
+    prompt_text: entry.promptText,
+    ...(createdBy !== undefined && { created_by: createdBy }),
+  }]);
 };
 
 export const updatePromptLibraryEntry = async (
   id: string,
   updates: { title?: string; description?: string; promptText?: string },
 ): Promise<void> => {
-  await runMutation(
-    supabase
-      .from('prompt_library')
-      .update({
-        ...(updates.title !== undefined && { title: updates.title }),
-        ...(updates.description !== undefined && { description: updates.description || null }),
-        ...(updates.promptText !== undefined && { prompt_text: updates.promptText }),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id),
-    'updatePromptLibraryEntry',
+  await db.updateWhere(
+    'prompt_library',
+    {
+      ...(updates.title !== undefined && { title: updates.title }),
+      ...(updates.description !== undefined && { description: updates.description || null }),
+      ...(updates.promptText !== undefined && { prompt_text: updates.promptText }),
+      updated_at: new Date().toISOString(),
+    },
+    { where: { id } },
   );
 };
 
 export const deletePromptLibraryEntry = async (id: string): Promise<void> => {
-  await runMutation(
-    supabase.from('prompt_library').delete().eq('id', id),
-    'deletePromptLibraryEntry',
-  );
+  await db.delete('prompt_library', { where: { id } });
 };

@@ -3,32 +3,32 @@
  * Manages instruction manual templates
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, orUndefined, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { IMTemplate, IMTemplateType } from '../../types';
-import { handleError, generateUUID } from '../../utils';
+import { generateUUID } from '../../utils';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
-import { runMutation } from '../core/db';
+
+const mapTemplate = (t: any): IMTemplate => ({
+  id: t.id,
+  categoryId: t.category_id,
+  templateType: (t.template_type ?? 'im') as IMTemplateType,
+  name: t.name,
+  languages: t.languages,
+  isFinalized: t.is_finalized,
+  finalizedAt: t.finalized_at,
+  metadata: normalizeIMTemplateMetadata(t.metadata),
+  updatedAt: t.updated_at,
+  lastUpdatedBy: t.last_updated_by
+});
 
 /**
  * Get all IM templates
  */
 export const getIMTemplates = async (): Promise<IMTemplate[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('im_templates').select('*');
-    if (error) return [];
-    return (data || []).map((t: any) => ({
-      id: t.id,
-      categoryId: t.category_id,
-      templateType: (t.template_type ?? 'im') as IMTemplateType,
-      name: t.name,
-      languages: t.languages,
-      isFinalized: t.is_finalized,
-      finalizedAt: t.finalized_at,
-      metadata: normalizeIMTemplateMetadata(t.metadata),
-      updatedAt: t.updated_at,
-      lastUpdatedBy: t.last_updated_by
-    }));
+    const rows = await orEmpty(db.select<Row>('im_templates'), 'getIMTemplates');
+    return rows.map(mapTemplate);
 };
 
 /**
@@ -36,20 +36,11 @@ export const getIMTemplates = async (): Promise<IMTemplate[]> => {
  */
 export const getIMTemplateById = async (id: string): Promise<IMTemplate | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await supabase.from('im_templates').select('*').eq('id', id).single();
-    if (error || !data) return undefined;
-    return {
-      id: data.id,
-      categoryId: data.category_id,
-      templateType: (data.template_type ?? 'im') as IMTemplateType,
-      name: data.name,
-      languages: data.languages,
-      isFinalized: data.is_finalized,
-      finalizedAt: data.finalized_at,
-      metadata: normalizeIMTemplateMetadata(data.metadata),
-      updatedAt: data.updated_at,
-      lastUpdatedBy: data.last_updated_by
-    };
+    const row = await orUndefined(
+        db.selectMaybeOne<Row>('im_templates', { where: { id } }),
+        'getIMTemplateById',
+    );
+    return row ? mapTemplate(row) : undefined;
 };
 
 /**
@@ -61,25 +52,13 @@ export const getIMTemplateByCategoryId = async (
   templateType: IMTemplateType = 'im',
 ): Promise<IMTemplate | undefined> => {
     if (!categoryId || !isLive) return undefined;
-    const { data, error } = await supabase
-      .from('im_templates')
-      .select('*')
-      .eq('category_id', categoryId)
-      .eq('template_type', templateType)
-      .single();
-    if (error || !data) return undefined;
-    return {
-      id: data.id,
-      categoryId: data.category_id,
-      templateType: (data.template_type ?? 'im') as IMTemplateType,
-      name: data.name,
-      languages: data.languages,
-      isFinalized: data.is_finalized,
-      finalizedAt: data.finalized_at,
-      metadata: normalizeIMTemplateMetadata(data.metadata),
-      updatedAt: data.updated_at,
-      lastUpdatedBy: data.last_updated_by
-    };
+    const row = await orUndefined(
+        db.selectMaybeOne<Row>('im_templates', {
+            where: { category_id: categoryId, template_type: templateType },
+        }),
+        'getIMTemplateByCategoryId',
+    );
+    return row ? mapTemplate(row) : undefined;
 };
 
 /**
@@ -90,7 +69,7 @@ export const createIMTemplate = async (
   name: string,
   templateType: IMTemplateType = 'im',
 ): Promise<IMTemplate> => {
-    const { data, error } = await supabase.from('im_templates').insert({
+    const data = await db.insert<Row>('im_templates', {
         id: generateUUID(),
         category_id: categoryId,
         template_type: templateType,
@@ -98,21 +77,9 @@ export const createIMTemplate = async (
         languages: ['en'],
         is_finalized: false,
         updated_at: new Date().toISOString()
-    }).select().single();
-    if (error) handleError(error, 'createIMTemplate');
+    });
     if (!data) throw new Error('createIMTemplate: no data returned');
-    return {
-      id: data.id,
-      categoryId: data.category_id,
-      templateType: (data.template_type ?? 'im') as IMTemplateType,
-      name: data.name,
-      languages: data.languages,
-      isFinalized: data.is_finalized,
-      finalizedAt: data.finalized_at,
-      metadata: normalizeIMTemplateMetadata(data.metadata),
-      updatedAt: data.updated_at,
-      lastUpdatedBy: data.last_updated_by
-    };
+    return mapTemplate(data);
 };
 
 /** Name of the shared, category-less template that project-based imports bind to. */
@@ -129,28 +96,17 @@ export const BLANK_TEMPLATE_NAME = 'Blank Standardized Template';
 export const getOrCreateBlankTemplate = async (
   templateType: IMTemplateType = 'im',
 ): Promise<IMTemplate> => {
-    const map = (data: any): IMTemplate => ({
-      id: data.id,
-      categoryId: data.category_id,
-      templateType: (data.template_type ?? 'im') as IMTemplateType,
-      name: data.name,
-      languages: data.languages,
-      isFinalized: data.is_finalized,
-      finalizedAt: data.finalized_at,
-      metadata: normalizeIMTemplateMetadata(data.metadata),
-      updatedAt: data.updated_at,
-      lastUpdatedBy: data.last_updated_by,
-    });
+    const existing = await orEmpty(
+        db.select<Row>('im_templates', {
+            // A null scalar in `where` means IS NULL — this is the category-less template.
+            where: { category_id: null, template_type: templateType },
+            limit: 1,
+        }),
+        'getOrCreateBlankTemplate:lookup',
+    );
+    if (existing.length) return mapTemplate(existing[0]);
 
-    const { data: existing } = await supabase
-      .from('im_templates')
-      .select('*')
-      .is('category_id', null)
-      .eq('template_type', templateType)
-      .limit(1);
-    if (existing && existing.length) return map(existing[0]);
-
-    const { data, error } = await supabase.from('im_templates').insert({
+    const data = await db.insert<Row>('im_templates', {
         id: generateUUID(),
         category_id: null,
         template_type: templateType,
@@ -158,17 +114,16 @@ export const getOrCreateBlankTemplate = async (
         languages: ['en'],
         is_finalized: false,
         updated_at: new Date().toISOString(),
-    }).select().single();
-    if (error) handleError(error, 'getOrCreateBlankTemplate');
+    });
     if (!data) throw new Error('getOrCreateBlankTemplate: no data returned');
-    return map(data);
+    return mapTemplate(data);
 };
 
 /**
  * Update IM template information
  */
 export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>): Promise<void> => {
-    const payload: any = {};
+    const payload: Row = {};
     if (updates.name !== undefined) payload.name = updates.name;
     if (updates.metadata !== undefined) payload.metadata = JSON.parse(JSON.stringify(updates.metadata));
     if (updates.languages !== undefined) payload.languages = updates.languages;
@@ -179,7 +134,7 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
 
     payload.updated_at = new Date().toISOString();
 
-    await runMutation(supabase.from('im_templates').update(payload).eq('id', id), 'updateIMTemplate');
+    await db.updateWhere('im_templates', payload, { where: { id } });
 };
 
 /**
@@ -189,12 +144,12 @@ export const updateIMTemplate = async (id: string, updates: Partial<IMTemplate>)
  */
 export const getProjectIMCountForTemplate = async (templateId: string): Promise<number> => {
     if (!templateId || !isLive) return 0;
-    const { count, error } = await supabase
-      .from('project_ims')
-      .select('id', { count: 'exact', head: true })
-      .eq('template_id', templateId);
-    if (error) return 0;
-    return count ?? 0;
+    try {
+        return await db.count('project_ims', { where: { template_id: templateId } });
+    } catch (e) {
+        console.error('getProjectIMCountForTemplate failed', e);
+        return 0;
+    }
 };
 
 /**
@@ -215,7 +170,7 @@ export const deleteIMTemplate = async (
       );
     }
     if (dependents > 0) {
-      await runMutation(supabase.from('project_ims').delete().eq('template_id', id), 'deleteIMTemplate:project_ims');
+      await db.delete('project_ims', { where: { template_id: id } });
     }
-    await runMutation(supabase.from('im_templates').delete().eq('id', id), 'deleteIMTemplate');
+    await db.delete('im_templates', { where: { id } });
 };

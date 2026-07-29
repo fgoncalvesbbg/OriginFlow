@@ -1,23 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Terminal `.upsert()` resolves from a controllable queue and records payloads,
-// so tests can assert exactly what would be written. vi.hoisted so these exist
-// before the hoisted vi.mock factories run.
+// The port's `db.upsert` resolves from a controllable queue and records payloads, so tests
+// can assert exactly what would be written. Mocking the PORT rather than a driver client
+// means these tests describe the service's contract, not PostgREST's builder shape — they
+// stay valid across a backend swap. vi.hoisted so these exist before the mock factory runs.
 const { upsertCalls, upsertQueue, refreshSession } = vi.hoisted(() => ({
   upsertCalls: [] as any[],
   upsertQueue: [] as Array<() => Promise<any>>,
-  refreshSession: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  refreshSession: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('../core/supabase.client', () => {
-  const builder: any = {};
-  builder.from = vi.fn(() => builder);
-  builder.upsert = vi.fn((payload: any) => {
-    upsertCalls.push(payload);
-    const next = upsertQueue.shift();
-    return next ? next() : Promise.resolve({ data: null, error: null });
-  });
-  return { supabase: { ...builder, auth: { refreshSession } } };
+vi.mock('../../data', async () => {
+  const resilience = await import('../../data/resilience');
+  const errors = await import('../../data/ports/errors');
+  return {
+    db: {
+      upsert: vi.fn((_table: string, payload: any) => {
+        upsertCalls.push(payload);
+        const next = upsertQueue.shift();
+        return next ? next() : Promise.resolve();
+      }),
+    },
+    auth: { refreshSession },
+    isPermanent: errors.isPermanent,
+    withDeadline: resilience.withDeadline,
+    orEmpty: resilience.orEmpty,
+  };
 });
 
 vi.mock('../../config/environment.config', () => ({ isLive: true }));
@@ -89,7 +97,7 @@ describe('saveIMSection', () => {
 
   it('retries a timed-out write via the shared pipeline and succeeds', async () => {
     upsertQueue.push(() => Promise.reject(new Error('Request timed out after 12s')));
-    upsertQueue.push(() => Promise.resolve({ data: null, error: null }));
+    upsertQueue.push(() => Promise.resolve());
     const saved = await saveIMSection({ id: 'sec-3', templateId: 'tmpl-1', title: 'T', order: 1, isPlaceholder: false, content: { en: '<p>x</p>' } });
     expect(saved.id).toBe('sec-3');
     expect(upsertCalls).toHaveLength(2);

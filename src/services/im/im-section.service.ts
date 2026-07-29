@@ -3,12 +3,10 @@
  * Manages sections within instruction manual templates
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { BlockRef, IMSection } from '../../types';
 import { generateUUID } from '../../utils';
-import { runMutation } from '../core/db';
-import { withTimeout } from '../core/with-timeout';
 import { saveWithRetry } from '../core/save-retry';
 import { externalizeFormDataImages } from './im-asset.service';
 
@@ -17,9 +15,11 @@ import { externalizeFormDataImages } from './im-asset.service';
  */
 export const getIMSections = async (templateId: string): Promise<IMSection[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('im_sections').select('*').eq('template_id', templateId);
-    if (error) return [];
-    return (data || []).map((s: any) => ({
+    const rows = await orEmpty(
+      db.select<Row>('im_sections', { where: { template_id: templateId } }),
+      'getIMSections',
+    );
+    return rows.map((s: any) => ({
       id: s.id,
       templateId: s.template_id,
       parentId: s.parent_id,
@@ -95,14 +95,17 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
 
     Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
-    // withTimeout must wrap the query BUILDER (not a promise already produced
-    // from it) so it can wire up abortSignal and actually cancel the in-flight
-    // request on timeout — otherwise a retry queues behind its own still-running
-    // first attempt's row lock. The builder is one-shot, so saveWithRetry gets a
-    // factory. No `.select()`: echoing the row back doubled the transfer.
+    // The deadline's signal is forwarded into the port so a timed-out attempt actually
+    // cancels the in-flight request — otherwise a retry queues behind its own still-running
+    // first attempt's row lock. `upsert` (not `upsertReturning`) because echoing the row
+    // back doubled the transfer.
     const payloadBytes = JSON.stringify(payload).length;
     await saveWithRetry(
-      (timeoutMs) => runMutation(withTimeout(supabase.from('im_sections').upsert(payload), timeoutMs), 'saveIMSection'),
+      (timeoutMs) => withDeadline(
+        (signal) => db.upsert('im_sections', payload, { signal }),
+        timeoutMs,
+        'saveIMSection',
+      ),
       { context: 'saveIMSection', payloadBytes },
     );
     return {
@@ -126,5 +129,5 @@ export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSect
  * Delete an IM section
  */
 export const deleteIMSection = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('im_sections').delete().eq('id', id), 'deleteIMSection');
+    await db.delete('im_sections', { where: { id } });
 };

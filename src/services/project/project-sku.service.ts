@@ -2,7 +2,7 @@
  * Project SKU service — CRUD for the SKUs (product variants) attached to a project, including
  * effective attribute-value resolution.
  */
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProjectSku, SkuAttributeValue, ProjectAttributeRequest } from '../../types';
 import { SKU_ATTRIBUTE_ID } from '../../config/compliance.constants';
@@ -28,16 +28,14 @@ const map = mapProjectSku;
 
 export const getProjectSkus = async (projectId: string): Promise<ProjectSku[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('project_skus')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('sort_order', { ascending: true });
-  if (error) {
-    console.error('getProjectSkus error:', error);
-    return [];
-  }
-  return (data || []).map(map);
+  const rows = await orEmpty(
+    db.select<Row>('project_skus', {
+      where: { project_id: projectId },
+      order: { column: 'sort_order', ascending: true },
+    }),
+    'getProjectSkus',
+  );
+  return rows.map(map);
 };
 
 export const createProjectSku = async (
@@ -55,23 +53,14 @@ export const createProjectSku = async (
     throw new Error(`Maximum of ${MAX_SKUS_PER_PROJECT} SKUs per project reached.`);
   }
 
-  const { data, error } = await supabase
-    .from('project_skus')
-    .insert({
-      project_id: projectId,
-      sku_number: skuNumber,
-      sku_title: skuTitle,
-      attribute_values: attributeValues,
-      sort_order: sortOrder ?? existing.length,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('createProjectSku error:', error);
-    throw new Error(error.message || 'Failed to create SKU');
-  }
-  return map(data);
+  const created = await db.insert<Row>('project_skus', {
+    project_id: projectId,
+    sku_number: skuNumber,
+    sku_title: skuTitle,
+    attribute_values: attributeValues,
+    sort_order: sortOrder ?? existing.length,
+  });
+  return map(created);
 };
 
 export const updateProjectSku = async (
@@ -88,30 +77,13 @@ export const updateProjectSku = async (
   if (updates.sortOrder !== undefined) payload.sort_order = updates.sortOrder;
   if (updates.categoryId !== undefined) payload.category_id = updates.categoryId;
 
-  const { data, error } = await supabase
-    .from('project_skus')
-    .update(payload)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('updateProjectSku error:', error);
-    throw new Error(error.message || 'Failed to update SKU');
-  }
-  return map(data);
+  const updated = await db.update<Row>('project_skus', payload, { where: { id } });
+  return map(updated);
 };
 
 export const deleteProjectSku = async (id: string): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { error } = await supabase
-    .from('project_skus')
-    .delete()
-    .eq('id', id);
-  if (error) {
-    console.error('deleteProjectSku error:', error);
-    throw new Error(error.message || 'Failed to delete SKU');
-  }
+  await db.delete('project_skus', { where: { id } });
 };
 
 // ---------------------------------------------------------------------------

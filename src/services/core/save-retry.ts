@@ -7,12 +7,11 @@
  * payload, retries transient failures with backoff and an escalating bound, and
  * fails fast on permanent errors (constraint/validation) where a retry can never
  * succeed. Session refresh stays part of the retry path because a stale token or
- * stuck navigator.locks refresh is still a real cause of stalled writes (see
- * supabase.client.ts).
+ * stuck token refresh is still a real cause of stalled writes (see
+ * data/supabase/client.ts).
  */
 
-import { supabase } from './supabase.client';
-import { withTimeout } from './with-timeout';
+import { auth, isPermanent, withDeadline } from '../../data';
 
 const BASE_TIMEOUT_MS = 12000;
 const MAX_TIMEOUT_MS = 90000;
@@ -31,12 +30,16 @@ const errText = (e: unknown): string =>
   e instanceof Error ? e.message : String((e as any)?.message ?? e);
 
 /**
- * Errors where re-sending the identical request cannot succeed: Postgres
- * constraint/validation failures, PostgREST schema errors, and the finalized-
- * template lock (migration 87 trigger). Auth and network/timeout errors are
- * NOT permanent — they get the retry path.
+ * Errors where re-sending the identical request cannot succeed: constraint/validation
+ * failures, schema errors, and the finalized-template lock (migration 87 trigger). Auth
+ * and network/timeout errors are NOT permanent — they get the retry path.
+ *
+ * Classification is the ADAPTER's job (it alone understands its driver's error codes), so a
+ * `DataAccessError` is trusted directly. The regex remains as a fallback for failures raised
+ * outside the data layer — e.g. a trigger message surfaced by a serverless function.
  */
 const isPermanentError = (e: unknown): boolean =>
+  isPermanent(e) ||
   /duplicate key|violates .*constraint|invalid input|malformed|is finalized|PGRST1\d\d|PGRST2\d\d|22P02|23\d{3}|42\d{3}/i.test(errText(e));
 
 export interface SaveRetryOptions {
@@ -50,10 +53,10 @@ export interface SaveRetryOptions {
 
 /**
  * Run a one-shot write factory with size-aware timeout and differentiated retries.
- * `runWrite` receives the timeout to apply (wrap the query builder in `withTimeout`
- * with it) and must build a FRESH query each call — postgrest builders are one-shot.
- * It must THROW on failure (use runQuery/runMutation so in-band `{ error }` results
- * become throws), otherwise transient server errors would never be retried.
+ * `runWrite` receives the timeout to apply — pass it to `withDeadline` and forward the
+ * signal to the port so a timed-out attempt is actually cancelled rather than left
+ * holding row locks. It must issue a FRESH request each call. Port methods already throw
+ * on failure, which is what lets transient errors reach the retry path.
  */
 export async function saveWithRetry<T>(
   runWrite: (timeoutMs: number) => Promise<T>,
@@ -73,7 +76,7 @@ export async function saveWithRetry<T>(
       // navigator.locks token refresh presents as a timeout/fetch failure, and a
       // bounded refresh is cheap and harmless when auth was fine. Then back off
       // briefly so we don't hammer a struggling connection.
-      await withTimeout(supabase.auth.refreshSession(), 8000).catch(() => {});
+      await withDeadline(() => auth.refreshSession(), 8000, 'refreshSession').catch(() => {});
       await new Promise((r) => setTimeout(r, 400 * 2 ** (attempt - 1) + Math.random() * 200));
     }
     try {

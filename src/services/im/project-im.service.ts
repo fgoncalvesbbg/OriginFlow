@@ -3,13 +3,10 @@
  * Manages instruction manual generation for specific projects
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProjectIM, SKUContentValue, IMTemplateType, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef } from '../../types';
-import { handleError } from '../../utils/error.utils';
-import { withTimeout } from '../core/with-timeout';
 import { saveWithRetry } from '../core/save-retry';
-import { runQuery } from '../core/db';
 
 const mapProjectIMRow = (data: any): ProjectIM => ({
   id: data.id,
@@ -39,15 +36,15 @@ export const getProjectIM = async (
   templateType: IMTemplateType = 'im',
 ): Promise<ProjectIM | null> => {
     if (!isLive) return null;
-    const { data, error } = await supabase
-      .from('project_ims')
-      .select('*')
-      .eq('project_id', projectId)
-      .eq('template_type', templateType)
-      .maybeSingle();
-    if (error) return null;
-    if (!data) return null;
-    return mapProjectIMRow(data);
+    try {
+      const data = await db.selectMaybeOne<Row>('project_ims', {
+        where: { project_id: projectId, template_type: templateType },
+      });
+      return data ? mapProjectIMRow(data) : null;
+    } catch (e) {
+      console.error('[project-im] getProjectIM failed:', e);
+      return null;
+    }
 };
 
 /**
@@ -74,24 +71,19 @@ export const saveProjectIM = async (
   blockOverrides?: Record<string, Record<string, InlineBlockRef>>,
 ): Promise<ProjectIM> => {
     // Bound every network call so a stalled request / stale auth lock can't leave the
-    // caller's "Saving…" state latched forever (see with-timeout.ts). withTimeout must
-    // wrap the query BUILDER (not a promise already produced from it) so it can wire up
-    // abortSignal and cancel the in-flight request on timeout; the builders are one-shot,
-    // so each is wrapped in a factory the retry pipeline can re-invoke.
+    // caller's "Saving…" state latched forever. The deadline's signal is forwarded into
+    // the port so a timed-out attempt cancels the in-flight request rather than leaving
+    // it holding row locks that the retry would then queue behind.
     const existing = await saveWithRetry(
-      (timeoutMs) =>
-        runQuery<{ id: string } | null>(
-          withTimeout(
-            supabase
-              .from('project_ims')
-              .select('id')
-              .eq('project_id', projectId)
-              .eq('template_type', templateType)
-              .maybeSingle(),
-            timeoutMs,
-          ),
-          'saveProjectIM lookup',
-        ),
+      (timeoutMs) => withDeadline(
+        (signal) => db.selectMaybeOne<{ id: string }>('project_ims', {
+          columns: 'id',
+          where: { project_id: projectId, template_type: templateType },
+          signal,
+        }),
+        timeoutMs,
+        'saveProjectIM lookup',
+      ),
       { context: 'saveProjectIM lookup' },
     );
 
@@ -119,16 +111,15 @@ export const saveProjectIM = async (
     // FINAL manual from wrongly clearing the lock in the caller's mapped instance.
     const context = existing ? 'saveProjectIM update' : 'saveProjectIM insert';
     const cols = 'id, version, updated_at, is_finalized, finalized_at';
-    const runWrite = (timeoutMs: number) =>
-        runQuery<{ id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null }>(
-          withTimeout(
-            existing
-              ? supabase.from('project_ims').update(payload).eq('id', existing.id).select(cols).single()
-              : supabase.from('project_ims').insert(payload).select(cols).single(),
-            timeoutMs,
-          ),
-          context,
-        );
+    type EchoedColumns = { id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null };
+
+    const runWrite = (timeoutMs: number) => withDeadline(
+        (signal) => existing
+          ? db.update<EchoedColumns>('project_ims', payload, { where: { id: existing.id }, columns: cols, signal })
+          : db.insert<EchoedColumns>('project_ims', payload, { columns: cols, signal }),
+        timeoutMs,
+        context,
+    );
 
     const data = await saveWithRetry(runWrite, { context, payloadBytes: JSON.stringify(payload).length });
     return mapProjectIMRow({ ...payload, ...data });
@@ -147,22 +138,21 @@ export const updateProjectIMPlaceholders = async (
   patch: Record<string, string>,
 ): Promise<void> => {
   if (!isLive || !Object.keys(patch).length) return;
-  const { data, error } = await supabase
-    .from('project_ims')
-    .select('id, placeholder_data')
-    .eq('project_id', projectId)
-    .eq('template_type', templateType)
-    .maybeSingle();
-  if (error || !data) {
-    if (error) console.error('[project-im] updateProjectIMPlaceholders lookup failed:', error.message);
-    return;
+  try {
+    const data = await db.selectMaybeOne<Row>('project_ims', {
+      columns: 'id, placeholder_data',
+      where: { project_id: projectId, template_type: templateType },
+    });
+    if (!data) return;
+    const merged = { ...(data.placeholder_data ?? {}), ...patch };
+    await db.updateWhere(
+      'project_ims',
+      { placeholder_data: merged, updated_at: new Date().toISOString() },
+      { where: { id: data.id } },
+    );
+  } catch (e) {
+    console.error('[project-im] updateProjectIMPlaceholders failed:', e);
   }
-  const merged = { ...(data.placeholder_data ?? {}), ...patch };
-  const { error: upErr } = await supabase
-    .from('project_ims')
-    .update({ placeholder_data: merged, updated_at: new Date().toISOString() })
-    .eq('id', data.id);
-  if (upErr) console.error('[project-im] updateProjectIMPlaceholders failed:', upErr.message);
 };
 
 /**
@@ -178,12 +168,11 @@ export const setProjectIMFinalized = async (
 ): Promise<{ isFinalized: boolean; finalizedAt: string | null; updatedAt: string }> => {
   const finalizedAt = isFinalized ? new Date().toISOString() : null;
   const updatedAt = new Date().toISOString();
-  const { error } = await supabase
-    .from('project_ims')
-    .update({ is_finalized: isFinalized, finalized_at: finalizedAt, updated_at: updatedAt })
-    .eq('project_id', projectId)
-    .eq('template_type', templateType);
-  if (error) handleError(error, 'setProjectIMFinalized');
+  await db.updateWhere(
+    'project_ims',
+    { is_finalized: isFinalized, finalized_at: finalizedAt, updated_at: updatedAt },
+    { where: { project_id: projectId, template_type: templateType } },
+  );
   return { isFinalized, finalizedAt, updatedAt };
 };
 
@@ -194,12 +183,7 @@ export const deleteProjectIM = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
 ): Promise<void> => {
-    const { error } = await supabase
-      .from('project_ims')
-      .delete()
-      .eq('project_id', projectId)
-      .eq('template_type', templateType);
-    if (error) handleError(error, 'deleteProjectIM');
+    await db.delete('project_ims', { where: { project_id: projectId, template_type: templateType } });
 };
 
 /**
@@ -208,12 +192,11 @@ export const deleteProjectIM = async (
  */
 export const getGeneratedProjectIMs = async (): Promise<Array<{ projectId: string; im: ProjectIM }>> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('project_ims')
-    .select('*')
-    .eq('status', 'generated');
-  if (error || !data) return [];
-  return data.map((row: any) => ({ projectId: row.project_id, im: mapProjectIMRow(row) }));
+  const rows = await orEmpty(
+    db.select<Row>('project_ims', { where: { status: 'generated' } }),
+    'getGeneratedProjectIMs',
+  );
+  return rows.map((row: any) => ({ projectId: row.project_id, im: mapProjectIMRow(row) }));
 };
 
 // ---------------------------------------------------------------------------
@@ -240,9 +223,10 @@ export interface ProjectIMSummary {
  */
 export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('project_ims')
-    .select(`
+  const rows = await orEmpty(
+    db.select<Row>('project_ims', {
+      // Two server-side joins — see data/PORTING.md for the SQL equivalent.
+      columns: `
       id,
       project_id,
       template_id,
@@ -252,22 +236,23 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       bound_sku_ids,
       project:projects ( id, name, category_id, project_id_code ),
       template:im_templates ( name )
-    `)
-    .order('updated_at', { ascending: false });
-
-  if (error) {
-    console.error('[getAllProjectIMs] error:', error);
-    return [];
-  }
+    `,
+      order: { column: 'updated_at', ascending: false },
+    }),
+    '[getAllProjectIMs]',
+  );
 
   // Project SKUs (a project can have several), in display order, indexed by id and project.
   const skusByProject = new Map<string, string[]>();
   const skuNumberById = new Map<string, string>();
-  const { data: skuRows } = await supabase
-    .from('project_skus')
-    .select('id, project_id, sku_number, sort_order')
-    .order('sort_order', { ascending: true });
-  for (const r of skuRows ?? []) {
+  const skuRows = await orEmpty(
+    db.select<Row>('project_skus', {
+      columns: 'id, project_id, sku_number, sort_order',
+      order: { column: 'sort_order', ascending: true },
+    }),
+    '[getAllProjectIMs] skus',
+  );
+  for (const r of skuRows) {
     const num = (r.sku_number ?? '').trim();
     if (!num) continue;
     skuNumberById.set(r.id, num);
@@ -276,7 +261,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
     skusByProject.set(r.project_id, arr);
   }
 
-  return (data || []).map((row: any) => {
+  return rows.map((row: any) => {
     const projectId = row.project?.id ?? row.project_id;
     // The IM's bound SKUs (numbers); empty/legacy binding falls back to all project SKUs.
     const boundIds: string[] = row.bound_sku_ids ?? [];

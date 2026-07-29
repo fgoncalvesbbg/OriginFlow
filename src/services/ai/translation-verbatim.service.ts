@@ -9,10 +9,9 @@
  * add entries as they find phrases worth protecting.
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { TranslationVerbatim } from '../../types';
-import { runMutation } from '../core/db';
 
 const mapRow = (row: any): TranslationVerbatim => ({
   id: row.id,
@@ -26,50 +25,41 @@ const mapRow = (row: any): TranslationVerbatim => ({
 
 export const getTranslationVerbatims = async (): Promise<TranslationVerbatim[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase.from('translation_verbatims').select('*').order('phrase');
-  if (error) {
-    console.error('[translation-verbatim] getTranslationVerbatims failed:', error.message);
-    return [];
-  }
-  return (data || []).map(mapRow);
+  const rows = await orEmpty(
+    db.select<Row>('translation_verbatims', { order: { column: 'phrase' } }),
+    '[translation-verbatim] getTranslationVerbatims',
+  );
+  return rows.map(mapRow);
 };
 
 export const createTranslationVerbatim = async (
   entry: { phrase: string; note?: string; translations?: Record<string, string> },
   createdBy?: string,
 ): Promise<void> => {
-  await runMutation(
-    supabase.from('translation_verbatims').insert({
-      phrase: entry.phrase,
-      note: entry.note || null,
-      translations: entry.translations ?? {},
-      ...(createdBy !== undefined && { created_by: createdBy }),
-    }),
-    'createTranslationVerbatim',
-  );
+  await db.insertMany('translation_verbatims', [{
+    phrase: entry.phrase,
+    note: entry.note || null,
+    translations: entry.translations ?? {},
+    ...(createdBy !== undefined && { created_by: createdBy }),
+  }]);
 };
 
 export const updateTranslationVerbatim = async (
   id: string,
   updates: { phrase?: string; note?: string; translations?: Record<string, string> },
 ): Promise<void> => {
-  await runMutation(
-    supabase
-      .from('translation_verbatims')
-      .update({
-        ...(updates.phrase !== undefined && { phrase: updates.phrase }),
-        ...(updates.note !== undefined && { note: updates.note || null }),
-        ...(updates.translations !== undefined && { translations: updates.translations }),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id),
-    'updateTranslationVerbatim',
+  await db.updateWhere(
+    'translation_verbatims',
+    {
+      ...(updates.phrase !== undefined && { phrase: updates.phrase }),
+      ...(updates.note !== undefined && { note: updates.note || null }),
+      ...(updates.translations !== undefined && { translations: updates.translations }),
+      updated_at: new Date().toISOString(),
+    },
+    { where: { id } },
   );
 };
 
 export const deleteTranslationVerbatim = async (id: string): Promise<void> => {
-  await runMutation(
-    supabase.from('translation_verbatims').delete().eq('id', id),
-    'deleteTranslationVerbatim',
-  );
+  await db.delete('translation_verbatims', { where: { id } });
 };

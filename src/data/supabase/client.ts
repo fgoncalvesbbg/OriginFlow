@@ -1,6 +1,13 @@
 /**
- * Supabase client setup. Exports `supabase` (authenticated app client) and `portalClient`
- * (separate client for unauthenticated supplier-portal access). Configured from environment.config.
+ * Supabase client setup — ADAPTER-INTERNAL.
+ *
+ * Nothing outside `src/data/` may import this. Application code talks to the ports
+ * (`db`, `portalDb`, `auth`, `storage` from `src/data`), which is what makes swapping the
+ * backend a matter of writing a sibling adapter rather than editing the whole service layer.
+ *
+ * Exports `supabaseClient` (authenticated app client) and `supabasePortalClient`
+ * (separate client for unauthenticated supplier-portal access). Configured from
+ * environment.config.
  */
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG, isLive } from '../../config/environment.config';
@@ -13,7 +20,7 @@ const FALLBACK_SUPABASE_ANON_KEY = 'public-anon-key';
  * lock. The default acquires the Web Lock with no timeout, so a lock held by
  * another tab — or left stale by a dev-server (HMR) reload mid token-refresh —
  * blocks every subsequent token-bearing request indefinitely. That manifests as
- * reads/writes hanging until our 12s withTimeout fires (e.g. saveIMBlock).
+ * reads/writes hanging until our 12s withDeadline fires (e.g. saveIMBlock).
  *
  * Here we still take the lock for normal cross-tab refresh coordination, but if
  * it can't be acquired within ACQUIRE_TIMEOUT_MS we proceed WITHOUT it rather
@@ -47,13 +54,13 @@ const timeoutLock = async <R>(
  * backgrounded long enough for the access token to expire, the keep-alive socket
  * is often silently dropped. On return, supabase-js's internal token refresh (and
  * any getSession/read that waits on it) can stay pending indefinitely — the OS
- * never delivers an error for the dead socket. Neither `withTimeout` (only wraps
+ * never delivers an error for the dead socket. Neither `withDeadline` (only wraps
  * explicit call sites) nor `timeoutLock` (only bounds lock acquisition) covers
  * that internal refresh fetch. Bounding fetch itself does.
  *
  * This is deliberately generous (100s) — LONGER than save-retry's MAX_TIMEOUT_MS
  * (90s) — so it never aborts a legitimately slow large upload; the per-call
- * `withTimeout` bounds (12-90s) always fire first for those. It exists purely to
+ * `withDeadline` bounds (12-90s) always fire first for those. It exists purely to
  * convert an infinite hang into a normal fetch error the app can recover from.
  * The connection-recovery layer (ConnectionContext) surfaces failures to the user
  * much faster (~8s) via its own short-bounded probe.
@@ -83,7 +90,7 @@ const fetchWithTimeout: typeof fetch = (input, init) => {
  * Standard Supabase client for authenticated requests
  * Credentials are loaded from environment variables only
  */
-export const supabase = createClient(
+export const supabaseClient = createClient(
   isLive ? APP_CONFIG.supabaseUrl : FALLBACK_SUPABASE_URL,
   isLive ? APP_CONFIG.supabaseAnonKey : FALLBACK_SUPABASE_ANON_KEY,
   {
@@ -102,7 +109,7 @@ export const supabase = createClient(
  * Portal client for non-authenticated public routes (suppliers, external users)
  * Uses separate session storage to avoid conflicts with authenticated session
  */
-export const portalClient = createClient(
+export const supabasePortalClient = createClient(
   isLive ? APP_CONFIG.supabaseUrl : FALLBACK_SUPABASE_URL,
   isLive ? APP_CONFIG.supabaseAnonKey : FALLBACK_SUPABASE_ANON_KEY,
   {

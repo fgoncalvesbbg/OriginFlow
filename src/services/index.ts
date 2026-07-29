@@ -3,8 +3,8 @@
  * Central export point for all application services
  */
 
-// Core infrastructure
-export { supabase, portalClient } from './core/supabase.client';
+// Core infrastructure. Data access itself is NOT re-exported here — application code
+// reaches a backend only through the ports in `src/data`, never through a driver client.
 export { isLive } from '../config/environment.config';
 
 // Storage module

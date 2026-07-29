@@ -561,12 +561,12 @@ const IMTemplateEditor: React.FC = () => {
     if (template?.isFinalized) return; // locked — unlock (pre-release) first
     // Guard against a manual Save racing an in-flight autosave or translation: concurrent
     // upserts of the same section rows queue behind each other's row lock instead of failing
-    // fast (see with-timeout.ts).
+    // fast (see data/resilience.ts).
     if (saving || translating) return;
     if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
     const dirty = getDirtySections();
     if (dirty.length === 0) { setLastSaved(new Date()); return; }
-    // The write itself is bounded (withTimeout + refresh-and-retry in saveIMSection), so it
+    // The write itself is bounded (withDeadline + refresh-and-retry in saveIMSection), so it
     // can't hang; on failure the local draft still holds the work and the user can retry.
     setBlockingSave(true);
     try {
@@ -622,7 +622,7 @@ const IMTemplateEditor: React.FC = () => {
     // autosave simply resumes once the operation finishes.
     if (saving || translating || dirty.length === 0) return;
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    // persistSections → saveIMSection is bounded (withTimeout + refresh-and-retry), so a stalled
+    // persistSections → saveIMSection is bounded (withDeadline + refresh-and-retry), so a stalled
     // network can't wedge autosave; a failed tick leaves the sections dirty and the local draft
     // intact. Consecutive failures back off exponentially (2.5s → 5s → … → 5min cap) so an
     // outage isn't hammered in a tight save loop; a success or manual Save All resets the delay.

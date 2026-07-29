@@ -9,7 +9,7 @@
  * See db_migrations/54_create_im_published_bucket.sql.
  */
 
-import { supabase } from '../core/supabase.client';
+import { auth, db, storage } from '../../data';
 import { isLive } from '../../config/environment.config';
 import {
   IMTemplate,
@@ -167,21 +167,21 @@ export const getPublishedManifestUrl = (
 ): string | null => {
   if (!isLive) return null;
   const path = `${projectId}/${templateType}/manifest.json`;
-  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return storage.publicUrl(BUCKET, path);
 };
 
 /** Upsert a JSON string to a deterministic path in the public bucket; return its public URL. */
 const uploadJson = async (path: string, json: string): Promise<string> => {
-  const { error } = await supabase.storage.from(BUCKET).upload(path, json, {
-    upsert: true,
-    contentType: 'application/json',
-    cacheControl: '0',
-  });
-  if (error) throw new Error(`Publish upload failed (${path}): ${error.message}`);
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return publicUrl;
+  try {
+    await storage.upload(BUCKET, path, json, {
+      upsert: true,
+      contentType: 'application/json',
+      cacheControl: '0',
+    });
+  } catch (e) {
+    throw new Error(`Publish upload failed (${path}): ${(e as Error).message}`);
+  }
+  return storage.publicUrl(BUCKET, path);
 };
 
 /**
@@ -225,8 +225,8 @@ export const publishResolvedManuals = async (
   // Attribute definitions for data-type-aware section-condition matching (fetched once).
   const attributesById = await getAttributesById();
 
-  const { data: userData } = await supabase.auth.getUser();
-  const publishedBy = userData?.user?.email ?? userData?.user?.id ?? null;
+  const user = await auth.getUser();
+  const publishedBy = user?.email ?? user?.id ?? null;
 
   const published: PublishedLanguage[] = [];
 
@@ -237,16 +237,21 @@ export const publishResolvedManuals = async (
     const storagePath = `${projectId}/${templateType}/${language}.json`;
     const url = await uploadJson(storagePath, json);
 
-    const { error } = await supabase.from('im_publish_snapshots').insert({
-      project_id: projectId,
-      language,
-      resolved,
-      content_hash: contentHash,
-      storage_path: storagePath,
-      template_type: templateType,
-      published_by: publishedBy,
-    });
-    if (error) console.error(TAG, `snapshot insert failed (${language}):`, error);
+    // Best-effort: the manual JSON is already uploaded, so a failed snapshot row
+    // costs staleness detection accuracy, not the publish itself.
+    try {
+      await db.insertMany('im_publish_snapshots', [{
+        project_id: projectId,
+        language,
+        resolved,
+        content_hash: contentHash,
+        storage_path: storagePath,
+        template_type: templateType,
+        published_by: publishedBy,
+      }]);
+    } catch (e) {
+      console.error(TAG, `snapshot insert failed (${language}):`, e);
+    }
 
     published.push({ language, url, storagePath, contentHash, warnings: resolved.warnings });
   }

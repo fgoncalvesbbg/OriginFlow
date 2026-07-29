@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { refreshSession } = vi.hoisted(() => ({
-  refreshSession: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+  refreshSession: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('./supabase.client', () => ({ supabase: { auth: { refreshSession } } }));
+// Mocking the PORT rather than a driver client: the retry pipeline only depends on the
+// auth contract, so this seam survives a backend swap.
+vi.mock('../../data', async () => {
+  const resilience = await import('../../data/resilience');
+  const errors = await import('../../data/ports/errors');
+  return { auth: { refreshSession }, isPermanent: errors.isPermanent, withDeadline: resilience.withDeadline };
+});
 
 import { saveWithRetry, timeoutForPayload, mapWithConcurrency } from './save-retry';
 

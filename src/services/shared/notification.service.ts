@@ -3,26 +3,29 @@
  * Manages notifications for users and suppliers
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { Notification } from '../../types';
-import { runMutation } from '../core/db';
+
+const mapNotification = (n: any): Notification => ({
+    id: n.id,
+    userId: n.user_id,
+    message: n.message,
+    link: n.link,
+    isRead: n.is_read,
+    createdAt: n.created_at
+});
 
 /**
  * Get all notifications for the current user
  */
 export const getNotifications = async (): Promise<Notification[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false });
-    if (error) return [];
-    return (data || []).map((n: any) => ({
-        id: n.id,
-        userId: n.user_id,
-        message: n.message,
-        link: n.link,
-        isRead: n.is_read,
-        createdAt: n.created_at
-    }));
+    const rows = await orEmpty(
+        db.select<Row>('notifications', { order: { column: 'created_at', ascending: false } }),
+        'getNotifications',
+    );
+    return rows.map(mapNotification);
 };
 
 /**
@@ -30,31 +33,18 @@ export const getNotifications = async (): Promise<Notification[]> => {
  */
 export const getSupplierNotifications = async (supplierId: string): Promise<Notification[]> => {
     if (!isLive || !supplierId) return [];
-    try {
-        const { data, error } = await portalClient.from('notifications').select('*').eq('supplier_id', supplierId);
-        if (error) {
-            console.warn('Failed to fetch notifications:', error.message);
-            return [];
-        }
-        return (data || []).map((n: any) => ({
-            id: n.id,
-            userId: n.user_id,
-            message: n.message,
-            link: n.link,
-            isRead: n.is_read,
-            createdAt: n.created_at
-        }));
-    } catch (err: any) {
-        console.warn('Notifications service error:', err.message);
-        return [];
-    }
+    const rows = await orEmpty(
+        portalDb.select<Row>('notifications', { where: { supplier_id: supplierId } }),
+        'getSupplierNotifications',
+    );
+    return rows.map(mapNotification);
 };
 
 /**
  * Mark a notification as read
  */
 export const markNotificationRead = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('notifications').update({ is_read: true }).eq('id', id), 'markNotificationRead');
+    await db.updateWhere('notifications', { is_read: true }, { where: { id } });
 };
 
 /**
@@ -68,41 +58,33 @@ export const upsertSupplierNotification = async (payload: {
 }): Promise<void> => {
     if (!isLive || !payload.supplierId || !payload.message || !payload.link) return;
 
-    const { data: existing, error: findError } = await supabase
-        .from('notifications')
-        .select('id')
-        .eq('supplier_id', payload.supplierId)
-        .eq('link', payload.link)
-        .limit(1)
-        .maybeSingle();
+    // Best-effort throughout: a failed reminder must never surface to the user.
+    try {
+        const existing = await db.selectMaybeOne<Row>('notifications', {
+            columns: 'id',
+            where: { supplier_id: payload.supplierId, link: payload.link },
+            limit: 1,
+        });
 
-    if (findError) {
-        console.warn('Failed to query existing supplier notification:', findError.message);
-        return;
+        if (existing?.id) {
+            await db.updateWhere(
+                'notifications',
+                { message: payload.message, is_read: false },
+                { where: { id: existing.id } },
+            );
+            return;
+        }
+
+        await db.insertMany('notifications', [{
+            supplier_id: payload.supplierId,
+            message: payload.message,
+            link: payload.link,
+            is_read: false,
+            created_at: new Date().toISOString()
+        }]);
+    } catch (e) {
+        console.warn('Failed to upsert supplier notification:', e);
     }
-
-    if (existing?.id) {
-        const { error: updateError } = await supabase
-            .from('notifications')
-            .update({
-                message: payload.message,
-                is_read: false
-            })
-            .eq('id', existing.id);
-
-        if (updateError) console.warn('Failed to update supplier notification:', updateError.message);
-        return;
-    }
-
-    const { error: insertError } = await supabase.from('notifications').insert({
-        supplier_id: payload.supplierId,
-        message: payload.message,
-        link: payload.link,
-        is_read: false,
-        created_at: new Date().toISOString()
-    });
-
-    if (insertError) console.warn('Failed to create supplier notification:', insertError.message);
 };
 
 /**

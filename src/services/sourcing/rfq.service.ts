@@ -3,21 +3,51 @@
  * Manages Request for Quote functionality
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { db, portalDb, orEmpty, orUndefined, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { RFQ, RFQEntry, RFQStatus, RFQEntryStatus, RFQAttributeValue, RFQAttachment } from '../../types';
 import { mapRFQ } from '../../utils/mappers.utils';
-import { handleError, generateUUID } from '../../utils';
-import { runMutation } from '../core/db';
+import { generateUUID } from '../../utils';
+
+/** Server-side joins — see data/PORTING.md for the SQL a non-PostgREST adapter must generate. */
+const RFQ_COLUMNS = '*, category_l3:categories_l3(name)';
+const ENTRY_COLUMNS = '*, supplier:suppliers(name)';
+
+const mapEntry = (e: any): RFQEntry => ({
+  id: e.id,
+  rfqId: e.rfq_id,
+  supplierId: e.supplier_id,
+  token: e.token,
+  status: e.status,
+  unitPrice: e.unit_price,
+  moq: e.moq,
+  leadTimeWeeks: e.lead_time_weeks,
+  toolingCost: e.tooling_cost,
+  currency: e.currency,
+  supplierNotes: e.supplier_notes,
+  quoteFileUrl: e.quote_file_url,
+  attachments: e.attachments ?? [],
+  submittedAt: e.submitted_at,
+  createdAt: e.created_at,
+  supplierName: e.supplier?.name,
+  rfqTitle: e.rfqs?.title,
+  rfqIdentifier: e.rfqs?.rfq_id,
+  attributeResponses: e.attribute_responses ?? []
+});
 
 /**
  * Get all RFQs
  */
 export const getRFQs = async (): Promise<RFQ[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('rfqs').select('*, category_l3:categories_l3(name)').order('created_at', { ascending: false });
-    if (error) return [];
-    return (data || []).map(mapRFQ);
+    const rows = await orEmpty(
+        db.select<Row>('rfqs', {
+            columns: RFQ_COLUMNS,
+            order: { column: 'created_at', ascending: false },
+        }),
+        'getRFQs',
+    );
+    return rows.map(mapRFQ);
 };
 
 /**
@@ -25,34 +55,18 @@ export const getRFQs = async (): Promise<RFQ[]> => {
  */
 export const getRFQById = async (id: string): Promise<RFQ | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await supabase.from('rfqs').select('*, category_l3:categories_l3(name)').eq('id', id).single();
-    if (error) return undefined;
+    const row = await orUndefined(
+        db.selectMaybeOne<Row>('rfqs', { columns: RFQ_COLUMNS, where: { id } }),
+        'getRFQById',
+    );
+    if (!row) return undefined;
 
-    const rfq = mapRFQ(data);
-    const { data: entries } = await supabase.from('rfq_entries').select('*, supplier:suppliers(name)').eq('rfq_id', id);
-    if (entries) {
-        rfq.entries = entries.map((e: any) => ({
-          id: e.id,
-          rfqId: e.rfq_id,
-          supplierId: e.supplier_id,
-          token: e.token,
-          status: e.status,
-          unitPrice: e.unit_price,
-          moq: e.moq,
-          leadTimeWeeks: e.lead_time_weeks,
-          toolingCost: e.tooling_cost,
-          currency: e.currency,
-          supplierNotes: e.supplier_notes,
-          quoteFileUrl: e.quote_file_url,
-          attachments: e.attachments ?? [],
-          submittedAt: e.submitted_at,
-          createdAt: e.created_at,
-          supplierName: e.supplier?.name,
-          rfqTitle: e.rfqs?.title,
-          rfqIdentifier: e.rfqs?.rfq_id,
-          attributeResponses: e.attribute_responses ?? []
-        }));
-    }
+    const rfq = mapRFQ(row);
+    const entries = await orEmpty(
+        db.select<Row>('rfq_entries', { columns: ENTRY_COLUMNS, where: { rfq_id: id } }),
+        'getRFQById:entries',
+    );
+    rfq.entries = entries.map(mapEntry);
     return rfq;
 };
 
@@ -61,36 +75,22 @@ export const getRFQById = async (id: string): Promise<RFQ | undefined> => {
  */
 export const getRFQEntryByToken = async (token: string): Promise<{ rfq: RFQ, entry: RFQEntry } | undefined> => {
     if (!isLive) return undefined;
-    const { data: entryRows, error } = await portalClient.rpc('get_rfq_entry_by_token', { p_token: token });
+    const entryRows = await orUndefined(
+        portalDb.rpc<Row | Row[] | null>('get_rfq_entry_by_token', { p_token: token }),
+        'getRFQEntryByToken',
+    );
     const entryData = Array.isArray(entryRows) ? entryRows[0] : entryRows;
-    if (error || !entryData) {
-        console.error("getRFQEntryByToken: Entry not found or error", error);
+    if (!entryData) {
+        console.error("getRFQEntryByToken: Entry not found");
         return undefined;
     }
 
-    const entry: RFQEntry = {
-      id: entryData.id,
-      rfqId: entryData.rfq_id,
-      supplierId: entryData.supplier_id,
-      token: entryData.token,
-      status: entryData.status,
-      unitPrice: entryData.unit_price,
-      moq: entryData.moq,
-      leadTimeWeeks: entryData.lead_time_weeks,
-      toolingCost: entryData.tooling_cost,
-      currency: entryData.currency,
-      supplierNotes: entryData.supplier_notes,
-      quoteFileUrl: entryData.quote_file_url,
-      attachments: entryData.attachments ?? [],
-      submittedAt: entryData.submitted_at,
-      createdAt: entryData.created_at,
-      supplierName: entryData.supplier?.name,
-      rfqTitle: entryData.rfqs?.title,
-      rfqIdentifier: entryData.rfqs?.rfq_id,
-      attributeResponses: entryData.attribute_responses ?? []
-    };
+    const entry = mapEntry(entryData);
 
-    const { data: rfqRows } = await portalClient.rpc('get_rfq_by_entry_token', { p_token: token });
+    const rfqRows = await orUndefined(
+        portalDb.rpc<Row | Row[] | null>('get_rfq_by_entry_token', { p_token: token }),
+        'getRFQEntryByToken:rfq',
+    );
     const rfqData = Array.isArray(rfqRows) ? rfqRows[0] : rfqRows;
 
     if (!rfqData) return undefined;
@@ -112,7 +112,7 @@ export const createRFQ = async (
     thumbnailUrl?: string,
     attachments?: RFQAttachment[]
 ): Promise<RFQ> => {
-    const { data: rfqData, error } = await supabase.from('rfqs').insert({
+    const rfqData = await db.insert<Row>('rfqs', {
         title,
         rfq_id: rfqId,
         description,
@@ -123,9 +123,7 @@ export const createRFQ = async (
         attachments: attachments,
         status: RFQStatus.OPEN,
         created_at: new Date().toISOString()
-    }).select().single();
-
-    if (error) handleError(error, 'createRFQ');
+    });
 
     const newRFQ = mapRFQ(rfqData);
 
@@ -138,8 +136,13 @@ export const createRFQ = async (
             created_at: new Date().toISOString()
         }));
 
-        const { error: entriesError } = await supabase.from('rfq_entries').insert(entriesPayload);
-        if (entriesError) console.error("Failed to create RFQ entries", entriesError);
+        // Best-effort: the RFQ itself is already created, so a failure here is logged
+        // rather than rolled back (matching the previous behaviour).
+        try {
+            await db.insertMany('rfq_entries', entriesPayload);
+        } catch (e) {
+            console.error("Failed to create RFQ entries", e);
+        }
     }
 
     return newRFQ;
@@ -149,16 +152,13 @@ export const createRFQ = async (
  * Delete an RFQ
  */
 export const deleteRFQ = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('rfqs').delete().eq('id', id), 'deleteRFQ');
+    await db.delete('rfqs', { where: { id } });
 };
 
 /**
  * Award an RFQ to a specific supplier entry
  */
 export const awardRFQ = async (rfqId: string, entryId: string): Promise<void> => {
-    const { error: entryError } = await supabase.from('rfq_entries').update({ status: RFQEntryStatus.AWARDED }).eq('id', entryId);
-    if (entryError) handleError(entryError, 'awardRFQ (entry)');
-
-    const { error: rfqError } = await supabase.from('rfqs').update({ status: RFQStatus.AWARDED }).eq('id', rfqId);
-    if (rfqError) handleError(rfqError, 'awardRFQ (rfq)');
+    await db.updateWhere('rfq_entries', { status: RFQEntryStatus.AWARDED }, { where: { id: entryId } });
+    await db.updateWhere('rfqs', { status: RFQStatus.AWARDED }, { where: { id: rfqId } });
 };

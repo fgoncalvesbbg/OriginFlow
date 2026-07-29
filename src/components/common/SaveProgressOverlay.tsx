@@ -3,7 +3,7 @@
  *
  * Its job is to stop the user navigating away or clicking anything mid-save — an
  * interrupted save on a slow connection is what wedges the session and loses work.
- * Because every network call in the save path is now time-bounded (see with-timeout.ts),
+ * Because every network call in the save path is now time-bounded (see data/resilience.ts),
  * this overlay is guaranteed to clear: the underlying save always resolves or fails within
  * its ceiling, so the caller flips `isOpen` back to false. It intentionally has no dismiss
  * control — the only way out is for the save to finish.

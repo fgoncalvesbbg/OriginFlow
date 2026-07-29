@@ -1,19 +1,18 @@
 /**
- * IM asset service — uploads images to the `im-assets` Supabase Storage bucket.
+ * IM asset service — uploads images to the `im-assets` object-storage bucket.
  * All IM images (inline HTML, annotated images, step photos) are stored here.
  * The bucket is public so <img src="..."> works without auth tokens.
  */
 
-import { supabase } from '../core/supabase.client';
-import { withTimeout } from '../core/with-timeout';
+import { storage, withDeadline } from '../../data';
 
 const BUCKET = 'im-assets';
 const TAG = '[im-asset.service]';
 
 // Storage uploads carry image bytes, so they get a longer ceiling than DB writes —
 // a multi-MB pasted screenshot on a slow uplink legitimately needs this long.
-// Storage builders don't expose `.abortSignal()`, so withTimeout degrades to a plain
-// race here — acceptable: each path is unique with `upsert:false`, so there's no row
+// The storage port takes no abort signal, so withDeadline degrades to a plain race
+// here — acceptable: each path is unique with `upsert:false`, so there's no row
 // lock a retry could queue behind.
 const UPLOAD_TIMEOUT_MS = 45000;
 
@@ -29,17 +28,19 @@ export const uploadIMAsset = async (file: File, folder = 'uploads'): Promise<str
 
   console.log(TAG, `uploading ${file.name} (${(file.size / 1024).toFixed(1)} KB) → ${storagePath}`);
 
-  const { data, error } = await withTimeout(
-    supabase.storage.from(BUCKET).upload(storagePath, file, { cacheControl: '31536000', upsert: false }),
-    UPLOAD_TIMEOUT_MS,
-  );
-
-  if (error) {
-    console.error(TAG, 'upload error:', error);
-    throw new Error(`Image upload failed: ${error.message}`);
+  let stored: { path: string };
+  try {
+    stored = await withDeadline(
+      () => storage.upload(BUCKET, storagePath, file, { cacheControl: '31536000', upsert: false }),
+      UPLOAD_TIMEOUT_MS,
+      'uploadIMAsset',
+    );
+  } catch (e) {
+    console.error(TAG, 'upload error:', e);
+    throw new Error(`Image upload failed: ${(e as Error).message}`);
   }
 
-  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
+  const publicUrl = storage.publicUrl(BUCKET, stored.path);
   console.log(TAG, 'uploaded:', publicUrl);
   return publicUrl;
 };
@@ -128,17 +129,19 @@ export const externalizeFormDataImages = async (
  * @param folder Sub-folder within the bucket to list (default 'library').
  */
 export const listIMAssets = async (folder = 'library'): Promise<string[]> => {
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .list(folder, { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } });
-
-  if (error) {
-    console.error(TAG, 'list error:', error);
+  let objects;
+  try {
+    objects = await storage.list(BUCKET, folder, {
+      limit: 1000,
+      sortBy: { column: 'created_at', order: 'desc' },
+    });
+  } catch (e) {
+    console.error(TAG, 'list error:', e);
     return [];
   }
 
-  return (data ?? [])
-    // Skip sub-folders (id === null) and Supabase's `.emptyFolderPlaceholder` marker.
+  return objects
+    // Skip sub-folders (id === null) and the `.emptyFolderPlaceholder` marker.
     .filter((obj) => obj.id !== null && !obj.name.startsWith('.'))
-    .map((obj) => supabase.storage.from(BUCKET).getPublicUrl(`${folder}/${obj.name}`).data.publicUrl);
+    .map((obj) => storage.publicUrl(BUCKET, `${folder}/${obj.name}`));
 };

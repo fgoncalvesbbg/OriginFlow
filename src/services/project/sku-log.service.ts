@@ -3,7 +3,7 @@
  * bulk overwrite and delete until it is unlocked. Finalize, unlock and value changes are written
  * to the append-only `sku_change_log` (see db_migrations/94_sku_finalization_and_log.sql).
  */
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { SkuChangeLogEntry } from '../../types';
 
@@ -32,8 +32,12 @@ const mapLog = (r: any): SkuChangeLogEntry => ({
 
 const insertRows = async (rows: Record<string, any>[]): Promise<void> => {
   if (!isLive || rows.length === 0) return;
-  const { error } = await supabase.from('sku_change_log').insert(rows);
-  if (error) console.error('sku_change_log insert error:', error);
+  // The log is best-effort: never fail the caller's save because auditing didn't land.
+  try {
+    await db.insertMany('sku_change_log', rows);
+  } catch (e) {
+    console.error('sku_change_log insert error:', e);
+  }
 };
 
 const baseRow = (skuId: string | null, skuNumber: string, actor: ChangeActor) => ({
@@ -52,11 +56,11 @@ export const setSkuFinal = async (
   note = '',
 ): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { error } = await supabase
-    .from('project_skus')
-    .update({ is_final: isFinal, updated_at: new Date().toISOString() })
-    .eq('id', skuId);
-  if (error) throw new Error(error.message || 'Failed to update SKU lock state');
+  await db.updateWhere(
+    'project_skus',
+    { is_final: isFinal, updated_at: new Date().toISOString() },
+    { where: { id: skuId } },
+  );
   await insertRows([{ ...baseRow(skuId, skuNumber, actor), action: isFinal ? 'finalize' : 'unlock', note }]);
 };
 
@@ -97,22 +101,23 @@ export const markSkusExported = async (
   if (!isLive || skus.length === 0) return;
   const ids = skus.map(s => s.id);
   const now = new Date().toISOString();
-  const { error } = await supabase
-    .from('project_skus')
-    .update({ pending_export: false, last_exported_at: now })
-    .in('id', ids);
-  if (error) throw new Error(error.message || 'Failed to mark SKUs as exported');
+  await db.updateWhere(
+    'project_skus',
+    { pending_export: false, last_exported_at: now },
+    { where: { id: ids } },
+  );
   await insertRows(skus.map(s => ({ ...baseRow(s.id, s.skuNumber, actor), action: 'export', note })));
 };
 
 /** Full change history for a SKU, newest first. */
 export const getSkuChangeLog = async (skuId: string): Promise<SkuChangeLogEntry[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('sku_change_log')
-    .select('*')
-    .eq('project_sku_id', skuId)
-    .order('created_at', { ascending: false });
-  if (error) { console.error('getSkuChangeLog error:', error); return []; }
-  return (data || []).map(mapLog);
+  const rows = await orEmpty(
+    db.select<Row>('sku_change_log', {
+      where: { project_sku_id: skuId },
+      order: { column: 'created_at', ascending: false },
+    }),
+    'getSkuChangeLog',
+  );
+  return rows.map(mapLog);
 };

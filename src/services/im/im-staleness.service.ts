@@ -24,7 +24,7 @@
  * published (its own pending edits are a separate concern).
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { IMBlock, IMSection, IMTemplate, IMTemplateType, CategoryAttribute } from '../../types';
 import { getIMTemplates, getIMTemplateById } from './im-template.service';
@@ -63,13 +63,16 @@ interface SnapshotIndex {
 const loadSnapshots = async (projectId?: string): Promise<SnapshotIndex> => {
   const hashes = new Map<string, string>();
   const publishedAt = new Map<string, string>();
-  let query = supabase
-    .from('im_publish_snapshots')
-    .select('project_id, template_type, language, content_hash, published_at')
-    .order('published_at', { ascending: false });
-  if (projectId) query = query.eq('project_id', projectId);
-  const { data } = await query;
-  for (const s of data ?? []) {
+  const rows = await orEmpty(
+    db.select<Row>('im_publish_snapshots', {
+      columns: 'project_id, template_type, language, content_hash, published_at',
+      // `undefined` when unscoped, so the whole-library and single-project cases share one query.
+      where: { project_id: projectId },
+      order: { column: 'published_at', ascending: false },
+    }),
+    'loadSnapshots',
+  );
+  for (const s of rows) {
     const k3 = `${s.project_id}::${s.template_type}::${s.language}`;
     if (!hashes.has(k3)) hashes.set(k3, s.content_hash); // first seen = latest (descending)
     const k2 = `${s.project_id}::${s.template_type}`;

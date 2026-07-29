@@ -3,12 +3,11 @@
  * Manages compliance requests and responses
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { db, portalDb, orEmpty, orUndefined, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequest, ComplianceResponseItem, ComplianceRequestStatus } from '../../types';
 import { mapComplianceRequest } from '../../utils/mappers.utils';
-import { handleError, generateUUID, generateNumericCode } from '../../utils';
-import { runMutation } from '../core/db';
+import { generateUUID, generateNumericCode } from '../../utils';
 import { upsertSupplierNotification } from '../shared/notification.service';
 
 /**
@@ -16,9 +15,11 @@ import { upsertSupplierNotification } from '../shared/notification.service';
  */
 export const getComplianceRequests = async (): Promise<ComplianceRequest[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase.from('compliance_requests').select('*').order('created_at', { ascending: false });
-  if (error) return [];
-  return (data || []).map(mapComplianceRequest);
+  const rows = await orEmpty(
+    db.select<Row>('compliance_requests', { order: { column: 'created_at', ascending: false } }),
+    'getComplianceRequests',
+  );
+  return rows.map(mapComplianceRequest);
 };
 
 /**
@@ -26,42 +27,48 @@ export const getComplianceRequests = async (): Promise<ComplianceRequest[]> => {
  */
 export const getComplianceRequestById = async (id: string): Promise<ComplianceRequest | undefined> => {
   if (!id || !isLive) return undefined;
-  const { data, error } = await supabase.from('compliance_requests').select('*').eq('id', id).single();
-  if (error) return undefined;
-  return mapComplianceRequest(data);
+  const row = await orUndefined(
+    db.selectMaybeOne<Row>('compliance_requests', { where: { id } }),
+    'getComplianceRequestById',
+  );
+  return row ? mapComplianceRequest(row) : undefined;
 };
 
 /**
  * Compliance requests for a supplier in the standalone compliance portal
  * (/compliance/supplier-portal), where the supplier authenticates with their supplier
  * code + 6-digit portal access code. Uses the get_compliance_requests_by_supplier_code
- * SECURITY DEFINER RPC, which validates code + access code server-side, so the data is
+ * SECURITY DEFINER routine, which validates code + access code server-side, so the data is
  * only listed for someone who already holds the access code (no unauthenticated lookups).
  */
 export const getComplianceRequestsBySupplierCode = async (code: string, accessCode: string): Promise<ComplianceRequest[]> => {
     if (!isLive || !code || !accessCode) return [];
-    const { data, error } = await portalClient.rpc('get_compliance_requests_by_supplier_code', {
-        p_code: code,
-        p_access_code: accessCode,
-    });
-    if (error) return [];
-    return (data || []).map(mapComplianceRequest);
+    const rows = await orEmpty(
+        portalDb.rpc<Row[]>('get_compliance_requests_by_supplier_code', {
+            p_code: code,
+            p_access_code: accessCode,
+        }),
+        'getComplianceRequestsBySupplierCode',
+    );
+    return (rows || []).map(mapComplianceRequest);
 };
 
 /**
  * Compliance requests for a supplier in the access-code-verified supplier portal.
- * Uses the get_compliance_requests_by_supplier SECURITY DEFINER RPC (validates the
+ * Uses the get_compliance_requests_by_supplier SECURITY DEFINER routine (validates the
  * supplier's portal token + access code); the compliance_requests table is not readable
- * by the anonymous portal client under RLS.
+ * by the anonymous portal client under row-level security.
  */
 export const getComplianceRequestsBySupplierToken = async (supplierToken: string, accessCode: string): Promise<ComplianceRequest[]> => {
     if (!isLive || !supplierToken || !accessCode) return [];
-    const { data, error } = await portalClient.rpc('get_compliance_requests_by_supplier', {
-        p_supplier_token: supplierToken,
-        p_code: accessCode,
-    });
-    if (error) return [];
-    return (data || []).map(mapComplianceRequest);
+    const rows = await orEmpty(
+        portalDb.rpc<Row[]>('get_compliance_requests_by_supplier', {
+            p_supplier_token: supplierToken,
+            p_code: accessCode,
+        }),
+        'getComplianceRequestsBySupplierToken',
+    );
+    return (rows || []).map(mapComplianceRequest);
 };
 
 /**
@@ -75,7 +82,7 @@ export const createComplianceRequest = async (
   const token = generateUUID();
   const accessCode = generateNumericCode(6);
 
-  const { data, error } = await supabase.from('compliance_requests').insert({
+  const created = await db.insert<Row>('compliance_requests', {
     project_id: projectId || null,
     project_name: projectName,
     request_id: requestIdCode,
@@ -88,22 +95,20 @@ export const createComplianceRequest = async (
     access_code: accessCode,
     deadline: deadline || null,
     created_at: new Date().toISOString()
-  }).select().single();
-  if (error) handleError(error, 'create compliance req');
-  return mapComplianceRequest(data);
+  });
+  return mapComplianceRequest(created);
 };
 
 /**
  * Verify supplier access to compliance request using token and access code
  */
 export const verifySupplierAccess = async (token: string, accessCode: string): Promise<ComplianceRequest> => {
-    if (!isLive) throw new Error("Connection error: Supabase is not configured.");
-    const { data, error } = await portalClient.rpc('get_compliance_request_secure', {
+    if (!isLive) throw new Error("Connection error: the database is not configured.");
+    const data = await portalDb.rpc<Row | Row[] | null>('get_compliance_request_secure', {
         p_token: token,
         p_code: accessCode
     });
 
-    if (error) handleError(error, 'verify access');
     if (!data) throw new Error('Invalid credentials');
 
     const requestData = Array.isArray(data) ? data[0] : data;
@@ -123,7 +128,7 @@ export const submitComplianceResponseSecure = async (
     respondentName: string,
     respondentPosition: string
 ): Promise<void> => {
-    const { error } = await portalClient.rpc('submit_compliance_response_secure', {
+    await portalDb.rpc('submit_compliance_response_secure', {
         p_token: token,
         p_code: accessCode,
         p_responses: responses,
@@ -131,27 +136,25 @@ export const submitComplianceResponseSecure = async (
         p_respondent_name: respondentName,
         p_respondent_position: respondentPosition
     });
-
-    if (error) handleError(error, 'submit response');
 };
 
 /**
  * Submit compliance response (authenticated)
  */
 export const submitComplianceResponse = async (reqId: string, responses: ComplianceResponseItem[], status?: ComplianceRequestStatus, user?: string): Promise<void> => {
-    const updates: any = { responses, submitted_at: new Date().toISOString() };
+    const updates: Row = { responses, submitted_at: new Date().toISOString() };
     if (status) updates.status = status;
     if (status === ComplianceRequestStatus.APPROVED) updates.completed_at = new Date().toISOString();
     if (user) updates.updated_by = user;
 
-    await runMutation(supabase.from('compliance_requests').update(updates).eq('id', reqId), 'submitComplianceResponse');
+    await db.updateWhere('compliance_requests', updates, { where: { id: reqId } });
 };
 
 /**
  * Delete a compliance request
  */
 export const deleteComplianceRequest = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('compliance_requests').delete().eq('id', id), 'deleteComplianceRequest');
+    await db.delete('compliance_requests', { where: { id } });
 };
 
 /**
@@ -160,14 +163,16 @@ export const deleteComplianceRequest = async (id: string): Promise<void> => {
 export const checkComplianceDeadlines = async (): Promise<void> => {
     if (!isLive) return;
 
-    const { data, error } = await supabase
-        .from('compliance_requests')
-        .select('*')
-        .eq('status', ComplianceRequestStatus.PENDING_SUPPLIER)
-        .not('deadline', 'is', null);
-
-    if (error) {
-        console.warn('Failed to check compliance deadlines:', error.message);
+    let rows: Row[];
+    try {
+        rows = await db.select<Row>('compliance_requests', {
+            where: {
+                status: ComplianceRequestStatus.PENDING_SUPPLIER,
+                deadline: { op: 'isNotNull' },
+            },
+        });
+    } catch (e) {
+        console.warn('Failed to check compliance deadlines:', e);
         return;
     }
 
@@ -175,7 +180,7 @@ export const checkComplianceDeadlines = async (): Promise<void> => {
     const msPerDay = 24 * 60 * 60 * 1000;
     const reminderWindowDays = 14;
 
-    for (const rawRequest of data || []) {
+    for (const rawRequest of rows) {
         const request = mapComplianceRequest(rawRequest);
         if (!request.deadline || !request.supplierId) continue;
 

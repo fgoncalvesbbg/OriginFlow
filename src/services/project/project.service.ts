@@ -3,13 +3,11 @@
  * Core project CRUD operations and management
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { auth, db, portalDb, orEmpty, orUndefined, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { Project, ProjectOverallStatus, ProjectMilestones, ProjectStep, ProjectDocument } from '../../types';
-import { mapProject, mapProjectStep, mapProjectDocument } from '../../utils/mappers.utils';
-import { handleError, generateUUID } from '../../utils';
-import { runMutation, runQuery } from '../core/db';
-import { withTimeout } from '../core/with-timeout';
+import { Project, ProjectOverallStatus, ProjectMilestones } from '../../types';
+import { mapProject } from '../../utils/mappers.utils';
+import { generateUUID } from '../../utils';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
@@ -19,17 +17,11 @@ const READ_TIMEOUT_MS = 20000;
  */
 export const getProjects = async (): Promise<Project[]> => {
     if (!isLive) return [];
-    try {
-        const { data, error } = await withTimeout(supabase.from('projects').select('*'), READ_TIMEOUT_MS);
-        if (error) {
-            console.error("getProjects failed", error);
-            return [];
-        }
-        return (data || []).map(mapProject);
-    } catch (e) {
-        console.error("[read] getProjects timed out or failed", e);
-        return [];
-    }
+    const rows = await orEmpty(
+        withDeadline((signal) => db.select<Row>('projects', { signal }), READ_TIMEOUT_MS, 'getProjects'),
+        'getProjects',
+    );
+    return rows.map(mapProject);
 };
 
 /**
@@ -37,9 +29,8 @@ export const getProjects = async (): Promise<Project[]> => {
  */
 export const getProjectById = async (id: string): Promise<Project | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await supabase.from('projects').select('*').eq('id', id).single();
-    if (error || !data) return undefined;
-    return mapProject(data);
+    const row = await orUndefined(db.selectMaybeOne<Row>('projects', { where: { id } }), 'getProjectById');
+    return row ? mapProject(row) : undefined;
 };
 
 /**
@@ -47,15 +38,13 @@ export const getProjectById = async (id: string): Promise<Project | undefined> =
  */
 export const getProjectByToken = async (token: string): Promise<Project | undefined> => {
     if (!isLive) return undefined;
-    const { data: rpcData, error: rpcError } = await portalClient.rpc('get_project_by_token_secure', { p_token: token });
-
-    if (!rpcError && rpcData) {
-        const projectData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-        if (projectData) {
-            return mapProject(projectData);
-        }
-    }
-    return undefined;
+    // Token-scoped routine on the public client: authorization lives in the routine itself.
+    const result = await orUndefined(
+        portalDb.rpc<Row | Row[] | null>('get_project_by_token_secure', { p_token: token }),
+        'getProjectByToken',
+    );
+    const row = Array.isArray(result) ? result[0] : result;
+    return row ? mapProject(row) : undefined;
 };
 
 /**
@@ -63,9 +52,11 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
  */
 export const getProjectsBySupplierId = async (supplierId: string): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('projects').select('*').eq('supplier_id', supplierId);
-    if (error) return [];
-    return (data || []).map(mapProject);
+    const rows = await orEmpty(
+        db.select<Row>('projects', { where: { supplier_id: supplierId } }),
+        'getProjectsBySupplierId',
+    );
+    return rows.map(mapProject);
 };
 
 /**
@@ -73,18 +64,20 @@ export const getProjectsBySupplierId = async (supplierId: string): Promise<Proje
  */
 export const getProjectsBySupplierToken = async (token: string): Promise<Project[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.rpc('get_projects_by_supplier_token', { p_token: token });
-    if (error) return [];
-    return (data || []).map(mapProject);
+    const rows = await orEmpty(
+        portalDb.rpc<Row[]>('get_projects_by_supplier_token', { p_token: token }),
+        'getProjectsBySupplierToken',
+    );
+    return (rows || []).map(mapProject);
 };
 
 /**
  * Create a new project with initial steps and documents
  */
 export const createProject = async (name: string, supplierId: string, projectId: string, pmId: string, categoryId?: string): Promise<Project> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await auth.getUser();
 
-    const { data, error } = await supabase.from('projects').insert({
+    const created = await db.insert<Row>('projects', {
         name,
         supplier_id: supplierId,
         project_id_code: projectId,
@@ -95,10 +88,9 @@ export const createProject = async (name: string, supplierId: string, projectId:
         current_step: 1,
         created_at: new Date().toISOString(),
         supplier_link_token: generateUUID()
-    }).select().single();
+    });
 
-    if (error) handleError(error, 'createProject');
-    const project = mapProject(data);
+    const project = mapProject(created);
 
     const seedChecklist = async () => {
         try {
@@ -108,7 +100,7 @@ export const createProject = async (name: string, supplierId: string, projectId:
                 { project_id: project.id, step_number: 3, name: 'Production', status: 'not_started' }
             ];
 
-            await supabase.from('project_steps').insert(stepsPayload);
+            await db.insertMany('project_steps', stepsPayload);
 
             const docsPayload = [
                 { project_id: project.id, step_number: 1, title: 'RFQ Specification', responsible_party: 'internal', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
@@ -120,9 +112,9 @@ export const createProject = async (name: string, supplierId: string, projectId:
                 { project_id: project.id, step_number: 3, title: 'Packaging Guidelines', responsible_party: 'internal', is_visible_to_supplier: true, is_required: true, status: 'not_started' }
             ];
 
-            await supabase.from('project_documents').insert(docsPayload);
+            await db.insertMany('project_documents', docsPayload);
         } catch(e) {
-            console.error("Failed to seed launch checklist. Check RLS permissions.", e);
+            console.error("Failed to seed launch checklist. Check row-level-security permissions.", e);
         }
     };
 
@@ -135,7 +127,7 @@ export const createProject = async (name: string, supplierId: string, projectId:
  * Update project information
  */
 export const updateProject = async (id: string, updates: Partial<Project>): Promise<Project> => {
-    const payload: any = {};
+    const payload: Row = {};
     if (updates.name !== undefined) payload.name = updates.name;
     if (updates.status !== undefined) payload.status = updates.status;
     if (updates.currentStep !== undefined) payload.current_step = updates.currentStep;
@@ -144,7 +136,7 @@ export const updateProject = async (id: string, updates: Partial<Project>): Prom
     if (updates.supplierId !== undefined) payload.supplier_id = updates.supplierId;
     if (updates.pmId !== undefined) payload.pm_id = updates.pmId;
 
-    const data = await runQuery(supabase.from('projects').update(payload).eq('id', id).select().single(), 'updateProject');
+    const data = await db.update<Row>('projects', payload, { where: { id } });
     if (!data) throw new Error("Project not found or update failed (returned null data)");
     return mapProject(data);
 };
@@ -153,7 +145,7 @@ export const updateProject = async (id: string, updates: Partial<Project>): Prom
  * Delete a project
  */
 export const deleteProject = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('projects').delete().eq('id', id), 'deleteProject');
+    await db.delete('projects', { where: { id } });
 };
 
 /**
@@ -162,4 +154,3 @@ export const deleteProject = async (id: string): Promise<void> => {
 export const saveProjectMilestones = async (projectId: string, milestones: ProjectMilestones): Promise<void> => {
     await updateProject(projectId, { milestones });
 };
-

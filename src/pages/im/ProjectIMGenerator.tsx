@@ -615,7 +615,7 @@ const ProjectIMGenerator: React.FC = () => {
       // A FINAL manual is read-only — never persist (this also short-circuits autosave).
       if (locked) return;
       // Never let a save start on top of another operation (Publish/Translate/another Save):
-      // overlapping writes to the same row queue behind each other's row lock (see with-timeout.ts).
+      // overlapping writes to the same row queue behind each other's row lock (see data/resilience.ts).
       if (isBusy) return;
       const silent = opts?.silent ?? false;
       if (silent) setAutosaving(true);
@@ -3150,7 +3150,7 @@ const ProjectIMGenerator: React.FC = () => {
 
        {/* Blocking overlay while a save/publish is in flight — stops the user navigating away
            and wedging the session. Guaranteed to clear because every network call in the save
-           path is time-bounded (see with-timeout.ts / saveProjectIM). Translation is excluded:
+           path is time-bounded (see data/resilience.ts / saveProjectIM). Translation is excluded:
            it shows its own progress in the translate modal, which this would otherwise hide. */}
        <SaveProgressOverlay
          isOpen={saving || generating}

@@ -1,13 +1,13 @@
 
 /**
- * Auth context: tracks the Supabase session and current user profile, exposes useAuth(), and
- * subscribes to auth-state changes for the app.
+ * Auth context: tracks the session and current user profile, exposes useAuth(), and
+ * subscribes to auth-state changes for the app. Talks to the auth PORT (src/data), never
+ * to an identity-provider SDK directly.
  */
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { User } from '../types';
 import { getUserProfile, login as apiLogin, logout as apiLogout } from '../services';
-import { supabase } from '../services/core/supabase.client';
-import { withTimeout } from '../services/core/with-timeout';
+import { auth, withDeadline, type AuthSubscription } from '../data';
 import { isLive } from '../config/environment.config';
 import { isPortalRoute } from '../config/routes.config';
 
@@ -43,9 +43,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const fetchProfile = async (userId: string) => {
     try {
-      const profile = await withTimeout(
-        Promise.resolve(getUserProfile(userId)),
+      const profile = await withDeadline(
+        () => getUserProfile(userId),
         AUTH_REQUEST_TIMEOUT_MS,
+        'fetchProfile',
       );
       if (profile) {
         setUser(profile);
@@ -65,7 +66,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const refreshProfile = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await auth.getSession();
       if (session?.user) {
         await fetchProfile(session.user.id);
       }
@@ -78,7 +79,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     let isMounted = true;
     let settled = false;
-    let subscription: { unsubscribe: () => void } | undefined;
+    let subscription: AuthSubscription | undefined;
 
     if (!isLive) {
       setIsLoading(false);
@@ -99,7 +100,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!settled) {
         console.error(
           `[Auth] Session init did not complete within ${AUTH_INIT_WATCHDOG_MS / 1000}s — forcing render. ` +
-          'The Supabase connection may be unavailable; the reconnect banner will guide recovery.',
+          'The backend may be unavailable; the reconnect banner will guide recovery.',
         );
         stopLoading();
       }
@@ -117,15 +118,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         // 1. Check initial session for PM/Admin users (bounded so a stale
-        // connection can't wedge the whole app on the loading screen)
-        const { data: { session }, error } = await withTimeout(
-          supabase.auth.getSession(),
+        // connection can't wedge the whole app on the loading screen). The port
+        // resolves null — and logs why — when there is no usable session, which is
+        // routine on public portals.
+        const session = await withDeadline(
+          () => auth.getSession(),
           AUTH_REQUEST_TIMEOUT_MS,
+          'getSession',
         );
-
-        if (error) {
-           console.warn("[Auth] Session check failed (common on public portals):", error.message);
-        }
 
         if (isMounted && session?.user) {
           await fetchProfile(session.user.id);
@@ -139,7 +139,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // 2. Listen for session changes
-      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+      subscription = auth.onAuthStateChange(async (event, session) => {
         console.debug('[Auth] Session event:', event);
         if (!isMounted) return;
         try {
@@ -157,7 +157,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           stopLoading();
         }
       });
-      subscription = data.subscription;
     };
 
     initializeAuth();

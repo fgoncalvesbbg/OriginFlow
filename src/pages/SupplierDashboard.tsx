@@ -196,8 +196,8 @@ const SupplierDashboard: React.FC = () => {
     let mounted = true;
     const controller = new AbortController();
 
-    // The authenticated supabase client's auth lock can take up to ~5s to settle on
-    // first use (see supabase.client.ts). The initial load can fire inside that window
+    // The authenticated client's auth lock can take up to ~5s to settle on
+    // first use (see data/supabase/client.ts). The initial load can fire inside that window
     // and come back empty/failed, so auto-retry a few times — what the user otherwise
     // has to do by hand with the Refresh button.
     let autoRetries = 0;

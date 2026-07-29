@@ -3,11 +3,10 @@
  * Manages compliance requirements and category attributes
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
-import { handleError, generateUUID } from '../../utils';
-import { runMutation } from '../core/db';
+import { generateUUID } from '../../utils';
 import { PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';
 import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
 
@@ -16,9 +15,8 @@ import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils'
  */
 export const getComplianceRequirements = async (): Promise<ComplianceRequirement[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('compliance_requirements').select('*');
-    if (error) return [];
-    return (data || []).map((r: any) => ({
+    const rows = await orEmpty(portalDb.select<Row>('compliance_requirements'), 'getComplianceRequirements');
+    return rows.map((r: any) => ({
         ...r,
         categoryId: r.category_id,
         condition: r.condition ?? null,
@@ -37,7 +35,7 @@ export const getComplianceRequirements = async (): Promise<ComplianceRequirement
  * Save/update a compliance requirement
  */
 export const saveRequirement = async (req: ComplianceRequirement): Promise<void> => {
-    const payload: any = {
+    const payload: Row = {
         id: req.id,
         category_id: req.categoryId,
         section: req.section,
@@ -52,14 +50,14 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
         self_declaration_accepted: req.selfDeclarationAccepted,
         test_report_origin: req.testReportOrigin
     };
-    await runMutation(supabase.from('compliance_requirements').upsert(payload), 'saveRequirement');
+    await db.upsert('compliance_requirements', payload);
 };
 
 /**
  * Delete a compliance requirement
  */
 export const deleteRequirement = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('compliance_requirements').delete().eq('id', id), 'deleteRequirement');
+    await db.delete('compliance_requirements', { where: { id } });
 };
 
 /**
@@ -68,13 +66,16 @@ export const deleteRequirement = async (id: string): Promise<void> => {
  */
 export const getComplianceSections = async (): Promise<string[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient
-        .from('compliance_sections')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('created_at', { ascending: true });
-    if (error) return [];
-    return (data || []).map((s: any) => s.name as string);
+    const rows = await orEmpty(
+        portalDb.select<Row>('compliance_sections', {
+            order: [
+                { column: 'sort_order', ascending: true },
+                { column: 'created_at', ascending: true },
+            ],
+        }),
+        'getComplianceSections',
+    );
+    return rows.map((s: any) => s.name as string);
 };
 
 /**
@@ -84,17 +85,14 @@ export const getComplianceSections = async (): Promise<string[]> => {
 export const addComplianceSection = async (name: string): Promise<void> => {
     const clean = name.trim();
     if (!clean) return;
-    const { error } = await supabase
-        .from('compliance_sections')
-        .upsert({ name: clean }, { onConflict: 'name' });
-    if (error) handleError(error, 'addComplianceSection');
+    await db.upsert('compliance_sections', { name: clean }, { onConflict: 'name' });
 };
 
 /**
  * Remove a custom section group (does not touch requirements already using it).
  */
 export const deleteComplianceSection = async (name: string): Promise<void> => {
-    await runMutation(supabase.from('compliance_sections').delete().eq('name', name), 'deleteComplianceSection');
+    await db.delete('compliance_sections', { where: { name } });
 };
 
 /**
@@ -113,9 +111,8 @@ export const addStandardRequirements = async (categoryId: string): Promise<void>
  */
 export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
     if (!isLive) return [];
-    const { data, error } = await portalClient.from('category_attributes').select('*');
-    if (error) return [];
-    return (data || []).map((a: any) => ({
+    const rows = await orEmpty(portalDb.select<Row>('category_attributes'), 'getCategoryAttributes');
+    return rows.map((a: any) => ({
         id: a.id,
         categoryId: a.category_id ?? null,
         assignedCategoryIds: a.assigned_category_ids ?? [],
@@ -154,7 +151,7 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         group: attr.group ?? 'Category Specific',
         akeneo_id: attr.akeneoId ?? null,
     };
-    await runMutation(supabase.from('category_attributes').upsert(payload), 'saveCategoryAttribute');
+    await db.upsert('category_attributes', payload);
 };
 
 /**
@@ -168,12 +165,15 @@ const reuseExistingByAkeneoId = async (
     selfId: string,
     intendedCategoryId: string | null,
 ): Promise<boolean> => {
-    const { data, error } = await supabase
-        .from('category_attributes')
-        .select('id, category_id, assigned_category_ids')
-        .eq('akeneo_id', code);
-    if (error) return false;
-    const rows = data ?? [];
+    let rows: Row[];
+    try {
+        rows = await db.select<Row>('category_attributes', {
+            columns: 'id, category_id, assigned_category_ids',
+            where: { akeneo_id: code },
+        });
+    } catch {
+        return false;
+    }
     const selfOwnsCode = rows.some((r: any) => r.id === selfId);
     const others = rows.filter((r: any) => r.id !== selfId);
     if (selfOwnsCode || others.length === 0) return false; // no conflict → normal write
@@ -182,20 +182,16 @@ const reuseExistingByAkeneoId = async (
     if (intendedCategoryId === null) {
         // Intended global: make the existing attribute global so it applies everywhere.
         if (target.category_id !== null) {
-            await runMutation(
-                supabase.from('category_attributes').update({ category_id: null }).eq('id', target.id),
-                'saveCategoryAttribute:promoteGlobal',
-            );
+            await db.updateWhere('category_attributes', { category_id: null }, { where: { id: target.id } });
         }
     } else if (target.category_id !== null && target.category_id !== intendedCategoryId) {
         // Existing is scoped to another category: share it into the intended one (no duplicate).
         const assigned: string[] = target.assigned_category_ids ?? [];
         if (!assigned.includes(intendedCategoryId)) {
-            await runMutation(
-                supabase.from('category_attributes')
-                    .update({ assigned_category_ids: [...assigned, intendedCategoryId] })
-                    .eq('id', target.id),
-                'saveCategoryAttribute:link',
+            await db.updateWhere(
+                'category_attributes',
+                { assigned_category_ids: [...assigned, intendedCategoryId] },
+                { where: { id: target.id } },
             );
         }
     }
@@ -295,26 +291,24 @@ export const importCategoryAttributes = async (
  * Delete a category attribute
  */
 export const deleteCategoryAttribute = async (id: string): Promise<void> => {
-    await runMutation(supabase.from('category_attributes').delete().eq('id', id), 'deleteCategoryAttribute');
+    await db.delete('category_attributes', { where: { id } });
 };
 
 /**
  * Assign an existing attribute to an additional category (shared assignment)
  */
 export const assignAttributeToCategory = async (attributeId: string, categoryId: string): Promise<void> => {
-    const { data, error: fetchError } = await supabase
-        .from('category_attributes')
-        .select('assigned_category_ids')
-        .eq('id', attributeId)
-        .single();
-    if (fetchError) handleError(fetchError, 'assignAttributeToCategory');
-    const current: string[] = data?.assigned_category_ids ?? [];
+    const row = await db.selectOne<Row>('category_attributes', {
+        columns: 'assigned_category_ids',
+        where: { id: attributeId },
+    });
+    const current: string[] = row?.assigned_category_ids ?? [];
     if (current.includes(categoryId)) return;
-    const { error } = await supabase
-        .from('category_attributes')
-        .update({ assigned_category_ids: [...current, categoryId] })
-        .eq('id', attributeId);
-    if (error) handleError(error, 'assignAttributeToCategory');
+    await db.updateWhere(
+        'category_attributes',
+        { assigned_category_ids: [...current, categoryId] },
+        { where: { id: attributeId } },
+    );
 };
 
 /**
@@ -322,26 +316,21 @@ export const assignAttributeToCategory = async (attributeId: string, categoryId:
  * Clears its category_id so it applies to every category, keeping its group.
  */
 export const makeAttributeGlobal = async (attributeId: string): Promise<void> => {
-    await runMutation(
-        supabase.from('category_attributes').update({ category_id: null }).eq('id', attributeId),
-        'makeAttributeGlobal'
-    );
+    await db.updateWhere('category_attributes', { category_id: null }, { where: { id: attributeId } });
 };
 
 /**
  * Remove a shared assignment of an attribute from a category
  */
 export const unassignAttributeFromCategory = async (attributeId: string, categoryId: string): Promise<void> => {
-    const { data, error: fetchError } = await supabase
-        .from('category_attributes')
-        .select('assigned_category_ids')
-        .eq('id', attributeId)
-        .single();
-    if (fetchError) handleError(fetchError, 'unassignAttributeFromCategory');
-    const current: string[] = data?.assigned_category_ids ?? [];
-    const { error } = await supabase
-        .from('category_attributes')
-        .update({ assigned_category_ids: current.filter(id => id !== categoryId) })
-        .eq('id', attributeId);
-    if (error) handleError(error, 'unassignAttributeFromCategory');
+    const row = await db.selectOne<Row>('category_attributes', {
+        columns: 'assigned_category_ids',
+        where: { id: attributeId },
+    });
+    const current: string[] = row?.assigned_category_ids ?? [];
+    await db.updateWhere(
+        'category_attributes',
+        { assigned_category_ids: current.filter(id => id !== categoryId) },
+        { where: { id: attributeId } },
+    );
 };

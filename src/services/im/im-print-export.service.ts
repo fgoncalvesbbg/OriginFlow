@@ -25,7 +25,7 @@
  * publishing — this is called on demand, never as part of Generate.
  */
 
-import { supabase } from '../core/supabase.client';
+import { auth, db, orEmpty, storage, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { generateUUID } from '../../utils';
 import type { IMTemplateType } from '../../types';
@@ -124,17 +124,14 @@ export const getPrintRenders = async (
   templateType: IMTemplateType,
 ): Promise<PrintRender[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('im_print_renders')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('template_type', templateType)
-    .order('created_at', { ascending: false });
-  if (error) {
-    console.error('[im-print-export] getPrintRenders failed:', error.message);
-    return [];
-  }
-  return (data ?? []).map(mapRender);
+  const rows = await orEmpty(
+    db.select<Row>('im_print_renders', {
+      where: { project_id: projectId, template_type: templateType },
+      order: { column: 'created_at', ascending: false },
+    }),
+    '[im-print-export] getPrintRenders',
+  );
+  return rows.map(mapRender);
 };
 
 /**
@@ -150,7 +147,7 @@ export const getPrintPdfUrl = (
   if (!isLive) return null;
   const name = `${templateType}-${languages.join('-')}-${pageSize}`;
   const path = `${projectId}/${templateType}/${name}.pdf`;
-  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return storage.publicUrl(BUCKET, path);
 };
 
 /** Thrown by `postJson` — carries the HTTP status so callers can decide whether to retry. */
@@ -233,8 +230,8 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
   if (!params.languages.length) throw new Error('Select at least one language.');
 
   // The render functions require a valid session (they cost credits + write to storage).
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
+  const session = await auth.getSession();
+  const token = session?.accessToken;
   if (!token) throw new Error('You must be signed in to generate a print PDF.');
 
   const base = {

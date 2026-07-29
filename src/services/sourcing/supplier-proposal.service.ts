@@ -3,62 +3,55 @@
  * Manages supplier proposals
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { SupplierProposal, RFQAttributeValue, RFQAttachment, RFQ, RFQStatus, RFQEntryStatus } from '../../types';
-import { handleError } from '../../utils/error.utils';
 import { generateUUID, generateNumericCode } from '../../utils';
+
+const mapProposal = (p: any): SupplierProposal => ({
+    id: p.id,
+    supplierId: p.supplier_id,
+    supplierName: p.supplier?.name,
+    title: p.title,
+    description: p.description,
+    fileUrl: p.file_url,
+    categoryId: p.category_id,
+    attributes: p.attributes || [],
+    thumbnailUrl: p.thumbnail_url,
+    attachments: p.attachments || [],
+    status: p.status,
+    createdAt: p.created_at
+});
 
 /**
  * Get all supplier proposals
  */
 export const getAllSupplierProposals = async (): Promise<SupplierProposal[]> => {
     if (!isLive) return [];
-    const { data, error } = await supabase.from('supplier_proposals').select('*, supplier:suppliers(name)').order('created_at', { ascending: false });
-    if (error) handleError(error, 'getAllSupplierProposals');
-    return (data || []).map((p: any) => ({
-        id: p.id,
-        supplierId: p.supplier_id,
-        supplierName: p.supplier?.name,
-        title: p.title,
-        description: p.description,
-        fileUrl: p.file_url,
-        categoryId: p.category_id,
-        attributes: p.attributes || [],
-        thumbnailUrl: p.thumbnail_url,
-        attachments: p.attachments || [],
-        status: p.status,
-        createdAt: p.created_at
-    }));
+    // Server-side join on the supplier name — see data/PORTING.md.
+    const rows = await db.select<Row>('supplier_proposals', {
+        columns: '*, supplier:suppliers(name)',
+        order: { column: 'created_at', ascending: false },
+    });
+    return rows.map(mapProposal);
 };
 
 /**
  * Get proposals for a supplier in the access-code-verified supplier portal.
- * Uses the get_supplier_proposals SECURITY DEFINER RPC (validates the supplier's
+ * Uses the get_supplier_proposals SECURITY DEFINER routine (validates the supplier's
  * portal token + access code); the supplier_proposals table is not readable by the
- * anonymous portal client under RLS.
+ * anonymous portal client under row-level security.
  */
 export const getSupplierProposals = async (supplierToken: string, accessCode: string): Promise<SupplierProposal[]> => {
     if (!isLive || !supplierToken || !accessCode) return [];
-    const { data, error } = await portalClient.rpc('get_supplier_proposals', {
-        p_supplier_token: supplierToken,
-        p_code: accessCode,
-    });
-    if (error) return [];
-    return (data || []).map((p: any) => ({
-        id: p.id,
-        supplierId: p.supplier_id,
-        supplierName: p.supplier?.name,
-        title: p.title,
-        description: p.description,
-        fileUrl: p.file_url,
-        categoryId: p.category_id,
-        attributes: p.attributes || [],
-        thumbnailUrl: p.thumbnail_url,
-        attachments: p.attachments || [],
-        status: p.status,
-        createdAt: p.created_at
-    }));
+    const rows = await orEmpty(
+        portalDb.rpc<Row[]>('get_supplier_proposals', {
+            p_supplier_token: supplierToken,
+            p_code: accessCode,
+        }),
+        'getSupplierProposals',
+    );
+    return (rows || []).map(mapProposal);
 };
 
 /**
@@ -74,10 +67,10 @@ export const createEnhancedSupplierProposal = async (
     thumbnailUrl?: string,
     attachments?: RFQAttachment[]
 ): Promise<void> => {
-    // Insert via the create_supplier_proposal_secure SECURITY DEFINER RPC: it validates
+    // Insert via the create_supplier_proposal_secure SECURITY DEFINER routine: it validates
     // the supplier's portal token + access code, so the anonymous portal client never
-    // writes to the supplier_proposals table directly (which RLS would block).
-    const { error } = await portalClient.rpc('create_supplier_proposal_secure', {
+    // writes to the supplier_proposals table directly (which row-level security would block).
+    await portalDb.rpc('create_supplier_proposal_secure', {
         p_supplier_token: supplierToken,
         p_code: accessCode,
         p_title: title,
@@ -87,7 +80,6 @@ export const createEnhancedSupplierProposal = async (
         p_thumbnail_url: thumbnailUrl || null,
         p_attachments: attachments || [],
     });
-    if (error) handleError(error, 'createEnhancedSupplierProposal');
 };
 
 /**
@@ -108,40 +100,23 @@ export const convertProposalToRFQ = async (
     supplierIds: string[]
 ): Promise<RFQ> => {
     // 1. Fetch the proposal
-    const { data: proposalData, error: fetchError } = await supabase
-        .from('supplier_proposals')
-        .select('*')
-        .eq('id', proposalId)
-        .single();
-
-    if (fetchError || !proposalData) {
-        handleError(fetchError, 'convertProposalToRFQ - fetch');
-        throw new Error('Proposal not found');
-    }
+    const proposalData = await db.selectMaybeOne<Row>('supplier_proposals', { where: { id: proposalId } });
+    if (!proposalData) throw new Error('Proposal not found');
 
     // 2. Create RFQ from proposal data
     const rfqId = generateRFQId();
-    const { data: rfqData, error: rfqError } = await supabase
-        .from('rfqs')
-        .insert({
-            title: proposalData.title,
-            rfq_id: rfqId,
-            description: proposalData.description,
-            created_by: createdBy,
-            category_id: proposalData.category_id,
-            attributes: proposalData.attributes || [],
-            thumbnail_url: proposalData.thumbnail_url,
-            attachments: proposalData.attachments || [],
-            status: RFQStatus.OPEN,
-            created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-    if (rfqError) {
-        handleError(rfqError, 'convertProposalToRFQ - create RFQ');
-        throw new Error('Failed to create RFQ');
-    }
+    const rfqData = await db.insert<Row>('rfqs', {
+        title: proposalData.title,
+        rfq_id: rfqId,
+        description: proposalData.description,
+        created_by: createdBy,
+        category_id: proposalData.category_id,
+        attributes: proposalData.attributes || [],
+        thumbnail_url: proposalData.thumbnail_url,
+        attachments: proposalData.attachments || [],
+        status: RFQStatus.OPEN,
+        created_at: new Date().toISOString()
+    });
 
     // 3. Create RFQ entries for selected suppliers
     if (supplierIds && supplierIds.length > 0) {
@@ -152,24 +127,11 @@ export const convertProposalToRFQ = async (
             status: RFQEntryStatus.PENDING,
             created_at: new Date().toISOString()
         }));
-
-        const { error: entriesError } = await supabase.from('rfq_entries').insert(entriesPayload);
-        if (entriesError) {
-            handleError(entriesError, 'convertProposalToRFQ - create entries');
-            throw new Error('Failed to create RFQ entries');
-        }
+        await db.insertMany('rfq_entries', entriesPayload);
     }
 
     // 4. Update proposal status
-    const { error: updateError } = await supabase
-        .from('supplier_proposals')
-        .update({ status: 'converted_to_rfq' })
-        .eq('id', proposalId);
-
-    if (updateError) {
-        handleError(updateError, 'convertProposalToRFQ - update status');
-        throw new Error('Failed to update proposal status');
-    }
+    await db.updateWhere('supplier_proposals', { status: 'converted_to_rfq' }, { where: { id: proposalId } });
 
     return {
         id: rfqData.id,

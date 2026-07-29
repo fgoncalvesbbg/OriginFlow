@@ -6,10 +6,9 @@
  * service is only wired into the Admin panel.
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { AIPrompt } from '../../types';
-import { runMutation } from '../core/db';
 
 const mapRow = (row: any): AIPrompt => ({
   id: row.id,
@@ -26,9 +25,8 @@ const mapRow = (row: any): AIPrompt => ({
 
 export const getAIPrompts = async (): Promise<AIPrompt[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase.from('ai_prompts').select('*').order('name');
-  if (error) return [];
-  return (data || []).map(mapRow);
+  const rows = await orEmpty(db.select<Row>('ai_prompts', { order: { column: 'name' } }), 'getAIPrompts');
+  return rows.map(mapRow);
 };
 
 export const updateAIPrompt = async (
@@ -36,17 +34,15 @@ export const updateAIPrompt = async (
   updates: { systemPrompt?: string; model?: string; maxTokens?: number },
   updatedBy?: string
 ): Promise<void> => {
-  await runMutation(
-    supabase
-      .from('ai_prompts')
-      .update({
-        ...(updates.systemPrompt !== undefined && { system_prompt: updates.systemPrompt }),
-        ...(updates.model !== undefined && { model: updates.model }),
-        ...(updates.maxTokens !== undefined && { max_tokens: updates.maxTokens }),
-        updated_at: new Date().toISOString(),
-        ...(updatedBy !== undefined && { updated_by: updatedBy }),
-      })
-      .eq('id', id),
-    'updateAIPrompt'
+  await db.updateWhere(
+    'ai_prompts',
+    {
+      ...(updates.systemPrompt !== undefined && { system_prompt: updates.systemPrompt }),
+      ...(updates.model !== undefined && { model: updates.model }),
+      ...(updates.maxTokens !== undefined && { max_tokens: updates.maxTokens }),
+      updated_at: new Date().toISOString(),
+      ...(updatedBy !== undefined && { updated_by: updatedBy }),
+    },
+    { where: { id } },
   );
 };

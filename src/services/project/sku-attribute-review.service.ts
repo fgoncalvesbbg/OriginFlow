@@ -3,7 +3,7 @@
  * an L3 category (for side-by-side comparison) and manages per-cell review flags/comments.
  * Editing an attribute value reuses updateProjectSku (the SKU row is the source of truth).
  */
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProjectSku, SkuAttributeFlag } from '../../types';
 
@@ -33,16 +33,17 @@ const mapSku = (r: any): CategorySku => ({
  */
 export const getSkusByCategory = async (categoryId: string): Promise<CategorySku[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('project_skus')
-    .select('*, projects!inner(id, name, category_id)')
-    .eq('projects.category_id', categoryId)
-    .order('sku_number', { ascending: true });
-  if (error) {
-    console.error('getSkusByCategory error:', error);
-    return [];
-  }
-  return (data || []).map(mapSku);
+  const rows = await orEmpty(
+    db.select<Row>('project_skus', {
+      // Inner join plus a filter on the JOINED table's column. Both are PostgREST-specific;
+      // see data/PORTING.md for what a SQL adapter must generate here.
+      columns: '*, projects!inner(id, name, category_id)',
+      where: { 'projects.category_id': categoryId },
+      order: { column: 'sku_number', ascending: true },
+    }),
+    'getSkusByCategory',
+  );
+  return rows.map(mapSku);
 };
 
 const mapFlag = (r: any): SkuAttributeFlag => ({
@@ -61,15 +62,11 @@ const mapFlag = (r: any): SkuAttributeFlag => ({
 /** All review flags for the given SKU ids (the SKUs currently shown in the viewer). */
 export const getFlagsForSkus = async (skuIds: string[]): Promise<SkuAttributeFlag[]> => {
   if (!isLive || skuIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from('sku_attribute_flags')
-    .select('*')
-    .in('project_sku_id', skuIds);
-  if (error) {
-    console.error('getFlagsForSkus error:', error);
-    return [];
-  }
-  return (data || []).map(mapFlag);
+  const rows = await orEmpty(
+    db.select<Row>('sku_attribute_flags', { where: { project_sku_id: skuIds } }),
+    'getFlagsForSkus',
+  );
+  return rows.map(mapFlag);
 };
 
 /**
@@ -84,28 +81,21 @@ export const upsertSkuAttributeFlag = async (
   flaggedByName: string,
 ): Promise<SkuAttributeFlag> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { data, error } = await supabase
-    .from('sku_attribute_flags')
-    .upsert(
-      {
-        project_sku_id: projectSkuId,
-        attribute_id: attributeId,
-        comment,
-        status: 'open',
-        flagged_by: flaggedBy,
-        flagged_by_name: flaggedByName,
-        resolved_at: null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'project_sku_id,attribute_id' },
-    )
-    .select()
-    .single();
-  if (error) {
-    console.error('upsertSkuAttributeFlag error:', error);
-    throw new Error(error.message || 'Failed to save flag');
-  }
-  return mapFlag(data);
+  const saved = await db.upsertReturning<Row>(
+    'sku_attribute_flags',
+    {
+      project_sku_id: projectSkuId,
+      attribute_id: attributeId,
+      comment,
+      status: 'open',
+      flagged_by: flaggedBy,
+      flagged_by_name: flaggedByName,
+      resolved_at: null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'project_sku_id,attribute_id' },
+  );
+  return mapFlag(saved);
 };
 
 /** Mark a flag resolved (or re-open it). Stamps resolved_at when resolving. */
@@ -114,29 +104,20 @@ export const setSkuAttributeFlagResolved = async (
   resolved: boolean,
 ): Promise<SkuAttributeFlag> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { data, error } = await supabase
-    .from('sku_attribute_flags')
-    .update({
+  const updated = await db.update<Row>(
+    'sku_attribute_flags',
+    {
       status: resolved ? 'resolved' : 'open',
       resolved_at: resolved ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) {
-    console.error('setSkuAttributeFlagResolved error:', error);
-    throw new Error(error.message || 'Failed to update flag');
-  }
-  return mapFlag(data);
+    },
+    { where: { id } },
+  );
+  return mapFlag(updated);
 };
 
 /** Remove a flag entirely. */
 export const deleteSkuAttributeFlag = async (id: string): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { error } = await supabase.from('sku_attribute_flags').delete().eq('id', id);
-  if (error) {
-    console.error('deleteSkuAttributeFlag error:', error);
-    throw new Error(error.message || 'Failed to delete flag');
-  }
+  await db.delete('sku_attribute_flags', { where: { id } });
 };

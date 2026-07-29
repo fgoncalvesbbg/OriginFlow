@@ -3,13 +3,11 @@
  * Manages supplier information and portal tokens
  */
 
-import { supabase, portalClient } from '../core/supabase.client';
+import { auth, db, portalDb, orEmpty, orUndefined, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { Supplier, User, Project } from '../../types';
 import { mapSupplier, mapProfile, mapProject } from '../../utils/mappers.utils';
-import { handleError, generateUUID, generateNumericCode } from '../../utils';
-import { runMutation, runQuery } from '../core/db';
-import { withTimeout } from '../core/with-timeout';
+import { generateUUID, generateNumericCode } from '../../utils';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
@@ -19,17 +17,11 @@ const READ_TIMEOUT_MS = 20000;
  */
 export const getSuppliers = async (): Promise<Supplier[]> => {
     if (!isLive) return [];
-    try {
-        const { data, error } = await withTimeout(supabase.from('suppliers').select('*'), READ_TIMEOUT_MS);
-        if (error) {
-            console.error("getSuppliers failed", error);
-            return [];
-        }
-        return (data || []).map(mapSupplier);
-    } catch (e) {
-        console.error("[read] getSuppliers timed out or failed", e);
-        return [];
-    }
+    const rows = await orEmpty(
+        withDeadline((signal) => db.select<Row>('suppliers', { signal }), READ_TIMEOUT_MS, 'getSuppliers'),
+        'getSuppliers',
+    );
+    return rows.map(mapSupplier);
 };
 
 /**
@@ -37,26 +29,24 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
  */
 export const getSupplierById = async (id: string): Promise<Supplier | undefined> => {
     if (!id || !isLive) return undefined;
-    const { data, error } = await supabase.from('suppliers').select('*').eq('id', id).single();
-    if (error || !data) return undefined;
-    return mapSupplier(data);
+    const row = await orUndefined(db.selectMaybeOne<Row>('suppliers', { where: { id } }), 'getSupplierById');
+    return row ? mapSupplier(row) : undefined;
 };
 
 /**
  * Get supplier by portal token (public supplier portal).
  *
- * Uses the get_supplier_by_token_safe SECURITY DEFINER RPC rather than a direct
+ * Uses the get_supplier_by_token_safe SECURITY DEFINER routine rather than a direct
  * table read: the suppliers table is not readable by the anonymous `anon` role
- * the portal client runs as, and the RPC returns has_access_code instead of the
+ * the portal client runs as, and the routine returns has_access_code instead of the
  * access code itself so the secret is never exposed to the browser.
  */
 export const getSupplierByToken = async (token: string): Promise<Supplier | undefined> => {
     if (!isLive || !token) return undefined;
-    const { data, error } = await portalClient.rpc('get_supplier_by_token_safe', { p_token: token });
-    if (error) {
-        console.error('getSupplierByToken failed', error);
-        return undefined;
-    }
+    const data = await orUndefined(
+        portalDb.rpc<Row | Row[] | null>('get_supplier_by_token_safe', { p_token: token }),
+        'getSupplierByToken',
+    );
     const row = Array.isArray(data) ? data[0] : data;
     return row ? mapSupplier(row) : undefined;
 };
@@ -64,17 +54,16 @@ export const getSupplierByToken = async (token: string): Promise<Supplier | unde
 /**
  * Verify a supplier's access code against the portal token (server-side).
  *
- * Uses the verify_supplier_access SECURITY DEFINER RPC so the access code is
+ * Uses the verify_supplier_access SECURITY DEFINER routine so the access code is
  * validated in the database and never sent to or compared in the browser.
  * Returns the supplier on success, or undefined when the code is incorrect.
  */
 export const verifySupplierPortalAccess = async (token: string, code: string): Promise<Supplier | undefined> => {
     if (!isLive || !token || !code) return undefined;
-    const { data, error } = await portalClient.rpc('verify_supplier_access', { p_token: token, p_code: code });
-    if (error) {
-        console.error('verifySupplierAccess failed', error);
-        return undefined;
-    }
+    const data = await orUndefined(
+        portalDb.rpc<Row | Row[] | null>('verify_supplier_access', { p_token: token, p_code: code }),
+        'verifySupplierAccess',
+    );
     const row = Array.isArray(data) ? data[0] : data;
     return row ? mapSupplier(row) : undefined;
 };
@@ -83,21 +72,20 @@ export const verifySupplierPortalAccess = async (token: string, code: string): P
  * Create a new supplier
  */
 export const createSupplier = async (name: string, code: string, email: string): Promise<Supplier> => {
-    const data = await runQuery(supabase.from('suppliers').insert({ name, code, email }).select().single(), 'createSupplier');
-    return mapSupplier(data);
+    const created = await db.insert<Row>('suppliers', { name, code, email });
+    return mapSupplier(created);
 };
 
 /**
  * Update supplier information
  */
 export const updateSupplier = async (id: string, updates: Partial<Supplier>): Promise<Supplier> => {
-    const { data, error } = await supabase.from('suppliers').update({
+    const updated = await db.update<Row>('suppliers', {
         name: updates.name,
         code: updates.code,
         email: updates.email
-    }).eq('id', id).select().single();
-    if (error) handleError(error, 'updateSupplier');
-    return mapSupplier(data);
+    }, { where: { id } });
+    return mapSupplier(updated);
 };
 
 /**
@@ -123,18 +111,11 @@ export const regenerateSupplierAccessCode = async (supplierId: string): Promise<
         throw new Error("Failed to generate new access code");
     }
 
-    const { data, error } = await supabase
-        .from('suppliers')
-        .update({ access_code: accessCode })
-        .eq('id', supplierId)
-        .select('access_code')
-        .single();
-
-    if (error) {
-        console.error('Error regenerating access code:', error);
-        handleError(error, 'regenerateSupplierAccessCode');
-        throw new Error(`Failed to regenerate access code: ${error.message}`);
-    }
+    const data = await db.update<Row>(
+        'suppliers',
+        { access_code: accessCode },
+        { where: { id: supplierId }, columns: 'access_code' },
+    );
 
     if (!data?.access_code) {
         throw new Error("New access code was not saved properly. Please try again.");
@@ -149,33 +130,35 @@ export const ensureSupplierToken = async (supplierId: string): Promise<string> =
     if (!sup) throw new Error("Supplier not found");
     if (sup.portalToken) return sup.portalToken;
     const token = generateUUID();
-    await runMutation(supabase.from('suppliers').update({ portal_token: token }).eq('id', supplierId), 'ensureSupplierToken');
+    await db.updateWhere('suppliers', { portal_token: token }, { where: { id: supplierId } });
     return token;
 };
 
 export const assignSupplierToPMs = async (supplierId: string, pmIds: string[]): Promise<void> => {
     if (!supplierId || !pmIds.length) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    const { error: deleteError } = await supabase.from('supplier_pm_assignments').delete().eq('supplier_id', supplierId);
-    if (deleteError) handleError(deleteError, 'assignSupplierToPMs');
+    const user = await auth.getUser();
+    await db.delete('supplier_pm_assignments', { where: { supplier_id: supplierId } });
     const assignments = pmIds.map(pmId => ({ supplier_id: supplierId, pm_id: pmId, assigned_by: user?.id }));
-    await runMutation(supabase.from('supplier_pm_assignments').insert(assignments), 'assignSupplierToPMs');
+    await db.insertMany('supplier_pm_assignments', assignments);
 };
 
 export const getSupplierPMs = async (supplierId: string): Promise<User[]> => {
     if (!supplierId || !isLive) return [];
-    const { data, error } = await supabase.from('supplier_pm_assignments').select('pm_id').eq('supplier_id', supplierId);
-    if (error) return [];
-    const pmIds = (data || []).map((d: any) => d.pm_id);
+    const assignments = await orEmpty(
+        db.select<Row>('supplier_pm_assignments', { columns: 'pm_id', where: { supplier_id: supplierId } }),
+        'getSupplierPMs:assignments',
+    );
+    const pmIds = assignments.map((d: any) => d.pm_id);
     if (!pmIds.length) return [];
-    const { data: profiles, error: profileError } = await supabase.from('profiles').select('*').in('id', pmIds);
-    if (profileError) return [];
-    return (profiles || []).map(mapProfile);
+    const profiles = await orEmpty(
+        db.select<Row>('profiles', { where: { id: pmIds } }),
+        'getSupplierPMs:profiles',
+    );
+    return profiles.map(mapProfile);
 };
 
 export const reassignProjectPM = async (projectId: string, newPmId: string): Promise<Project> => {
-    const { data, error } = await supabase.from('projects').update({ pm_id: newPmId }).eq('id', projectId).select().single();
-    if (error) handleError(error, 'reassignProjectPM');
+    const data = await db.update<Row>('projects', { pm_id: newPmId }, { where: { id: projectId } });
     if (!data) throw new Error('reassignProjectPM: no data returned');
     return mapProject(data);
 };
@@ -187,16 +170,13 @@ export const logAccessCodeAttempt = async (
     success: boolean
 ): Promise<void> => {
     try {
-        const { error } = await portalClient.from('supplier_access_logs').insert({
+        await portalDb.insertMany('supplier_access_logs', [{
             supplier_id: supplierId,
             access_code: accessCode,
             ip_address: ipAddress,
             success,
             created_at: new Date().toISOString()
-        });
-        if (error) {
-            console.error('Failed to log access code attempt:', error);
-        }
+        }]);
     } catch (e) {
         console.error('Error logging access code attempt:', e);
     }

@@ -8,7 +8,7 @@
  *
  * What remains: it reflects the browser's own `online`/`offline` signal so we can
  * show a passive banner when the device is genuinely offline. Recovery from a
- * stale/slow connection is handled invisibly by bounded requests (with-timeout)
+ * stale/slow connection is handled invisibly by bounded requests (data/resilience.ts)
  * and the auth watchdog — pages fail fast and surface their own error/retry UI
  * rather than hanging. The user is only ever asked to act via explicit buttons.
  */

@@ -3,15 +3,16 @@
  * CRUD for shared reusable content blocks (im_blocks table)
  */
 
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { IMBlock } from '../../types';
-import { handleError, generateUUID } from '../../utils';
-import { withTimeout } from '../core/with-timeout';
+import { generateUUID } from '../../utils';
 import { saveWithRetry } from '../core/save-retry';
 import { externalizeFormDataImages } from './im-asset.service';
 
 const TAG = '[im-block.service]';
+/** Default read bound for this service's queries. */
+const READ_TIMEOUT_MS = 12000;
 
 const mapRow = (r: any): IMBlock => ({
   id: r.id,
@@ -37,18 +38,25 @@ export const getIMBlocks = async (filters?: {
   approvalStatus?: string;
 }): Promise<IMBlock[]> => {
   if (!isLive) { console.warn(TAG, 'getIMBlocks skipped — isLive=false'); return []; }
-  let query = supabase.from('im_blocks').select('*').order('title');
-  if (filters?.approvalStatus) query = query.eq('approval_status', filters.approvalStatus);
-  if (filters?.categoryId) query = query.contains('applicable_categories', [filters.categoryId]);
-
-  try {
-    const { data, error } = await withTimeout(query);
-    if (error) { console.error(TAG, 'getIMBlocks error:', error); return []; }
-    return (data || []).map(mapRow);
-  } catch (e) {
-    console.error(TAG, 'getIMBlocks threw:', e);
-    return [];
-  }
+  const rows = await orEmpty(
+    withDeadline(
+      (signal) => db.select<Row>('im_blocks', {
+        // Absent filters stay `undefined` and are dropped by the port, so no branching.
+        where: {
+          approval_status: filters?.approvalStatus,
+          applicable_categories: filters?.categoryId
+            ? { op: 'arrayContains', value: [filters.categoryId] }
+            : undefined,
+        },
+        order: { column: 'title' },
+        signal,
+      }),
+      READ_TIMEOUT_MS,
+      'getIMBlocks',
+    ),
+    `${TAG} getIMBlocks`,
+  );
+  return rows.map(mapRow);
 };
 
 export const saveIMBlock = async (block: Partial<IMBlock>): Promise<IMBlock> => {
@@ -84,23 +92,13 @@ export const saveIMBlock = async (block: Partial<IMBlock>): Promise<IMBlock> => 
 
   try {
     const data = await saveWithRetry(
-      async (timeoutMs) => {
-        const { data: row, error } = await withTimeout(
-          supabase.from('im_blocks').upsert(payload).select().single(),
-          timeoutMs,
-        );
-        if (error) {
-          console.error(TAG, 'saveIMBlock Supabase error:', {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint,
-          });
-          handleError(error, 'saveIMBlock');
-        }
-        if (!row) throw new Error('saveIMBlock: upsert returned no data and no error');
-        return row;
-      },
+      // Forwarding the deadline's signal is what lets a timed-out attempt release its
+      // row lock before the retry goes out.
+      (timeoutMs) => withDeadline(
+        (signal) => db.upsertReturning<Row>('im_blocks', payload, { signal }),
+        timeoutMs,
+        'saveIMBlock',
+      ),
       { context: 'saveIMBlock', payloadBytes: JSON.stringify(payload).length },
     );
 
@@ -129,22 +127,34 @@ export interface IMBlockUsageRef {
  */
 const getIMBlockUsage = async (id: string): Promise<IMBlockUsageRef[]> => {
   if (!isLive) return [];
-  const { data, error } = await withTimeout(
-    supabase.from('im_block_section_usage').select('section_id, template_id').eq('block_id', id)
-  );
-  if (error) {
-    console.error(TAG, 'getIMBlockUsage error:', error);
-    throw new Error(`Could not verify whether the block is in use: ${error.message}`);
+  let rows: Row[];
+  try {
+    rows = await withDeadline(
+      (signal) => db.select<Row>('im_block_section_usage', {
+        columns: 'section_id, template_id',
+        where: { block_id: id },
+        signal,
+      }),
+      READ_TIMEOUT_MS,
+      'getIMBlockUsage',
+    );
+  } catch (e) {
+    console.error(TAG, 'getIMBlockUsage error:', e);
+    throw new Error(`Could not verify whether the block is in use: ${(e as Error).message}`);
   }
-  const rows = data || [];
   if (rows.length === 0) return [];
 
   // Resolve template names for a human-readable "remove it from X first" message.
   const templateIds = [...new Set(rows.map((r: any) => r.template_id))];
-  const { data: tpls } = await withTimeout(
-    supabase.from('im_templates').select('id, name').in('id', templateIds)
+  const tpls = await orEmpty(
+    withDeadline(
+      (signal) => db.select<Row>('im_templates', { columns: 'id, name', where: { id: templateIds }, signal }),
+      READ_TIMEOUT_MS,
+      'getIMBlockUsage:templates',
+    ),
+    `${TAG} getIMBlockUsage:templates`,
   );
-  const nameById = new Map<string, string>((tpls || []).map((t: any) => [t.id, t.name]));
+  const nameById = new Map<string, string>(tpls.map((t: any) => [t.id, t.name]));
 
   return rows.map((r: any) => ({
     sectionId: r.section_id,
@@ -159,18 +169,17 @@ const getIMBlockUsage = async (id: string): Promise<IMBlockUsageRef[]> => {
  */
 export const getIMBlockUsageCounts = async (): Promise<Record<string, number>> => {
   if (!isLive) return {};
-  try {
-    const { data, error } = await withTimeout(
-      supabase.from('im_block_section_usage').select('block_id')
-    );
-    if (error) { console.error(TAG, 'getIMBlockUsageCounts error:', error); return {}; }
-    const counts: Record<string, number> = {};
-    for (const r of data || []) counts[(r as any).block_id] = (counts[(r as any).block_id] ?? 0) + 1;
-    return counts;
-  } catch (e) {
-    console.error(TAG, 'getIMBlockUsageCounts threw:', e);
-    return {};
-  }
+  const rows = await orEmpty(
+    withDeadline(
+      (signal) => db.select<Row>('im_block_section_usage', { columns: 'block_id', signal }),
+      READ_TIMEOUT_MS,
+      'getIMBlockUsageCounts',
+    ),
+    `${TAG} getIMBlockUsageCounts`,
+  );
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[(r as any).block_id] = (counts[(r as any).block_id] ?? 0) + 1;
+  return counts;
 };
 
 export class BlockInUseError extends Error {
@@ -201,13 +210,11 @@ export const deleteIMBlock = async (id: string): Promise<void> => {
   }
 
   try {
-    const { error } = await withTimeout(
-      supabase.from('im_blocks').delete().eq('id', id)
+    await withDeadline(
+      (signal) => db.delete('im_blocks', { where: { id }, signal }),
+      READ_TIMEOUT_MS,
+      'deleteIMBlock',
     );
-    if (error) {
-      console.error(TAG, 'deleteIMBlock error:', error);
-      handleError(error, 'deleteIMBlock');
-    }
   } catch (e) {
     console.error(TAG, 'deleteIMBlock threw:', e);
     throw e;

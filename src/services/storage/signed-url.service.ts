@@ -10,7 +10,7 @@
  * working while the bucket is still public (during the migration window).
  */
 
-import { supabase } from '../core/supabase.client';
+import { storage } from '../../data';
 
 const ENDPOINT = '/.netlify/functions/supplier-file-url';
 const BUCKET = 'documents';
@@ -71,8 +71,7 @@ export const getSignedDocumentUrl = async (fileUrl: string): Promise<string> => 
   const path = toStoragePath(fileUrl);
   if (!path) return fileUrl;
   try {
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_TTL_SECONDS);
-    if (!error && data?.signedUrl) return data.signedUrl;
+    return await storage.createSignedUrl(BUCKET, path, SIGNED_TTL_SECONDS);
   } catch (e) {
     console.warn('getSignedDocumentUrl failed', e);
   }

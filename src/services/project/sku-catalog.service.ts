@@ -4,11 +4,14 @@
  * db_migrations/93_standalone_sku_catalog.sql): a NULL project_id means a catalog SKU, and
  * category_id lives directly on the row so a project-less SKU still resolves its attribute set.
  */
-import { supabase } from '../core/supabase.client';
+import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { CatalogSku, SkuAttributeValue } from '../../types';
 import { mapProjectSku } from './project-sku.service';
 import { logSkuChanges, logSkuCreated, type ChangeActor } from './sku-log.service';
+
+/** Server-side join pulling the owning project's name and category — see data/PORTING.md. */
+const CATALOG_COLUMNS = '*, projects(id, name, category_id)';
 
 const mapCatalog = (r: any): CatalogSku => ({
   ...mapProjectSku(r),
@@ -23,15 +26,14 @@ const mapCatalog = (r: any): CatalogSku => ({
  */
 export const getCatalogSkus = async (): Promise<CatalogSku[]> => {
   if (!isLive) return [];
-  const { data, error } = await supabase
-    .from('project_skus')
-    .select('*, projects(id, name, category_id)')
-    .order('sku_number', { ascending: true });
-  if (error) {
-    console.error('getCatalogSkus error:', error);
-    return [];
-  }
-  return (data || []).map(mapCatalog);
+  const rows = await orEmpty(
+    db.select<Row>('project_skus', {
+      columns: CATALOG_COLUMNS,
+      order: { column: 'sku_number', ascending: true },
+    }),
+    'getCatalogSkus',
+  );
+  return rows.map(mapCatalog);
 };
 
 /** Create a project-less catalog SKU under a category (no per-project cap applies). */
@@ -42,23 +44,19 @@ export const createCatalogSku = async (
   attributeValues: SkuAttributeValue[] = [],
 ): Promise<CatalogSku> => {
   if (!isLive) throw new Error('Database not configured.');
-  const { data, error } = await supabase
-    .from('project_skus')
-    .insert({
+  const created = await db.insert<Row>(
+    'project_skus',
+    {
       project_id: null,
       category_id: categoryId,
       sku_number: skuNumber,
       sku_title: skuTitle,
       attribute_values: attributeValues,
       sort_order: 0,
-    })
-    .select('*, projects(id, name, category_id)')
-    .single();
-  if (error) {
-    console.error('createCatalogSku error:', error);
-    throw new Error(error.message || 'Failed to create catalog SKU');
-  }
-  return mapCatalog(data);
+    },
+    { columns: CATALOG_COLUMNS },
+  );
+  return mapCatalog(created);
 };
 
 export interface ParsedSkuRow {
@@ -91,14 +89,10 @@ export const bulkUpsertCatalogSkus = async (
   if (!isLive) throw new Error('Database not configured.');
   const result: BulkUpsertSkuResult = { created: 0, updated: 0, skipped: 0, lockedSkipped: 0 };
 
-  // Existing catalog SKUs, keyed by sku_number.
-  const { data: existingRows, error } = await supabase
-    .from('project_skus')
-    .select('*')
-    .is('project_id', null);
-  if (error) throw new Error(error.message || 'Failed to load existing catalog SKUs');
+  // Existing catalog SKUs, keyed by sku_number. A null project_id is what makes a row "catalog".
+  const existingRows = await db.select<Row>('project_skus', { where: { project_id: null } });
   const byNumber = new Map<string, ReturnType<typeof mapProjectSku>>();
-  for (const r of existingRows || []) byNumber.set((r.sku_number ?? '').trim(), mapProjectSku(r));
+  for (const r of existingRows) byNumber.set((r.sku_number ?? '').trim(), mapProjectSku(r));
 
   for (const row of rows) {
     const number = row.skuNumber.trim();
@@ -111,17 +105,17 @@ export const bulkUpsertCatalogSkus = async (
       const merged = new Map<string, SkuAttributeValue>();
       for (const v of existing.attributeValues) merged.set(v.attributeId, v);
       for (const v of row.values) merged.set(v.attributeId, v);
-      const { error: upErr } = await supabase
-        .from('project_skus')
-        .update({
+      await db.updateWhere(
+        'project_skus',
+        {
           sku_title: row.skuTitle || existing.skuTitle,
           category_id: categoryId,
           attribute_values: Array.from(merged.values()),
           pending_export: true,
           updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id);
-      if (upErr) throw new Error(upErr.message || `Failed to update SKU ${number}`);
+        },
+        { where: { id: existing.id } },
+      );
       if (actor) await logSkuChanges(existing.id, number, row.values.map(v => ({ field: v.name, oldValue: null, newValue: v.value })), actor, 'bulk upload');
       result.updated++;
     } else {
