@@ -26,7 +26,7 @@ import { uploadIMAsset, listIMAssets, externalizeHtmlImages, externalizeFormData
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, CheckCircle, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useUndoRedo } from './editor/useUndoRedo';
 import { insertToActiveEditor } from './editor/insertTarget';
@@ -34,8 +34,11 @@ import { ProjectImImportDialog } from './ProjectImImportDialog';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
-import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition } from './project-im-generator/im-content.utils';
+import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
+import { PREVIEW_SECTION_ATTR, findPreviewSection, previewScrollTopFor } from './project-im-generator/preview-scroll.utils';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
+import { Badge } from '../../components/common/Badge';
+import { OptionalContentPanel, IncludeModeControl, modeOf, type OptionalContentItem } from './project-im-generator/OptionalContentPanel';
 import { BindableField } from './project-im-generator/BindableField';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
@@ -99,6 +102,12 @@ const ProjectIMGenerator: React.FC = () => {
   const [blockOverrides, setBlockOverrides] = useState<Record<string, Record<string, InlineBlockRef>>>({});
   // Left panel mode: fill placeholder values, or author project-specific content.
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
+  // Chapter briefly outlined in the preview after a "Show in preview" jump, so the eye can
+  // find the landing spot in a page of body text. Cleared on a timer.
+  const [flashSectionId, setFlashSectionId] = useState<string | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
+  // The preview's scrolling viewport (the pane, not the A4 page inside it).
+  const previewScrollRef = useRef<HTMLDivElement>(null);
   const [availableBlocks, setAvailableBlocks] = useState<Record<string, { content: Record<string, string>; blockType: string }>>({});
   // Full block library (title/slug/type) for the standardized-block picker.
   const [blockLibrary, setBlockLibrary] = useState<IMBlock[]>([]);
@@ -694,6 +703,56 @@ const ProjectIMGenerator: React.FC = () => {
       return () => clearTimeout(t);
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serializeDraft(), loading, pendingDraft, isBusy, projectId, selectedTemplateId]);
+
+  /**
+   * Scroll the preview pane to a chapter and flash it, so the eye can find where it landed
+   * in what is otherwise a wall of A4 text. A no-op when the chapter isn't rendered; callers
+   * disable their control in that case rather than letting the click do nothing silently.
+   *
+   * Lives up here with the hooks that use it, not down with the other section helpers: this
+   * component returns early while loading and before a template is chosen, so anything a hook
+   * closes over has to be initialised on EVERY render, not just the ones that get that far.
+   */
+  const jumpToPreviewSection = (sectionId: string) => {
+    const scroller = previewScrollRef.current;
+    if (!scroller) return;
+    const target = findPreviewSection(scroller, sectionId);
+    if (!target) return;
+
+    const reduceMotion = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    scroller.scrollTo({
+      top: previewScrollTopFor(scroller, target),
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    });
+
+    setFlashSectionId(sectionId);
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => setFlashSectionId(null), 1600);
+  };
+
+  /**
+   * Content tab: picking a chapter in the tree also brings the preview to it, so the two panes
+   * stay in sync without a second click. Deliberately keyed on the SELECTION (and on entering
+   * the tab), not on content — auto-scrolling while someone types would yank the page around.
+   *
+   * No "is this chapter in the preview?" pre-check: `findPreviewSection` already misses for a
+   * chapter the preview omitted (condition, visibility, SKU scope), and the DOM is the ground
+   * truth for what is on screen. Checking `isSectionInPreview` here would mean closing over
+   * bindings declared below the early returns, which is what broke this in the first place.
+   */
+  useEffect(() => {
+    if (editorMode !== 'content' || !selectedContentSectionId) return;
+    // A frame's grace so the preview has committed any layout change from the selection.
+    const raf = requestAnimationFrame(() => jumpToPreviewSection(selectedContentSectionId));
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorMode, selectedContentSectionId]);
+
+  // Never leave the flash timer pending past unmount.
+  useEffect(() => () => {
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+  }, []);
 
   // Unsaved-work indicator: current editable state differs from the last-persisted baseline.
   const isDirty = savedSnapshotRef.current !== null && serializeDraft() !== savedSnapshotRef.current;
@@ -1330,11 +1389,8 @@ const ProjectIMGenerator: React.FC = () => {
   };
   const deleteSnippet = (name: string) => persistSnippets(snippets.filter(s => s.name !== name));
 
-  // --- Per-project overrides of individual inline template blocks (e.g. tables) ---
-  // True when an inline ref's content contains a table in any language — the only case
-  // where we surface the per-project "Edit table" action.
-  const refHasTable = (ref: BlockRef): boolean =>
-      ref.kind === 'inline' && Object.values((ref as InlineBlockRef).content || {}).some(h => /<table/i.test(h || ''));
+  // --- Per-project overrides of individual inline template blocks ---
+  // `refIsOverridable` / `refHasTable` live in im-content.utils.ts (pure + unit-tested).
 
   // Start a per-project edit of a template inline block: seed the override from the
   // template ref (deep-copied so edits never mutate the template) and store it by index.
@@ -1818,6 +1874,46 @@ const ProjectIMGenerator: React.FC = () => {
         ?? (extra ? ({ ...extra, templateId: '', isPlaceholder: false, content: {} } as IMSection) : undefined);
     }
     return true;
+  };
+
+  /**
+   * Whether a chapter is actually rendered in the Live Preview right now. The preview is
+   * WYSIWYG, so a chapter excluded by its condition or outside the bound SKU scope is omitted
+   * entirely. Shared by the preview itself and the "Show in preview" controls so the two can
+   * never disagree about what is on screen.
+   */
+  const isSectionInPreview = (section: IMSection): boolean =>
+    isSectionEffectivelyVisible(section) && isSectionInSkuScope(section.id);
+
+  /**
+   * "Show in preview" control. Explicitly DISABLED with a reason when the chapter isn't in the
+   * preview, rather than clicking to no effect — an excluded chapter is exactly the case a PM
+   * needs explained, not silently swallowed.
+   */
+  const renderJumpToPreview = (section: IMSection, opts: { compact?: boolean } = {}) => {
+    const inPreview = isSectionInPreview(section);
+    const label = inPreview
+      ? 'Show this chapter in the live preview'
+      : "Not in the preview: excluded by its condition, hidden, or outside this manual's SKU scope";
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); jumpToPreviewSection(section.id); }}
+        disabled={!inPreview}
+        title={label}
+        aria-label={opts.compact ? label : undefined}
+        className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 motion-reduce:transition-none ${
+          inPreview
+            ? 'text-gray-500 hover:bg-indigo-50 hover:text-indigo-700'
+            : 'cursor-not-allowed text-gray-400'
+        }`}
+      >
+        <Crosshair size={12} aria-hidden="true" />
+        {/* The label carries the state, not just the tooltip: a greyed-out "Show in preview"
+            looks broken, whereas "Not in preview" explains itself at a glance. */}
+        {!opts.compact && <span>{inPreview ? 'Show in preview' : 'Not in preview'}</span>}
+      </button>
+    );
   };
 
   // --- Per-chapter SKU scope (SKU-specific chapter variants) ---
@@ -2932,18 +3028,23 @@ const ProjectIMGenerator: React.FC = () => {
 
             {refs.map((ref, i) => (
               <React.Fragment key={i}>
-                {/* Locked template block */}
+                {/* A template block. Inline ones can be edited for this project only (stored as
+                    a project override, never written back to the template); shared blocks and
+                    SKU slots stay locked — see refIsOverridable. */}
                 {ref.kind === 'sku_slot' ? (
                   <div className="flex items-center gap-2 text-xs text-gray-400 italic border border-gray-100 rounded px-2 py-1.5 bg-gray-50">
                     <Lock size={11} /> SKU slot: {(ref as SKUSlotRef).label?.[activeLang] || (ref as SKUSlotRef).slot}
                   </div>
-                ) : refHasTable(ref) ? (
+                ) : refIsOverridable(ref) ? (
                   blockOverrides[section.id]?.[String(i)] ? (
-                    // Template table unlocked for this project — fully editable (add rows/columns).
+                    // Template block unlocked for this project — fully editable (and for a
+                    // table, that includes adding rows/columns).
                     <div className="border border-sky-200 rounded-lg bg-sky-50/30">
                       <div className="flex items-center justify-between px-2 py-1 border-b border-sky-100">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-sky-600 flex items-center gap-1"><Boxes size={11} /> Table · edited for this project</span>
-                        <button onClick={() => resetBlockOverride(section.id, i)} title="Discard project edits and use the template table" className="text-[10px] font-medium text-gray-500 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={11} /> Reset to template</button>
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-sky-600 flex items-center gap-1">
+                          <Unlock size={11} /> {refHasTable(ref) ? 'Table · edited for this project' : 'Edited for this project'}
+                        </span>
+                        <button onClick={() => resetBlockOverride(section.id, i)} title="Discard the project edits and go back to the template block" className="text-[10px] font-medium text-gray-500 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={11} /> Reset to template</button>
                       </div>
                       <InlineBlockEditor
                         rowKey={`${section.id}-bo-${i}`}
@@ -2957,16 +3058,27 @@ const ProjectIMGenerator: React.FC = () => {
                       />
                     </div>
                   ) : (
-                    // Locked template table + an opt-in to edit it for this project only.
+                    // Locked template block + an opt-in to edit it for this project only. The
+                    // template itself is untouched; the edit is stored on this manual.
                     <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
-                      <span className="absolute top-1 right-1 text-gray-300" title="Template content (locked)"><Lock size={11} /></span>
+                      <span className="absolute top-1 right-1 text-gray-300" title="Template content — edit it for this project below"><Lock size={11} /></span>
                       <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
-                      <button onClick={() => editBlockForProject(section.id, i, ref as InlineBlockRef)} className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-sky-600 border border-dashed border-sky-300 rounded hover:bg-sky-50 hover:text-sky-700 transition-colors"><Boxes size={12} /> Edit table for this project</button>
+                      <button
+                        onClick={() => editBlockForProject(section.id, i, ref as InlineBlockRef)}
+                        title={refHasTable(ref)
+                          ? 'Edit this table for this project only — the shared template keeps its version'
+                          : 'Edit this text for this project only — the shared template keeps its version'}
+                        className="w-full flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-sky-600 border border-dashed border-sky-300 rounded hover:bg-sky-50 hover:text-sky-700 transition-colors"
+                      >
+                        <Unlock size={12} /> {refHasTable(ref) ? 'Edit table for this project' : 'Edit for this project'}
+                      </button>
                     </div>
                   )
                 ) : (
+                  // Shared library block: approval-gated, so it stays locked here. Change it in
+                  // the Block Library (which updates every manual that uses it).
                   <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
-                    <span className="absolute top-1 right-1 text-gray-300" title="Template content (locked)"><Lock size={11} /></span>
+                    <span className="absolute top-1 right-1 text-gray-300" title="Shared block (locked) — edit it in the Block Library"><Lock size={11} /></span>
                     <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                   </div>
                 )}
@@ -3026,7 +3138,8 @@ const ProjectIMGenerator: React.FC = () => {
               ? <LayoutTemplate size={12} className="text-amber-400 shrink-0" aria-label="Placeholder section" />
               : <Lock size={12} className="text-gray-300 shrink-0" aria-label="Template section" />}
           {hidden && <EyeOff size={12} className="text-gray-400 shrink-0" aria-label="Hidden" />}
-          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-0.5">
+          <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity gap-0.5">
+            {renderJumpToPreview(section, { compact: true })}
             <button onClick={(e) => { e.stopPropagation(); toggleSectionHidden(section.id); }} title={hidden ? 'Show section' : 'Hide section for this project'} className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded">{hidden ? <Eye size={12} /> : <EyeOff size={12} />}</button>
             <button onClick={(e) => { e.stopPropagation(); addExtraSection(section.id); }} title="Add sub-section" className="text-gray-400 hover:text-indigo-600 p-1 hover:bg-indigo-100 rounded"><Plus size={12} /></button>
             {isExtra && <button onClick={(e) => { e.stopPropagation(); removeExtraSection(section.id); if (selected) setSelectedContentSectionId(null); }} title="Delete project section" className="text-gray-400 hover:text-rose-600 p-1 hover:bg-rose-100 rounded"><Trash2 size={12} /></button>}
@@ -3081,8 +3194,16 @@ const ProjectIMGenerator: React.FC = () => {
         <div className="flex-1 min-w-0 overflow-y-auto">
           <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2 mb-4">
             <FilePlus2 size={14} className="mt-0.5 shrink-0" />
-            <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section that doesn't apply — it (and its subsections) won't appear in the generated IM. Template blocks are <strong>locked</strong>; nothing here changes the shared template.</span>
+            <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section that doesn't apply — it (and its subsections) won't appear in the generated IM. Standardized text and tables can be tweaked with <strong>Edit for this project</strong>, and reset back to the template at any time — nothing here changes the shared template or any other manual. Shared library blocks stay locked.</span>
           </div>
+          {selectedSection && (
+            <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+              <span className="min-w-0 truncate text-xs font-bold text-gray-700">
+                {localizedSectionTitle(selectedSection, activeLang)}
+              </span>
+              {renderJumpToPreview(selectedSection)}
+            </div>
+          )}
           {selectedSection ? renderSectionContentEditor(selectedSection) : <div className="text-sm text-gray-400 text-center py-10">No sections yet.</div>}
         </div>
       </div>
@@ -3724,127 +3845,134 @@ const ProjectIMGenerator: React.FC = () => {
                          </div>
                        )}
 
-                       {/* CHAPTER CONDITIONS */}
-                       {orderedSections.some(s => s.conditionFeatureId) && (
+                       {/* CHAPTER CONDITIONS — whole chapters gated on an attribute value. Uses the
+                           same Auto/Include/Exclude control as the Optional & Conditional panel
+                           below: the decision is identical, so the affordance must be too. */}
+                       {orderedSections.some(s => s.conditionFeatureId) && (() => {
+                         const conditional = orderedSections.filter(s => s.conditionFeatureId);
+                         const includedCount = conditional.filter(isSectionVisible).length;
+                         return (
                          <div className="border-b border-gray-100 pb-6">
-                           <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                             <span className="bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded text-xs font-bold">COND</span> Chapter Conditions
-                           </h4>
-                           <div className="space-y-2">
-                             {orderedSections.filter(s => s.conditionFeatureId).map(s => {
+                           <div className="mb-1 flex flex-wrap items-center gap-2">
+                             <h4 className="flex items-center gap-2 text-sm font-bold text-gray-800">
+                               <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-bold text-violet-700">COND</span> Chapter Conditions
+                             </h4>
+                             <span className="text-[11px] font-medium text-gray-500">{includedCount} of {conditional.length} in the manual</span>
+                           </div>
+                           <p className="mb-3 max-w-[70ch] text-[11px] leading-relaxed text-gray-500">
+                             Whole chapters that only apply to some products. <strong className="font-semibold text-gray-600">Auto</strong> follows the chapter's condition.
+                           </p>
+                           <div className="overflow-hidden rounded-lg border border-gray-200 divide-y divide-gray-100">
+                             {conditional.map(s => {
                                const attr = allAttributes.find(a => a.id === s.conditionFeatureId);
                                const visible = isSectionVisible(s);
-                               const hasOverride = sectionVisibility[s.id] !== undefined;
+                               const override = sectionVisibility[s.id];
                                const autoResult = (() => {
                                  if (!s.conditionFeatureId || !s.conditionLabel) return true;
                                  const val = submittedAttrValues[s.conditionFeatureId];
                                  if (!val) return null; // no data
                                  return attr ? matchesConditionValue(val, s.conditionLabel, attr) : true;
                                })();
+                               const outcome = visible
+                                 ? { tone: 'emerald' as const, icon: <Check size={11} />, text: 'In the manual' }
+                                 : { tone: 'gray' as const, icon: <Minus size={11} />, text: 'Left out' };
+                               // Mirror isSectionVisible: a chapter with no submitted value is
+                               // INCLUDED by default (unlike a conditional block, which is left
+                               // out until its data arrives). Assuming `false` here would have
+                               // flagged every no-data chapter as an override.
+                               const autoVisible = autoResult === null ? true : autoResult;
+                               const contrary = override !== undefined && override !== autoVisible;
                                return (
-                                 <div key={s.id} className={`p-3 rounded-lg border text-xs transition-colors ${visible ? 'bg-violet-50 border-violet-200' : 'bg-gray-50 border-gray-200 opacity-70'}`}>
-                                   <div className="flex items-start justify-between gap-2">
-                                     <div className="flex-1 min-w-0">
-                                       <div className="font-semibold text-gray-800 truncate">{localizedSectionTitle(s, activeLang)}</div>
-                                       <div className="text-muted mt-0.5">
-                                         {attr?.name ?? '?'}: <span className="text-violet-600 font-medium">{s.conditionLabel}</span>
-                                         {autoResult === null
-                                           ? <span className="ml-1 text-amber-500">(no data yet)</span>
-                                           : autoResult
-                                             ? <span className="ml-1 text-emerald-600">✓ matches</span>
-                                             : <span className="ml-1 text-rose-500">✗ no match</span>}
+                                 <div key={s.id} className={`px-3 py-2.5 ${visible ? '' : 'bg-gray-50/60'}`}>
+                                   <div className="flex items-start gap-2">
+                                     <div className="min-w-0 flex-1">
+                                       <div className={`truncate text-xs font-semibold ${visible ? 'text-gray-800' : 'text-gray-500'}`}>
+                                         {localizedSectionTitle(s, activeLang)}
+                                       </div>
+                                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                         <Badge tone={outcome.tone} icon={outcome.icon} className="rounded px-1.5 py-0 text-[10px]">{outcome.text}</Badge>
+                                         <span className="text-[11px] text-gray-500">
+                                           {attr?.name ?? '?'} = {s.conditionLabel}
+                                           {autoResult === null
+                                             ? ': no value entered yet, kept in by default'
+                                             : autoResult ? ': matches' : ': no match'}
+                                         </span>
+                                         {contrary && (
+                                           <span className="rounded bg-amber-50 px-1.5 py-0 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                                             Your choice overrides this rule
+                                           </span>
+                                         )}
                                        </div>
                                      </div>
-                                     <div className="flex items-center gap-1 shrink-0">
-                                       {hasOverride && (
-                                         <button onClick={() => setSectionVisibility(prev => { const next = {...prev}; delete next[s.id]; return next; })}
-                                           className="text-[10px] text-amber-600 hover:underline">reset</button>
-                                       )}
-                                       <button
-                                         onClick={() => setSectionVisibility(prev => ({ ...prev, [s.id]: !visible }))}
-                                         className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${visible ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'}`}
-                                       >
-                                         {visible ? 'Include' : 'Exclude'}
-                                       </button>
-                                     </div>
+                                     <IncludeModeControl
+                                       value={modeOf(override)}
+                                       ariaLabel={`Inclusion for chapter ${localizedSectionTitle(s, activeLang)}`}
+                                       onChange={mode => setSectionVisibility(prev => {
+                                         const next = { ...prev };
+                                         if (mode === 'auto') delete next[s.id]; else next[s.id] = mode === 'include';
+                                         return next;
+                                       })}
+                                     />
                                    </div>
                                  </div>
                                );
                              })}
                            </div>
                          </div>
-                       )}
+                         );
+                       })()}
 
                        {/* OPTIONAL & CONDITIONAL CONTENT — inline rows / shared blocks with a
-                           "Show if" condition, plus inline rows marked as opt-in placeholders. */}
+                           "Show if" condition, plus inline rows marked as opt-in placeholders.
+                           Grouped by chapter and rendered by OptionalContentPanel; this block only
+                           flattens the refs into the shape that panel consumes. */}
                        {(() => {
-                         const condRefs = orderedSections.flatMap(section =>
-                           (section.blockRefs ?? [])
-                             .map((ref, index) => ({ section, ref, index }))
-                             .filter(x => refHasCondition(x.ref) || (x.ref.kind === 'inline' && (x.ref as InlineBlockRef).isPlaceholder))
-                         );
-                         if (condRefs.length === 0) return null;
                          const merged = { ...submittedAttrValues, ...formData };
+                         const items: OptionalContentItem[] = orderedSections.flatMap(section =>
+                           (section.blockRefs ?? [])
+                             .map((ref, index) => ({ ref, index }))
+                             .filter(x => refHasCondition(x.ref) || (x.ref.kind === 'inline' && (x.ref as InlineBlockRef).isPlaceholder))
+                             .map(({ ref, index }) => {
+                               const isPlaceholder = ref.kind === 'inline' && !!(ref as InlineBlockRef).isPlaceholder;
+                               const condAttrId = (ref as FeatureConditionFields).requires_feature ?? undefined;
+                               // Show the project's version when this block has been edited for
+                               // this project, matching what the manual will actually contain.
+                               // Condition/placeholder metadata still comes from the template ref
+                               // (an override copies those fields and can't change them).
+                               const shownRef = ref.kind === 'inline'
+                                 ? (blockOverrides[section.id]?.[String(index)] ?? ref)
+                                 : ref;
+                               const rawContent = shownRef.kind === 'block'
+                                 ? (() => { const blk = availableBlocks[(shownRef as any).block_id]; return blk?.content?.[activeLang] || blk?.content?.['en'] || ''; })()
+                                 : ((shownRef as any).content?.[activeLang] || (shownRef as any).content?.['en'] || '');
+                               const snippet = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+                               return {
+                                 key: `${section.id}:${index}`,
+                                 sectionId: section.id,
+                                 sectionTitle: localizedSectionTitle(section, activeLang),
+                                 label: snippet || (ref.kind === 'block' ? 'Shared block' : 'Inline content'),
+                                 previewHtml: templateRefPreviewHtml(shownRef),
+                                 kind: isPlaceholder ? 'placeholder' : 'conditional',
+                                 conditionText: isPlaceholder
+                                   ? ((ref as InlineBlockRef).note || null)
+                                   : describeRefCondition(ref as FeatureConditionFields),
+                                 autoVisible: refAutoVisible(ref),
+                                 visible: isRefVisible(section.id, index, ref),
+                                 override: refVisibility[`${section.id}:${index}`],
+                                 noData: !isPlaceholder && !!condAttrId && !merged[condAttrId],
+                               };
+                             })
+                         );
                          return (
-                           <div className="border-b border-gray-100 pb-6">
-                             <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
-                               <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs font-bold">IF</span> Optional &amp; Conditional Content
-                             </h4>
-                             <div className="space-y-2">
-                               {condRefs.map(({ section, ref, index }) => {
-                                 const key = `${section.id}:${index}`;
-                                 const visible = isRefVisible(section.id, index, ref);
-                                 const hasOverride = refVisibility[key] !== undefined;
-                                 const isPlaceholder = ref.kind === 'inline' && (ref as InlineBlockRef).isPlaceholder;
-                                 const desc = isPlaceholder
-                                   ? ((ref as InlineBlockRef).note || 'Optional — review before including')
-                                   : describeRefCondition(ref as FeatureConditionFields);
-                                 const condAttrId = (ref as FeatureConditionFields).requires_feature ?? undefined;
-                                 const noData = !isPlaceholder && !!condAttrId && !merged[condAttrId];
-                                 const auto = refAutoVisible(ref);
-                                 const rawContent = ref.kind === 'block'
-                                   ? (() => { const blk = availableBlocks[(ref as any).block_id]; return blk?.content?.[activeLang] || blk?.content?.['en'] || ''; })()
-                                   : ((ref as any).content?.[activeLang] || (ref as any).content?.['en'] || '');
-                                 const snippet = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
-                                 const label = snippet || (ref.kind === 'block' ? 'Shared block' : 'Inline content');
-                                 return (
-                                   <div key={key} className={`p-3 rounded-lg border text-xs transition-colors ${visible ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200 opacity-70'}`}>
-                                     <div className="flex items-start justify-between gap-2">
-                                       <div className="flex-1 min-w-0">
-                                         <div className="font-semibold text-gray-800 truncate flex items-center gap-1">
-                                           {isPlaceholder
-                                             ? <AlertCircle size={11} className="text-amber-500 shrink-0" />
-                                             : <GitBranch size={11} className="text-purple-400 shrink-0" />}
-                                           <span className="text-gray-400 font-normal">{localizedSectionTitle(section, activeLang)} ·</span> {label}
-                                         </div>
-                                         <div className={`mt-0.5 ${isPlaceholder ? 'text-amber-700' : 'text-muted'}`}>
-                                           {isPlaceholder && <span className="font-semibold mr-1">Placeholder —</span>}
-                                           {desc ?? 'Conditional'}
-                                           {!isPlaceholder && (noData
-                                             ? <span className="ml-1 text-amber-500">(no data yet)</span>
-                                             : auto
-                                               ? <span className="ml-1 text-emerald-600">✓ matches</span>
-                                               : <span className="ml-1 text-rose-500">✗ no match</span>)}
-                                         </div>
-                                       </div>
-                                       <div className="flex items-center gap-1 shrink-0">
-                                         {hasOverride && (
-                                           <button onClick={() => setRefVisibility(prev => { const next = { ...prev }; delete next[key]; return next; })}
-                                             className="text-[10px] text-amber-600 hover:underline">reset</button>
-                                         )}
-                                         <button
-                                           onClick={() => setRefVisibility(prev => ({ ...prev, [key]: !visible }))}
-                                           className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${visible ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'}`}
-                                         >
-                                           {visible ? 'Include' : 'Exclude'}
-                                         </button>
-                                       </div>
-                                     </div>
-                                   </div>
-                                 );
-                               })}
-                             </div>
-                           </div>
+                           <OptionalContentPanel
+                             items={items}
+                             sectionOrder={orderedSections.map(s => s.id)}
+                             onSetOverride={(key, override) => setRefVisibility(prev => {
+                               const next = { ...prev };
+                               if (override === undefined) delete next[key]; else next[key] = override;
+                               return next;
+                             })}
+                           />
                          );
                        })()}
 
@@ -3860,9 +3988,13 @@ const ProjectIMGenerator: React.FC = () => {
 
                            return (
                                <div key={section.id} className="border-b border-gray-100 pb-6 last:border-0">
-                                   <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-sm">
-                                       <span className="bg-gray-100 px-1.5 py-0.5 rounded text-muted">Sec {section.order}</span> {localizedSectionTitle(section, activeLang)}
-                                   </h4>
+                                   <div className="mb-4 flex items-center justify-between gap-2">
+                                       <h4 className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-800">
+                                           <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-muted">Sec {section.order}</span>
+                                           <span className="truncate">{localizedSectionTitle(section, activeLang)}</span>
+                                       </h4>
+                                       {renderJumpToPreview(section)}
+                                   </div>
                                    {section.isPlaceholder && <div className="mb-4 bg-indigo-50 p-3 rounded border border-indigo-100 text-xs text-blue-800"><AlertCircle size={14} className="inline mr-1"/> Placeholder Section</div>}
                                    {!contentHtml && items.length === 0 && attrTokens.length === 0 && slotRefs.length === 0 && !section.isPlaceholder && <div className="text-xs text-gray-400 italic mb-2">No content defined for {activeLang.toUpperCase()}.</div>}
 
@@ -4008,7 +4140,7 @@ const ProjectIMGenerator: React.FC = () => {
                            <span className="text-xs text-muted">{metadata.layout?.pageNumberingStyle}</span>
                        </div>
                    </div>
-                   <div className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center" onClick={handlePreviewClick}>
+                   <div ref={previewScrollRef} className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center scroll-smooth motion-reduce:scroll-auto" onClick={handlePreviewClick}>
                        <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top" data-icon-set={metadata.assets?.iconSet}>
                           {/* COVER PAGE */}
                           <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page" style={{ ...(getBackgroundStyle(masterPages.cover) || {}), ...(pageBackground ? { background: pageBackground } : {}) }} data-page-template={metadata.pages?.coverTemplate}>
@@ -4030,16 +4162,23 @@ const ProjectIMGenerator: React.FC = () => {
                               {watermark && <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ background: watermark }} />}
                               <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
                                   {orderedSections.map(section => {
-                                      const inSkuScope = isSectionInSkuScope(section.id);
-                                      const visible = isSectionEffectivelyVisible(section) && inSkuScope;
                                       // WYSIWYG: the preview mirrors the generated output, so a chapter
                                       // excluded by its condition (or because none of its SKUs are bound)
                                       // is omitted entirely rather than shown dimmed. The "Optional &
                                       // Conditional Content" panel above remains the place to see/override
                                       // what's excluded.
-                                      if (!visible) return null;
+                                      if (!isSectionInPreview(section)) return null;
                                       return (
-                                        <div key={section.id} className="mb-8">
+                                        <div
+                                          key={section.id}
+                                          // Jump target for the editor's "Show in preview" controls.
+                                          {...{ [PREVIEW_SECTION_ATTR]: section.id }}
+                                          className={`mb-8 scroll-mt-6 rounded transition-shadow duration-500 motion-reduce:transition-none ${
+                                            flashSectionId === section.id
+                                              ? 'ring-2 ring-indigo-500 ring-offset-4 ring-offset-white'
+                                              : 'ring-0'
+                                          }`}
+                                        >
                                           <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{localizedSectionTitle(section, activeLang)}</h3>
                                           <div className="im-content" style={{ color: metadata.brand?.textColors.body, fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
                                         </div>

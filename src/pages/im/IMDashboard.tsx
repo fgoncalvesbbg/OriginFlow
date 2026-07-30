@@ -13,6 +13,9 @@ import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
   FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson
 } from 'lucide-react';
+import {
+  MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, type ManualStatus,
+} from './im-manual-status';
 import { IMViewerTab } from './IMViewerTab';
 import { ImImportDialog } from './ImImportDialog';
 import type { ImImportResult } from '../../services';
@@ -30,13 +33,16 @@ import { BlockLibraryContent } from './IMBlockLibrary';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const STATUS_CONFIG = {
-  generated: { label: 'Generated', classes: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  draft:     { label: 'Draft',     classes: 'bg-amber-100  text-amber-700  border-amber-200'  },
-} as const;
-
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** Icon per derived status. Kept here because im-manual-status.ts stays JSX-free. */
+const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
+  final: <Lock size={10} />,
+  needs_republish: <RefreshCw size={10} />,
+  published: <CheckCircle2 size={10} />,
+  draft: <Clock size={10} />,
+};
 
 // ---------------------------------------------------------------------------
 // All Manuals tab
@@ -79,9 +85,12 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   const staleReasons = (im: ProjectIMSummary) =>
     staleInfo.get(stalenessKey(im.projectId, im.templateType))?.reasons ?? [];
 
+  /** Mutually-exclusive display status used for the badge, the filter and the grouping. */
+  const statusOf = (im: ProjectIMSummary) => manualStatusOf(im, isStale(im));
+
   const filtered = ims.filter(im => {
-    if (filterStatus === 'stale') { if (!isStale(im)) return false; }
-    else if (filterStatus !== 'all' && im.status !== filterStatus) return false;
+    // Filter on the DERIVED status so the dropdown, the badges and the groups agree.
+    if (filterStatus !== 'all' && statusOf(im) !== filterStatus) return false;
     if (filterCat !== 'all' && im.categoryId !== filterCat) return false;
     if (filterProject) {
       const pq = filterProject.toLowerCase();
@@ -100,8 +109,16 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
     return true;
   });
 
-  // Only published ('generated') manuals can be re-published.
-  const selectableRows = filtered.filter(im => im.status === 'generated');
+  /**
+   * Only published manuals can be re-published, and NOT if they are final.
+   *
+   * Re-publishing regenerates the published artifact from the current template and shared
+   * blocks, so running it on a signed-off manual would silently replace the very output the
+   * FINAL lock exists to preserve. Migration 98 added no database trigger for project_ims, so
+   * nothing else stops it — the guard has to live here.
+   */
+  const selectableRows = filtered.filter(im => im.status === 'generated' && !im.isFinalized);
+  const isSelectable = (im: ProjectIMSummary) => im.status === 'generated' && !im.isFinalized;
   const allSelected = selectableRows.length > 0 && selectableRows.every(im => selectedIds.has(im.id));
   const toggleRow = (id: string) =>
     setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -109,7 +126,8 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
     setSelectedIds(allSelected ? new Set() : new Set(selectableRows.map(im => im.id)));
 
   const handleRepublishSelected = async () => {
-    const targets = ims.filter(im => selectedIds.has(im.id));
+    // Re-check selectability: a manual could have been finalized in another tab since selection.
+    const targets = ims.filter(im => selectedIds.has(im.id) && isSelectable(im));
     if (!targets.length) return;
     setRepublishing(true);
     let ok = 0; const failures: string[] = [];
@@ -152,9 +170,14 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
           onChange={e => setFilterStatus(e.target.value)}
         >
           <option value="all">All statuses</option>
-          <option value="generated">Generated</option>
-          <option value="draft">Draft</option>
-          <option value="stale">Needs re-publish{staleInfo.size ? ` (${staleInfo.size})` : ''}</option>
+          {MANUAL_STATUS_ORDER.map(status => {
+            const count = ims.filter(im => statusOf(im) === status).length;
+            return (
+              <option key={status} value={status}>
+                {MANUAL_STATUS_META[status].label}{count ? ` (${count})` : ''}
+              </option>
+            );
+          })}
         </select>
         <select
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
@@ -229,21 +252,45 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map(im => {
-                const sc = STATUS_CONFIG[im.status] ?? STATUS_CONFIG.draft;
+            {/* One tbody per status group: keeps a single table (so columns stay aligned)
+                while giving each group a spanning header row. */}
+            {groupByStatus(filtered, isStale).map(({ status, items }) => {
+              const meta = MANUAL_STATUS_META[status];
+              return (
+              <tbody key={status} className="divide-y divide-gray-50">
+                <tr className="border-y border-gray-100 bg-light/80">
+                  {/* `rowgroup`, not `colgroup`: this heading labels the rows that follow. */}
+                  <th colSpan={9} scope="rowgroup" className="px-4 py-2 text-left font-normal">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>
+                        {STATUS_ICON[status]} {meta.label}
+                      </span>
+                      <span className="text-xs font-semibold text-gray-700">
+                        {items.length} manual{items.length !== 1 ? 's' : ''}
+                      </span>
+                      {/* gray-500, not gray-400: this is prose on a tinted surface and has to
+                          clear 4.5:1, which gray-400 does not. */}
+                      <span className="text-[11px] text-gray-500">{meta.hint}</span>
+                    </div>
+                  </th>
+                </tr>
+                {items.map(im => {
                 const catName = im.categoryId ? (catMap[im.categoryId] ?? '—') : '—';
                 return (
                   <tr key={im.id} className="hover:bg-light/60 transition-colors group">
                     <td className="px-4 py-3">
-                      {im.status === 'generated' && (
+                      {isSelectable(im) ? (
                         <input
                           type="checkbox"
                           className="accent-indigo-600 cursor-pointer"
                           checked={selectedIds.has(im.id)}
                           onChange={() => toggleRow(im.id)}
                         />
-                      )}
+                      ) : im.isFinalized ? (
+                        <span title="Final: unlock it in the editor before re-publishing">
+                          <Lock size={12} className="text-gray-300" aria-label="Locked" />
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       <span className="font-semibold text-gray-800">{im.projectName}</span>
@@ -283,11 +330,28 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${sc.classes}`}>
-                          {im.status === 'generated' ? <CheckCircle2 size={10} /> : <Clock size={10} />}
-                          {sc.label}
-                        </span>
-                        {isStale(im) && (() => {
+                        {(() => {
+                          const s = statusOf(im);
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${MANUAL_STATUS_META[s].classes}`}
+                              title={im.isFinalized && im.finalizedAt ? `Marked final on ${fmtDate(im.finalizedAt)}` : undefined}
+                            >
+                              {STATUS_ICON[s]} {MANUAL_STATUS_META[s].label}
+                            </span>
+                          );
+                        })()}
+                        {/* A final manual keeps its underlying publish state visible: "Final"
+                            says it's locked, not whether it was ever published. */}
+                        {im.isFinalized && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                            {im.status === 'generated' ? 'Published' : 'Draft'}
+                          </span>
+                        )}
+                        {/* Only as a SECONDARY signal: when the row's own status is
+                            'needs_republish' the primary badge already says so. This is for a
+                            final manual whose sources drifted — locked, but out of date. */}
+                        {im.isFinalized && isStale(im) && (() => {
                           const reasons = staleReasons(im);
                           const blocks = reasons.filter(r => r.type === 'block').map(r => r.label);
                           const others = reasons.filter(r => r.type !== 'block').map(r => r.label);
@@ -295,9 +359,9 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                           return (
                             <span
                               className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200"
-                              title={`Changed since last publish — ${summary}. Re-publish to update.`}
+                              title={`Changed since last publish — ${summary}. Unlock and re-publish to update.`}
                             >
-                              <RefreshCw size={10} /> Needs re-publish
+                              <RefreshCw size={10} /> Out of date
                             </span>
                           );
                         })()}
@@ -321,8 +385,10 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
+                })}
+              </tbody>
+              );
+            })}
           </table>
         </div>
       )}

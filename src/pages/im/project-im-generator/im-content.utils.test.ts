@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition } from './im-content.utils';
+import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './im-content.utils';
 import type { CategoryAttribute, BlockRef } from '../../../types';
 
 const attr = (dataType: CategoryAttribute['dataType']): CategoryAttribute => ({ dataType } as CategoryAttribute);
@@ -64,5 +64,38 @@ describe('refHasCondition', () => {
   it('is false for sku_slot refs and refs without a condition', () => {
     expect(refHasCondition({ kind: 'sku_slot', requires_feature: 'f' } as unknown as BlockRef)).toBe(false);
     expect(refHasCondition({ kind: 'block' } as unknown as BlockRef)).toBe(false);
+  });
+});
+
+describe('refIsOverridable', () => {
+  it('allows any inline block, not just tables', () => {
+    expect(refIsOverridable({ kind: 'inline', content: { en: '<p>Plain text</p>' } } as unknown as BlockRef)).toBe(true);
+    expect(refIsOverridable({ kind: 'inline', content: { en: '<table><tr><td>x</td></tr></table>' } } as unknown as BlockRef)).toBe(true);
+    expect(refIsOverridable({ kind: 'inline', content: {} } as unknown as BlockRef)).toBe(true);
+  });
+
+  it('allows a conditional or placeholder inline block', () => {
+    expect(refIsOverridable({ kind: 'inline', content: { en: '<p>a</p>' }, requires_feature: 'f1' } as unknown as BlockRef)).toBe(true);
+    expect(refIsOverridable({ kind: 'inline', content: { en: '<p>a</p>' }, isPlaceholder: true } as unknown as BlockRef)).toBe(true);
+  });
+
+  // resolveManual ignores blockOverrides for these, so the editor must not offer the action —
+  // otherwise a PM types an edit that never reaches the published manual.
+  it('refuses shared library blocks and SKU slots', () => {
+    expect(refIsOverridable({ kind: 'block', block_id: 'blk-1' } as unknown as BlockRef)).toBe(false);
+    expect(refIsOverridable({ kind: 'sku_slot', slot: 'dimensions' } as unknown as BlockRef)).toBe(false);
+  });
+});
+
+describe('refHasTable', () => {
+  it('detects a table in any language, case-insensitively', () => {
+    expect(refHasTable({ kind: 'inline', content: { en: '<p>no</p>', de: '<TABLE><tr><td>ja</td></tr></TABLE>' } } as unknown as BlockRef)).toBe(true);
+    expect(refHasTable({ kind: 'inline', content: { en: '<table class="im-table">x</table>' } } as unknown as BlockRef)).toBe(true);
+  });
+
+  it('is false for table-less inline content and for non-inline refs', () => {
+    expect(refHasTable({ kind: 'inline', content: { en: '<p>Just a paragraph</p>' } } as unknown as BlockRef)).toBe(false);
+    expect(refHasTable({ kind: 'inline' } as unknown as BlockRef)).toBe(false);
+    expect(refHasTable({ kind: 'block', block_id: 'blk-1' } as unknown as BlockRef)).toBe(false);
   });
 });

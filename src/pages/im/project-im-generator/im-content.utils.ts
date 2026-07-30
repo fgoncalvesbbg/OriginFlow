@@ -5,7 +5,7 @@
  * so they live here as standalone, testable functions.
  */
 
-import { BlockRef, FeatureConditionFields } from '../../../types';
+import { BlockRef, FeatureConditionFields, InlineBlockRef } from '../../../types';
 
 // matchesConditionValue now lives in the shared attribute-condition utils so the resolver
 // (published JSON) and this generator (preview/PDF) decide chapter visibility identically.
@@ -39,3 +39,27 @@ export const getTokensInFragment = (html: string): string[] => {
 /** A ref carries a condition when it requires (or requires the absence of) an attribute. */
 export const refHasCondition = (ref: BlockRef): boolean =>
   ref.kind !== 'sku_slot' && !!((ref as FeatureConditionFields).requires_feature || (ref as FeatureConditionFields).requires_feature_absent);
+
+/**
+ * Whether a template block can be edited for one project only (stored as a project
+ * `blockOverrides` entry instead of changing the template).
+ *
+ * Any INLINE block can: the point of a project override is the small wording or value tweak
+ * that would otherwise force a fork of the shared template.
+ *
+ * Shared library blocks and SKU slots deliberately cannot. `resolveManual` ignores
+ * `blockOverrides` for both — approval-gated compliance content stays locked, and
+ * `im-resolver.test.ts` pins that — so offering the action would let a PM type an edit that
+ * silently never reaches the published manual.
+ */
+export const refIsOverridable = (ref: BlockRef): boolean => ref.kind === 'inline';
+
+/**
+ * Whether an inline ref's content contains a table in any language.
+ *
+ * Used only to LABEL an override (a table override also gets the grid controls), never to
+ * decide what may be edited — see {@link refIsOverridable}.
+ */
+export const refHasTable = (ref: BlockRef): boolean =>
+  ref.kind === 'inline'
+  && Object.values((ref as InlineBlockRef).content || {}).some(h => /<table/i.test(h || ''));

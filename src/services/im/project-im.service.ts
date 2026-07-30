@@ -213,6 +213,13 @@ export interface ProjectIMSummary {
   templateType: IMTemplateType;
   templateName: string | null;
   status: 'draft' | 'generated';
+  /**
+   * Marked FINAL (locked). Orthogonal to `status`: a manual can be final while draft or
+   * generated. Note the lock is enforced in the editor only — migration 98 added no trigger —
+   * so any code path that regenerates published output must check this itself.
+   */
+  isFinalized: boolean;
+  finalizedAt: string | null;
   updatedAt: string;
   skus: string[];            // SKU numbers on the project (a project can have several)
 }
@@ -232,6 +239,8 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       template_id,
       template_type,
       status,
+      is_finalized,
+      finalized_at,
       updated_at,
       bound_sku_ids,
       project:projects ( id, name, category_id, project_id_code ),
@@ -277,6 +286,8 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       templateType: (row.template_type ?? 'im') as IMTemplateType,
       templateName: row.template?.name ?? null,
       status: row.status as 'draft' | 'generated',
+      isFinalized: row.is_finalized ?? false,
+      finalizedAt: row.finalized_at ?? null,
       updatedAt: row.updated_at,
       skus,
     };

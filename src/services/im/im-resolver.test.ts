@@ -734,6 +734,36 @@ describe('resolveManual — per-project block overrides', () => {
     expect((result.sections[0].nodes[0] as any).html).not.toContain('template');
   });
 
+  // The point of the feature: reuse a standardized chapter with a small wording/value tweak
+  // for one project, instead of forking the template. Not limited to tables.
+  it('overrides a plain-text inline block with the project version', () => {
+    const section = makeSection({
+      id: 'bo1b',
+      blockRefs: [{ kind: 'inline', content: { en: '<p>Rated 230 V.</p>' } }],
+    });
+    const projectIM = mkIM({
+      blockOverrides: { bo1b: { '0': { kind: 'inline', content: { en: '<p>Rated 110 V.</p>' } } } },
+    });
+    const result = resolveManual(baseTemplate, [section], {}, projectIM, 'en');
+    expect((result.sections[0].nodes[0] as any).html).toBe('<p>Rated 110 V.</p>');
+  });
+
+  it('keeps a project override scoped to its own manual, leaving the template section intact', () => {
+    const section = makeSection({
+      id: 'bo1c',
+      blockRefs: [{ kind: 'inline', content: { en: '<p>Template wording</p>' } }],
+    });
+    const overridden = mkIM({
+      blockOverrides: { bo1c: { '0': { kind: 'inline', content: { en: '<p>Project wording</p>' } } } },
+    });
+    const a = resolveManual(baseTemplate, [section], {}, overridden, 'en');
+    // Same template + section objects, a different manual with no overrides → template wording.
+    const b = resolveManual(baseTemplate, [section], {}, mkIM(), 'en');
+    expect((a.sections[0].nodes[0] as any).html).toBe('<p>Project wording</p>');
+    expect((b.sections[0].nodes[0] as any).html).toBe('<p>Template wording</p>');
+    expect((section.blockRefs![0] as any).content.en).toBe('<p>Template wording</p>');
+  });
+
   it('falls back to the template block when there is no override', () => {
     const section = makeSection({
       id: 'bo2',
