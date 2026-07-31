@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, type LucideIcon } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
 import { Logo } from './Logo';
@@ -101,6 +101,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { to: '/attributes', label: 'Attribute Viewer', Icon: Table2, match: p => p.startsWith('/attributes') },
     { to: '/products', label: 'SKU Catalog', Icon: Package, match: p => p.startsWith('/products') },
   ];
+  const NAV_TOOLS: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
+    { to: '/tools/pdf-to-markdown', label: 'PDF → Markdown', Icon: FileDown, match: p => p.startsWith('/tools/pdf-to-markdown') },
+  ];
 
   const renderNavLink = ({ to, label, Icon, match }: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }) => (
     <Link key={to} to={to} className={navItemClass(match(location.pathname))} title={railCollapsed ? label : undefined}>
@@ -141,6 +144,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {NAV_MAIN.map(renderNavLink)}
           {sectionLabel('Modules')}
           {NAV_MODULES.map(renderNavLink)}
+          {sectionLabel('Tools')}
+          {NAV_TOOLS.map(renderNavLink)}
           {user?.role === UserRole.ADMIN && (
             <>
               {sectionLabel('Admin')}

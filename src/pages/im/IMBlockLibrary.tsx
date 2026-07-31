@@ -8,10 +8,11 @@ import { IMBlock, CategoryL3, CategoryAttribute } from '../../types';
 import { sanitizeHtml } from '../../utils';
 import {
   Layers, Plus, Search, CheckCircle2, Clock, Edit2, Trash2, X,
-  ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Loader2, RefreshCw, Flame, Thermometer,
+  ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Images, Loader2, RefreshCw, Flame, Thermometer,
   Code, Bold, Italic, Underline, Languages as LanguagesIcon
 } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
+import { AssetLibraryPanel } from './editor/AssetLibraryPanel';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,6 +21,7 @@ import { translateHtml } from '../../services/ai/translation.service';
 const BLOCK_TYPES = [
   { value: 'content',     label: 'Content',   color: 'bg-blue-100 text-blue-700' },
   { value: 'warning',     label: 'Warning',   color: 'bg-amber-100 text-amber-700' },
+  { value: 'danger',      label: 'Danger',    color: 'bg-red-100 text-red-700' },
   { value: 'caution',     label: 'Caution',   color: 'bg-orange-100 text-orange-700' },
   { value: 'electric',    label: 'Electric',  color: 'bg-yellow-100 text-yellow-700' },
   { value: 'flammable',   label: 'Risk of Fire',  color: 'bg-rose-100 text-orange-700' },
@@ -40,6 +42,7 @@ const blockTypeLabel = (bt: string) =>
 
 const blockTypeIcon = (bt: string) => {
   if (bt === 'warning')  return <AlertTriangle size={12} />;
+  if (bt === 'danger')   return <AlertTriangle size={12} />;
   if (bt === 'caution')  return <AlertCircle   size={12} />;
   if (bt === 'electric') return <Zap           size={12} />;
   if (bt === 'flammable') return <Flame        size={12} />;
@@ -84,12 +87,18 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
   const [draft, setDraft] = useState<Partial<IMBlock>>(initial);
   const [activeLang, setActiveLang] = useState('en');
   const [uploadingImg, setUploadingImg] = useState(false);
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
   const [slugDirty, setSlugDirty] = useState(false);
   const [slugUid, setSlugUid] = useState(makeUid);
   // Content editing surface: 'visual' = WYSIWYG (contentEditable), 'html' = raw source.
   const [contentMode, setContentMode] = useState<'visual' | 'html'>('visual');
   const imgInputRef = useRef<HTMLInputElement>(null);
   const visualRef = useRef<HTMLDivElement>(null);
+  const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Last caret/selection inside the visual surface, restored before a programmatic
+  // insert (upload, asset picker) that would otherwise land at the end because the
+  // triggering button/modal steals focus first.
+  const savedRangeRef = useRef<Range | null>(null);
 
   const set = (updates: Partial<IMBlock>) => setDraft(prev => ({ ...prev, ...updates }));
 
@@ -104,15 +113,48 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
     }
   }, [activeLang, contentMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Append a snippet (image / attribute token) into the content, mode-aware so it
-  // shows immediately in whichever surface is active and stays faithfully in sync.
+  const saveSelection = useCallback(() => {
+    const el = visualRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (el.contains(range.commonAncestorContainer)) {
+      savedRangeRef.current = range.cloneRange();
+    }
+  }, []);
+
+  // Insert a snippet (image / attribute token) at the caret, mode-aware. Visual mode
+  // restores the last saved selection (falling back to the end) before running
+  // execCommand, so an insert triggered from a button/modal — which steals focus —
+  // still lands where the user was, not appended after whatever they'd typed. HTML
+  // mode reads the textarea's own selection, which survives a blur.
   const insertIntoContent = (html: string) => {
     if (contentMode === 'visual' && visualRef.current) {
-      const next = (visualRef.current.innerHTML || '') + html;
-      visualRef.current.innerHTML = next;
-      setContent(activeLang, next);
+      const el = visualRef.current;
+      el.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        const saved = savedRangeRef.current;
+        if (saved && el.contains(saved.commonAncestorContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(saved);
+        } else {
+          const end = document.createRange();
+          end.selectNodeContents(el);
+          end.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(end);
+        }
+      }
+      document.execCommand('insertHTML', false, html);
+      savedRangeRef.current = null;
+      setContent(activeLang, el.innerHTML);
     } else {
-      setContent(activeLang, (draft.content?.[activeLang] ?? '') + html);
+      const ta = htmlTextareaRef.current;
+      const current = draft.content?.[activeLang] ?? '';
+      const start = ta?.selectionStart ?? current.length;
+      const end = ta?.selectionEnd ?? current.length;
+      setContent(activeLang, current.slice(0, start) + html + current.slice(end));
     }
   };
 
@@ -443,17 +485,26 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
               )}
               <button
                 type="button"
-                onClick={() => imgInputRef.current?.click()}
+                onMouseDown={e => { e.preventDefault(); saveSelection(); imgInputRef.current?.click(); }}
                 disabled={uploadingImg}
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
               >
                 {uploadingImg ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                 {uploadingImg ? 'Uploading…' : 'Upload Image'}
               </button>
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); saveSelection(); setShowAssetPicker(true); }}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                title="Search &amp; insert from the asset library"
+              >
+                <Images size={12} /> Assets
+              </button>
               <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImgUpload} />
             </div>
             {contentMode === 'html' ? (
               <textarea
+                ref={htmlTextareaRef}
                 className="w-full border rounded-lg p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
                 rows={8}
                 value={draft.content?.[activeLang] ?? ''}
@@ -465,7 +516,10 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                 ref={visualRef}
                 contentEditable
                 suppressContentEditableWarning
-                onInput={e => setContent(activeLang, e.currentTarget.innerHTML)}
+                onInput={e => { saveSelection(); setContent(activeLang, e.currentTarget.innerHTML); }}
+                onMouseUp={saveSelection}
+                onKeyUp={saveSelection}
+                onBlur={saveSelection}
                 className="im-content w-full border rounded-lg p-3 text-sm min-h-[12rem] max-h-[24rem] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
               />
             )}
@@ -497,6 +551,18 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
           </div>
         </div>
       </form>
+
+      {showAssetPicker && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setShowAssetPicker(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl h-[80vh] flex flex-col overflow-hidden" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Images size={18} className="text-indigo-600" /> Asset Library</h2>
+              <button type="button" onClick={() => setShowAssetPicker(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <AssetLibraryPanel onInsert={(html) => { insertIntoContent(html); setShowAssetPicker(false); }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

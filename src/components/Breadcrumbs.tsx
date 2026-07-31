@@ -11,6 +11,8 @@ const routeLabels: Record<string, string> = {
   'admin': 'Admin Console',
   'project': 'Project',
   'request': 'TCF Request',
+  'tools': 'Tools',
+  'pdf-to-markdown': 'PDF → Markdown',
 };
 
 // Paths that correspond to actual pages we can link to
@@ -43,7 +45,8 @@ export const Breadcrumbs: React.FC = () => {
         const isLast = index === pathnames.length - 1;
 
         // Heuristic: If it contains numbers or dashes and is long, it's likely an ID
-        const isId = value.length > 10 || /\d/.test(value) && value.includes('-');
+        // (unless it's a known static segment — e.g. a multi-word tool slug).
+        const isId = !routeLabels[value] && (value.length > 10 || /\d/.test(value) && value.includes('-'));
 
         let label = routeLabels[value] || value.replace(/-/g, ' ');
 

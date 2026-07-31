@@ -5,6 +5,11 @@
 [build.environment]
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
 
+[dev]
+  command = "npm run start"
+  targetPort = 5173
+  framework = "#custom"
+
 # Server-side functions (PDF render, supplier file signed-URL issuer, IM
 # translation proxy). These read secrets from the Netlify site environment
 # (server-only — do NOT use a VITE_ prefix):

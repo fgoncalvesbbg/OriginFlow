@@ -18,6 +18,15 @@ platform's internal IM section/block model so an eventual import is mechanical.
 > Both go through `src/services/im/im-import.service.ts` and the existing resolve/publish/print
 > pipeline unchanged. Standardized content (company/WEEE/conformity) is added by the platform and
 > must NOT be in the file.
+>
+> 3. **Diff against an existing template (quick, template-aware)** — when a project is already
+>    bound to a real category template and you want to add a supplier draft's content on top of
+>    it *without* re-importing what the template already covers: export the template via
+>    `exportTemplateForReview(templateId)`, paste that export into the review prompt alongside the
+>    supplier draft, and import the result through the project's **Import supplier draft (diff)**
+>    action. This calls `importSupplierDraftIntoProject`, which never rebinds the project's
+>    template and never overwrites its existing overlay content — see
+>    [Diffing against an existing template](#diffing-against-an-existing-template) below.
 
 ---
 
@@ -96,6 +105,11 @@ is not authored here as a URL — if one is needed, express it as an `imageNeed`
   "order": 1,                         // required. Integer sort order among siblings.
   "title": { "en": "Safety", "de": "Sicherheit" },   // required language map
   "scope": "generic",                 // optional: "generic" (default) | "model-specific". See below.
+  "matchStatus": "new",               // optional: "new" (default) | "matches-template" | "adjust-template".
+                                       //   Only meaningful for the diff-aware project import. See
+                                       //   "Diffing against an existing template".
+  "matchedSectionKey": null,          // required when matchStatus is matches-template/adjust-template.
+                                       //   An existing template section's id, from exportTemplateForReview.
   "blocks": [ … ]                     // required, may be empty. Ordered content. See "Block".
 }
 ```
@@ -203,6 +217,45 @@ generic section containing one `model-specific` block than as a whole model-spec
 
 ---
 
+## Diffing against an existing template
+
+`scope` (generic vs model-specific) answers "should this be shared template content?". A separate,
+optional question — only relevant when you're landing content into a project that's **already
+bound to a real category template** — is "does the template already have this?". That's what
+`matchStatus` + `matchedSectionKey` answer, and what `importSupplierDraftIntoProject` (in
+`src/services/im/im-import.service.ts`) acts on. It never rebinds the project's template and never
+overwrites its existing overlay content — it only adds the delta.
+
+**Getting the existing template in front of the reviewer.** Call
+`exportTemplateForReview(templateId)` and paste its output into the review prompt alongside the
+supplier draft (see `review-prompt.md`). It returns each section's real id as `key` — echo that
+back as `matchedSectionKey` so the importer can resolve it directly, with no fuzzy title matching:
+
+```jsonc
+{ "templateId": "…", "sections": [
+  { "key": "9f3a…", "parentKey": null, "title": "Safety Instructions", "contentPreview": "…" }
+] }
+```
+
+**Classifying each drafted section**, per `matchStatus`:
+
+| `matchStatus` | Meaning | What gets imported |
+|---|---|---|
+| `new` (default) | No equivalent section in the existing template | Full section, as an `extraSection` — same as today |
+| `matches-template` | Already substantively covered by `matchedSectionKey` | Nothing — skipped, just counted |
+| `adjust-template` | Same topic as `matchedSectionKey`, but this model needs extra/different detail | **Only the differing block(s)** in `blocks`, appended onto that template section (a `ProjectBlockAddition`) — the rest of the section stays live-linked to the template |
+
+Only emit the delta for `adjust-template` — e.g. one extra table row or a model-specific caveat —
+not the whole chapter rewritten; the unchanged parts of that section are already covered by the
+template and should not be duplicated.
+
+This is intentionally **project-overlay only**: it never proposes changes to the shared template
+itself, even when a drafted section looks like it should become new generic template content. That
+stays a separate, deliberate curation step. See `future-in-app-diff.md` for the deferred idea of
+automating this classification in-app instead of via a Claude Chat prompt.
+
+---
+
 ## Back page
 
 ```jsonc
@@ -268,5 +321,7 @@ sub-heading-per-block structure no longer fragments the chapter.
 - Every `callout` has a valid `variant`; every `image` has an `imageNeed`.
 - Content HTML uses only the allowed tag set above.
 - `excludedStandardized` lists the stripped WEEE/company/conformity content.
+- Every `matchStatus: "matches-template"` or `"adjust-template"` section has a
+  `matchedSectionKey` (only relevant when diffing against an existing template).
 
 See [`example.import.json`](./example.import.json) for a filled coffee-machine example.

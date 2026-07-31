@@ -38,7 +38,19 @@ export {
   BlockInUseError
 } from './im-block.service';
 
-export { resolveManual } from './im-resolver';
+export {
+  getAssetFolders,
+  createAssetFolder,
+  renameAssetFolder,
+  deleteAssetFolder,
+  getAssets,
+  createAsset,
+  updateAsset,
+  deleteAsset,
+  backfillAssetsFromStorage,
+} from './im-asset-library.service';
+
+export { resolveManual, TEMP_HIGHLIGHT_CLASS, containsTempHighlight, findTempHighlightSections } from './im-resolver';
 export { publishResolvedManuals, normalizeResolverData, getPublishedManifestUrl, getProjectRequiredLanguages } from './im-publish.service';
 export type { PublishResult } from './im-publish.service';
 export {
@@ -74,6 +86,8 @@ export {
   importIMTemplate,
   buildExtraSectionsFromDoc,
   importProjectIMFromDoc,
+  exportTemplateForReview,
+  importSupplierDraftIntoProject,
 } from './im-import.service';
 export type {
   ImImportDoc,
@@ -81,8 +95,12 @@ export type {
   ImImportBlock,
   ImImportBlockType,
   ImImportScope,
+  ImImportMatchStatus,
   ImImportImageNeed,
   ImImportValidation,
   ImImportResult,
   ImProjectImportResult,
+  TemplateReviewSection,
+  TemplateReviewExport,
+  ImSupplierDiffImportResult,
 } from './im-import.service';

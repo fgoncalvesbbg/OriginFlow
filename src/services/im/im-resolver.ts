@@ -22,7 +22,7 @@ const ISO_W021 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" 
 // ISO 7010 W017 — Hot surface (official ISO_7010_W017 artwork)
 const ISO_W017 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" style="display:block;width:100%;height:100%;"><path d="M597.6,499.6,313.8,8c-2.9-5-8.2-8-13.9-8s-11,3.1-13.9,8l-283.8,491.6c-2.9,5-2.9,11.1,0,16,2.9,5,8.2,8,13.9,8h567.6c5.7,0,11-3.1,13.9-8,2.9-5,2.9-11.1,0-16z" fill="#231F20"/><polygon points="43.875,491.5,299.88,48.2,555.88,491.5" transform="matrix(1,0,0,0.99591458,0.125,2.0332437)" fill="#FFDA00"/><rect x="175" y="437" width="250" height="25" fill="#231F20"/><path d="M242.68,415c56.86-81.3-60.68-104.16-2.68-185" stroke="#231F20" stroke-width="16" fill="none"/><path d="m303.78,414.51c56.86-81.3-60.561-103.43-2.561-184.27" stroke="#231F20" stroke-width="16" fill="none"/><path d="M365,415c56.86-81.3-59.23-104.65-1.22-185.49" stroke="#231F20" stroke-width="16" fill="none"/></svg>`;
 
-const ISO_ICONS: Record<string, string> = { warning: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002 };
+const ISO_ICONS: Record<string, string> = { warning: ISO_W001, danger: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002 };
 
 /**
  * Wraps HTML content in the standard ISO callout structure for safety/info block types.
@@ -38,6 +38,25 @@ export const wrapBlockCallout = (blockType: string, contentHtml: string, lang?: 
   const title = getCalloutTitle(blockType, lang);
   return `<div class="im-block-wrapper im-block-${blockType}"><div class="im-block-icon">${icon}</div><div class="im-block-content"><strong class="im-block-title">${title}</strong>${contentHtml}</div></div>`;
 };
+
+// ---------------------------------------------------------------------------
+// Temporary-highlight marker — author-visible "not yet final" text (toggled from
+// SimpleRichTextEditor's Highlight button, InlineBlockEditor.tsx). The class name
+// is the single source of truth: the editor wraps marked text in it, and publish
+// scans resolved HTML for it so a manual can never go out with unfinished text.
+// ---------------------------------------------------------------------------
+
+export const TEMP_HIGHLIGHT_CLASS = 'im-temp-highlight';
+
+/** Whether a chunk of resolved HTML still carries a temporary-highlight marker. */
+export const containsTempHighlight = (html: string): boolean =>
+  html.includes(`class="${TEMP_HIGHLIGHT_CLASS}"`);
+
+/** Sections in an already-resolved manual whose HTML still carries the marker. */
+export const findTempHighlightSections = (resolved: ResolvedManual): Array<{ id: string; title: string }> =>
+  resolved.sections
+    .filter((s) => s.nodes.some((n) => 'html' in n && containsTempHighlight(n.html)))
+    .map((s) => ({ id: s.id, title: s.title }));
 
 import { getCalloutTitle } from './callout-titles.i18n';
 import {
@@ -142,6 +161,7 @@ const calloutVariant = (
 ): ResolvedCalloutNode['variant'] | null => {
   const map: Record<string, ResolvedCalloutNode['variant']> = {
     warning: 'warning',
+    danger: 'danger',
     caution: 'caution',
     electric: 'electric',
     flammable: 'flammable',

@@ -12,12 +12,14 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Bold, Italic, Underline, List, ListOrdered, Type, Image as ImageIcon, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, type LucideIcon } from 'lucide-react';
+import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, type LucideIcon } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
+import { TEMP_HIGHLIGHT_CLASS } from '../../../services/im/im-resolver';
 import { CalloutVariant, CategoryAttribute } from '../../../types';
 import { AttributePicker } from './AttributePicker';
+import { AssetLibraryPanel } from './AssetLibraryPanel';
 import { setInsertTarget, clearInsertTarget, insertToActiveEditor, setCommitPlaceholderTarget, clearCommitPlaceholderTarget, commitPlaceholder as commitPlaceholderToTarget } from './insertTarget';
 
 // --- ISO 7010 / 7000 callout signs (shared by the editor preview and serializer) ---
@@ -30,12 +32,13 @@ const ISO_M002 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" 
 // ISO 7010 W017 — Hot surface
 const ISO_W017 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" style="display:block;width:100%;height:100%;"><path d="M597.6,499.6,313.8,8c-2.9-5-8.2-8-13.9-8s-11,3.1-13.9,8l-283.8,491.6c-2.9,5-2.9,11.1,0,16,2.9,5,8.2,8,13.9,8h567.6c5.7,0,11-3.1,13.9-8,2.9-5,2.9-11.1,0-16z" fill="#231F20"/><polygon points="43.875,491.5,299.88,48.2,555.88,491.5" transform="matrix(1,0,0,0.99591458,0.125,2.0332437)" fill="#FFDA00"/><rect x="175" y="437" width="250" height="25" fill="#231F20"/><path d="M242.68,415c56.86-81.3-60.68-104.16-2.68-185" stroke="#231F20" stroke-width="16" fill="none"/><path d="m303.78,414.51c56.86-81.3-60.561-103.43-2.561-184.27" stroke="#231F20" stroke-width="16" fill="none"/><path d="M365,415c56.86-81.3-59.23-104.65-1.22-185.49" stroke="#231F20" stroke-width="16" fill="none"/></svg>`;
 
-const CALLOUT_ICONS: Record<CalloutVariant, string> = { warning: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002 };
-const CALLOUT_TITLES: Record<CalloutVariant, string> = { warning: 'WARNING', caution: 'CAUTION', electric: 'ELECTRIC HAZARD', flammable: 'RISK OF FIRE', hot_surface: 'HOT SURFACE', info: 'INFO' };
+const CALLOUT_ICONS: Record<CalloutVariant, string> = { warning: ISO_W001, danger: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002 };
+const CALLOUT_TITLES: Record<CalloutVariant, string> = { warning: 'WARNING', danger: 'DANGER', caution: 'CAUTION', electric: 'ELECTRIC HAZARD', flammable: 'RISK OF FIRE', hot_surface: 'HOT SURFACE', info: 'INFO' };
 
 // Default body text seeded when a callout box is inserted inline (per variant).
 const CALLOUT_DEFAULT_TEXT: Record<CalloutVariant, string> = {
   warning: 'Indicates a hazardous situation which, if not avoided, could result in serious injury or death.',
+  danger: 'Indicates an imminent hazardous situation which, if not avoided, will result in death or serious injury.',
   caution: 'Indicates a potentially hazardous situation which may result in minor injury or damage to the appliance.',
   electric: 'Risk of electric shock. Disconnect power before servicing.',
   flammable: 'Risk of fire. Keep away from open flames and flammable materials.',
@@ -46,6 +49,7 @@ const CALLOUT_DEFAULT_TEXT: Record<CalloutVariant, string> = {
 // Editor-only chrome for the row variant selector + framing (the final PDF uses the CSS classes).
 export const CALLOUT_VARIANTS: { value: CalloutVariant; label: string; Icon: LucideIcon; frame: string; chip: string }[] = [
   { value: 'warning',   label: 'Warning',         Icon: AlertTriangle, frame: 'border-orange-300 bg-orange-50',  chip: 'bg-orange-100 text-orange-700 border-orange-200' },
+  { value: 'danger',    label: 'Danger',          Icon: AlertTriangle, frame: 'border-red-700 bg-red-100',       chip: 'bg-red-700 text-white border-red-700' },
   { value: 'caution',   label: 'Caution',         Icon: AlertOctagon,  frame: 'border-yellow-300 bg-yellow-50',  chip: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
   { value: 'electric',  label: 'Electric Hazard', Icon: Zap,           frame: 'border-red-300 bg-red-50',        chip: 'bg-red-100 text-red-700 border-red-200' },
   { value: 'flammable', label: 'Risk of Fire',    Icon: Flame,         frame: 'border-orange-400 bg-rose-50',    chip: 'bg-rose-100 text-orange-700 border-orange-200' },
@@ -54,10 +58,15 @@ export const CALLOUT_VARIANTS: { value: CalloutVariant; label: string; Icon: Luc
 ];
 
 // --- Structured Rich Text Editor ---
-type BlockInsertType = 'warning' | 'info' | 'table' | 'caution' | 'electric' | 'flammable' | 'hot_surface';
+type BlockInsertType = 'warning' | 'danger' | 'info' | 'table' | 'caution' | 'electric' | 'flammable' | 'hot_surface';
+
+// A 'temp' mark flags text as not-yet-final (author-visible highlight only —
+// never a real formatting choice). Publishing must be blocked while any survives;
+// see `containsTempHighlight` / `TEMP_HIGHLIGHT_MARKER` below.
+type TextMark = 'bold' | 'italic' | 'underline' | 'temp';
 
 type InlineNode =
-  | { type: 'text'; text: string; marks?: Array<'bold' | 'italic' | 'underline'> }
+  | { type: 'text'; text: string; marks?: Array<TextMark> }
   | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string; attrId?: string }
   | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string }
   // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
@@ -65,13 +74,19 @@ type InlineNode =
   // `align` is the chosen inline/left/right/center placement.
   | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign };
 
+// A table cell's content plus its own horizontal alignment (independent of any
+// per-image align/float set inside it — this centers/aligns whatever the cell
+// holds, image or text, the way a spreadsheet or Word table cell would).
+export type CellAlign = 'left' | 'center' | 'right';
+interface TableCellData { align?: CellAlign; content: InlineNode[]; }
+
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
   | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign }
   | { id: string; type: 'list'; ordered: boolean; items: InlineNode[][] }
-  | { id: string; type: 'table'; rows: InlineNode[][][] }
+  | { id: string; type: 'table'; rows: TableCellData[][] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
   | { id: string; type: 'legacy_html'; html: string };
 
@@ -126,7 +141,15 @@ const readImgAlign = (el: Element): ImgAlign | undefined => {
 };
 
 /** A table cell holding a single plain-text run (used for defaults/fallbacks). */
-const textCell = (text: string): InlineNode[] => [{ type: 'text', text }];
+const textCell = (text: string): TableCellData => ({ content: [{ type: 'text', text }] });
+
+const CELL_ALIGNS: CellAlign[] = ['left', 'center', 'right'];
+
+/** Read a valid cell alignment off a <td>/<th> element, or undefined (browser default: left). */
+const readCellAlign = (el: Element): CellAlign | undefined => {
+  const a = el.getAttribute('data-align') as CellAlign | null;
+  return a && CELL_ALIGNS.includes(a) ? a : undefined;
+};
 
 /**
  * Collapse pretty-print / indentation whitespace inside a parsed table cell and
@@ -150,6 +173,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
+  // Foldered/searchable asset library popup — lets the author reuse a previously
+  // uploaded image (or an ISO pictogram) without leaving this row.
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
   // Editing surface: 'rich' = structured WYSIWYG, 'html' = raw HTML source.
   const [mode, setMode] = useState<'rich' | 'html'>('rich');
   const [htmlDraft, setHtmlDraft] = useState('');
@@ -232,7 +258,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const parseInlineNodes = useCallback((container: HTMLElement): InlineNode[] => {
     const inlines: InlineNode[] = [];
 
-    const walk = (node: Node, marks: Array<'bold' | 'italic' | 'underline'> = []) => {
+    const walk = (node: Node, marks: Array<TextMark> = []) => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent || '';
         if (text) inlines.push({ type: 'text', text, marks: marks.length ? marks : undefined });
@@ -284,6 +310,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (['B', 'STRONG'].includes(el.tagName) && !nextMarks.includes('bold')) nextMarks.push('bold');
       if (['I', 'EM'].includes(el.tagName) && !nextMarks.includes('italic')) nextMarks.push('italic');
       if (el.tagName === 'U' && !nextMarks.includes('underline')) nextMarks.push('underline');
+      if (el.classList.contains(TEMP_HIGHLIGHT_CLASS) && !nextMarks.includes('temp')) nextMarks.push('temp');
 
       Array.from(el.childNodes).forEach((child) => walk(child, nextMarks));
     };
@@ -319,6 +346,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (mark === 'bold') textHtml = `<strong>${textHtml}</strong>`;
       if (mark === 'italic') textHtml = `<em>${textHtml}</em>`;
       if (mark === 'underline') textHtml = `<u>${textHtml}</u>`;
+      if (mark === 'temp') textHtml = `<mark class="${TEMP_HIGHLIGHT_CLASS}" data-temp="true" title="Temporary — remove before publishing">${textHtml}</mark>`;
     });
     return textHtml;
   }).join(''), []);
@@ -348,7 +376,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       }
       if (el.classList.contains('im-block-wrapper')) {
         const contentEl = el.querySelector('.im-block-content') as HTMLElement | null;
-        const variant = (['warning', 'caution', 'electric', 'flammable', 'hot_surface', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as CalloutVariant;
+        const variant = (['warning', 'danger', 'caution', 'electric', 'flammable', 'hot_surface', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as CalloutVariant;
         // Use only the <p> body — the .im-block-title strong is re-generated on serialize, exclude it
         const bodyEl = contentEl?.querySelector('p') as HTMLElement | null;
         parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(bodyEl || contentEl || el) });
@@ -369,8 +397,12 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (el.tagName === 'TABLE') {
         // Parse each cell into inline nodes (not textContent) so placeholder /
         // condition chips inside cells survive the round-trip instead of being
-        // flattened to their bare label text.
-        const rows = Array.from(el.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((cell) => normalizeCellInlines(parseInlineNodes(cell as HTMLElement))));
+        // flattened to their bare label text. Cell alignment is read off its own
+        // `data-align` attribute, independent of any per-image align inside it.
+        const rows = Array.from(el.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((cell) => ({
+          align: readCellAlign(cell),
+          content: normalizeCellInlines(parseInlineNodes(cell as HTMLElement)),
+        })));
         parsed.push({ id: createId(), type: 'table', rows: rows.length ? rows : [[textCell('Header 1'), textCell('Header 2')], [textCell('Value 1'), textCell('Value 2')]] });
         return;
       }
@@ -402,9 +434,16 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return `<${tag}>${items.map((item) => `<li>${serializeInline(item)}</li>`).join('')}</${tag}>`;
       }
       if (block.type === 'table') {
+        // `data-align` is the round-trip source of truth (re-read on parse); the
+        // `text-align` style is what actually centers/aligns the cell's content —
+        // text runs directly, and any inline (non-floated/non-blocked) image too.
+        const cellHtml = (cell: TableCellData, tag: 'th' | 'td') => {
+          const alignAttr = cell.align ? ` data-align="${cell.align}" style="text-align:${cell.align};"` : '';
+          return `<${tag}${alignAttr}>${serializeInline(cell.content)}</${tag}>`;
+        };
         const [headerRow, ...body] = block.rows;
-        const th = (headerRow || []).map((cell) => `<th>${serializeInline(cell)}</th>`).join('');
-        const tr = body.map((row) => `<tr>${row.map((cell) => `<td>${serializeInline(cell)}</td>`).join('')}</tr>`).join('');
+        const th = (headerRow || []).map((cell) => cellHtml(cell, 'th')).join('');
+        const tr = body.map((row) => `<tr>${row.map((cell) => cellHtml(cell, 'td')).join('')}</tr>`).join('');
         return `<table class="im-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
       }
       if (block.type === 'conditional') {
@@ -508,7 +547,21 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   };
 
   const [caretInTable, setCaretInTable] = useState(false);
-  const refreshCaretTable = useCallback(() => setCaretInTable(!!getTableContext()), []);
+  // Mirrors the caret cell's current alignment so the toolbar can highlight it,
+  // the same way imgAlign mirrors the selected image's alignment.
+  const [caretCellAlign, setCaretCellAlign] = useState<CellAlign | undefined>(undefined);
+  const refreshCaretTable = useCallback(() => {
+    const ctx = getTableContext();
+    setCaretInTable(!!ctx);
+    if (!ctx) { setCaretCellAlign(undefined); return; }
+    let seen = -1;
+    for (const b of blocks) {
+      if (b.type !== 'table') continue;
+      seen++;
+      if (seen === ctx.tableIdx) { setCaretCellAlign(b.rows[ctx.row]?.[ctx.col]?.align); return; }
+    }
+    setCaretCellAlign(undefined);
+  }, [blocks]);
 
   const handleChange = useCallback((event: React.FormEvent<HTMLDivElement>) => {
     isUserEditingRef.current = true;
@@ -595,6 +648,45 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
   }, [deserializeHtmlToBlocks]);
 
+  // Toggle a "temporary — not final yet" highlight over the current selection. Unlike
+  // bold/italic/underline there's no native execCommand for a custom-classed wrapper, so
+  // this manipulates the Range directly: unwrap if the selection sits inside an existing
+  // highlight (toggle off), otherwise wrap it in a <mark>. No-ops on a collapsed selection
+  // — there's nothing to mark. See TEMP_HIGHLIGHT_CLASS (im-resolver.ts): publish is
+  // blocked while any survive in the resolved manual.
+  const toggleHighlight = useCallback(() => {
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return;
+
+    const closestHighlight = (node: Node): HTMLElement | null => {
+      const start = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+      return start?.closest(`mark.${TEMP_HIGHLIGHT_CLASS}`) ?? null;
+    };
+    const startMark = closestHighlight(range.startContainer);
+    const endMark = closestHighlight(range.endContainer);
+
+    if (startMark && startMark === endMark) {
+      // Selection sits entirely inside one existing highlight — unwrap it (toggle off).
+      const parent = startMark.parentNode;
+      if (parent) {
+        while (startMark.firstChild) parent.insertBefore(startMark.firstChild, startMark);
+        parent.removeChild(startMark);
+      }
+    } else {
+      const mark = document.createElement('mark');
+      mark.className = TEMP_HIGHLIGHT_CLASS;
+      mark.setAttribute('data-temp', 'true');
+      mark.title = 'Temporary — remove before publishing';
+      mark.appendChild(range.extractContents());
+      range.insertNode(mark);
+    }
+    isUserEditingRef.current = true; // keep the live DOM; just sync blocks + emit
+    setBlocks(deserializeHtmlToBlocks(el.innerHTML));
+  }, [deserializeHtmlToBlocks]);
+
   useEffect(() => {
     if (isUserEditingRef.current) {
       isUserEditingRef.current = false;
@@ -619,7 +711,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // (like switchToHtml) so in-progress typing isn't lost, mutates the matching table
   // block's `rows`, then lets the render effect rewrite the DOM + emit onChange.
   const mutateCaretTable = (
-    fn: (rows: InlineNode[][][], ctx: { row: number; col: number }) => InlineNode[][][],
+    fn: (rows: TableCellData[][], ctx: { row: number; col: number }) => TableCellData[][],
   ) => {
     const el = contentRef.current;
     if (!el) return;
@@ -640,7 +732,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setBlocks(next);
   };
 
-  const tableColCount = (rows: InlineNode[][][]) => rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
+  const tableColCount = (rows: TableCellData[][]) => rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
   const addTableRow = () => mutateCaretTable((rows, { row }) => {
     const cols = tableColCount(rows);
     const newRow = Array.from({ length: cols }, () => textCell(''));
@@ -654,6 +746,10 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Never remove the header row (index 0) or the last remaining row.
   const removeTableRow = () => mutateCaretTable((rows, { row }) => (rows.length <= 1 || row === 0 ? rows : rows.filter((_, i) => i !== row)));
   const removeTableColumn = () => mutateCaretTable((rows, { col }) => (tableColCount(rows) <= 1 ? rows : rows.map((r) => r.filter((_, i) => i !== col))));
+  // Align the caret's cell only — this editor has no multi-cell selection, so a
+  // toolbar click always targets the one cell the caret is in.
+  const setCellAlign = (align: CellAlign) => mutateCaretTable((rows, { row, col }) =>
+    rows.map((r, ri) => (ri !== row ? r : r.map((cell, ci) => (ci === col ? { ...cell, align } : cell)))));
 
   // Mode switching. Going to HTML seeds the textarea from the current blocks;
   // returning to rich re-parses whatever HTML the user typed back into blocks.
@@ -710,6 +806,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold (Ctrl+B)"><Bold size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic (Ctrl+I)"><Italic size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline (Ctrl+U)"><Underline size={16} /></button>
+            <button onMouseDown={(e) => { e.preventDefault(); toggleHighlight(); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Mark as temporary — select text not yet final; publish is blocked while any remains"><Highlighter size={16} /></button>
             {/* Lists — execCmd toggles the current line(s) and re-parses into a list block (numbers/bullets persist) */}
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bulleted list"><List size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertOrderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Numbered list"><ListOrdered size={16} /></button>
@@ -726,6 +823,20 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                 <button onMouseDown={(e) => { e.preventDefault(); addTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded" title="Add a column after the current one">+ Col</button>
                 <button onMouseDown={(e) => { e.preventDefault(); removeTableRow(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current row (header can't be removed)">− Row</button>
                 <button onMouseDown={(e) => { e.preventDefault(); removeTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current column">− Col</button>
+                <div className="w-px h-4 bg-gray-300 mx-0.5"></div>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Align the current cell's content (text or image)">Cell</span>
+                {([
+                  { value: 'left' as const,   Icon: AlignLeft,   title: 'Align cell content left' },
+                  { value: 'center' as const, Icon: AlignCenter, title: 'Center cell content — also centers an image inside it' },
+                  { value: 'right' as const,  Icon: AlignRight,  title: 'Align cell content right' },
+                ]).map(({ value, Icon, title }) => (
+                  <button
+                    key={value}
+                    onMouseDown={(e) => { e.preventDefault(); setCellAlign(value); }}
+                    className={`p-1.5 rounded ${caretCellAlign === value ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}
+                    title={title}
+                  ><Icon size={14} /></button>
+                ))}
               </>
             )}
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
@@ -734,6 +845,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); imgInputRef.current?.click(); }} disabled={uploadingImg} className="flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded text-xs font-medium border border-emerald-200 disabled:opacity-50" title="Upload image to Supabase">
               {uploadingImg ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploadingImg ? 'Uploading…' : 'Upload'}
             </button>
+            <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setShowAssetPicker(true); }} className="flex items-center gap-1 px-2 py-1 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded text-xs font-medium border border-sky-200" title="Search &amp; insert from the asset library"><Images size={14} /> Assets</button>
             <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); onInsertCondition?.(); }} className="flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-xs font-medium border border-purple-200" title="Insert Optional/Conditional Text"><GitBranch size={14} /> Cond</button>
             <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImgUpload} />
           </>
@@ -830,6 +942,18 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           </>
         )}
       </div>
+
+      {showAssetPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setShowAssetPicker(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl h-[80vh] flex flex-col overflow-hidden" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Images size={18} className="text-indigo-600" /> Asset Library</h2>
+              <button onClick={() => setShowAssetPicker(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <AssetLibraryPanel onInsert={(html) => { insertHtmlAtCursor(html); setShowAssetPicker(false); }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

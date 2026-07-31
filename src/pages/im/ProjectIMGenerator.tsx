@@ -22,15 +22,15 @@ import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { translateHtml } from '../../services/ai/translation.service';
 import { IM_LANGUAGE_NAMES } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
-import { uploadIMAsset, listIMAssets, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
+import { uploadIMAsset, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useUndoRedo } from './editor/useUndoRedo';
-import { insertToActiveEditor } from './editor/insertTarget';
 import { ProjectImImportDialog } from './ProjectImImportDialog';
+import { ProjectSupplierDiffImportDialog } from './ProjectSupplierDiffImportDialog';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
@@ -115,10 +115,6 @@ const ProjectIMGenerator: React.FC = () => {
   const [sharedPickerFor, setSharedPickerFor] = useState<string | null>(null);
   const [blockPickerSearch, setBlockPickerSearch] = useState('');
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
-  // Reusable asset library (public URLs from the `im-assets` bucket) — same as the template editor.
-  const [assets, setAssets] = useState<string[]>([]);
-  const [assetUploading, setAssetUploading] = useState(false);
-  const [showAssets, setShowAssets] = useState(false);
 
   // Context Data
   const [allAttributes, setAllAttributes] = useState<CategoryAttribute[]>([]);
@@ -201,6 +197,7 @@ const ProjectIMGenerator: React.FC = () => {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showDiffImport, setShowDiffImport] = useState(false);
 
   // Block drag-and-drop within one section's editable list (extra-section blocks or a
   // placeholder section's override blocks). Keyed by a listId so the single top-level
@@ -277,7 +274,6 @@ const ProjectIMGenerator: React.FC = () => {
         blks.forEach(b => { blkMap[b.id] = { content: b.content, blockType: b.blockType }; });
         setAvailableBlocks(blkMap);
         setBlockLibrary(blks);
-        listIMAssets().then(setAssets).catch(() => {});
 
         // The project's SKUs + attribute submissions feed resolution. The collapsed
         // attributeId -> value map (and the {{__sku}} token) is derived from the BOUND
@@ -1038,7 +1034,7 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Map a shared block's type to its callout variant so a flattened copy keeps its look.
   const blockTypeToVariant = (blockType?: string): CalloutVariant | undefined => {
-      const map: Record<string, CalloutVariant> = { warning: 'warning', caution: 'caution', electric: 'electric', flammable: 'flammable', hot_surface: 'hot_surface', info: 'info' };
+      const map: Record<string, CalloutVariant> = { warning: 'warning', danger: 'danger', caution: 'caution', electric: 'electric', flammable: 'flammable', hot_surface: 'hot_surface', info: 'info' };
       return blockType ? map[blockType] : undefined;
   };
 
@@ -1124,36 +1120,6 @@ const ProjectIMGenerator: React.FC = () => {
           : s));
   };
 
-  // --- Reusable asset library (upload + insert into the focused editor) ---
-  const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = ''; // allow re-selecting the same file
-      if (!file) return;
-      setAssetUploading(true);
-      try {
-          // Shared `library` folder so it's durable and reusable across manuals.
-          const url = await uploadIMAsset(file, 'library');
-          setAssets(prev => [url, ...prev]);
-      } catch (err) {
-          console.error('[ProjectIMGenerator] asset upload failed:', err);
-          alert(err instanceof Error ? err.message : 'Image upload failed');
-      } finally {
-          setAssetUploading(false);
-      }
-  };
-
-  // Insert a library asset at the caret of the last-focused inline editor (the editor
-  // registers itself as the insert target on focus and restores its saved selection).
-  const handleInsertAsset = (src: string) => {
-      const alt = window.prompt('Describe this image for accessibility (alt text). Leave blank to skip:', '')?.trim() ?? '';
-      const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
-      const ok = insertToActiveEditor(`<img src="${src}"${altAttr} style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`);
-      if (!ok) {
-          alert('Click into a text block where you want the image, then pick an asset.');
-          return;
-      }
-      setShowAssets(false);
-  };
 
   const removeExtraBlock = (id: string, idx: number) => {
       setExtraSections(prev => prev.map(s => s.id === id
@@ -3160,7 +3126,6 @@ const ProjectIMGenerator: React.FC = () => {
         <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
           <span className="text-xs font-bold text-muted uppercase flex items-center gap-1.5"><Layers size={13} /> Section tree</span>
           <div className="flex items-center gap-1">
-            <button onClick={() => { listIMAssets().then(setAssets).catch(() => {}); setShowAssets(true); }} title="Asset library — upload & insert images" className="text-gray-500 hover:bg-gray-100 hover:text-indigo-600 p-1 rounded"><ImageIcon size={14} /></button>
             <button onClick={() => addExtraSection(null)} title="Add chapter at document root" className="text-indigo-600 hover:bg-indigo-100 p-1 rounded"><Plus size={14} /></button>
           </div>
         </div>
@@ -3608,13 +3573,15 @@ const ProjectIMGenerator: React.FC = () => {
                      </button>
                    )}
 
-                   <button onClick={() => { listIMAssets().then(setAssets).catch(() => {}); setShowAssets(true); }} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Upload & insert images from the shared asset library">
-                      <ImageIcon size={16} /> Assets
-                   </button>
-
                    <button onClick={() => setShowImport(true)} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Replace this manual by importing a reviewed JSON">
                       <FileJson size={16} /> Import
                    </button>
+
+                   {!!template?.categoryId && (
+                     <button onClick={() => setShowDiffImport(true)} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Add a reviewed supplier draft on top of this project's template, keeping the template as-is">
+                        <GitBranch size={16} /> Import supplier draft (diff)
+                     </button>
+                   )}
 
                    {/* Export Menu */}
                    <div className="relative" ref={exportMenuRef}>
@@ -4242,32 +4209,14 @@ const ProjectIMGenerator: React.FC = () => {
                 />
             )}
 
-            {showAssets && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={() => setShowAssets(false)}>
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onMouseDown={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2"><ImageIcon size={18} className="text-indigo-600" /> Asset Library</h2>
-                            <button onClick={() => setShowAssets(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
-                        </div>
-                        <div className="px-5 pt-4">
-                            <label className={`w-full flex items-center justify-center gap-2 bg-white border border-gray-300 border-dashed rounded-xl p-3 transition-colors ${assetUploading ? 'opacity-60 cursor-wait' : 'cursor-pointer hover:bg-indigo-50 hover:border-indigo-300'}`}>
-                                {assetUploading ? <Loader2 size={16} className="text-indigo-400 animate-spin" /> : <Upload size={16} className="text-gray-400" />}
-                                <span className="text-xs font-medium text-gray-600">{assetUploading ? 'Uploading…' : 'Upload image'}</span>
-                                <input type="file" className="hidden" accept="image/*" disabled={assetUploading} onChange={handleUploadAsset} />
-                            </label>
-                            <p className="text-[11px] text-gray-400 mt-1.5">Click into a text block first, then pick an image to insert it at the cursor.</p>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-3 sm:grid-cols-4 gap-2">
-                            {assets.map((src, i) => (
-                                <div key={src} className="group relative aspect-square rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-400" onClick={() => handleInsertAsset(src)}>
-                                    <img src={src} alt={`Asset ${i}`} className="w-full h-full object-cover" />
-                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Plus size={20} className="text-white" /></div>
-                                </div>
-                            ))}
-                            {assets.length === 0 && <div className="col-span-full text-center py-10 text-gray-400 text-xs">No assets uploaded yet.</div>}
-                        </div>
-                    </div>
-                </div>
+            {showDiffImport && (
+                <ProjectSupplierDiffImportDialog
+                    projectId={projectId!}
+                    templateId={selectedTemplateId}
+                    templateType={templateType}
+                    onClose={() => setShowDiffImport(false)}
+                    onImported={() => { setShowDiffImport(false); loadData(); }}
+                />
             )}
 
             {sharedPickerFor && (() => {

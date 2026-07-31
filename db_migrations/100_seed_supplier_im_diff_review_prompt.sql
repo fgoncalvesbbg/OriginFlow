@@ -1,28 +1,24 @@
-# Supplier IM Intake — Claude Chat Review Prompt
+-- Migration 100: seed the "Supplier IM Intake" Claude Chat review prompt into
+-- prompt_library (see migration 89) so it's available from Admin → Prompt
+-- Library instead of only living in docs/im-import/review-prompt.md.
+--
+-- This is a one-time seed of the initial prompt text, not a synced copy: rows in
+-- prompt_library are freely editable from the Admin panel (see
+-- src/pages/AdminDashboard.tsx), and the app never re-reads docs/im-import/review-prompt.md
+-- at runtime. If that doc is revised later (e.g. the review tasks or the
+-- OriginFlow IM Import v1 schema change), update this row by hand in the Admin
+-- panel — this migration will not overwrite an existing row (see WHERE NOT
+-- EXISTS below), so it is safe to re-run and safe to have drifted from the doc.
+--
+-- Dollar-quoting ($prompt$...$prompt$) is used for prompt_text because the
+-- prompt itself contains many literal single/double quotes (it's largely a
+-- worked JSON example) that would otherwise need hand-escaping.
 
-Paste everything in the **Prompt** block below into a new Claude Chat conversation, then attach or
-paste the supplier's draft (PDF, extracted text, and image descriptions). The output is a single
-JSON document conforming to `OriginFlow IM Import v1` (see [`schema.md`](./schema.md)).
-
-**How to use**
-1. Open the supplier PDF. Attach it to Claude Chat (or paste the text + describe each figure).
-2. **If the project is already on a real category template** and you want this draft layered on
-   top of it (rather than creating a template-free project or a brand-new template), export that
-   template first: call `exportTemplateForReview(templateId)`
-   (`src/services/im/im-import.service.ts`) — or use the "Export template for review" action in
-   the project's IM generator — and copy its JSON output. This is optional; skip it entirely for a
-   fresh category with no existing template.
-3. Paste the entire prompt below as your first message, then the draft.
-4. Fill the bracketed placeholders at the top (`[[CATEGORY]]`, `[[TARGET LANGUAGES]]`, and
-   `[[EXISTING TEMPLATE EXPORT]]` if you have one from step 2 — otherwise write "none").
-5. Copy the JSON it returns into a `.import.json` file. Review `reviewNotes` and
-   `excludedStandardized` before doing anything with it.
-
----
-
-## Prompt
-
-````
+INSERT INTO prompt_library (title, description, prompt_text)
+SELECT
+  'Supplier IM Intake — Review & Diff (Claude Chat)',
+  'Paste into a new Claude Chat conversation together with a supplier''s draft instruction manual (PDF/text/figures). Reviews, corrects, restructures, and translates the draft into a single OriginFlow IM Import v1 JSON document. Optionally compares against an existing category template (paste the output of exportTemplateForReview) to mark sections as already covered, needing adjustment, or new — see docs/im-import/schema.md and review-prompt.md.',
+  $prompt$
 You are an expert technical writer and product-compliance reviewer specializing in instruction
 manuals (IMs) for household appliances sold in the EU/UK. I will give you a supplier's draft
 instruction manual (text and/or figures). Your job is to review, correct, and restructure it into
@@ -222,29 +218,7 @@ WORKED FRAGMENT (illustrates the exact shape — your full output covers all cha
 }
 
 Now wait for the supplier draft in my next message, then produce the JSON.
-````
-
----
-
-## After you get the JSON
-
-- Save it as `something.import.json`.
-- Read `reviewNotes.openQuestions` first — these are the gaps to resolve with the supplier.
-- Confirm `excludedStandardized` really lists the WEEE/company/conformity content (the platform
-  adds those back automatically).
-- Validate against the checklist in [`schema.md`](./schema.md#validation-checklist-manual-until-the-importer-exists).
-- **Import it — three options (same file):**
-  - **Reusable category template:** **Instruction Manuals → Category Templates → Import from JSON**
-    → confirm the category + name → **Create template**. Then open a project, pick the new
-    template, and generate/edit/publish. Best when many products share the category.
-  - **Quick, project-only:** open the project's IM generator → **Import from JSON**. Creates a
-    100% project-based manual (no category template) you can edit and publish immediately. Best for
-    fast one-off projects.
-  - **Diff onto the project's existing template:** if you exported the template in step 2 and
-    the doc uses `matchStatus`/`matchedSectionKey`, open the project's IM generator →
-    **Import supplier draft (diff)**. Keeps the project's real template bound as-is, skips
-    `matches-template` sections, and adds `new`/`adjust-template` content as project-only overlay —
-    same principle as the quick project-only import, but merged onto a real template instead of
-    the blank one. Best when the project already has a category template and the draft mostly
-    duplicates it.
-  Standardized content (company/WEEE/conformity) is added by the platform, not the file.
+$prompt$
+WHERE NOT EXISTS (
+  SELECT 1 FROM prompt_library WHERE title = 'Supplier IM Intake — Review & Diff (Claude Chat)'
+);

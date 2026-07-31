@@ -36,6 +36,15 @@
   text-decoration: underline !important;
 }
 
+/* Author-only "not yet final" marker (SimpleRichTextEditor's Highlight toggle).
+   Never reaches a published manual — publish is blocked while any remains. */
+.im-content mark.im-temp-highlight {
+  background-color: #fef08a;
+  color: inherit;
+  border-bottom: 2px dashed #ca8a04;
+  padding: 0 1px;
+}
+
 .im-placeholder {
   display: inline-block;
   vertical-align: middle;
@@ -98,6 +107,16 @@
 
 .im-block-warning .im-block-title {
   color: #c2410c;
+}
+
+/* Deeper/darker red than .im-block-electric so the two read as distinct hazard levels. */
+.im-block-danger {
+  background-color: #fee2e2;
+  border-left-color: #b91c1c;
+}
+
+.im-block-danger .im-block-title {
+  color: #7f1d1d;
 }
 
 .im-block-caution {

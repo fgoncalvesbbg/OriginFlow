@@ -11,10 +11,10 @@
  * template/section services), so existing RLS applies to the writes.
  */
 
-import { IMTemplateType, CalloutVariant, InlineBlockRef, BlockRef, ProjectExtraSection } from '../../types';
+import { IMTemplateType, CalloutVariant, InlineBlockRef, BlockRef, ProjectExtraSection, ProjectBlockAddition } from '../../types';
 import { createIMTemplate, updateIMTemplate, getOrCreateBlankTemplate } from './im-template.service';
-import { saveIMSection } from './im-section.service';
-import { saveProjectIM } from './project-im.service';
+import { saveIMSection, getIMSections } from './im-section.service';
+import { saveProjectIM, getProjectIM } from './project-im.service';
 import { sanitizeHtml, generateUUID } from '../../utils';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,20 @@ export type ImImportBlockType = 'paragraph' | 'heading' | 'callout' | 'table' | 
  * is never silently reused for a different model.
  */
 export type ImImportScope = 'generic' | 'model-specific';
+
+/**
+ * How a section compares against an existing category template, when one is supplied
+ * to the reviewer alongside the supplier draft (see `exportTemplateForReview`). Absent
+ * = 'new' (today's behavior — the whole doc is fresh content). Only meaningful for the
+ * diff-aware project import (`importSupplierDraftIntoProject`); ignored elsewhere.
+ * - 'matches-template'  — already substantively covered by an existing template section;
+ *                          not re-imported (see `matchedSectionKey`).
+ * - 'adjust-template'   — same topic as an existing template section but this model needs
+ *                          extra/different detail; only the differing block(s) are imported,
+ *                          appended onto that template section (see `matchedSectionKey`).
+ * - 'new'               — no equivalent in the existing template.
+ */
+export type ImImportMatchStatus = 'new' | 'matches-template' | 'adjust-template';
 
 export interface ImImportImageNeed {
   description: string;
@@ -55,6 +69,9 @@ export interface ImImportSection {
   order: number;
   title: Record<string, string>;
   scope?: ImImportScope;                // default 'generic'; 'model-specific' → placeholder section
+  matchStatus?: ImImportMatchStatus;     // default 'new'; see ImImportMatchStatus
+  matchedSectionKey?: string;            // required when matchStatus is matches-template/adjust-template;
+                                          // an existing template section's id (from exportTemplateForReview)
   blocks: ImImportBlock[];
 }
 
@@ -77,9 +94,10 @@ export interface ImImportDoc {
   };
 }
 
-const CALLOUT_VARIANTS: CalloutVariant[] = ['warning', 'caution', 'electric', 'flammable', 'hot_surface', 'info'];
+const CALLOUT_VARIANTS: CalloutVariant[] = ['warning', 'danger', 'caution', 'electric', 'flammable', 'hot_surface', 'info'];
 const BLOCK_TYPES: ImImportBlockType[] = ['paragraph', 'heading', 'callout', 'table', 'image'];
 const SCOPES: ImImportScope[] = ['generic', 'model-specific'];
+const MATCH_STATUSES: ImImportMatchStatus[] = ['new', 'matches-template', 'adjust-template'];
 
 // ---------------------------------------------------------------------------
 // Validation — hand-rolled type guards (matches the codebase's no-zod pattern)
@@ -138,6 +156,11 @@ export const validateImImport = (raw: unknown): ImImportValidation => {
       if (typeof s.order !== 'number') errors.push(`${where}.order (number) is required.`);
       if (!isLangMap(s.title)) errors.push(`${where}.title must be a { lang: string } map.`);
       if (s.scope !== undefined && !SCOPES.includes(s.scope)) errors.push(`${where}.scope must be one of ${SCOPES.join('|')}.`);
+      if (s.matchStatus !== undefined && !MATCH_STATUSES.includes(s.matchStatus)) {
+        errors.push(`${where}.matchStatus must be one of ${MATCH_STATUSES.join('|')}.`);
+      } else if ((s.matchStatus === 'matches-template' || s.matchStatus === 'adjust-template') && !isStr(s.matchedSectionKey)) {
+        errors.push(`${where}.matchedSectionKey is required when matchStatus is "${s.matchStatus}".`);
+      }
       if (!Array.isArray(s.blocks)) { errors.push(`${where}.blocks must be an array.`); return; }
       s.blocks.forEach((b: any, j: number) => {
         const bw = `${where}.blocks[${j}]`;
@@ -471,4 +494,171 @@ export const importProjectIMFromDoc = async (
   );
 
   return { projectId, templateType, sectionCount: extraSections.length, imageNeedCount };
+};
+
+// ---------------------------------------------------------------------------
+// Template review export — feeds the "existing template" input of the Claude Chat
+// review prompt so it can classify each drafted section's matchStatus against what's
+// actually already in the category template (see docs/im-import/review-prompt.md).
+// ---------------------------------------------------------------------------
+
+const stripHtmlPreview = (html: string): string =>
+  (html ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+const previewOfBlockRef = (ref: BlockRef): string => {
+  if (ref.kind === 'inline') {
+    const firstLang = Object.keys(ref.content ?? {})[0];
+    return firstLang ? stripHtmlPreview(ref.content[firstLang]) : '';
+  }
+  if (ref.kind === 'block') return '[shared standardized block]';
+  return `[SKU slot: ${Object.values(ref.label ?? {})[0] ?? ref.slot}]`;
+};
+
+export interface TemplateReviewSection {
+  key: string;           // the real im_sections.id — echo this back as matchedSectionKey
+  parentKey: string | null;
+  title: string;
+  contentPreview: string;
+}
+
+export interface TemplateReviewExport {
+  templateId: string;
+  sections: TemplateReviewSection[];
+}
+
+/**
+ * Build a compact, stable-keyed dump of a category template's current sections for
+ * pasting into the review prompt as "EXISTING CATEGORY TEMPLATE" context. `key` is the
+ * real template section id, so the AI's `matchedSectionKey` resolves directly with no
+ * fuzzy matching. This is a read-only reference document for the reviewer — not a
+ * re-import artifact — so content is flattened to plain text and truncated.
+ */
+export const exportTemplateForReview = async (templateId: string): Promise<TemplateReviewExport> => {
+  const sections = await getIMSections(templateId);
+  return {
+    templateId,
+    sections: sections
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .map(s => ({
+        key: s.id,
+        parentKey: s.parentId ?? null,
+        title: s.title,
+        contentPreview: (s.blockRefs ?? []).map(previewOfBlockRef).filter(Boolean).join(' ').slice(0, 800),
+      })),
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Diff-aware project import — layers a supplier draft on top of a project's ALREADY
+// BOUND category template, keeping the template as-is. Unlike importProjectIMFromDoc
+// (which rebinds to the blank template and imports everything), this never changes
+// the project's templateId and only imports the delta the reviewer flagged as
+// new/adjust-template — see ImImportMatchStatus.
+// ---------------------------------------------------------------------------
+
+export interface ImSupplierDiffImportResult {
+  projectId: string;
+  templateId: string;
+  templateType: IMTemplateType;
+  /** Sections the reviewer found already covered by the template — skipped, not imported. */
+  matchedCount: number;
+  /** Sections with no equivalent in the template — added as extraSections. */
+  newCount: number;
+  /** Sections covering an existing topic but needing extra/different detail — appended
+   *  onto the matched template section as sectionAdditions. */
+  adjustedCount: number;
+  imageNeedCount: number;
+  reviewNotes?: ImImportDoc['reviewNotes'];
+  excludedStandardized?: string[];
+}
+
+/**
+ * Import a supplier draft as a diff on top of a project's existing category template.
+ * Per section, by `matchStatus` (default 'new'):
+ *  - 'matches-template' → skipped entirely (already covered by the template).
+ *  - 'adjust-template'  → its block(s) are appended as a ProjectBlockAddition onto the
+ *    matched template section (via `matchedSectionKey`), so the rest of that section
+ *    stays live-linked to the template — no whole-section duplication.
+ *  - 'new'              → added as a project extraSection, same as importProjectIMFromDoc.
+ * Merges into the project's EXISTING ProjectIM (preserving its placeholderData,
+ * skuContent, sectionOverrides, blockOverrides, boundSkuIds, sectionSkus, and any prior
+ * overlay content) rather than overwriting it, and never rebinds the project's template.
+ */
+export const importSupplierDraftIntoProject = async (
+  projectId: string,
+  templateId: string,
+  doc: ImImportDoc,
+): Promise<ImSupplierDiffImportResult> => {
+  const templateType = doc.kind;
+  const existing = await getProjectIM(projectId, templateType);
+
+  const extraSections: ProjectExtraSection[] = [...(existing?.extraSections ?? [])];
+  const sectionAdditions: Record<string, ProjectBlockAddition[]> = { ...(existing?.sectionAdditions ?? {}) };
+
+  let matchedCount = 0;
+  let adjustedCount = 0;
+  let imageNeedCount = 0;
+  const newDocSections: ImImportSection[] = [];
+
+  for (const s of doc.sections) {
+    const status = s.matchStatus ?? 'new';
+    if (status === 'matches-template') { matchedCount++; continue; }
+
+    if (status === 'adjust-template') {
+      const targetSectionId = s.matchedSectionKey!; // validated by validateImImport
+      const additions = [...(sectionAdditions[targetSectionId] ?? [])];
+      // `position` is an index into the TEMPLATE section's own blockRefs, which this
+      // function never loads — a large sentinel always clamps to "end of section"
+      // (see im-resolver.ts's `>= refs.length` handling), while still ordering
+      // multiple appended blocks/runs relative to each other and to prior additions.
+      let nextPosition = Math.max(1_000_000, ...additions.map(a => a.position + 1));
+      for (const b of coalesceFlowBlocks(s.blocks)) {
+        if (b.type === 'image') imageNeedCount++;
+        const block = blockToRef(b, doc.languages, { placeholderModelSpecific: false });
+        additions.push({ id: `padd-${generateUUID().slice(0, 9)}`, position: nextPosition++, block });
+      }
+      sectionAdditions[targetSectionId] = additions;
+      adjustedCount++;
+      continue;
+    }
+
+    newDocSections.push(s);
+  }
+
+  if (newDocSections.length) {
+    const built = buildExtraSectionsFromDoc({ ...doc, sections: newDocSections }, { placeholderModelSpecific: false });
+    extraSections.push(...built);
+    imageNeedCount += built.reduce(
+      (n, s) => n + s.blocks.filter(b => b.kind === 'inline' && b.isPlaceholder && b.variant === 'info').length, 0,
+    );
+  }
+
+  await saveProjectIM(
+    projectId,
+    templateId,
+    existing?.placeholderData ?? {},
+    existing?.status ?? 'draft',
+    existing?.skuContent ?? {},
+    templateType,
+    sectionAdditions,
+    extraSections,
+    existing?.sectionOverrides ?? {},
+    undefined,                          // version — leave untouched
+    existing?.boundSkuIds ?? [],
+    existing?.sectionSkus ?? {},
+    existing?.blockOverrides ?? {},
+  );
+
+  return {
+    projectId,
+    templateId,
+    templateType,
+    matchedCount,
+    newCount: newDocSections.length,
+    adjustedCount,
+    imageNeedCount,
+    reviewNotes: doc.reviewNotes,
+    excludedStandardized: doc.excludedStandardized,
+  };
 };

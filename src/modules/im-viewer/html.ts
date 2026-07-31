@@ -24,6 +24,7 @@ const ISO_W017 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" 
 
 const ISO_ICONS: Record<CalloutVariant, string> = {
   warning: ISO_W001,
+  danger: ISO_W001,
   caution: ISO_W001,
   electric: ISO_W012,
   flammable: ISO_W021,

@@ -192,7 +192,7 @@ export interface ProjectExtraSection {
 // ---------------------------------------------------------------------------
 
 /** Callout variants — a hazard/info box with an official ISO 7010 sign. */
-export type CalloutVariant = 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info';
+export type CalloutVariant = 'warning' | 'danger' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info';
 
 /**
  * Visibility condition shared by inline and shared-block refs — the ref only
@@ -247,7 +247,7 @@ export interface IMBlock {
   title: string;
   /** Brief internal-only label to differentiate blocks in the library/pickers. Never printed on generated IMs. */
   internalTitle?: string | null;
-  blockType: 'content' | 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info' | 'legacy_html';
+  blockType: 'content' | 'warning' | 'danger' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info' | 'legacy_html';
   sourceLanguage: string;
   content: Record<string, string>; // lang -> html
   placeholders: string[];
@@ -259,6 +259,29 @@ export interface IMBlock {
   createdAt: string;
   updatedAt: string;
   lastUpdatedBy?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Asset library — im_asset_folders / im_assets (foldered, searchable images
+// insertable into any IM inline HTML row or content block)
+// ---------------------------------------------------------------------------
+
+export interface AssetFolder {
+  id: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface IMAsset {
+  id: string;
+  folderId: string | null;
+  name: string;
+  url: string;
+  storagePath: string | null;
+  altText: string | null;
+  createdBy: string | null;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

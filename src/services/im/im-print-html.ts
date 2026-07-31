@@ -220,9 +220,9 @@ const ISO_W021 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" 
 // ISO 7010 W017 — Hot surface
 const ISO_W017 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 525" style="display:block;width:100%;height:100%;"><path d="M597.6,499.6,313.8,8c-2.9-5-8.2-8-13.9-8s-11,3.1-13.9,8l-283.8,491.6c-2.9,5-2.9,11.1,0,16,2.9,5,8.2,8,13.9,8h567.6c5.7,0,11-3.1,13.9-8,2.9-5,2.9-11.1,0-16z" fill="#231F20"/><polygon points="43.875,491.5,299.88,48.2,555.88,491.5" transform="matrix(1,0,0,0.99591458,0.125,2.0332437)" fill="#FFDA00"/><rect x="175" y="437" width="250" height="25" fill="#231F20"/><path d="M242.68,415c56.86-81.3-60.68-104.16-2.68-185" stroke="#231F20" stroke-width="16" fill="none"/><path d="m303.78,414.51c56.86-81.3-60.561-103.43-2.561-184.27" stroke="#231F20" stroke-width="16" fill="none"/><path d="M365,415c56.86-81.3-59.23-104.65-1.22-185.49" stroke="#231F20" stroke-width="16" fill="none"/></svg>`;
 
-type CalloutVariant = 'warning' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info';
+type CalloutVariant = 'warning' | 'danger' | 'caution' | 'electric' | 'flammable' | 'hot_surface' | 'info';
 const ISO_ICONS: Record<CalloutVariant, string> = {
-  warning: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002,
+  warning: ISO_W001, danger: ISO_W001, caution: ISO_W001, electric: ISO_W012, flammable: ISO_W021, hot_surface: ISO_W017, info: ISO_M002,
 };
 const wrapCallout = (variant: CalloutVariant, contentHtml: string, lang: string): string => {
   if (!contentHtml) return contentHtml;
@@ -599,6 +599,7 @@ const buildStyles = (
     .imv-block-content p:last-child { margin-bottom: 0; }
     .imv-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 0.5rem; letter-spacing: 0.05em; }
     .imv-block-warning { background: #fff7ed; border-left-color: #f97316; } .imv-block-warning .imv-block-title { color: #c2410c; }
+    .imv-block-danger { background: #fee2e2; border-left-color: #b91c1c; } .imv-block-danger .imv-block-title { color: #7f1d1d; }
     .imv-block-caution { background: #fefce8; border-left-color: #eab308; } .imv-block-caution .imv-block-title { color: #854d0e; }
     .imv-block-electric { background: #fef2f2; border-left-color: #dc2626; } .imv-block-electric .imv-block-title { color: #b91c1c; }
     .imv-block-flammable { background: #fff1f2; border-left-color: #ea580c; } .imv-block-flammable .imv-block-title { color: #c2410c; }

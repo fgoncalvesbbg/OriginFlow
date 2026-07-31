@@ -58,6 +58,9 @@ export type {
   FeatureConditionFields,
   // IMBlock
   IMBlock,
+  // Asset library
+  AssetFolder,
+  IMAsset,
   // SKU content schemas
   RichTextContent,
   AnnotatedImage,

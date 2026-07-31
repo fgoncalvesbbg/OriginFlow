@@ -284,6 +284,8 @@
 }
 .imv-block-warning { background: #fff7ed; border-left-color: #f97316; }
 .imv-block-warning .imv-block-title { color: #c2410c; }
+.imv-block-danger { background: #fee2e2; border-left-color: #b91c1c; }
+.imv-block-danger .imv-block-title { color: #7f1d1d; }
 .imv-block-caution { background: #fefce8; border-left-color: #eab308; }
 .imv-block-caution .imv-block-title { color: #854d0e; }
 .imv-block-electric { background: #fef2f2; border-left-color: #dc2626; }

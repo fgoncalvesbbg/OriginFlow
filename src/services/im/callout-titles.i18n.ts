@@ -15,6 +15,10 @@ export const CALLOUT_TITLES_I18N: Record<string, Record<string, string>> = {
     en: 'WARNING', de: 'WARNUNG', fr: 'AVERTISSEMENT', es: 'ADVERTENCIA', it: 'AVVERTENZA', pt: 'ADVERTÊNCIA', nl: 'WAARSCHUWING', pl: 'OSTRZEŻENIE',
     bg: 'ПРЕДУПРЕЖДЕНИЕ', hr: 'UPOZORENJE', cs: 'VAROVÁNÍ', da: 'ADVARSEL', et: 'HOIATUS', fi: 'VAROITUS', el: 'ΠΡΟΕΙΔΟΠΟΙΗΣΗ', hu: 'FIGYELMEZTETÉS', lv: 'BRĪDINĀJUMS', lt: 'ĮSPĖJIMAS', ro: 'AVERTIZARE', sk: 'VAROVANIE', sl: 'OPOZORILO', sv: 'VARNING',
   },
+  danger: {
+    en: 'DANGER', de: 'GEFAHR', fr: 'DANGER', es: 'PELIGRO', it: 'PERICOLO', pt: 'PERIGO', nl: 'GEVAAR', pl: 'NIEBEZPIECZEŃSTWO',
+    bg: 'ОПАСНОСТ', hr: 'OPASNOST', cs: 'NEBEZPEČÍ', da: 'FARE', et: 'OHT', fi: 'VAARA', el: 'ΚΙΝΔΥΝΟΣ', hu: 'VESZÉLY', lv: 'BĪSTAMI', lt: 'PAVOJUS', ro: 'PERICOL', sk: 'NEBEZPEČENSTVO', sl: 'NEVARNOST', sv: 'FARA',
+  },
   caution: {
     en: 'CAUTION', de: 'VORSICHT', fr: 'ATTENTION', es: 'PRECAUCIÓN', it: 'ATTENZIONE', pt: 'CUIDADO', nl: 'LET OP', pl: 'PRZESTROGA',
     bg: 'ВНИМАНИЕ', hr: 'OPREZ', cs: 'POZOR', da: 'FORSIGTIG', et: 'ETTEVAATUST', fi: 'HUOMIO', el: 'ΠΡΟΣΟΧΗ', hu: 'VIGYÁZAT', lv: 'UZMANĪBU', lt: 'ATSARGIAI', ro: 'ATENȚIE', sk: 'POZOR', sl: 'PREVIDNO', sv: 'FÖRSIKTIGHET',

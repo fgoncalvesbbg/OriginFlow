@@ -20,7 +20,7 @@ import {
   ResolvedManual,
   RESOLVED_MANUAL_SCHEMA_VERSION,
 } from '../../types';
-import { resolveManual } from './im-resolver';
+import { resolveManual, findTempHighlightSections } from './im-resolver';
 import { getIMBlocks } from './im-block.service';
 import { getProjectSkus } from '../project/project-sku.service';
 import { getCategoryAttributes } from '../compliance/compliance-requirement.service';
@@ -228,12 +228,32 @@ export const publishResolvedManuals = async (
   const user = await auth.getUser();
   const publishedBy = user?.email ?? user?.id ?? null;
 
+  // Resolve every language up front (rather than interleaved with upload below) so a
+  // temporary-highlight check can veto the whole publish before anything is written —
+  // this is the one choke point every publish path (this function) goes through, so
+  // it also protects the staleness module's republishProjectIM, not just the generator.
+  const resolvedByLanguage = await Promise.all(
+    languages.map((language) => resolveContentHash(template, sections, blocksById, projectIM, language, projectSkus, attributesById)
+      .then((r) => ({ language, ...r }))),
+  );
+
+  const marked = resolvedByLanguage.flatMap(({ language, resolved }) =>
+    findTempHighlightSections(resolved).map(({ title }) => ({ language, sectionTitle: title })));
+  if (marked.length) {
+    const byTitle = new Map<string, Set<string>>();
+    for (const m of marked) {
+      if (!byTitle.has(m.sectionTitle)) byTitle.set(m.sectionTitle, new Set());
+      byTitle.get(m.sectionTitle)!.add(m.language.toUpperCase());
+    }
+    const list = [...byTitle.entries()].map(([title, langs]) => `"${title}" (${[...langs].join(', ')})`).join(', ');
+    throw new Error(`text is still marked as temporary in: ${list}. Remove the highlight before publishing.`);
+  }
+
   const published: PublishedLanguage[] = [];
 
-  for (let i = 0; i < languages.length; i++) {
-    const language = languages[i];
-    onProgress?.(i + 1, languages.length, language);
-    const { resolved, json, contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, language, projectSkus, attributesById);
+  for (let i = 0; i < resolvedByLanguage.length; i++) {
+    const { language, resolved, json, contentHash } = resolvedByLanguage[i];
+    onProgress?.(i + 1, resolvedByLanguage.length, language);
     const storagePath = `${projectId}/${templateType}/${language}.json`;
     const url = await uploadJson(storagePath, json);
 

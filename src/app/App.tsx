@@ -42,6 +42,9 @@ import IMSharedManual from '../pages/im/IMSharedManual';
 import IMBlockLibrary from '../pages/im/IMBlockLibrary';
 import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
+// Standalone Tools
+import PdfToMarkdownPage from '../modules/pdf-to-markdown';
+
 // Sourcing Pages
 import SourcingDashboard from '../pages/sourcing/SourcingDashboard';
 import CreateRFQ from '../pages/sourcing/CreateRFQ';
@@ -178,6 +181,13 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           } />
 
+
+          {/* Standalone Tools */}
+          <Route path="/tools/pdf-to-markdown" element={
+            <ProtectedRoute>
+              <PdfToMarkdownPage />
+            </ProtectedRoute>
+          } />
 
           {/* Admin Routes */}
           <Route path="/admin" element={

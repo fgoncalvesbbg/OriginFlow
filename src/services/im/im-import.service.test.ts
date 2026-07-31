@@ -10,14 +10,17 @@ vi.mock('./im-template.service', () => ({
   updateIMTemplate: vi.fn(),
   getOrCreateBlankTemplate: vi.fn(),
 }));
-vi.mock('./im-section.service', () => ({ saveIMSection: vi.fn() }));
-vi.mock('./project-im.service', () => ({ saveProjectIM: vi.fn() }));
+vi.mock('./im-section.service', () => ({ saveIMSection: vi.fn(), getIMSections: vi.fn() }));
+vi.mock('./project-im.service', () => ({ saveProjectIM: vi.fn(), getProjectIM: vi.fn() }));
 vi.mock('../../utils', () => ({ sanitizeHtml: (s: string) => s, generateUUID: () => `uuid${++uuidSeq}00000000` }));
 
-import { validateImImport, importIMTemplate, buildExtraSectionsFromDoc, importProjectIMFromDoc } from './im-import.service';
+import {
+  validateImImport, importIMTemplate, buildExtraSectionsFromDoc, importProjectIMFromDoc,
+  exportTemplateForReview, importSupplierDraftIntoProject,
+} from './im-import.service';
 import { createIMTemplate, getOrCreateBlankTemplate } from './im-template.service';
-import { saveIMSection } from './im-section.service';
-import { saveProjectIM } from './project-im.service';
+import { saveIMSection, getIMSections } from './im-section.service';
+import { saveProjectIM, getProjectIM } from './project-im.service';
 
 const exampleDoc = () =>
   JSON.parse(readFileSync(join(__dirname, '../../../docs/im-import/example.import.json'), 'utf8'));
@@ -73,7 +76,7 @@ describe('validateImImport', () => {
   it('rejects a callout block with a bad variant', () => {
     const d = exampleDoc();
     const s = d.sections.find((x: any) => x.blocks.some((b: any) => b.type === 'callout'));
-    s.blocks.find((b: any) => b.type === 'callout').variant = 'danger';
+    s.blocks.find((b: any) => b.type === 'callout').variant = 'bogus';
     expect(validateImImport(d).errors.some(e => /variant must be one of/.test(e))).toBe(true);
   });
 
@@ -282,5 +285,138 @@ describe('importProjectIMFromDoc', () => {
     expect(args[3]).toBe('draft');                     // status
     expect(Array.isArray(args[7])).toBe(true);         // extraSections positional arg
     expect(args[7]).toHaveLength(1);
+  });
+});
+
+describe('exportTemplateForReview', () => {
+  it('builds a stable-keyed, order-sorted, flattened preview of the template sections', async () => {
+    vi.mocked(getIMSections).mockResolvedValue([
+      {
+        id: 'sec-2', templateId: 't1', parentId: null, title: 'Cleaning', order: 2, isPlaceholder: false,
+        content: {}, blockRefs: [{ kind: 'inline', content: { en: '<p>Wipe with a damp cloth.</p>' } }],
+      },
+      {
+        id: 'sec-1', templateId: 't1', parentId: null, title: 'Safety', order: 1, isPlaceholder: false,
+        content: {},
+        blockRefs: [
+          { kind: 'inline', content: { en: '<p>Do not immerse in water.</p>' } },
+          { kind: 'block', block_id: 'blk-1' },
+          { kind: 'sku_slot', slot: 'parts', schema: 'legend_table', label: { en: 'Parts legend' }, required: true },
+        ],
+      },
+    ] as any);
+
+    const res = await exportTemplateForReview('t1');
+    expect(res.templateId).toBe('t1');
+    expect(res.sections.map(s => s.key)).toEqual(['sec-1', 'sec-2']); // sorted by order
+    expect(res.sections[0].title).toBe('Safety');
+    expect(res.sections[0].parentKey).toBeNull();
+    expect(res.sections[0].contentPreview).toContain('Do not immerse in water.');
+    expect(res.sections[0].contentPreview).toContain('[shared standardized block]');
+    expect(res.sections[0].contentPreview).toContain('[SKU slot: Parts legend]');
+    expect(res.sections[1].contentPreview).toBe('Wipe with a damp cloth.');
+  });
+});
+
+describe('importSupplierDraftIntoProject', () => {
+  beforeEach(() => {
+    vi.mocked(getProjectIM).mockReset();
+    vi.mocked(saveProjectIM).mockReset();
+  });
+
+  const baseDoc = (sections: any[]): any => ({
+    importSchemaVersion: 1, kind: 'im', category: 'C', product: { name: 'X' },
+    languages: ['en'], sourceLanguage: 'en', sections,
+  });
+
+  it('skips matches-template sections and counts them, without writing anything for them', async () => {
+    vi.mocked(getProjectIM).mockResolvedValue(null);
+    vi.mocked(saveProjectIM).mockResolvedValue({} as any);
+    const doc = baseDoc([
+      { key: 'intended-use', order: 1, title: { en: 'Intended Use' },
+        matchStatus: 'matches-template', matchedSectionKey: 'tmpl-sec-1', blocks: [] },
+    ]);
+
+    const res = await importSupplierDraftIntoProject('proj-1', 'tmpl-1', doc);
+
+    expect(res.matchedCount).toBe(1);
+    expect(res.newCount).toBe(0);
+    expect(res.adjustedCount).toBe(0);
+    const args = vi.mocked(saveProjectIM).mock.calls[0];
+    expect(args[1]).toBe('tmpl-1');                    // templateId — NOT rebound to a blank template
+    expect(args[6]).toEqual({});                       // sectionAdditions — nothing added
+    expect(args[7]).toEqual([]);                        // extraSections — nothing added
+  });
+
+  it('appends adjust-template content onto the matched template section as a sectionAddition', async () => {
+    vi.mocked(getProjectIM).mockResolvedValue(null);
+    vi.mocked(saveProjectIM).mockResolvedValue({} as any);
+    const doc = baseDoc([
+      { key: 'cleaning', order: 1, title: { en: 'Cleaning' },
+        matchStatus: 'adjust-template', matchedSectionKey: 'tmpl-sec-2',
+        blocks: [{ type: 'paragraph', content: { en: '<p>Replace cartridge every 3 months.</p>' } }] },
+    ]);
+
+    const res = await importSupplierDraftIntoProject('proj-1', 'tmpl-1', doc);
+
+    expect(res.adjustedCount).toBe(1);
+    expect(res.newCount).toBe(0);
+    const args = vi.mocked(saveProjectIM).mock.calls[0];
+    const additions = args[6] as Record<string, any[]>;
+    expect(additions['tmpl-sec-2']).toHaveLength(1);
+    expect(additions['tmpl-sec-2'][0].block.content.en).toBe('<p>Replace cartridge every 3 months.</p>');
+    expect(additions['tmpl-sec-2'][0].position).toBeGreaterThanOrEqual(1_000_000); // clamps to "end of section"
+    expect(args[7]).toEqual([]);                        // extraSections untouched
+  });
+
+  it('adds new sections as extraSections, same shape as the project-only import', async () => {
+    vi.mocked(getProjectIM).mockResolvedValue(null);
+    vi.mocked(saveProjectIM).mockResolvedValue({} as any);
+    const doc = baseDoc([
+      { key: 'new-chapter', order: 1, title: { en: 'New Chapter' },
+        blocks: [{ type: 'paragraph', content: { en: '<p>Brand new content.</p>' } }] },
+    ]);
+
+    const res = await importSupplierDraftIntoProject('proj-1', 'tmpl-1', doc);
+
+    expect(res.newCount).toBe(1);
+    const args = vi.mocked(saveProjectIM).mock.calls[0];
+    expect(args[7]).toHaveLength(1);
+    expect((args[7] as any[])[0].title).toBe('New Chapter');
+  });
+
+  it('merges onto an existing ProjectIM rather than overwriting its prior content', async () => {
+    vi.mocked(getProjectIM).mockResolvedValue({
+      id: 'pim-1', templateId: 'tmpl-1', templateType: 'im',
+      placeholderData: { __cover_title: 'Existing Title' },
+      skuContent: {}, status: 'generated', updatedAt: '2024-01-01',
+      boundSkuIds: ['sku-1'],
+      sectionAdditions: { 'tmpl-sec-9': [{ id: 'padd-old', position: 1_000_000, block: { kind: 'inline', content: { en: '<p>old</p>' } } }] },
+      extraSections: [{ id: 'proj-old', parentId: null, title: 'Old Extra', order: 1, blocks: [] }],
+      sectionOverrides: { 'tmpl-sec-5': [{ kind: 'inline', content: { en: '<p>override</p>' } }] },
+      sectionSkus: { 'tmpl-sec-5': ['sku-1'] },
+      blockOverrides: { 'tmpl-sec-5': { '0': { kind: 'inline', content: { en: '<p>block override</p>' } } } },
+    } as any);
+    vi.mocked(saveProjectIM).mockResolvedValue({} as any);
+
+    const doc = baseDoc([
+      { key: 'new-chapter', order: 1, title: { en: 'New Chapter' },
+        blocks: [{ type: 'paragraph', content: { en: '<p>Fresh.</p>' } }] },
+    ]);
+
+    await importSupplierDraftIntoProject('proj-1', 'tmpl-1', doc);
+
+    const args = vi.mocked(saveProjectIM).mock.calls[0];
+    expect(args[2]).toEqual({ __cover_title: 'Existing Title' }); // placeholderData preserved
+    expect(args[3]).toBe('generated');                            // status preserved, not reset to draft
+    expect(args[8]).toEqual({ 'tmpl-sec-5': [{ kind: 'inline', content: { en: '<p>override</p>' } }] }); // sectionOverrides preserved
+    expect(args[9]).toBeUndefined();                              // version left untouched
+    expect(args[10]).toEqual(['sku-1']);                          // boundSkuIds preserved
+    expect(args[11]).toEqual({ 'tmpl-sec-5': ['sku-1'] });        // sectionSkus preserved
+    expect(args[12]).toEqual({ 'tmpl-sec-5': { '0': { kind: 'inline', content: { en: '<p>block override</p>' } } } }); // blockOverrides preserved
+    // prior overlay content is kept alongside the new addition, not replaced
+    expect((args[7] as any[]).some((s: any) => s.title === 'Old Extra')).toBe(true);
+    expect((args[7] as any[]).some((s: any) => s.title === 'New Chapter')).toBe(true);
+    expect((args[6] as Record<string, any[]>)['tmpl-sec-9']).toHaveLength(1);
   });
 });

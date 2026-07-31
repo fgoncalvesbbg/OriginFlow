@@ -1,10 +1,10 @@
 /** IMPreview — read-only rendered preview of a resolved IM template/section content. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getIMTemplateById, getIMSections, resolveManual } from '../../services';
+import { getIMTemplateById, getIMSections, getIMBlocks, resolveManual } from '../../services';
 import { sanitizeHtml } from '../../utils';
 import { wrapBlockCallout } from '../../services/im/im-resolver';
-import { IMTemplate, IMSection, IMMasterLayoutName, IMMasterPageOverride, ResolvedSection, localizedSectionTitle } from '../../types';
+import { IMTemplate, IMSection, IMBlock, IMMasterLayoutName, IMMasterPageOverride, ResolvedSection, localizedSectionTitle } from '../../types';
 import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 import './styles/im-content.css';
@@ -45,6 +45,7 @@ const IMPreview: React.FC = () => {
   const { templateId } = useParams<{ templateId: string }>();
   const [template, setTemplate] = useState<IMTemplate | null>(null);
   const [sections, setSections] = useState<IMSection[]>([]);
+  const [blocks, setBlocks] = useState<IMBlock[]>([]);
   const [activeLang, setActiveLang] = useState('en');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -66,8 +67,9 @@ const IMPreview: React.FC = () => {
         setError('Template not found.');
       } else {
         setTemplate(temp);
-        const secs = await getIMSections(temp.id);
+        const [secs, blks] = await Promise.all([getIMSections(temp.id), getIMBlocks()]);
         setSections(secs);
+        setBlocks(blks);
       }
     } catch (e) {
       setError('Failed to load template.');
@@ -96,11 +98,20 @@ const IMPreview: React.FC = () => {
     ...(template.metadata?.masterPages || {})
   };
 
+  // Shared blocks must be resolved by id so rows referencing the block library render
+  // here too — passing {} silently drops them (resolveManual treats an unresolvable
+  // block id as "block not found" and returns no node for that row).
+  const blocksById = useMemo(() => {
+    const map: Record<string, IMBlock> = {};
+    for (const b of blocks) map[b.id] = b;
+    return map;
+  }, [blocks]);
+
   // Resolve the full document for the active language. Recomputes whenever
   // the language switcher changes; no project context in preview mode.
   const resolved = useMemo(
-    () => resolveManual(template, sections, {}, null, activeLang),
-    [template, sections, activeLang],
+    () => resolveManual(template, sections, blocksById, null, activeLang),
+    [template, sections, blocksById, activeLang],
   );
 
   // Build a lookup from section id → ResolvedSection for the renderer

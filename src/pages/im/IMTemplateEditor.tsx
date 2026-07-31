@@ -9,11 +9,10 @@ import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, deleteIMTemplate, getProjectIMCountForTemplate, getCategoryAttributes, getIMBlocks, resolveManual } from '../../services';
 import { wrapBlockCallout } from '../../services/im/im-resolver';
 import { sanitizeHtml } from '../../utils';
-import { uploadIMAsset, listIMAssets } from '../../services/im/im-asset.service';
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle, ResolvedSection } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Upload, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
 import { parseTranslationXliff, applyTranslationImport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
@@ -105,9 +104,7 @@ const IMTemplateEditor: React.FC = () => {
   
   const [categoryAttributes, setCategoryAttributes] = useState<CategoryAttribute[]>([]);
 
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'structure' | 'assets'>('structure');
-
-  // Resizable structure/assets sidebar — persisted so long section titles aren't
+  // Resizable structure sidebar — persisted so long section titles aren't
   // permanently truncated. Clamped to a sensible range.
   const SIDEBAR_MIN = 200, SIDEBAR_MAX = 640;
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -134,11 +131,6 @@ const IMTemplateEditor: React.FC = () => {
     document.addEventListener('mouseup', onUp);
     document.body.style.userSelect = 'none';
   };
-  // Reusable asset library — public URLs of images uploaded to the `im-assets` bucket.
-  // Seeded from storage on load so past uploads persist across refreshes/sessions.
-  const [assets, setAssets] = useState<string[]>([]);
-  const [assetUploading, setAssetUploading] = useState(false);
-
   const [isLangModalOpen, setIsLangModalOpen] = useState(false);
   const [langDraft, setLangDraft] = useState<string[]>(['en']);
 
@@ -218,12 +210,6 @@ const IMTemplateEditor: React.FC = () => {
     if (!categoryId) return;
     loadData();
   }, [categoryId, templateType]);
-
-  // Load the reusable asset library from storage so past uploads are always shown.
-  // Independent of the selected category/template — it's a shared library.
-  useEffect(() => {
-    listIMAssets().then(setAssets);
-  }, []);
 
   const loadData = async () => {
     if (!categoryId) return;
@@ -311,33 +297,6 @@ const IMTemplateEditor: React.FC = () => {
     // fall back to a plain caret insert if no row registered one.
     commitPlaceholderToTarget(html);
     setIsPlaceholderModalOpen(false);
-  };
-
-  const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      // Reset the input so re-selecting the same file fires onChange again.
-      e.target.value = '';
-      if (!file) return;
-      setAssetUploading(true);
-      try {
-          // Upload to the shared `library` folder so the asset is durable and shows in
-          // every template's asset library for reuse (survives refresh, unlike a
-          // base64 data URL held only in memory).
-          const url = await uploadIMAsset(file, 'library');
-          setAssets(prev => [url, ...prev]);
-      } catch (err) {
-          console.error('[IMTemplateEditor] asset upload failed:', err);
-          alert(err instanceof Error ? err.message : 'Image upload failed');
-      } finally {
-          setAssetUploading(false);
-      }
-  };
-
-  const handleInsertAsset = (src: string) => {
-      const alt = window.prompt('Describe this image for accessibility (alt text). Leave blank to skip:', '')?.trim() ?? '';
-      const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
-      const html = `<img src="${src}"${altAttr} style="max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;" /><p></p>`;
-      insertHtmlToCurrentEditor(html);
   };
 
   const resetCondValue = () => {
@@ -903,7 +862,13 @@ const IMTemplateEditor: React.FC = () => {
 
   const renderPreviewDrawer = () => {
     if (!showPreview || !template) return null;
-    const resolved = resolveManual(template, sections, {}, null, activeLang);
+    // Shared blocks must be resolved by id so rows that reference the block library
+    // (not just inline content) actually render here — otherwise resolveManual silently
+    // drops them (unresolvable block warning), which is what made this preview look
+    // stale/incomplete next to the real generator.
+    const blocksById: Record<string, IMBlock> = {};
+    for (const b of availableBlocks) blocksById[b.id] = b;
+    const resolved = resolveManual(template, sections, blocksById, null, activeLang);
     const byId: Record<string, ResolvedSection> = {};
     for (const rs of resolved.sections) byId[rs.id] = rs;
     const nodesToHtml = (rs?: ResolvedSection): string => !rs ? '' : rs.nodes.map(n =>
@@ -1617,56 +1582,26 @@ const IMTemplateEditor: React.FC = () => {
           <div className="flex flex-1 gap-6 overflow-hidden">
              {/* Sidebar */}
              <div style={{ width: sidebarWidth }} className="shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
-                <div className="flex border-b border-gray-200">
-                   <button onClick={() => setActiveSidebarTab('structure')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'structure' ? 'bg-light text-indigo-600 border-b-2 border-indigo-600' : 'text-muted hover:bg-light'}`}><Layers size={14} /> Structure</button>
-                   <button onClick={() => setActiveSidebarTab('assets')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${activeSidebarTab === 'assets' ? 'bg-light text-indigo-600 border-b-2 border-indigo-600' : 'text-muted hover:bg-light'}`}><Grid size={14} /> Assets</button>
+                <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
+                   <span className="text-xs font-bold text-muted uppercase flex items-center gap-2"><Layers size={14} /> Section Tree</span>
+                   {!locked && <button onClick={handleAddSection} className={`text-indigo-600 hover:bg-indigo-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>}
                 </div>
-
-                {activeSidebarTab === 'structure' && (
-                   <>
-                     <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
-                        <span className="text-xs font-bold text-muted uppercase">Section Tree</span>
-                        {!locked && <button onClick={handleAddSection} className={`text-indigo-600 hover:bg-indigo-100 p-1 rounded transition-colors ${rootSections.length >= 15 ? 'opacity-50' : ''}`} disabled={rootSections.length >= 15}><Plus size={14}/></button>}
-                     </div>
-                     {/* Jump-to-section search (#5) */}
-                     <div className="px-2 pt-2">
-                        <div className="relative">
-                           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                           <input value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} placeholder="Find a section…" className="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" />
-                        </div>
-                     </div>
-                     <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                        {sectionSearch.trim() ? (() => {
-                           const q = sectionSearch.trim().toLowerCase();
-                           const matches = sections.filter(s => localizedSectionTitle(s, activeLang).toLowerCase().includes(q));
-                           return matches.length ? matches.map(s => (
-                             <button key={s.id} onClick={() => setSelectedSectionId(s.id)} className={`w-full text-left px-2 py-1.5 rounded text-sm truncate ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-light'}`} title={localizedSectionTitle(s, activeLang)}>{localizedSectionTitle(s, activeLang)}</button>
-                           )) : <p className="text-xs text-gray-400 italic px-2 py-4 text-center">No sections match “{sectionSearch}”.</p>;
-                        })() : rootSections.map((s, idx) => renderSidebarItem(s, `${idx + 1}.`, 0))}
-                     </div>
-                   </>
-                )}
-
-                {activeSidebarTab === 'assets' && (
-                   <div className="flex-col flex h-full">
-                      <div className="p-3 border-b border-gray-100 bg-light">
-                         <label className={`w-full flex items-center justify-center gap-2 bg-white border border-gray-300 border-dashed rounded-xl p-3 transition-colors ${assetUploading ? 'opacity-60 cursor-wait' : 'cursor-pointer hover:bg-indigo-50 hover:border-indigo-300'}`}>
-                            {assetUploading ? <Loader2 size={16} className="text-indigo-400 animate-spin" /> : <Upload size={16} className="text-gray-400" />}
-                            <span className="text-xs font-medium text-gray-600">{assetUploading ? 'Uploading…' : 'Upload Image'}</span>
-                            <input type="file" className="hidden" accept="image/*" disabled={assetUploading} onChange={handleUploadAsset} />
-                         </label>
-                      </div>
-                      <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2">
-                         {assets.map((src, i) => (
-                            <div key={src} className="group relative aspect-square rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-400" onClick={() => handleInsertAsset(src)}>
-                               <img src={src} alt={`Asset ${i}`} className="w-full h-full object-cover" />
-                               <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Plus size={20} className="text-white" /></div>
-                            </div>
-                         ))}
-                         {assets.length === 0 && <div className="col-span-2 text-center py-8 text-gray-400 text-xs">No assets uploaded yet.</div>}
-                      </div>
+                {/* Jump-to-section search (#5) */}
+                <div className="px-2 pt-2">
+                   <div className="relative">
+                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <input value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} placeholder="Find a section…" className="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" />
                    </div>
-                )}
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                   {sectionSearch.trim() ? (() => {
+                      const q = sectionSearch.trim().toLowerCase();
+                      const matches = sections.filter(s => localizedSectionTitle(s, activeLang).toLowerCase().includes(q));
+                      return matches.length ? matches.map(s => (
+                        <button key={s.id} onClick={() => setSelectedSectionId(s.id)} className={`w-full text-left px-2 py-1.5 rounded text-sm truncate ${selectedSectionId === s.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-light'}`} title={localizedSectionTitle(s, activeLang)}>{localizedSectionTitle(s, activeLang)}</button>
+                      )) : <p className="text-xs text-gray-400 italic px-2 py-4 text-center">No sections match “{sectionSearch}”.</p>;
+                   })() : rootSections.map((s, idx) => renderSidebarItem(s, `${idx + 1}.`, 0))}
+                </div>
              </div>
 
              {/* Drag handle to resize the sidebar */}
@@ -1809,6 +1744,7 @@ const IMTemplateEditor: React.FC = () => {
                                          <>
                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
                                              blk?.blockType === 'warning' ? 'bg-amber-100 text-amber-700' :
+                                             blk?.blockType === 'danger'  ? 'bg-red-100 text-red-700' :
                                              blk?.blockType === 'caution' ? 'bg-orange-100 text-orange-700' :
                                              blk?.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' :
                                              blk?.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' :
@@ -2913,7 +2849,7 @@ const IMTemplateEditor: React.FC = () => {
                           disabled={already}
                           className={`w-full text-left flex items-start gap-3 p-3 rounded-lg border transition-colors ${already ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed' : 'border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 cursor-pointer'}`}
                         >
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${blk.blockType === 'warning' ? 'bg-amber-100 text-amber-700' : blk.blockType === 'caution' ? 'bg-orange-100 text-orange-700' : blk.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' : blk.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' : blk.blockType === 'hot_surface' ? 'bg-amber-100 text-amber-800' : blk.blockType === 'info' ? 'bg-sky-100 text-sky-700' : 'bg-blue-100 text-blue-700'}`}>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${blk.blockType === 'warning' ? 'bg-amber-100 text-amber-700' : blk.blockType === 'danger' ? 'bg-red-100 text-red-700' : blk.blockType === 'caution' ? 'bg-orange-100 text-orange-700' : blk.blockType === 'electric' ? 'bg-yellow-100 text-yellow-700' : blk.blockType === 'flammable' ? 'bg-rose-100 text-orange-700' : blk.blockType === 'hot_surface' ? 'bg-amber-100 text-amber-800' : blk.blockType === 'info' ? 'bg-sky-100 text-sky-700' : 'bg-blue-100 text-blue-700'}`}>
                             {blk.blockType.toUpperCase()}
                           </span>
                           <div className="flex-1 min-w-0">
