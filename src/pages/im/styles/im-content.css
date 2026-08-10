@@ -65,6 +65,18 @@
   display: inline-block !important;
 }
 
+/* Author-only "official wording exists" marker on a matched verbatim phrase
+   (EN tab only). Never reaches the saved HTML — see VERBATIM_BADGE_SVG /
+   decorateVerbatims in InlineBlockEditor.tsx. */
+.im-verbatim-badge {
+  display: inline-flex;
+  vertical-align: super;
+  margin: 0 1px;
+  color: #7c3aed;
+  cursor: pointer;
+  user-select: none;
+}
+
 .im-block-wrapper {
   display: flex;
   align-items: flex-start;

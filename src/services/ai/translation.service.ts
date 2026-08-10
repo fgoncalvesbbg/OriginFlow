@@ -23,6 +23,7 @@
  * fails or drops a token, the first-pass translation is kept.
  */
 
+import { auth } from '../../data';
 import { freeze, freezeVerbatims, thaw, hasProse, countTokens, VerbatimEntry } from '../im/im-chip-freeze';
 import { getTranslationVerbatims } from './translation-verbatim.service';
 import type { TranslationVerbatim } from '../../types';
@@ -87,11 +88,16 @@ const isImplausibleLength = (input: string, output: string): boolean =>
 
 /** POST one frozen fragment to the proxy (retrying transient 5xx); returns the model output or throws. */
 const callProxy = async (body: Record<string, unknown>): Promise<string> => {
+  // The proxy requires a valid session (it spends Anthropic credits) — attach the
+  // bearer token so the server can authenticate the caller.
+  const session = await auth.getSession();
+  const token = session?.accessToken;
+  if (!token) throw new Error('You must be signed in to use translation.');
   for (let attempt = 1; ; attempt++) {
     if (endpointMissing) throw new Error(ENDPOINT_MISSING_MESSAGE);
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     });
     if (res.ok) {

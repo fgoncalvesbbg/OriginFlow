@@ -22,9 +22,13 @@
  * The caller invokes it as a separate request after the translate pass, so each
  * function invocation stays a single model call (no timeout risk).
  *
- * Request body:  { text: string, targetLang: string, sourceLang?: string, mode?: 'translate' | 'qa', model?: string }
+ * Request body:  { text: string, targetLang: string, sourceLang?: string, mode?: 'translate' | 'qa' }
  *                (sourceLang is required for mode='translate', ignored for 'qa')
  * Response body: { text: string }   |   { error: string }
+ *
+ * Auth: requires a valid Supabase session (Authorization: Bearer <access_token>).
+ * The model is pinned server-side (ai_prompts config or DEFAULT_MODEL) and is NOT
+ * taken from the request, so the endpoint cannot be used as an open LLM relay.
  *
  * Server-only env (set in Netlify, NOT VITE_-prefixed):
  *   SUPABASE_URL
@@ -38,6 +42,7 @@ import { createClient } from '@supabase/supabase-js';
 interface NetlifyEvent {
   httpMethod: string;
   body: string | null;
+  headers?: Record<string, string | undefined>;
 }
 
 const PROMPT_KEY = 'im_translation';
@@ -94,13 +99,28 @@ export const handler = async (event: NetlifyEvent) => {
     return json(500, { error: 'ANTHROPIC_API_KEY is not configured on the server.' });
   }
 
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return json(500, { error: 'Server is not configured for translation.' });
+  }
+
+  // This proxy spends Anthropic credits, so it must never be callable anonymously.
+  // Require a valid Supabase session, exactly like the print-render pipeline does —
+  // translation is a staff-only IM-editor feature.
+  const admin = createClient(supabaseUrl, serviceRoleKey);
+  const token = (event.headers?.authorization || event.headers?.Authorization || '')
+    .replace(/^Bearer\s+/i, '');
+  if (!token) return json(401, { error: 'Authentication required.' });
+  const { data: userData, error: authErr } = await admin.auth.getUser(token);
+  if (authErr || !userData?.user) return json(401, { error: 'Invalid or expired session.' });
+
   let text: string;
   let sourceLang: string | undefined;
   let targetLang: string;
   let mode: string | undefined;
-  let model: string | undefined;
   try {
-    ({ text, sourceLang, targetLang, mode, model } = JSON.parse(event.body || '{}'));
+    ({ text, sourceLang, targetLang, mode } = JSON.parse(event.body || '{}'));
   } catch {
     return json(400, { error: 'Invalid JSON body.' });
   }
@@ -118,24 +138,19 @@ export const handler = async (event: NetlifyEvent) => {
   let promptModel: string | undefined;
   let promptMaxTokens: number | undefined;
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (supabaseUrl && serviceRoleKey) {
-    try {
-      const admin = createClient(supabaseUrl, serviceRoleKey);
-      const { data } = await admin
-        .from('ai_prompts')
-        .select('system_prompt, model, max_tokens')
-        .eq('key', isQa ? QA_PROMPT_KEY : PROMPT_KEY)
-        .maybeSingle();
-      if (data?.system_prompt) {
-        systemTemplate = data.system_prompt;
-        promptModel = data.model || undefined;
-        promptMaxTokens = data.max_tokens || undefined;
-      }
-    } catch (e) {
-      console.warn('[translate] Failed to load ai_prompts row, using fallback prompt.', e);
+  try {
+    const { data } = await admin
+      .from('ai_prompts')
+      .select('system_prompt, model, max_tokens')
+      .eq('key', isQa ? QA_PROMPT_KEY : PROMPT_KEY)
+      .maybeSingle();
+    if (data?.system_prompt) {
+      systemTemplate = data.system_prompt;
+      promptModel = data.model || undefined;
+      promptMaxTokens = data.max_tokens || undefined;
     }
+  } catch (e) {
+    console.warn('[translate] Failed to load ai_prompts row, using fallback prompt.', e);
   }
 
   const system = systemTemplate
@@ -145,7 +160,9 @@ export const handler = async (event: NetlifyEvent) => {
   try {
     const anthropic = new Anthropic({ apiKey });
     const response = await anthropic.messages.create({
-      model: model || promptModel || DEFAULT_MODEL,
+      // Model is pinned server-side (ai_prompts config or the default) — never taken
+      // from the request body, so a caller cannot bill an arbitrary/expensive model.
+      model: promptModel || DEFAULT_MODEL,
       max_tokens: promptMaxTokens || DEFAULT_MAX_TOKENS,
       system,
       messages: [{ role: 'user', content: text }],

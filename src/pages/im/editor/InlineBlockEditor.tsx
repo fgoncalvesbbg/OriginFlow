@@ -12,15 +12,47 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, type LucideIcon } from 'lucide-react';
+import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, type LucideIcon } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
+import { getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim } from '../../../services/ai/translation-verbatim.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { TEMP_HIGHLIGHT_CLASS } from '../../../services/im/im-resolver';
-import { CalloutVariant, CategoryAttribute } from '../../../types';
+import { CalloutVariant, CategoryAttribute, TranslationVerbatim } from '../../../types';
+import { useAuth } from '../../../context/AuthContext';
 import { AttributePicker } from './AttributePicker';
 import { AssetLibraryPanel } from './AssetLibraryPanel';
 import { setInsertTarget, clearInsertTarget, insertToActiveEditor, setCommitPlaceholderTarget, clearCommitPlaceholderTarget, commitPlaceholder as commitPlaceholderToTarget } from './insertTarget';
+
+// --- Verbatim phrase badges (EN tab only) ------------------------------------
+// Known verbatim phrases (translation_verbatims table) are fetched once per
+// session and shared by every open row/editor instance, mirroring the cache in
+// translation.service.ts. `notifyVerbatimListeners` pushes a fresh list to every
+// mounted editor immediately after a save, so a phrase added in one box is
+// badged in every other open EN box without a page reload.
+let verbatimsCache: TranslationVerbatim[] | null = null;
+let verbatimsPromise: Promise<TranslationVerbatim[]> | null = null;
+const verbatimListeners = new Set<(v: TranslationVerbatim[]) => void>();
+const notifyVerbatimListeners = (v: TranslationVerbatim[]) => {
+  verbatimsCache = v;
+  verbatimListeners.forEach((fn) => fn(v));
+};
+const loadVerbatimsCached = (): Promise<TranslationVerbatim[]> => {
+  if (verbatimsCache) return Promise.resolve(verbatimsCache);
+  if (!verbatimsPromise) {
+    verbatimsPromise = getTranslationVerbatims()
+      .then((v) => { verbatimsCache = v; return v; })
+      .catch((e) => { console.warn('[InlineBlockEditor] Failed to load translation verbatims; continuing without.', e); return []; });
+  }
+  return verbatimsPromise;
+};
+
+// Small inline badge appended right after a matched verbatim phrase — purely a
+// visual, contenteditable="false" marker. It is never part of the saved HTML:
+// parseInlineNodes skips the `im-verbatim-badge` class entirely, so it drops out
+// on the very next deserialize→serialize round-trip and is re-added by the
+// decoration pass below. lucide's ShieldCheck path, inlined for raw DOM insertion.
+const VERBATIM_BADGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;display:block;"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>`;
 
 // --- ISO 7010 / 7000 callout signs (shared by the editor preview and serializer) ---
 // W001 General Warning, W012 Electrical Hazard, W021 Flammable (Risk of Fire), W017 Hot Surface, M002 Information.
@@ -71,8 +103,9 @@ type InlineNode =
   | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string }
   // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
   // `width` is the optional CSS width set via the resize control (e.g. "50%");
-  // `align` is the chosen inline/left/right/center placement.
-  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign };
+  // `align` is the chosen inline/left/right/center placement; `border` draws a
+  // thin frame around the image.
+  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean };
 
 // A table cell's content plus its own horizontal alignment (independent of any
 // per-image align/float set inside it — this centers/aligns whatever the cell
@@ -84,7 +117,7 @@ type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
-  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign }
+  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean }
   | { id: string; type: 'list'; ordered: boolean; items: InlineNode[][] }
   | { id: string; type: 'table'; rows: TableCellData[][] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
@@ -97,6 +130,13 @@ interface EditorProps {
   onInsertPlaceholder?: (type: 'text' | 'image') => void;
   onInsertCondition?: () => void;
   minimal?: boolean;
+  /**
+   * Enables verbatim phrase badges + the "Save as Verbatim" toolbar action.
+   * Passed only for the EN tab (verbatim phrases are English text matched
+   * exactly); the languages list drives which per-language wording fields the
+   * save/edit modal offers.
+   */
+  verbatimLanguages?: { code: string; label: string }[];
 }
 
 const createId = () => Math.random().toString(36).slice(2, 11);
@@ -115,10 +155,12 @@ const IMG_ALIGNS: ImgAlign[] = ['inline', 'left', 'right', 'center'];
  * Inline style for an editor image. Width caps to the container (max-width:100%).
  * center → block with auto side-margins; left/right → float so text wraps beside it;
  * inline → sits within the text run; unset → legacy block with vertical margin.
+ * `border` adds a thin frame (with a little inner padding so it doesn't hug the pixels).
  */
-const imgStyleFor = (width?: string, align?: ImgAlign): string => {
+const imgStyleFor = (width?: string, align?: ImgAlign, border?: boolean): string => {
   const w = width ? `width:${width};` : '';
-  const base = `${w}max-width:100%;height:auto;border-radius:0.375rem;`;
+  const b = border ? 'border:1px solid #d1d5db;padding:0.25rem;background:#fff;' : '';
+  const base = `${w}${b}max-width:100%;height:auto;border-radius:0.375rem;`;
   switch (align) {
     case 'center': return `${base}display:block;margin:1rem auto;`;
     case 'left':   return `${base}float:left;margin:0.25rem 1rem 0.5rem 0;`;
@@ -128,10 +170,11 @@ const imgStyleFor = (width?: string, align?: ImgAlign): string => {
   }
 };
 
-/** Full <img> tag with size + alignment (align mirrored to data-align for re-parse). */
-const imgTag = (src: string, alt: string, width?: string, align?: ImgAlign): string => {
+/** Full <img> tag with size + alignment + border (align/border mirrored to data-* for re-parse). */
+const imgTag = (src: string, alt: string, width?: string, align?: ImgAlign, border?: boolean): string => {
   const alignAttr = align ? ` data-align="${align}"` : '';
-  return `<img src="${src}" alt="${alt}"${alignAttr} style="${imgStyleFor(width, align)}" />`;
+  const borderAttr = border ? ' data-border="1"' : '';
+  return `<img src="${src}" alt="${alt}"${alignAttr}${borderAttr} style="${imgStyleFor(width, align, border)}" />`;
 };
 
 /** Read a valid alignment off an <img> element, or undefined. */
@@ -139,6 +182,9 @@ const readImgAlign = (el: Element): ImgAlign | undefined => {
   const a = el.getAttribute('data-align') as ImgAlign | null;
   return a && IMG_ALIGNS.includes(a) ? a : undefined;
 };
+
+/** Read the border flag off an <img> element (persisted as data-border). */
+const readImgBorder = (el: Element): boolean => el.getAttribute('data-border') === '1';
 
 /** A table cell holding a single plain-text run (used for defaults/fallbacks). */
 const textCell = (text: string): TableCellData => ({ content: [{ type: 'text', text }] });
@@ -168,7 +214,12 @@ const normalizeCellInlines = (nodes: InlineNode[]): InlineNode[] => {
   return collapsed.filter((n) => !(n.type === 'text' && n.text === ''));
 };
 
-const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, minimal }) => {
+const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, minimal, verbatimLanguages }) => {
+  const { user } = useAuth();
+  const verbatimEnabled = !!verbatimLanguages?.length;
+  const [verbatims, setVerbatims] = useState<TranslationVerbatim[]>(() => verbatimsCache ?? []);
+  const [verbatimModal, setVerbatimModal] = useState<{ id?: string; phrase: string; note: string; translations: Record<string, string> } | null>(null);
+  const [savingVerbatim, setSavingVerbatim] = useState(false);
   const [blocks, setBlocks] = useState<EditorBlock[]>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -185,6 +236,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // highlight the active choice. Kept in sync on selection and on every apply.
   const [imgWidth, setImgWidth] = useState<string>('');
   const [imgAlign, setImgAlign] = useState<ImgAlign | undefined>(undefined);
+  const [imgBorder, setImgBorder] = useState(false);
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -234,6 +286,114 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     savedRangeRef.current = null;
   }, []);
 
+  // Load the shared verbatim list once (subsequent instances hit the cache) and
+  // stay subscribed so a phrase saved in another open box shows up here too.
+  useEffect(() => {
+    if (!verbatimEnabled) return;
+    let alive = true;
+    loadVerbatimsCached().then((v) => { if (alive) setVerbatims(v); });
+    const listener = (v: TranslationVerbatim[]) => { if (alive) setVerbatims(v); };
+    verbatimListeners.add(listener);
+    return () => { alive = false; verbatimListeners.delete(listener); };
+  }, [verbatimEnabled]);
+
+  const verbatimPhrases = verbatimEnabled ? verbatims.map((v) => v.phrase).filter(Boolean) : [];
+
+  // Badge every occurrence of a known verbatim phrase in the live DOM. Purely
+  // presentational: removes and reinserts its own badges each call (idempotent),
+  // never touches `blocks`/emitted HTML. Matches are case-sensitive, exactly like
+  // freezeVerbatims (im-chip-freeze.ts) uses at translation time, so a badge here
+  // means the phrase really will be protected when this box is translated.
+  const decorateVerbatims = useCallback(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.querySelectorAll('.im-verbatim-badge').forEach((b) => b.remove());
+    el.normalize();
+    if (!verbatimPhrases.length) return;
+    const phrases = [...verbatimPhrases].sort((a, b) => b.length - a.length);
+
+    const findFirstMatch = (text: string): { idx: number; phrase: string } | null => {
+      let best: { idx: number; phrase: string } | null = null;
+      for (const phrase of phrases) {
+        if (!phrase) continue;
+        const idx = text.indexOf(phrase);
+        if (idx === -1) continue;
+        if (!best || idx < best.idx || (idx === best.idx && phrase.length > best.phrase.length)) best = { idx, phrase };
+      }
+      return best;
+    };
+
+    const decorateTextNode = (textNode: Text) => {
+      let current: Text | null = textNode;
+      while (current) {
+        const text = current.textContent || '';
+        const match = findFirstMatch(text);
+        if (!match) break;
+        const rest = current.splitText(match.idx + match.phrase.length);
+        const badge = document.createElement('span');
+        badge.className = 'im-verbatim-badge';
+        badge.setAttribute('contenteditable', 'false');
+        badge.setAttribute('data-verbatim-phrase', encodeURIComponent(match.phrase));
+        badge.title = 'Verbatim phrase — official per-language wording exists. Click to view/edit.';
+        badge.innerHTML = VERBATIM_BADGE_SVG;
+        current.parentNode?.insertBefore(badge, rest);
+        current = rest;
+      }
+    };
+
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) { decorateTextNode(node as Text); return; }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const elNode = node as HTMLElement;
+      if (elNode.classList.contains('im-placeholder') || elNode.classList.contains('im-condition') || elNode.classList.contains('im-verbatim-badge')) return;
+      Array.from(elNode.childNodes).forEach(walk);
+    };
+    Array.from(el.childNodes).forEach(walk);
+  }, [verbatimPhrases]);
+
+  // Re-run decoration once the (async) verbatim list arrives or changes, in case
+  // it lands after the DOM has already been rendered from `blocks`.
+  useEffect(() => { decorateVerbatims(); }, [decorateVerbatims]);
+
+  /** Selection → new/edit verbatim modal. Reuses the existing entry (by exact
+   * phrase match) instead of creating a duplicate — `phrase` is unique in the table. */
+  const handleSaveSelectionAsVerbatim = useCallback(() => {
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    const phrase = sel && sel.rangeCount > 0 && !sel.isCollapsed && el?.contains(sel.getRangeAt(0).commonAncestorContainer)
+      ? sel.toString().trim()
+      : '';
+    if (!phrase) {
+      alert('Select the English text you want to save as a verbatim phrase first.');
+      return;
+    }
+    const existing = verbatims.find((v) => v.phrase === phrase);
+    setVerbatimModal(existing
+      ? { id: existing.id, phrase: existing.phrase, note: existing.note ?? '', translations: { ...existing.translations } }
+      : { phrase, note: '', translations: {} });
+  }, [verbatims]);
+
+  const handleSaveVerbatimEntry = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verbatimModal) return;
+    setSavingVerbatim(true);
+    try {
+      const translations = Object.fromEntries(Object.entries(verbatimModal.translations).filter(([, v]) => v && v.trim()));
+      if (verbatimModal.id) {
+        await updateTranslationVerbatim(verbatimModal.id, { phrase: verbatimModal.phrase, note: verbatimModal.note, translations });
+      } else {
+        await createTranslationVerbatim({ phrase: verbatimModal.phrase, note: verbatimModal.note, translations }, user?.id);
+      }
+      const fresh = await getTranslationVerbatims();
+      notifyVerbatimListeners(fresh);
+      setVerbatimModal(null);
+    } catch (err: any) {
+      alert(`Error saving verbatim: ${err?.message ?? err}`);
+    } finally {
+      setSavingVerbatim(false);
+    }
+  }, [verbatimModal, user]);
+
   const handleImgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -266,6 +426,10 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
       const el = node as HTMLElement;
+
+      // Ephemeral verbatim-match decoration — never part of the saved content;
+      // dropped here so it can't survive a deserialize→serialize round-trip.
+      if (el.classList.contains('im-verbatim-badge')) return;
 
       if (el.classList.contains('im-placeholder')) {
         inlines.push({
@@ -302,7 +466,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       // are silently dropped on the deserialize→serialize round-trip — i.e. they
       // render but never save. `width` carries any resize the user applied.
       if (el.tagName === 'IMG') {
-        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el) });
+        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined });
         return;
       }
 
@@ -334,7 +498,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
 
     if (inline.type === 'image') {
-      return imgTag(inline.src, inline.alt || '', inline.width, inline.align);
+      return imgTag(inline.src, inline.alt || '', inline.width, inline.align, inline.border);
     }
 
     let textHtml = inline.text
@@ -383,7 +547,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
       if (el.tagName === 'IMG') {
-        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el) });
+        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined });
         return;
       }
       if (el.tagName === 'UL' || el.tagName === 'OL') {
@@ -426,7 +590,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
       }
       if (block.type === 'image') {
-        return imgTag(block.src, block.alt || '', block.width, block.align);
+        return imgTag(block.src, block.alt || '', block.width, block.align, block.border);
       }
       if (block.type === 'list') {
         const tag = block.ordered ? 'ol' : 'ul';
@@ -576,6 +740,13 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // just `style.width`, so it never leaks into the saved HTML.
   const handleEditorClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
+    const badge = target.closest?.('.im-verbatim-badge') as HTMLElement | null;
+    if (badge) {
+      const phrase = decodeURIComponent(badge.dataset.verbatimPhrase || '');
+      const existing = verbatims.find((v) => v.phrase === phrase);
+      if (existing) setVerbatimModal({ id: existing.id, phrase: existing.phrase, note: existing.note ?? '', translations: { ...existing.translations } });
+      return;
+    }
     const prev = selectedImgRef.current;
     if (prev && prev !== target) prev.style.outline = '';
     if (target.tagName === 'IMG') {
@@ -585,24 +756,26 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       setImgSelected(true);
       setImgWidth(img.style.width || '');
       setImgAlign(readImgAlign(img));
+      setImgBorder(readImgBorder(img));
     } else {
       selectedImgRef.current = null;
       setImgSelected(false);
     }
     refreshCaretTable();
-  }, [refreshCaretTable]);
+  }, [refreshCaretTable, verbatims]);
 
-  // Resize / re-align the selected image. Both rebuild the whole inline style (via
-  // imgStyleFor) so a previous float/margin is fully cleared, preserve the OTHER
-  // dimension (align keeps the current width, size keeps the current align), re-add
-  // the selection outline the rebuild wiped, then re-parse so the change persists
-  // into blocks + emitted HTML while the live node stays in place.
-  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign) => {
+  // Resize / re-align / re-border the selected image. All rebuild the whole inline
+  // style (via imgStyleFor) so a previous float/margin/border is fully cleared,
+  // preserve the OTHER dimensions (each control keeps the current values of the
+  // rest), re-add the selection outline the rebuild wiped, then re-parse so the
+  // change persists into blocks + emitted HTML while the live node stays in place.
+  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign, border?: boolean) => {
     const img = selectedImgRef.current;
     const el = contentRef.current;
     if (!img || !el) return;
     if (align) img.setAttribute('data-align', align);
-    img.style.cssText = imgStyleFor(width, align);
+    if (border) img.setAttribute('data-border', '1'); else img.removeAttribute('data-border');
+    img.style.cssText = imgStyleFor(width, align, border);
     img.style.outline = '2px solid #6366f1'; // rebuild wiped it — keep the selection visible
     isUserEditingRef.current = true; // keep the DOM node; just sync blocks + emit
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
@@ -613,14 +786,21 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const img = selectedImgRef.current;
     if (!img) return;
     setImgWidth(width);
-    restyleSelectedImg(width || undefined, readImgAlign(img));
+    restyleSelectedImg(width || undefined, readImgAlign(img), readImgBorder(img));
   }, [restyleSelectedImg]);
 
   const applyImgAlign = useCallback((align: ImgAlign) => {
     const img = selectedImgRef.current;
     if (!img) return;
     setImgAlign(align);
-    restyleSelectedImg(img.style.width || undefined, align);
+    restyleSelectedImg(img.style.width || undefined, align, readImgBorder(img));
+  }, [restyleSelectedImg]);
+
+  const applyImgBorder = useCallback((border: boolean) => {
+    const img = selectedImgRef.current;
+    if (!img) return;
+    setImgBorder(border);
+    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), border);
   }, [restyleSelectedImg]);
 
   // Apply the free-typed width. Empty → natural size; a bare number → px; otherwise a
@@ -697,7 +877,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     // The rewrite replaces any selected <img> node — drop the stale selection.
     selectedImgRef.current = null;
     setImgSelected(false);
-  }, [blocks, serializeBlocksToHtml]);
+    decorateVerbatims();
+  }, [blocks, serializeBlocksToHtml, decorateVerbatims]);
 
   const insertBlock = (type: BlockInsertType) => {
     const newBlock: EditorBlock = type === 'table'
@@ -807,6 +988,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic (Ctrl+I)"><Italic size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline (Ctrl+U)"><Underline size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); toggleHighlight(); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Mark as temporary — select text not yet final; publish is blocked while any remains"><Highlighter size={16} /></button>
+            {verbatimEnabled && (
+              <button onMouseDown={(e) => { e.preventDefault(); handleSaveSelectionAsVerbatim(); }} className="p-1.5 hover:bg-gray-200 rounded text-purple-600" title="Save the selected text as an official Verbatim phrase — future translations use the stored per-language wording instead of the AI's own translation"><ShieldPlus size={16} /></button>
+            )}
             {/* Lists — execCmd toggles the current line(s) and re-parses into a list block (numbers/bullets persist) */}
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bulleted list"><List size={16} /></button>
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertOrderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Numbered list"><ListOrdered size={16} /></button>
@@ -892,6 +1076,12 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                 title={title}
               ><Icon size={16} /></button>
             ))}
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); applyImgBorder(!imgBorder); }}
+              className={`flex items-center gap-1 px-1.5 py-1 text-[11px] rounded ${imgBorder ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
+              title={imgBorder ? 'Remove the border from the selected image' : 'Add a border around the selected image'}
+            ><Square size={14} /> Border</button>
           </>
         )}
         {mode === 'html' && (
@@ -935,7 +1125,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onDrop={handleDrop}
               onClick={handleEditorClick}
               onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
-              onBlur={() => { setIsFocused(false); saveSelection(); }}
+              onBlur={() => { setIsFocused(false); saveSelection(); decorateVerbatims(); }}
               onMouseUp={() => { saveSelection(); refreshCaretTable(); }}
               onKeyUp={() => { saveSelection(); refreshCaretTable(); }}
             />
@@ -951,6 +1141,67 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               <button onClick={() => setShowAssetPicker(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
             </div>
             <AssetLibraryPanel onInsert={(html) => { insertHtmlAtCursor(html); setShowAssetPicker(false); }} />
+          </div>
+        </div>
+      )}
+
+      {verbatimModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onMouseDown={() => setVerbatimModal(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-purple-600" /> {verbatimModal.id ? 'Edit Verbatim' : 'Save as Verbatim'}
+              </h3>
+              <button onClick={() => setVerbatimModal(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <p className="text-xs text-muted mb-4">
+              The English phrase is matched exactly (case-sensitive) whenever this box is translated. The stored
+              wording below is substituted directly instead of the AI translating it. Languages left blank keep the
+              English phrase unchanged (right for identifiers like "(EU) 2019/2016").
+            </p>
+            <form onSubmit={handleSaveVerbatimEntry} className="space-y-4 overflow-y-auto flex-1 pr-1">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">English phrase (exact, case-sensitive)</label>
+                <textarea
+                  required
+                  rows={2}
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm font-mono focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={verbatimModal.phrase}
+                  onChange={(e) => setVerbatimModal({ ...verbatimModal, phrase: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+                <input
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  value={verbatimModal.note}
+                  onChange={(e) => setVerbatimModal({ ...verbatimModal, note: e.target.value })}
+                  placeholder="Where this comes from / why it must stay verbatim"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Official wording per language</label>
+                <div className="border border-gray-200 rounded-md divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                  {(verbatimLanguages || []).filter((l) => l.code !== 'en').map((l) => (
+                    <div key={l.code} className="flex items-center gap-3 px-3 py-1.5">
+                      <span className="text-xs font-mono font-semibold text-gray-500 w-8 shrink-0 uppercase">{l.code}</span>
+                      <input
+                        className="flex-1 border-0 bg-transparent text-sm py-1 focus:ring-0 outline-none placeholder:text-gray-300"
+                        value={verbatimModal.translations[l.code] ?? ''}
+                        onChange={(e) => setVerbatimModal({ ...verbatimModal, translations: { ...verbatimModal.translations, [l.code]: e.target.value } })}
+                        placeholder={`${l.label} — blank keeps the English phrase`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setVerbatimModal(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium">Cancel</button>
+                <button type="submit" disabled={savingVerbatim} className="px-4 py-2 bg-purple-600 text-white hover:bg-purple-700 rounded-md text-sm font-medium disabled:opacity-50">
+                  {savingVerbatim ? 'Saving…' : verbatimModal.id ? 'Save Changes' : 'Save Verbatim'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -1189,6 +1440,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
             placeholder="Enter content…"
             onInsertPlaceholder={handleInsertPlaceholder}
             onInsertCondition={onInsertCondition}
+            verbatimLanguages={activeCode === 'en' ? languages : undefined}
           />
         </div>
       </div>
