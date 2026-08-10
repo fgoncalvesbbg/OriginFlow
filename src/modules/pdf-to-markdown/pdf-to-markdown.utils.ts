@@ -12,7 +12,7 @@
  * and reused as-is from the parsing worker.
  */
 
-import { ConversionMeta, IMAGE_ONLY_CHAR_THRESHOLD, PageMeta, TextItemLike } from './types';
+import { ConversionMeta, ConversionResult, IMAGE_ONLY_CHAR_THRESHOLD, PageMeta, TextItemLike } from './types';
 
 interface Line {
   y: number;

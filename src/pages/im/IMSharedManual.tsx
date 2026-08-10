@@ -25,21 +25,30 @@ const IMSharedManual: React.FC = () => {
         setLoading(false);
         return;
       }
-      const resolved = await resolveIMShareToken(token);
-      if (cancelled) return;
-      if (!resolved) {
-        setError('This link is invalid or has been revoked.');
-        setLoading(false);
-        return;
+      try {
+        const resolved = await resolveIMShareToken(token);
+        if (cancelled) return;
+        if (!resolved) {
+          setError('This link is invalid or has been revoked.');
+          return;
+        }
+        const manifestUrl = getPublishedManifestUrl(resolved.projectId, resolved.templateType);
+        if (!manifestUrl) {
+          setError('This manual is unavailable.');
+          return;
+        }
+        setSource({ manifestUrl });
+      } catch (e) {
+        // Any unexpected failure (e.g. a misconfigured client throwing) must still
+        // resolve the loading state — otherwise this customer-facing page hangs on
+        // "Loading manual…" forever with an unhandled rejection.
+        if (!cancelled) {
+          console.error('[IMSharedManual] Failed to load shared manual:', e);
+          setError('This manual is currently unavailable. Please try again later.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      const manifestUrl = getPublishedManifestUrl(resolved.projectId, resolved.templateType);
-      if (!manifestUrl) {
-        setError('This manual is unavailable.');
-        setLoading(false);
-        return;
-      }
-      setSource({ manifestUrl });
-      setLoading(false);
     };
     load();
     return () => { cancelled = true; };

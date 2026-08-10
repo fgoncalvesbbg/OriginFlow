@@ -7,6 +7,7 @@ import { RFQ, RFQEntry, RFQEntryStatus, RFQStatus, UserRole } from '../../types'
 import { ArrowLeft, Link as LinkIcon, Award, CheckCircle, DollarSign, Package, Truck, Wrench, Plus, Copy, List, Paperclip, FileText, Download, Trash2, Eye, X, Sliders } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRefetchOnFocus } from '../../hooks';
+import { safeHref } from '../../utils/url.utils';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -238,7 +239,7 @@ const RFQDetail: React.FC = () => {
                                       {files.map((f, idx) => (
                                           <a
                                               key={idx}
-                                              href={f.url}
+                                              href={safeHref(f.url)}
                                               target="_blank"
                                               rel="noreferrer"
                                               className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-3 rounded-lg border border-indigo-100 font-medium"
@@ -297,7 +298,7 @@ const RFQDetail: React.FC = () => {
                       </h3>
                       <div className="space-y-2">
                           {rfq.attachments.map((file, idx) => (
-                              <a key={idx} href={file.url} download={file.name} className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-2 rounded border border-indigo-100">
+                              <a key={idx} href={safeHref(file.url)} download={file.name} className="flex items-center gap-2 text-sm text-indigo-600 hover:underline bg-indigo-50 p-2 rounded border border-indigo-100">
                                   <FileText size={14}/> {file.name}
                               </a>
                           ))}
@@ -394,7 +395,7 @@ const RFQDetail: React.FC = () => {
                                       </td>
                                       <td className="px-4 py-3 text-right">
                                           {entry.quoteFileUrl ? (
-                                              <a href={entry.quoteFileUrl} download={`Quote_${entry.supplierName}`} className="text-indigo-600 hover:text-blue-800 inline-flex items-center gap-1">
+                                              <a href={safeHref(entry.quoteFileUrl)} download={`Quote_${entry.supplierName}`} className="text-indigo-600 hover:text-blue-800 inline-flex items-center gap-1">
                                                   <Download size={14} />
                                               </a>
                                           ) : '-'}

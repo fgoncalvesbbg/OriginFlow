@@ -19,6 +19,7 @@ import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { TEMP_HIGHLIGHT_CLASS } from '../../../services/im/im-resolver';
 import { CalloutVariant, CategoryAttribute, TranslationVerbatim } from '../../../types';
+import { sanitizeHtml } from '../../../utils';
 import { useAuth } from '../../../context/AuthContext';
 import { AttributePicker } from './AttributePicker';
 import { AssetLibraryPanel } from './AssetLibraryPanel';
@@ -873,7 +874,11 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       return;
     }
     if (!contentRef.current) return;
-    contentRef.current.innerHTML = serializeBlocksToHtml(blocks);
+    // Sanitize before writing to the live DOM: blocks can carry stored `legacy_html`
+    // (round-tripped verbatim from the DB), so an <img onerror=…>/<svg onload=…> would
+    // otherwise execute here in the editor. serializeBlocksToHtml's own markup is
+    // standard HTML and passes through unchanged.
+    contentRef.current.innerHTML = sanitizeHtml(serializeBlocksToHtml(blocks));
     // The rewrite replaces any selected <img> node — drop the stale selection.
     selectedImgRef.current = null;
     setImgSelected(false);

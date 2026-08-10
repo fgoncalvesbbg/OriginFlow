@@ -64,7 +64,12 @@ const AppContent: React.FC = () => {
     <>
       <ConnectionBanner />
       <Router>
-        <Routes>
+        {/* Inner boundary INSIDE the router: a crash in one page shows the fallback
+            without tearing down the router or the auth/connection/toast providers,
+            so navigation and "Try Again" still work (the outer boundary in <App/>
+            would otherwise unmount the whole app on any single-page error). */}
+        <ErrorBoundary>
+          <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/supplier/:token" element={<SupplierPortal />} />
@@ -207,7 +212,8 @@ const AppContent: React.FC = () => {
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </ErrorBoundary>
       </Router>
       {toastContext && <ToastContainer toasts={toastContext.toasts} onClose={toastContext.removeToast} />}
     </>

@@ -7,6 +7,7 @@ import { db, portalDb, storage, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProjectDocument, DocVersion, DocStatus, ResponsibleParty, DocumentComment, ProjectOverallStatus } from '../../types';
 import { mapProjectDocument, mapDocVersion } from '../../utils/mappers.utils';
+import { validateUploadFile, safeExtension } from '../../utils/upload-validation.utils';
 import { getProjectsBySupplierId } from './project.service';
 
 const BUCKET = 'documents';
@@ -106,7 +107,8 @@ export const removeDocument = async (id: string): Promise<void> => {
  * authenticated client and record version history.
  */
 export const uploadFile = async (docId: string, file: File, isSupplier: boolean, projectToken?: string): Promise<ProjectDocument> => {
-    const ext = file.name.split('.').pop() || 'bin';
+    validateUploadFile(file);
+    const ext = safeExtension(file.name);
     const storagePath = `project-documents/${docId}/${Date.now()}.${ext}`;
 
     await storage.upload(BUCKET, storagePath, file, { upsert: true, contentType: file.type });
@@ -156,7 +158,8 @@ export const uploadFile = async (docId: string, file: File, isSupplier: boolean,
 export const uploadAdHocFile = async (projectId: string, step_number: number, file: File, isSupplier: boolean, projectToken?: string): Promise<ProjectDocument> => {
     if (isSupplier) {
         if (!projectToken) throw new Error('uploadAdHocFile: projectToken is required for supplier uploads');
-        const ext = file.name.split('.').pop() || 'bin';
+        validateUploadFile(file);
+        const ext = safeExtension(file.name);
         const storagePath = `project-documents/adhoc/${Date.now()}.${ext}`;
         await storage.upload(BUCKET, storagePath, file, { upsert: true, contentType: file.type });
         const publicUrl = storage.publicUrl(BUCKET, storagePath);

@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 import { getRFQEntryByToken, submitRFQEntry } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { RFQ, RFQEntry, RFQEntryStatus, RFQAttributeResponse, RFQAttachment } from '../../types';
+import { normalizeExternalLink } from '../../utils/url.utils';
 import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, Upload, Paperclip, Sliders, X, Tag } from 'lucide-react';
 import RFQAttributeComparison from '../../components/sourcing/RFQAttributeComparison';
 
@@ -118,8 +119,14 @@ const SupplierRFQPortal: React.FC = () => {
   };
 
   const addLink = () => {
-      const url = linkInput.trim();
-      if (!url) return;
+      // Only accept absolute http(s) links. This blocks `javascript:`/`data:` URLs,
+      // which would otherwise be stored and later executed in the PM's session when
+      // rendered as an <a href> (stored XSS).
+      const url = normalizeExternalLink(linkInput);
+      if (!url) {
+          alert('Please enter a valid http(s) link (e.g. https://example.com/quote.pdf).');
+          return;
+      }
       setAttachments(prev => [...prev, { name: url.split('/').pop() || url, url, type: 'link' }]);
       setLinkInput('');
   };

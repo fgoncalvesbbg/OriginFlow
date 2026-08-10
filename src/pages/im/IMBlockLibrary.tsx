@@ -109,7 +109,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
   // never on every keystroke, so the caret doesn't jump while typing.
   useEffect(() => {
     if (contentMode === 'visual' && visualRef.current) {
-      visualRef.current.innerHTML = draft.content?.[activeLang] ?? '';
+      visualRef.current.innerHTML = sanitizeHtml(draft.content?.[activeLang] ?? '');
     }
   }, [activeLang, contentMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -195,7 +195,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
       await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
       set({ content: nextContent });
       // Reseed the visual surface if the currently-shown language was translated.
-      if (contentMode === 'visual' && visualRef.current) visualRef.current.innerHTML = nextContent[activeLang] ?? '';
+      if (contentMode === 'visual' && visualRef.current) visualRef.current.innerHTML = sanitizeHtml(nextContent[activeLang] ?? '');
       if (failures.length) alert(`Translated with ${failures.length} language(s) skipped due to errors: ${failures.join(', ')}`);
     } finally {
       setTranslating(false);

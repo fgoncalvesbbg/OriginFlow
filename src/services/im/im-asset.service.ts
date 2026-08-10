@@ -5,6 +5,7 @@
  */
 
 import { storage, withDeadline } from '../../data';
+import { validateUploadFile, safeExtension } from '../../utils/upload-validation.utils';
 
 const BUCKET = 'im-assets';
 const TAG = '[im-asset.service]';
@@ -22,7 +23,11 @@ const UPLOAD_TIMEOUT_MS = 45000;
  * @param folder Optional sub-folder within the bucket (e.g. 'blocks', 'sku').
  */
 export const uploadIMAsset = async (file: File, folder = 'uploads'): Promise<string> => {
-  const ext = (file.name.split('.').pop() ?? 'bin').toLowerCase();
+  // im-assets is a PUBLIC bucket, so an HTML/SVG upload would be served as an
+  // executable page at its URL. Reject anything outside the safe allow-list
+  // (raster images + office docs) before it reaches storage.
+  validateUploadFile(file);
+  const ext = safeExtension(file.name);
   const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const storagePath = `${folder}/${unique}.${ext}`;
 

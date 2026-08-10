@@ -8,6 +8,7 @@ import { ShoppingBag, Plus, Search, ChevronRight, Clock, FileText, Paperclip, Do
 import { useAuth } from '../../context/AuthContext';
 import { useToast, useRefetchOnFocus } from '../../hooks';
 import ConvertProposalModal from '../../components/sourcing/ConvertProposalModal';
+import { safeHref } from '../../utils/url.utils';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -310,7 +311,7 @@ const SourcingDashboard: React.FC = () => {
                                   {prop.attachments.map((att, idx) => (
                                     <a
                                       key={idx}
-                                      href={att.url}
+                                      href={safeHref(att.url)}
                                       download={att.name}
                                       className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-gray-300 rounded text-xs text-gray-700 hover:bg-gray-100 transition"
                                     >

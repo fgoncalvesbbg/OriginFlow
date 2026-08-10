@@ -52,16 +52,20 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <p className="text-rose-700 text-center mb-4">
               We encountered an unexpected error. Please try again.
             </p>
-            <details className="bg-rose-50 border border-rose-200 rounded p-3 mb-4 text-sm">
-              <summary className="font-semibold text-rose-900 cursor-pointer">
-                Error details
-              </summary>
-              <pre className="mt-2 text-rose-700 overflow-auto max-h-40 text-xs">
-                {this.state.error.message}
-                {'\n\n'}
-                {this.state.error.stack}
-              </pre>
-            </details>
+            {/* Only expose the stack trace in development — in production it would
+                leak internal paths/logic to end users (source maps are shipped). */}
+            {import.meta.env.DEV && (
+              <details className="bg-rose-50 border border-rose-200 rounded p-3 mb-4 text-sm">
+                <summary className="font-semibold text-rose-900 cursor-pointer">
+                  Error details
+                </summary>
+                <pre className="mt-2 text-rose-700 overflow-auto max-h-40 text-xs">
+                  {this.state.error.message}
+                  {'\n\n'}
+                  {this.state.error.stack}
+                </pre>
+              </details>
+            )}
             <button
               onClick={this.retry}
               className="w-full bg-rose-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded transition-colors"
