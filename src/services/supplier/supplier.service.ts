@@ -7,7 +7,7 @@ import { auth, db, portalDb, orEmpty, orUndefined, withDeadline, type Row } from
 import { isLive } from '../../config/environment.config';
 import { Supplier, User, Project } from '../../types';
 import { mapSupplier, mapProfile, mapProject } from '../../utils/mappers.utils';
-import { generateUUID, generateNumericCode } from '../../utils';
+import { generateUUID, generateNumericCode, asPortalLockedError } from '../../utils';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
@@ -60,12 +60,19 @@ export const getSupplierByToken = async (token: string): Promise<Supplier | unde
  */
 export const verifySupplierPortalAccess = async (token: string, code: string): Promise<Supplier | undefined> => {
     if (!isLive || !token || !code) return undefined;
-    const data = await orUndefined(
-        portalDb.rpc<Row | Row[] | null>('verify_supplier_access', { p_token: token, p_code: code }),
-        'verifySupplierAccess',
-    );
-    const row = Array.isArray(data) ? data[0] : data;
-    return row ? mapSupplier(row) : undefined;
+    // Not wrapped in orUndefined: a brute-force lockout must propagate to the UI as a
+    // clear "please wait" message. Any other failure still degrades to undefined
+    // (treated as an incorrect code), preserving the previous resilient behaviour.
+    try {
+        const data = await portalDb.rpc<Row | Row[] | null>('verify_supplier_access', { p_token: token, p_code: code });
+        const row = Array.isArray(data) ? data[0] : data;
+        return row ? mapSupplier(row) : undefined;
+    } catch (e) {
+        const locked = asPortalLockedError(e);
+        if (locked) throw locked;
+        console.error('verifySupplierAccess failed:', e);
+        return undefined;
+    }
 };
 
 /**

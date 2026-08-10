@@ -11,7 +11,7 @@
  * condition insertion modals, so a consumer only needs to pass content + the
  * category attributes; the heavy editor + modal plumbing lives here.
  */
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, type LucideIcon } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim } from '../../../services/ai/translation-verbatim.service';
@@ -298,7 +298,16 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     return () => { alive = false; verbatimListeners.delete(listener); };
   }, [verbatimEnabled]);
 
-  const verbatimPhrases = verbatimEnabled ? verbatims.map((v) => v.phrase).filter(Boolean) : [];
+  // Memoized: this array's identity flows (via decorateVerbatims) into the deps of
+  // the render effect that rewrites the contentEditable from `blocks`. Rebuilding it
+  // on every render made that effect run on EVERY render — so any re-render that
+  // wasn't caused by typing (parent echo after onChange, focus/toolbar state like
+  // caretInTable flipping) rewrote the DOM with the one-shot isUserEditingRef guard
+  // already consumed, destroying the caret (felt worst inside tables).
+  const verbatimPhrases = useMemo(
+    () => (verbatimEnabled ? verbatims.map((v) => v.phrase).filter(Boolean) : []),
+    [verbatimEnabled, verbatims],
+  );
 
   // Badge every occurrence of a known verbatim phrase in the live DOM. Purely
   // presentational: removes and reinserts its own badges each call (idempotent),
@@ -868,6 +877,11 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
   }, [deserializeHtmlToBlocks]);
 
+  // Caret cell to restore after a forced DOM rewrite (table row/col/align ops).
+  // The rewrite replaces every node, so the browser drops the selection — without
+  // this the caret lands outside the table after each toolbar action.
+  const pendingCaretCellRef = useRef<{ tableIdx: number; row: number; col: number } | null>(null);
+
   useEffect(() => {
     if (isUserEditingRef.current) {
       isUserEditingRef.current = false;
@@ -883,6 +897,25 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     selectedImgRef.current = null;
     setImgSelected(false);
     decorateVerbatims();
+    // Put the caret back into the cell a table toolbar action was operating on
+    // (clamped, in case that row/column was just removed).
+    const pending = pendingCaretCellRef.current;
+    if (pending) {
+      pendingCaretCellRef.current = null;
+      const table = contentRef.current.querySelectorAll('table')[pending.tableIdx];
+      const trs = table ? Array.from(table.querySelectorAll('tr')) : [];
+      const tr = trs[Math.min(pending.row, trs.length - 1)];
+      const cell = tr?.children[Math.min(pending.col, Math.max(tr.children.length - 1, 0))];
+      if (cell) {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        setCaretInTable(true);
+      }
+    }
   }, [blocks, serializeBlocksToHtml, decorateVerbatims]);
 
   const insertBlock = (type: BlockInsertType) => {
@@ -915,6 +948,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       return { ...b, rows: fn(b.rows, { row: ctx?.row ?? b.rows.length - 1, col: ctx?.col ?? cols - 1 }) };
     });
     isUserEditingRef.current = false; // force the render effect to rewrite the DOM
+    if (ctx) pendingCaretCellRef.current = ctx; // restore the caret to this cell after the rewrite
     setBlocks(next);
   };
 

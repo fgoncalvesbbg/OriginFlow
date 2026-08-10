@@ -364,7 +364,13 @@ const SupplierDashboard: React.FC = () => {
       verified = await verifySupplierPortalAccess(token, enteredAccessCode);
     } catch (err: any) {
       console.error('Access verification failed:', err);
-      setAccessCodeError('Could not verify your code. Please try again.');
+      // A brute-force lockout carries a clear "please wait" message — show it verbatim.
+      setAccessCodeError(
+        err?.name === 'PortalLockedError'
+          ? err.message
+          : 'Could not verify your code. Please try again.',
+      );
+      setEnteredAccessCode('');
       return;
     }
 

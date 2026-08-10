@@ -7,7 +7,7 @@ import { db, portalDb, orEmpty, orUndefined, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequest, ComplianceResponseItem, ComplianceRequestStatus } from '../../types';
 import { mapComplianceRequest } from '../../utils/mappers.utils';
-import { generateUUID, generateNumericCode } from '../../utils';
+import { generateUUID, generateNumericCode, asPortalLockedError } from '../../utils';
 import { upsertSupplierNotification } from '../shared/notification.service';
 
 /**
@@ -43,14 +43,21 @@ export const getComplianceRequestById = async (id: string): Promise<ComplianceRe
  */
 export const getComplianceRequestsBySupplierCode = async (code: string, accessCode: string): Promise<ComplianceRequest[]> => {
     if (!isLive || !code || !accessCode) return [];
-    const rows = await orEmpty(
-        portalDb.rpc<Row[]>('get_compliance_requests_by_supplier_code', {
+    // Not wrapped in orEmpty: a brute-force lockout must surface to the UI. Any other
+    // failure still degrades to an empty list (indistinguishable from "no matches"),
+    // preserving prior behaviour.
+    try {
+        const rows = await portalDb.rpc<Row[]>('get_compliance_requests_by_supplier_code', {
             p_code: code,
             p_access_code: accessCode,
-        }),
-        'getComplianceRequestsBySupplierCode',
-    );
-    return (rows || []).map(mapComplianceRequest);
+        });
+        return (rows || []).map(mapComplianceRequest);
+    } catch (e) {
+        const locked = asPortalLockedError(e);
+        if (locked) throw locked;
+        console.error('getComplianceRequestsBySupplierCode failed:', e);
+        return [];
+    }
 };
 
 /**
@@ -104,10 +111,18 @@ export const createComplianceRequest = async (
  */
 export const verifySupplierAccess = async (token: string, accessCode: string): Promise<ComplianceRequest> => {
     if (!isLive) throw new Error("Connection error: the database is not configured.");
-    const data = await portalDb.rpc<Row | Row[] | null>('get_compliance_request_secure', {
-        p_token: token,
-        p_code: accessCode
-    });
+    let data: Row | Row[] | null;
+    try {
+        data = await portalDb.rpc<Row | Row[] | null>('get_compliance_request_secure', {
+            p_token: token,
+            p_code: accessCode
+        });
+    } catch (e) {
+        // Convert the DB lockout signal into a friendly, typed error; rethrow anything else.
+        const locked = asPortalLockedError(e);
+        if (locked) throw locked;
+        throw e;
+    }
 
     if (!data) throw new Error('Invalid credentials');
 

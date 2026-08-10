@@ -56,7 +56,12 @@ const SupplierCompliancePortalList: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Failed to load requests:', err);
-      setError('Failed to load requests. Please check your Supplier ID and access code and try again.');
+      // Surface a brute-force lockout clearly; otherwise keep the generic message.
+      setError(
+        err?.name === 'PortalLockedError'
+          ? err.message
+          : 'Failed to load requests. Please check your Supplier ID and access code and try again.',
+      );
       setRequests([]);
     } finally {
       setLoading(false);

@@ -6,6 +6,7 @@
 export { generateUUID } from './uuid.utils';
 export { handleError } from './error.utils';
 export { sanitizeHtml } from './sanitize-html.utils';
+export { PortalLockedError, asPortalLockedError, isPortalLockedError } from './portal-lockout.utils';
 export { generateNumericCode } from './code.utils';
 export { validateAttributeValue, getAttributesForCategory } from './attribute-validation.utils';
 export { passesFeatureGate } from './attribute-condition.utils';
