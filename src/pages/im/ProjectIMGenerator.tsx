@@ -14,19 +14,25 @@ import {
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
     getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
-    updateProjectIMPlaceholders, getProjectRequiredLanguages
+    updateProjectIMPlaceholders, getProjectRequiredLanguages,
+    getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
+    checkMarkupReviewStatus, isMarkupReviewAvailable
 } from '../../services';
+import type { ProjectIMBackup } from '../../services';
+import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
 import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { translateHtml } from '../../services/ai/translation.service';
+import { markTranslatedFromEn } from '../../services/im/im-translation-marker';
 import { IM_LANGUAGE_NAMES } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 import { uploadIMAsset, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
-import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, Code, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
+import type { PublishResult, PrintPdfResult, PrintRender, MarkupReviewResult } from '../../services';
+import { isInReview } from './im-manual-status';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useUndoRedo } from './editor/useUndoRedo';
 import { ProjectImImportDialog } from './ProjectImImportDialog';
@@ -41,6 +47,7 @@ import { Badge } from '../../components/common/Badge';
 import { OptionalContentPanel, IncludeModeControl, modeOf, type OptionalContentItem } from './project-im-generator/OptionalContentPanel';
 import { BindableField } from './project-im-generator/BindableField';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
+import PipelineStepper, { type PipelineStep } from './project-im-generator/PipelineStepper';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 
 // The full set of editable, persisted state captured in a crash-safe local draft. Mirrors
@@ -127,7 +134,17 @@ const ProjectIMGenerator: React.FC = () => {
   const [boundSkuIds, setBoundSkuIds] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(true);
+  // Load FAILED (network/auth) — rendered as an error-with-retry screen, never as the
+  // template picker: mistaking "failed to load" for "no draft exists" invited starting
+  // over and overwriting the real draft.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Someone else (or another tab) saved this manual after we loaded it. Saves are halted
+  // until the operator reloads; their edits stay in the local crash-safe backup.
+  const [saveConflict, setSaveConflict] = useState<{ at: string; by: string | null } | null>(null);
+  // Daily rolling backups (last 3 days) — restore modal state.
+  const [showBackups, setShowBackups] = useState(false);
+  const [backups, setBackups] = useState<ProjectIMBackup[] | null>(null);
   // Brief "Saved!" confirmation shown on the Save Draft button after a successful save.
   const [savedTick, setSavedTick] = useState(false);
   // Background (debounced) server autosave — separate from the blocking manual Save.
@@ -145,7 +162,7 @@ const ProjectIMGenerator: React.FC = () => {
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   // Pre-publish checklist: populated when the user clicks Publish and something is
   // missing, so they can review before confirming (or cancel and fix).
-  const [checklist, setChecklist] = useState<{ blocking: string[]; values: string[]; slots: string[]; translations: { lang: string; items: string[] }[] } | null>(null);
+  const [checklist, setChecklist] = useState<{ blocking: string[]; values: string[]; slots: string[]; conditionsNoData: string[]; translations: { lang: string; items: string[] }[] } | null>(null);
   // "Already up to date" guard: set when Publish is clicked but the published output would be
   // identical to what's already live. Carries the prior artifacts to show instead of republishing.
   const [noChangesPrompt, setNoChangesPrompt] = useState<{ manifestUrl: string | null; lastRender: PrintRender | null } | null>(null);
@@ -260,6 +277,8 @@ const ProjectIMGenerator: React.FC = () => {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
+    setSaveConflict(null);
     try {
         const proj = await getProjectById(projectId!);
         if (!proj) throw new Error("Project not found");
@@ -337,9 +356,13 @@ const ProjectIMGenerator: React.FC = () => {
         } else {
              const allTemps = (await getIMTemplates()).filter(t => t.templateType === templateType);
              setTemplates(allTemps);
+             // Sibling manuals for "start from a sibling project" — best-effort; the
+             // template picker works fine without the list.
+             getAllProjectIMs().then(ims => setSiblingIMs(ims)).catch(() => {});
         }
     } catch (e) {
         console.error(e);
+        setLoadError(e instanceof Error ? e.message : 'Failed to load this manual.');
     } finally {
         setLoading(false);
     }
@@ -385,10 +408,163 @@ const ProjectIMGenerator: React.FC = () => {
       }
   }, [sections]);
 
+  // One-time override-key migration: move legacy positional keys (`<sectionId>:<index>`
+  // for visibility, `<index>` for block overrides) onto the ref's stable id key
+  // (`ref:<id>`) once the template's refs carry ids. Positional keys silently re-point
+  // when a template's blocks are reordered — id keys don't. Skipped while FINAL (the
+  // manual is read-only, and the id-first lookups fall back to positional keys anyway);
+  // the migrated state registers as dirty and persists via the normal autosave.
+  const overrideKeysMigratedRef = useRef(false);
+  useEffect(() => {
+      if (loading || locked || overrideKeysMigratedRef.current || !instance || sections.length === 0) return;
+      overrideKeysMigratedRef.current = true;
+      setRefVisibility(prev => {
+          let changed = false;
+          const next = { ...prev };
+          for (const sec of sections) (sec.blockRefs ?? []).forEach((ref, i) => {
+              if (!ref.id) return;
+              const legacy = `${sec.id}:${i}`;
+              const idKey = `ref:${ref.id}`;
+              if (next[legacy] !== undefined) {
+                  if (next[idKey] === undefined) next[idKey] = next[legacy];
+                  delete next[legacy];
+                  changed = true;
+              }
+          });
+          return changed ? next : prev;
+      });
+      setBlockOverrides(prev => {
+          let changed = false;
+          const next: typeof prev = { ...prev };
+          for (const sec of sections) {
+              if (!next[sec.id]) continue;
+              (sec.blockRefs ?? []).forEach((ref, i) => {
+                  if (!ref.id) return;
+                  const forSection = next[sec.id];
+                  if (!forSection || forSection[String(i)] === undefined) return;
+                  const updated = { ...forSection };
+                  const idKey = `ref:${ref.id}`;
+                  if (updated[idKey] === undefined) updated[idKey] = updated[String(i)];
+                  delete updated[String(i)];
+                  next[sec.id] = updated;
+                  changed = true;
+              });
+          }
+          return changed ? next : prev;
+      });
+  }, [loading, locked, instance, sections]);
+
   const handleTemplateSelect = async (e: React.ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
       if (val) await loadTemplate(val);
   };
+
+  // --- "Start from a sibling project" (template-picker screen) --------------------
+  // A new project in a category re-enters placeholder toggles, language settings and
+  // field wiring a near-identical sibling already configured. This copies a CURATED
+  // subset of the sibling's setup — condition/visibility choices, language settings,
+  // attribute wiring, brand assets — and deliberately NEVER product attribute values,
+  // SKU content, SKU scoping, or the cover title (per-product by definition). Field
+  // wiring re-derives its values from THIS project's attributes via the binding-sync
+  // effect. Optionally also copies the sibling's project text additions/edited blocks.
+  const [siblingIMs, setSiblingIMs] = useState<ProjectIMSummary[]>([]);
+  const [copySourceId, setCopySourceId] = useState('');
+  const [copyContent, setCopyContent] = useState(false);
+  const [copying, setCopying] = useState(false);
+
+  const COPYABLE_META_KEYS = ['__required_languages', '__language_order', '__field_bindings', '__custom_logo', '__custom_footer'];
+
+  const handleCopyFromSibling = async () => {
+      if (!copySourceId || copying) return;
+      setCopying(true);
+      try {
+          const sourceIM = await getProjectIM(copySourceId, templateType);
+          if (!sourceIM) throw new Error('The source manual could not be loaded.');
+          const safe = sourceIM.placeholderData || {};
+          const curated: Record<string, string> = {};
+          for (const [k, v] of Object.entries(safe)) {
+              if (k.startsWith('cond_') || k.startsWith('secvis_') || k.startsWith('refvis_') || COPYABLE_META_KEYS.includes(k)) {
+                  curated[k] = v;
+              }
+          }
+          setFormData(curated);
+          // Mirror loadData's prefix parsing so the toggle panels reflect the copy.
+          const conds: Record<string, boolean> = {};
+          const secVis: Record<string, boolean> = {};
+          const refVis: Record<string, boolean> = {};
+          for (const key of Object.keys(curated)) {
+              if (key.startsWith('cond_')) conds[key.replace('cond_', '')] = curated[key] === 'true';
+              else if (key.startsWith('refvis_')) refVis[key.replace('refvis_', '')] = curated[key] === 'true';
+              else if (key.startsWith('secvis_')) secVis[key.replace('secvis_', '')] = curated[key] === 'true';
+          }
+          setConditions(conds);
+          setSectionVisibility(secVis);
+          setRefVisibility(refVis);
+          if (curated['__field_bindings']) {
+              try {
+                  const parsed = JSON.parse(curated['__field_bindings']);
+                  if (parsed && typeof parsed === 'object') setFieldBindings(parsed);
+              } catch { /* wiring is optional — skip malformed */ }
+          }
+          if (copyContent) {
+              setSectionAdditions(structuredClone(sourceIM.sectionAdditions ?? {}));
+              setExtraSections(structuredClone(sourceIM.extraSections ?? []));
+              setSectionOverrides(structuredClone(sourceIM.sectionOverrides ?? {}));
+              setBlockOverrides(structuredClone(sourceIM.blockOverrides ?? {}));
+          }
+          // Same template as the sibling — that's what makes the copied section/ref
+          // toggles meaningful. Nothing is persisted until the user saves.
+          await loadTemplate(sourceIM.templateId);
+      } catch (e) {
+          alert(`Copying the setup failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+          setCopying(false);
+      }
+  };
+
+  // --- Manual pipeline (stepper) ------------------------------------------------
+  // Async signals the stepper needs beyond page state: publish freshness (staleness),
+  // the newest print render's version, and the live Markup.io review outcome. All
+  // best-effort and off the critical path — the stepper renders without them.
+  const [pipelineStale, setPipelineStale] = useState<boolean | null>(null); // null = unknown/unchecked
+  const [latestRenderVersion, setLatestRenderVersion] = useState<number | null | undefined>(undefined);
+
+  useEffect(() => {
+      if (loading || !projectId) return;
+      if (instance?.status !== 'generated') { setPipelineStale(null); return; }
+      // Deferred: the staleness check re-resolves every language — keep it away from first paint.
+      const t = setTimeout(() => {
+          getProjectIMStaleReasons(projectId, templateType)
+              .then(rs => setPipelineStale(rs.length > 0))
+              .catch(() => setPipelineStale(null));
+      }, 1500);
+      return () => clearTimeout(t);
+  }, [loading, projectId, templateType, instance?.status, instance?.version]);
+
+  useEffect(() => {
+      if (loading || !projectId || !isPrintExportAvailable()) return;
+      getPrintRenders(projectId, templateType)
+          .then(rs => setLatestRenderVersion(rs[0]?.imVersion ?? null))
+          .catch(() => { /* stepper shows the print step without freshness */ });
+  }, [loading, projectId, templateType]);
+
+  // Poll Markup.io once per open while a round is out and undecided; the function
+  // caches the outcome on the manual, so this also heals the dashboard's view.
+  const reviewCheckedRef = useRef(false);
+  useEffect(() => {
+      if (loading || !projectId || reviewCheckedRef.current || !isMarkupReviewAvailable()) return;
+      if (!instance || !isInReview(instance) || instance.reviewDone === true || !instance.reviewMarkupId) return;
+      reviewCheckedRef.current = true;
+      checkMarkupReviewStatus(projectId, templateType)
+          .then(res => setInstance(prev => prev ? {
+              ...prev,
+              reviewStatus: res.status,
+              reviewDone: res.done,
+              reviewActiveThreads: res.activeThreads,
+              reviewCheckedAt: res.checkedAt,
+          } : prev))
+          .catch(() => { /* the cached/derived state stands */ });
+  }, [loading, projectId, templateType, instance]);
 
   const handleInputChange = (id: string, value: string) => {
       setFormData(prev => ({ ...prev, [id]: value }));
@@ -563,6 +739,60 @@ const ProjectIMGenerator: React.FC = () => {
     setPendingDraft(null);
   };
 
+  // ---------------- DAILY BACKUPS (last 3 days) ----------------
+  // Convert a backed-up ProjectIM row into the editable-state shape, exactly the way
+  // loadData unpacks a loaded instance (prefixed keys → conditions/visibility maps).
+  const draftStateFromIM = (im: ProjectIM): DraftState => {
+    const data = im.placeholderData || {};
+    const conds: Record<string, boolean> = {};
+    const secVis: Record<string, boolean> = {};
+    const refVis: Record<string, boolean> = {};
+    Object.keys(data).forEach(key => {
+      if (key.startsWith('cond_')) conds[key.replace('cond_', '')] = data[key] === 'true';
+      else if (key.startsWith('refvis_')) refVis[key.replace('refvis_', '')] = data[key] === 'true';
+      else if (key.startsWith('secvis_')) secVis[key.replace('secvis_', '')] = data[key] === 'true';
+    });
+    let bindings: Record<string, string[]> = {};
+    try {
+      const parsed = JSON.parse(data['__field_bindings'] ?? '');
+      if (parsed && typeof parsed === 'object') bindings = parsed;
+    } catch { /* absent/malformed — no bindings */ }
+    return {
+      formData: data,
+      fieldBindings: bindings,
+      conditions: conds,
+      sectionVisibility: secVis,
+      refVisibility: refVis,
+      skuContent: im.skuContent ?? {},
+      sectionAdditions: im.sectionAdditions ?? {},
+      extraSections: im.extraSections ?? [],
+      sectionOverrides: im.sectionOverrides ?? {},
+      sectionSkus: im.sectionSkus ?? {},
+      blockOverrides: im.blockOverrides ?? {},
+      boundSkuIds: im.boundSkuIds ?? [],
+      activeLang: data['__meta_language'] || activeLang,
+    };
+  };
+
+  const openBackups = async () => {
+    if (!projectId) return;
+    setShowBackups(true);
+    setBackups(null);
+    try {
+      setBackups(await getProjectIMBackups(projectId, templateType));
+    } catch (e) {
+      console.error('[ProjectIMGenerator] loading backups failed:', e);
+      setBackups([]);
+    }
+  };
+
+  // Load a daily snapshot INTO THE EDITOR (not straight into the DB): the operator can
+  // review it in the preview, undo it (Ctrl/Cmd+Z), and keep it with a normal Save.
+  const restoreBackup = (b: ProjectIMBackup) => {
+    applyDraftState(draftStateFromIM(b.im));
+    setShowBackups(false);
+  };
+
   // Seed the DB baseline once loading finishes (so nothing is dirty on load), then offer to
   // restore a newer local draft if one survived a hang/crash/close on this device.
   useEffect(() => {
@@ -619,6 +849,9 @@ const ProjectIMGenerator: React.FC = () => {
       if (!projectId || !selectedTemplateId) return;
       // A FINAL manual is read-only — never persist (this also short-circuits autosave).
       if (locked) return;
+      // A detected concurrent-edit conflict halts all saves until the operator reloads —
+      // saving would overwrite the other person's version.
+      if (saveConflict) return;
       // Never let a save start on top of another operation (Publish/Translate/another Save):
       // overlapping writes to the same row queue behind each other's row lock (see data/resilience.ts).
       if (isBusy) return;
@@ -638,7 +871,7 @@ const ProjectIMGenerator: React.FC = () => {
           setBlockOverrides(ext.blockOverrides);
           setExtraSections(ext.extraSections);
           const dataToSave = buildPlaceholderData(extForm);
-          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides);
+          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides, { baselineUpdatedAt: instance?.updatedAt ?? null });
           setInstance(saved);
           // Baseline = exactly what we persisted, so the local draft clears and nothing shows dirty.
           markSaved({ formData: extForm, sectionAdditions: ext.sectionAdditions, sectionOverrides: ext.sectionOverrides, blockOverrides: ext.blockOverrides, extraSections: ext.extraSections });
@@ -650,7 +883,10 @@ const ProjectIMGenerator: React.FC = () => {
           }
       } catch (e) {
           console.error(e);
-          if (!silent) {
+          if (e instanceof ProjectIMConflictError) {
+              // Same handling for manual save and autosave: halt saving, show the banner.
+              setSaveConflict({ at: e.lastUpdatedAt, by: e.lastUpdatedBy });
+          } else if (!silent) {
               const detail = e instanceof Error && e.message ? `\n\nDetails: ${e.message}` : '';
               alert(`Failed to save draft. Your work is backed up locally on this device — try Save again.${detail}`);
           } else {
@@ -664,6 +900,20 @@ const ProjectIMGenerator: React.FC = () => {
 
   const handleSaveDraft = () => persistDraft();
 
+  // Conflict recovery: stash the current edits as the local draft (fresh timestamp, so the
+  // restore prompt will offer them on top of the other person's version), then reload.
+  const reloadAfterConflict = () => {
+      if (draftKey) {
+          try {
+              localStorage.setItem(draftKey, JSON.stringify({ savedAt: new Date().toISOString(), state: buildDraftState() }));
+          } catch { /* quota — the reload still proceeds; worst case the edits are lost with warning shown */ }
+      }
+      savedSnapshotRef.current = null;
+      setSaveConflict(null);
+      setPendingDraft(null);
+      void loadData();
+  };
+
   // Toggle the FINAL lock. Finalizing persists any unsaved edits first (so what's locked is
   // exactly what's on the server), then flips the flag; unlocking just clears it. Touches
   // only the finalize columns via setProjectIMFinalized, so it never races the content save.
@@ -675,7 +925,7 @@ const ProjectIMGenerator: React.FC = () => {
           if (next && isDirty) await persistDraft();
           setFinalizing(true);
           const res = await setProjectIMFinalized(projectId, templateType, next);
-          setInstance(prev => prev ? { ...prev, isFinalized: res.isFinalized, finalizedAt: res.finalizedAt, updatedAt: res.updatedAt } : prev);
+          setInstance(prev => prev ? { ...prev, isFinalized: res.isFinalized, finalizedAt: res.finalizedAt, finalizedBy: res.finalizedBy, updatedAt: res.updatedAt } : prev);
       } catch (e) {
           console.error('[ProjectIMGenerator] finalize toggle failed', e);
           alert(`Could not ${next ? 'mark this manual as final' : 'unlock this manual'} — see console for details.`);
@@ -692,7 +942,7 @@ const ProjectIMGenerator: React.FC = () => {
   // server. Skipped while loading, while a recovered draft awaits a decision, during any
   // other operation, and when nothing is unsaved.
   useEffect(() => {
-      if (loading || pendingDraft || isBusy) return;
+      if (loading || pendingDraft || isBusy || saveConflict) return;
       if (!projectId || !selectedTemplateId || savedSnapshotRef.current === null) return;
       if (serializeDraft() === savedSnapshotRef.current) return; // nothing unsaved
       const t = setTimeout(() => { void persistDraft({ silent: true }); }, 4000);
@@ -832,7 +1082,7 @@ const ProjectIMGenerator: React.FC = () => {
           setBlockOverrides(extOv.blockOverrides);
           setExtraSections(extOv.extraSections);
           const dataToSave = buildPlaceholderData(extForm);
-          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides);
+          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides, { baselineUpdatedAt: instance?.updatedAt ?? null });
           setInstance(savedIM);
           // Baseline = exactly what we persisted, so the local draft clears.
           markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
@@ -850,7 +1100,8 @@ const ProjectIMGenerator: React.FC = () => {
 
       } catch (e: any) {
           console.error("Publish failed", e);
-          alert(`Failed to publish ${typeLabel}: ${e.message}`);
+          if (e instanceof ProjectIMConflictError) setSaveConflict({ at: e.lastUpdatedAt, by: e.lastUpdatedBy });
+          else alert(`Failed to publish ${typeLabel}: ${e.message}`);
       } finally {
           setGenerating(false);
           setPublishStatus(null);
@@ -889,6 +1140,27 @@ const ProjectIMGenerator: React.FC = () => {
       });
 
       await uploadFile(targetDoc.id, file, false);
+  };
+
+  // After a PDF is sent to Markup.io, mirror the new review round onto the local
+  // instance so the In Review badge + link appear without a reload. updatedAt is
+  // synced too: the send-to-markup function bumps it server-side, and keeping a
+  // stale baseline would trip the concurrent-edit guard on the next save.
+  const handleReviewSent = (res: MarkupReviewResult) => {
+      setInstance(prev => prev ? {
+          ...prev,
+          reviewUrl: res.markupUrl,
+          reviewMarkupId: res.markupId,
+          reviewRequestedAt: res.reviewRequestedAt,
+          reviewRequestedBy: res.reviewRequestedBy,
+          reviewVersion: res.reviewVersion,
+          // A fresh round has no outcome yet — clear the previous round's cache.
+          reviewStatus: null,
+          reviewDone: null,
+          reviewActiveThreads: null,
+          reviewCheckedAt: null,
+          updatedAt: res.reviewRequestedAt,
+      } : prev);
   };
 
   // Remember the cover choices made in the print dialog (logo / cover image) as this
@@ -1359,36 +1631,37 @@ const ProjectIMGenerator: React.FC = () => {
   // `refIsOverridable` / `refHasTable` live in im-content.utils.ts (pure + unit-tested).
 
   // Start a per-project edit of a template inline block: seed the override from the
-  // template ref (deep-copied so edits never mutate the template) and store it by index.
-  const editBlockForProject = (sectionId: string, i: number, ref: InlineBlockRef) => {
+  // template ref (deep-copied so edits never mutate the template), stored by the ref's
+  // stable key (`ref:<id>`, or the legacy index for id-less refs — see blockOvKey).
+  const editBlockForProject = (sectionId: string, key: string, ref: InlineBlockRef) => {
       setBlockOverrides(prev => ({
           ...prev,
-          [sectionId]: { ...(prev[sectionId] ?? {}), [String(i)]: { ...ref, content: { ...ref.content } } },
+          [sectionId]: { ...(prev[sectionId] ?? {}), [key]: { ...ref, content: { ...ref.content } } },
       }));
   };
 
-  const updateBlockOverride = (sectionId: string, i: number, lang: string, html: string) => {
+  const updateBlockOverride = (sectionId: string, key: string, lang: string, html: string) => {
       setBlockOverrides(prev => {
-          const cur = prev[sectionId]?.[String(i)];
+          const cur = prev[sectionId]?.[key];
           if (!cur) return prev;
-          return { ...prev, [sectionId]: { ...prev[sectionId], [String(i)]: { ...cur, content: { ...cur.content, [lang]: html } } } };
+          return { ...prev, [sectionId]: { ...prev[sectionId], [key]: { ...cur, content: { ...cur.content, [lang]: html } } } };
       });
   };
 
-  const setBlockOverrideVariant = (sectionId: string, i: number, variant: CalloutVariant | undefined) => {
+  const setBlockOverrideVariant = (sectionId: string, key: string, variant: CalloutVariant | undefined) => {
       setBlockOverrides(prev => {
-          const cur = prev[sectionId]?.[String(i)];
+          const cur = prev[sectionId]?.[key];
           if (!cur) return prev;
-          return { ...prev, [sectionId]: { ...prev[sectionId], [String(i)]: { ...cur, variant } } };
+          return { ...prev, [sectionId]: { ...prev[sectionId], [key]: { ...cur, variant } } };
       });
   };
 
-  // Drop a block override → the section falls back to the template block. Clears the
-  // section key when no overrides remain under it.
-  const resetBlockOverride = (sectionId: string, i: number) => {
+  // Drop a block override → the section falls back to the template block. Removes both
+  // the id key and the legacy positional key so a stale legacy entry can't resurrect it.
+  const resetBlockOverride = (sectionId: string, keys: string[]) => {
       setBlockOverrides(prev => {
           const forSection = { ...(prev[sectionId] ?? {}) };
-          delete forSection[String(i)];
+          for (const k of keys) delete forSection[k];
           const next = { ...prev };
           if (Object.keys(forSection).length) next[sectionId] = forSection; else delete next[sectionId];
           return next;
@@ -1396,62 +1669,6 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // ---------------- EXPORT HELPERS ----------------
-
-
-  const getCleanContent = (html: string) => {
-      if (!html) return '';
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-
-      // Process Conditions
-      const conditionNodes = doc.querySelectorAll('.im-condition');
-      conditionNodes.forEach((node) => {
-          const el = node as HTMLElement;
-          const id = el.getAttribute('data-id');
-          const contentEncoded = el.getAttribute('data-content');
-          const always = el.getAttribute('data-always') === 'true';
-
-          if (always && id) {
-              const value = formData[id] || '';
-              const textNode = document.createTextNode(value);
-              el.replaceWith(textNode);
-          } else if (id && conditions[id] && contentEncoded) {
-              try {
-                  const content = decodeURIComponent(contentEncoded);
-                  const textNode = document.createTextNode(content);
-                  el.replaceWith(textNode);
-              } catch(e) { el.remove(); }
-          } else { el.remove(); }
-      });
-
-      // Process Placeholders (Clean replacement)
-      const placeholderNodes = doc.querySelectorAll('.im-placeholder');
-      placeholderNodes.forEach((node) => {
-          const el = node as HTMLElement;
-          const id = el.getAttribute('data-id');
-          const type = el.getAttribute('data-type');
-          
-          if (!id || !type) return;
-          const val = formData[id];
-
-          if (type === 'image') {
-             if (val) {
-                 const img = document.createElement('img');
-                 img.src = val;
-                 // Base64 images might be huge for XML, but we keep them for data integrity or strip them for text exports
-                 el.replaceWith(img);
-             } else {
-                 el.remove();
-             }
-          } else {
-             const span = document.createElement('span');
-             span.textContent = val || '';
-             el.replaceWith(span);
-          }
-      });
-
-      return doc.body.innerHTML;
-  };
 
   const downloadData = (data: string, filename: string, type: string) => {
       const blob = new Blob([data], { type });
@@ -1465,71 +1682,42 @@ const ProjectIMGenerator: React.FC = () => {
       URL.revokeObjectURL(url);
   };
 
-  const handleExport = async (format: 'json' | 'xml') => {
+  // Canonical structured export: the same ResolvedManual that gets published to the
+  // im-published bucket, so this download is byte-identical to the hosted file.
+  // (An XML/InDesign export used to live here; it exported only legacy section content —
+  // no blocks/overrides/additions — and was confirmed unused, so it was removed.)
+  const handleExport = async () => {
       if (!project) return;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${project.name.replace(/\s+/g, '_')}_${activeLang}_${timestamp}.${format}`;
+      const filename = `${project.name.replace(/\s+/g, '_')}_${activeLang}_${timestamp}.json`;
 
-      if (format === 'json') {
-          // Canonical structured artifact: the same ResolvedManual that gets published to the
-          // im-published bucket, so this download is byte-identical to the hosted file.
-          if (!template) { alert('Template not loaded.'); return; }
-          const exportData: Record<string, string> = { ...submittedAttrValues, ...formData };
-          Object.entries(conditions).forEach(([k, v]) => { exportData[`cond_${k}`] = String(v); });
-          Object.entries(sectionVisibility).forEach(([k, v]) => { exportData[`secvis_${k}`] = String(v); });
-          Object.entries(refVisibility).forEach(([k, v]) => { exportData[`refvis_${k}`] = String(v); });
-          const resolverIM: ProjectIM = {
-              id: instance?.id ?? '',
-              templateId: selectedTemplateId,
-              templateType,
-              placeholderData: normalizeResolverData(exportData),
-              skuContent,
-              status: 'generated',
-              updatedAt: new Date().toISOString(),
-              sectionAdditions,
-              extraSections,
-              sectionOverrides,
-              boundSkuIds,
-              sectionSkus,
-              blockOverrides,
-          };
-          const blocks = await getIMBlocks();
-          const blocksById: Record<string, any> = {};
-          for (const b of blocks) blocksById[b.id] = b;
-          // Attribute definitions so section conditions resolve identically to the published file.
-          const attributesById = allAttributes.reduce<Record<string, CategoryAttribute>>((m, a) => { m[a.id] = a; return m; }, {});
-          const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang, projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })), attributesById);
-          downloadData(JSON.stringify(resolved, null, 2), filename, 'application/json');
-      } else if (format === 'xml') {
-          // InDesign / Generic XML format
-          let xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<InstructionManual>\n`;
-          xml += `  <Metadata>\n`;
-          xml += `    <ProjectName>${escapeXml(project.name)}</ProjectName>\n`;
-          xml += `    <ProjectId>${escapeXml(project.projectId)}</ProjectId>\n`;
-          xml += `    <ExportDate>${new Date().toISOString()}</ExportDate>\n`;
-          xml += `    <Language>${activeLang}</Language>\n`;
-          xml += `    <CoverTitle>${escapeXml(formData['__cover_title'] || project.name)}</CoverTitle>\n`;
-          xml += `    <CoverSubtitle>${escapeXml(formData['__cover_subtitle'] || 'INSTRUCTION MANUAL')}</CoverSubtitle>\n`;
-          xml += `  </Metadata>\n`;
-          xml += `  <Sections>\n`;
-          
-          orderedSections.forEach(s => {
-              const rawContent = getCleanContent(s.content[activeLang] || '');
-              // Strip tags for a clean text version
-              const textContent = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-              
-              xml += `    <Section id="${s.id}">\n`;
-              xml += `      <Title>${escapeXml(s.title)}</Title>\n`;
-              xml += `      <Order>${s.order}</Order>\n`;
-              xml += `      <HtmlContent><![CDATA[${rawContent}]]></HtmlContent>\n`;
-              xml += `      <PlainText>${escapeXml(textContent)}</PlainText>\n`;
-              xml += `    </Section>\n`;
-          });
-          
-          xml += `  </Sections>\n`;
-          xml += `</InstructionManual>`;
-          downloadData(xml, filename, 'application/xml');
-      }
+      if (!template) { alert('Template not loaded.'); return; }
+      const exportData: Record<string, string> = { ...submittedAttrValues, ...formData };
+      Object.entries(conditions).forEach(([k, v]) => { exportData[`cond_${k}`] = String(v); });
+      Object.entries(sectionVisibility).forEach(([k, v]) => { exportData[`secvis_${k}`] = String(v); });
+      Object.entries(refVisibility).forEach(([k, v]) => { exportData[`refvis_${k}`] = String(v); });
+      const resolverIM: ProjectIM = {
+          id: instance?.id ?? '',
+          templateId: selectedTemplateId,
+          templateType,
+          placeholderData: normalizeResolverData(exportData),
+          skuContent,
+          status: 'generated',
+          updatedAt: new Date().toISOString(),
+          sectionAdditions,
+          extraSections,
+          sectionOverrides,
+          boundSkuIds,
+          sectionSkus,
+          blockOverrides,
+      };
+      const blocks = await getIMBlocks();
+      const blocksById: Record<string, any> = {};
+      for (const b of blocks) blocksById[b.id] = b;
+      // Attribute definitions so section conditions resolve identically to the published file.
+      const attributesById = allAttributes.reduce<Record<string, CategoryAttribute>>((m, a) => { m[a.id] = a; return m; }, {});
+      const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang, projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })), attributesById);
+      downloadData(JSON.stringify(resolved, null, 2), filename, 'application/json');
       setShowExportMenu(false);
   };
 
@@ -1754,7 +1942,36 @@ const ProjectIMGenerator: React.FC = () => {
 
   if (loading) return <Layout><div>Loading...</div></Layout>;
 
+  // Load failure gets its own screen — NOT the template picker. Showing the picker here
+  // read as "no draft exists yet"; picking a template and saving would then overwrite the
+  // real (unloadable) draft with a fresh empty state.
+  if (loadError) {
+      return (
+          <Layout>
+              <div className="max-w-2xl mx-auto mt-16 bg-white p-8 rounded-xl border border-rose-200 shadow text-center">
+                  <AlertCircle size={32} className="mx-auto text-rose-500 mb-3" />
+                  <h1 className="text-xl font-bold text-gray-800 mb-2">Couldn't load this {typeLabel.toLowerCase()}</h1>
+                  <p className="text-sm text-muted mb-1">{loadError}</p>
+                  <p className="text-xs text-muted mb-6">
+                      If a draft exists, it is untouched — this is a loading problem, not a missing manual.
+                  </p>
+                  <div className="flex justify-center gap-3">
+                      <button onClick={() => navigate(`/project/${projectId}`)} className="px-4 py-2 border border-gray-300 text-gray-600 rounded-xl text-sm font-medium hover:bg-light">Back to project</button>
+                      <button onClick={() => loadData()} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700"><RotateCcw size={15} /> Try again</button>
+                  </div>
+              </div>
+          </Layout>
+      );
+  }
+
   if (!selectedTemplateId) {
+      // Offer the PROJECT'S CATEGORY templates when any exist — picking another category's
+      // template produces a wrong manual with no warning. Fall back to all templates only
+      // when the category has none (with a note), and mark non-finalized templates.
+      const categoryTemplates = templates.filter(t => t.categoryId === project?.categoryId);
+      const templateChoices = categoryTemplates.length ? categoryTemplates : templates;
+      const templateOptionLabel = (t: IMTemplate) =>
+          `${t.name}${t.isFinalized ? '' : ' — DRAFT template (not finalized)'}`;
       return (
           <Layout>
               <div className="max-w-2xl mx-auto mt-10">
@@ -1763,8 +1980,67 @@ const ProjectIMGenerator: React.FC = () => {
                       <label className="block font-medium text-gray-700 mb-2">Select a Template</label>
                       <select className="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" onChange={handleTemplateSelect} defaultValue="">
                           <option value="" disabled>-- Choose a Template --</option>
-                          {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          {templateChoices.map(t => <option key={t.id} value={t.id}>{templateOptionLabel(t)}</option>)}
                       </select>
+                      {!categoryTemplates.length && templates.length > 0 && (
+                          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                              No template exists for this project's category yet — the list shows templates from
+                              OTHER categories. Double-check the choice, or create a category template first.
+                          </p>
+                      )}
+
+                      {/* Start from a sibling project — copies the curated setup of a manual
+                          already configured in this category (see handleCopyFromSibling). */}
+                      {(() => {
+                          const siblings = siblingIMs.filter(s =>
+                              s.templateType === templateType
+                              && s.projectId !== projectId
+                              && !!project?.categoryId
+                              && s.categoryId === project.categoryId);
+                          if (!siblings.length) return null;
+                          return (
+                              <>
+                                  <div className="flex items-center gap-3 my-5">
+                                      <div className="flex-1 h-px bg-gray-100" />
+                                      <span className="text-xs text-gray-400 uppercase tracking-wide">or</span>
+                                      <div className="flex-1 h-px bg-gray-100" />
+                                  </div>
+                                  <label className="block font-medium text-gray-700 mb-2">Start from a sibling project</label>
+                                  <div className="flex gap-2">
+                                      <select
+                                          className="flex-1 min-w-0 p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                                          value={copySourceId}
+                                          onChange={(e) => setCopySourceId(e.target.value)}
+                                      >
+                                          <option value="">-- Choose a project in this category --</option>
+                                          {siblings.map(s => (
+                                              <option key={s.id} value={s.projectId}>
+                                                  {(s.projectCode ? `${s.projectCode} — ` : '') + s.projectName}
+                                                  {s.version ? ` (v${s.version})` : ''} · {new Date(s.updatedAt).toLocaleDateString()}
+                                              </option>
+                                          ))}
+                                      </select>
+                                      <button
+                                          onClick={handleCopyFromSibling}
+                                          disabled={!copySourceId || copying}
+                                          className="shrink-0 flex items-center gap-2 bg-indigo-600 text-white px-4 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
+                                      >
+                                          {copying ? <Loader2 size={15} className="animate-spin" /> : <Copy size={15} />}
+                                          {copying ? 'Copying…' : 'Copy setup'}
+                                      </button>
+                                  </div>
+                                  <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
+                                      <input type="checkbox" checked={copyContent} onChange={(e) => setCopyContent(e.target.checked)} />
+                                      Also copy the sibling's project text additions &amp; edited blocks
+                                  </label>
+                                  <p className="text-[11px] text-gray-400 mt-1.5">
+                                      Copies condition &amp; visibility choices, language settings, attribute wiring and brand
+                                      assets — never product values, SKU content, or SKU scoping. Review with the checklist
+                                      before publishing; nothing is saved until you save.
+                                  </p>
+                              </>
+                          );
+                      })()}
 
                       <div className="flex items-center gap-3 my-5">
                           <div className="flex-1 h-px bg-gray-100" />
@@ -1804,14 +2080,21 @@ const ProjectIMGenerator: React.FC = () => {
     ? `url(${metadata.assets.watermarkAssetUrl}) center/55% no-repeat`
     : undefined;
 
+  // MUST mirror the resolver's isSectionVisible (im-resolver.ts) exactly — the preview is
+  // WYSIWYG only if the two agree. In particular: a condition whose attribute has NO value
+  // EXCLUDES the chapter (the resolver's rule); it used to include it here, which meant the
+  // preview showed chapters the published output silently dropped.
   const isSectionVisible = (section: IMSection): boolean => {
     const override = sectionVisibility[section.id];
     if (override !== undefined) return override;
-    if (!section.conditionFeatureId || !section.conditionLabel) return true;
-    const value = submittedAttrValues[section.conditionFeatureId];
-    if (!value) return true; // no submitted data → include by default
+    if (!section.conditionFeatureId) return true;
+    if (section.conditionFeatureId === 'manual') return true; // included unless explicitly hidden
+    // PM edits (formData) win over submitted supplier values — same merge the resolver sees.
+    const value = formData[section.conditionFeatureId] ?? submittedAttrValues[section.conditionFeatureId];
+    if (value === undefined) return false; // no data → excluded, matching publish
+    if (!section.conditionLabel || section.conditionLabel === 'any') return true;
     const attr = allAttributes.find(a => a.id === section.conditionFeatureId);
-    if (!attr) return true;
+    if (!attr) return String(value) === section.conditionLabel;
     return matchesConditionValue(value, section.conditionLabel, attr);
   };
 
@@ -1941,9 +2224,26 @@ const ProjectIMGenerator: React.FC = () => {
     return passesFeatureGate(ref as FeatureConditionFields, { ...submittedAttrValues, ...formData }, {});
   };
 
+  // --- Stable override keys -----------------------------------------------------
+  // Overrides on template block refs are keyed by the ref's stable id (`ref:<id>`,
+  // assigned on template save) so that inserting/reordering blocks in the template can't
+  // re-point a project's overrides onto different blocks. Refs saved before ids existed
+  // fall back to the legacy positional `<sectionId>:<index>` key; a one-time migration
+  // below moves legacy entries onto id keys as soon as the manual is opened unlocked.
+  const refVisKey = (sectionId: string, index: number, ref: BlockRef): string =>
+    ref.id ? `ref:${ref.id}` : `${sectionId}:${index}`;
+  const blockOvKey = (index: number, ref: BlockRef): string =>
+    ref.id ? `ref:${ref.id}` : String(index);
+  const getBlockOverride = (sectionId: string, index: number, ref: BlockRef): InlineBlockRef | undefined =>
+    blockOverrides[sectionId]?.[blockOvKey(index, ref)] ?? blockOverrides[sectionId]?.[String(index)];
+  // The key the current override is actually stored under — the id key when present,
+  // else the legacy positional key (still possible while a FINAL manual awaits migration).
+  const blockOverrideKeyInUse = (sectionId: string, index: number, ref: BlockRef): string =>
+    blockOverrides[sectionId]?.[blockOvKey(index, ref)] !== undefined ? blockOvKey(index, ref) : String(index);
+
   // Effective visibility: a manual Include/Exclude override wins; otherwise the gate.
   const isRefVisible = (sectionId: string, index: number, ref: BlockRef): boolean => {
-    const override = refVisibility[`${sectionId}:${index}`];
+    const override = refVisibility[refVisKey(sectionId, index, ref)] ?? refVisibility[`${sectionId}:${index}`];
     if (override !== undefined) return override;
     return refAutoVisible(ref);
   };
@@ -2240,7 +2540,7 @@ const ProjectIMGenerator: React.FC = () => {
       if ((ref.kind === 'inline' || ref.kind === 'block') && !isRefVisible(section.id, i, ref)) continue;
       // Per-project inline block override (e.g. an edited table) replaces this template
       // inline ref. Not applied to section overrides (already the project's own content).
-      const inlineOverride = !override ? blockOverrides[section.id]?.[String(i)] : undefined;
+      const inlineOverride = !override ? getBlockOverride(section.id, i, ref) : undefined;
       const effRef: any = (ref.kind === 'inline' && inlineOverride) ? inlineOverride : ref;
       if (effRef.kind === 'inline') {
         const html = processContent(effRef.content?.[activeLang] || effRef.content?.['en'] || '');
@@ -2355,7 +2655,9 @@ const ProjectIMGenerator: React.FC = () => {
       for (const lang of langs) {
         if (skipExisting && content[lang]?.trim()) continue;
         gapsByLang[lang].add(label);
-        tasksByLang[lang].push(async () => { write(lang, await translateHtml(src, 'en', lang)); });
+        // Marked with the EN source hash so the editor's language tabs can flag the
+        // translation as stale if English is edited later (im-translation-marker.ts).
+        tasksByLang[lang].push(async () => { write(lang, markTranslatedFromEn(await translateHtml(src, 'en', lang), src)); });
       }
     };
 
@@ -2470,10 +2772,15 @@ const ProjectIMGenerator: React.FC = () => {
         const saved = await saveProjectIM(
           projectId, selectedTemplateId, buildPlaceholderData(extForm), 'draft', skuContent, templateType,
           ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides,
+          { baselineUpdatedAt: instance?.updatedAt ?? null },
         );
         setInstance(saved);
         markSaved({ formData: extForm, sectionAdditions: ext.sectionAdditions, sectionOverrides: ext.sectionOverrides, blockOverrides: ext.blockOverrides, extraSections: ext.extraSections });
-      } catch (e) { console.error(e); failures.push('Failed to save translations. Your work is backed up locally on this device.'); }
+      } catch (e) {
+        console.error(e);
+        if (e instanceof ProjectIMConflictError) setSaveConflict({ at: e.lastUpdatedAt, by: e.lastUpdatedBy });
+        failures.push('Failed to save translations. Your work is backed up locally on this device.');
+      }
 
       if (failures.length) {
         alert(`Translated ${tasks.length - failures.length}/${tasks.length} fragment(s). ${failures.length} left untranslated:\n\n${failures.slice(0, 8).join('\n')}${failures.length > 8 ? '\n…' : ''}`);
@@ -2592,6 +2899,20 @@ const ProjectIMGenerator: React.FC = () => {
       }
     }
 
+    // Conditional chapters whose attribute has no value and no explicit Include/Exclude
+    // choice: they are LEFT OUT of the published output (resolver rule). Listed here so a
+    // missing supplier value can never silently drop a chapter the operator expected.
+    const conditionsNoData: string[] = [];
+    for (const section of orderedSections) {
+      if (!section.conditionFeatureId || section.conditionFeatureId === 'manual' || !section.conditionLabel) continue;
+      if (sectionVisibility[section.id] !== undefined) continue; // explicit choice made
+      const v = formData[section.conditionFeatureId] ?? submittedAttrValues[section.conditionFeatureId];
+      if (v === undefined) {
+        const attr = allAttributes.find(a => a.id === section.conditionFeatureId);
+        conditionsNoData.push(`${localizedSectionTitle(section, 'en')} — “${attr?.name ?? section.conditionFeatureId}” has no value yet (chapter left out)`);
+      }
+    }
+
     // Per-language content gaps: anything authored in English but blank in another
     // REQUIRED language (non-required languages aren't part of this project's manual).
     const otherLangs = requiredLanguages.filter(l => l !== 'en');
@@ -2619,7 +2940,7 @@ const ProjectIMGenerator: React.FC = () => {
       if (missing.size) translations.push({ lang, items: [...missing] });
     }
 
-    return { blocking, values, slots, translations };
+    return { blocking, values, slots, conditionsNoData, translations };
   };
 
   // Publish entry point. If the manual is already published and nothing changed since
@@ -2655,7 +2976,7 @@ const ProjectIMGenerator: React.FC = () => {
   // for review; otherwise publish straight away.
   const proceedToChecklist = () => {
     const result = buildPublishChecklist();
-    if (result.blocking.length || result.values.length || result.slots.length || result.translations.length) {
+    if (result.blocking.length || result.values.length || result.slots.length || result.conditionsNoData.length || result.translations.length) {
       setChecklist(result);
     } else {
       handleGenerate();
@@ -3002,7 +3323,7 @@ const ProjectIMGenerator: React.FC = () => {
                     <Lock size={11} /> SKU slot: {(ref as SKUSlotRef).label?.[activeLang] || (ref as SKUSlotRef).slot}
                   </div>
                 ) : refIsOverridable(ref) ? (
-                  blockOverrides[section.id]?.[String(i)] ? (
+                  getBlockOverride(section.id, i, ref) ? (
                     // Template block unlocked for this project — fully editable (and for a
                     // table, that includes adding rows/columns).
                     <div className="border border-sky-200 rounded-lg bg-sky-50/30">
@@ -3010,16 +3331,16 @@ const ProjectIMGenerator: React.FC = () => {
                         <span className="text-[10px] font-bold uppercase tracking-wide text-sky-600 flex items-center gap-1">
                           <Unlock size={11} /> {refHasTable(ref) ? 'Table · edited for this project' : 'Edited for this project'}
                         </span>
-                        <button onClick={() => resetBlockOverride(section.id, i)} title="Discard the project edits and go back to the template block" className="text-[10px] font-medium text-gray-500 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={11} /> Reset to template</button>
+                        <button onClick={() => resetBlockOverride(section.id, [blockOvKey(i, ref), String(i)])} title="Discard the project edits and go back to the template block" className="text-[10px] font-medium text-gray-500 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={11} /> Reset to template</button>
                       </div>
                       <InlineBlockEditor
                         rowKey={`${section.id}-bo-${i}`}
-                        content={blockOverrides[section.id][String(i)].content}
-                        variant={blockOverrides[section.id][String(i)].variant}
+                        content={getBlockOverride(section.id, i, ref)!.content}
+                        variant={getBlockOverride(section.id, i, ref)!.variant}
                         languages={editorLanguages}
                         attributes={projectAttributes}
-                        onChange={(lang, html) => updateBlockOverride(section.id, i, lang, html)}
-                        onVariantChange={(v) => setBlockOverrideVariant(section.id, i, v)}
+                        onChange={(lang, html) => updateBlockOverride(section.id, blockOverrideKeyInUse(section.id, i, ref), lang, html)}
+                        onVariantChange={(v) => setBlockOverrideVariant(section.id, blockOverrideKeyInUse(section.id, i, ref), v)}
                         enableTranslate
                       />
                     </div>
@@ -3030,7 +3351,7 @@ const ProjectIMGenerator: React.FC = () => {
                       <span className="absolute top-1 right-1 text-gray-300" title="Template content — edit it for this project below"><Lock size={11} /></span>
                       <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                       <button
-                        onClick={() => editBlockForProject(section.id, i, ref as InlineBlockRef)}
+                        onClick={() => editBlockForProject(section.id, blockOvKey(i, ref), ref as InlineBlockRef)}
                         title={refHasTable(ref)
                           ? 'Edit this table for this project only — the shared template keeps its version'
                           : 'Edit this text for this project only — the shared template keeps its version'}
@@ -3244,6 +3565,21 @@ const ProjectIMGenerator: React.FC = () => {
          detail={generating ? publishStatus : null}
        />
 
+       {/* Concurrent-edit conflict: someone else saved after we loaded. All saves are halted
+           until reload; the operator's edits are stashed in the local draft and re-offered. */}
+       {saveConflict && (
+         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] bg-white border border-rose-300 shadow-xl rounded-xl px-4 py-3 flex items-center gap-4 max-w-xl">
+           <AlertCircle size={18} className="text-rose-500 shrink-0" />
+           <span className="text-sm text-gray-700">
+             <strong>{saveConflict.by ?? 'Someone else'}</strong> saved this {typeLabel.toLowerCase()} at{' '}
+             {new Date(saveConflict.at).toLocaleString()} — after you loaded it. Saving is paused so
+             their work isn't overwritten. Reload to get their version; you'll then be offered your
+             own edits to restore and merge.
+           </span>
+           <button onClick={reloadAfterConflict} className="px-3 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-semibold hover:bg-rose-700 shrink-0">Reload</button>
+         </div>
+       )}
+
        {/* Recovered unsaved edits from a hang/crash/close on this device. */}
        {pendingDraft && (
          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[65] bg-white border border-amber-300 shadow-xl rounded-xl px-4 py-3 flex items-center gap-4 max-w-lg">
@@ -3318,8 +3654,13 @@ const ProjectIMGenerator: React.FC = () => {
              .map((s) => s.skuNumber)
              .filter(Boolean)}
            version={instance?.version}
-           onRendered={attachPrintPdfToProject}
+           onRendered={async (res, langs, size) => {
+             // A fresh render for the current version — keep the pipeline's Print step live.
+             setLatestRenderVersion(instance?.version ?? null);
+             await attachPrintPdfToProject(res, langs, size);
+           }}
            onCoverPrefs={persistCoverPrefs}
+           onReviewSent={handleReviewSent}
            onClose={() => setShowPrintDialog(false)}
          />
        )}
@@ -3427,6 +3768,17 @@ const ProjectIMGenerator: React.FC = () => {
                    </ul>
                  </div>
                )}
+               {checklist.conditionsNoData.length > 0 && (
+                 <div>
+                   <div className="text-xs font-bold uppercase tracking-wide text-orange-600 mb-1.5">Chapters left out — condition has no data ({checklist.conditionsNoData.length})</div>
+                   <p className="text-xs text-muted mb-1.5">These chapters will NOT be in the published manual. Fill the attribute value, or force-include them under Chapter Conditions.</p>
+                   <ul className="space-y-1">
+                     {checklist.conditionsNoData.map((v, i) => (
+                       <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><EyeOff size={14} className="text-orange-400 mt-0.5 shrink-0" /> {v}</li>
+                     ))}
+                   </ul>
+                 </div>
+               )}
                {checklist.translations.map(t => (
                  <div key={t.lang}>
                    <div className="text-xs font-bold uppercase tracking-wide text-amber-600 mb-1.5">Missing {t.lang.toUpperCase()} translation ({t.items.length})</div>
@@ -3446,6 +3798,53 @@ const ProjectIMGenerator: React.FC = () => {
                  title={checklist.blocking.length > 0 ? 'Resolve the blocking items first' : undefined}
                  className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                >Publish anyway</button>
+             </div>
+           </div>
+         </div>
+       )}
+
+       {/* DAILY BACKUPS — one snapshot per day, last 3 days, restored into the editor. */}
+       {showBackups && (
+         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+             <div className="flex items-start justify-between mb-1">
+               <h3 className="font-bold text-lg flex items-center gap-2"><RotateCcw size={18} className="text-indigo-500" /> Restore a daily backup</h3>
+               <button onClick={() => setShowBackups(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+             </div>
+             <p className="text-sm text-muted mb-4">
+               One snapshot is kept per day (each day's last saved state), for the last 3 days.
+               Restoring loads it <strong>into the editor</strong> — review it in the preview, undo with
+               Ctrl/Cmd+Z, and press Save Draft to keep it. Nothing changes on the server until you save.
+             </p>
+             {backups === null ? (
+               <div className="flex items-center gap-2 text-sm text-muted py-6 justify-center"><Loader2 size={15} className="animate-spin" /> Loading backups…</div>
+             ) : backups.length === 0 ? (
+               <div className="text-sm text-gray-400 text-center py-6 border border-dashed border-gray-200 rounded-lg">
+                 No backups yet — a snapshot is stored automatically with each day's saves.
+               </div>
+             ) : (
+               <div className="border rounded-lg divide-y">
+                 {backups.map(b => (
+                   <div key={b.backupDate} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                     <div className="min-w-0">
+                       <div className="text-sm font-medium text-gray-800">
+                         {new Date(b.backupDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                       </div>
+                       <div className="text-xs text-muted">
+                         Last saved {new Date(b.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                         {b.savedBy ? ` by ${b.savedBy}` : ''}
+                       </div>
+                     </div>
+                     <button
+                       onClick={() => restoreBackup(b)}
+                       className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                     >Load into editor</button>
+                   </div>
+                 ))}
+               </div>
+             )}
+             <div className="flex justify-end mt-5 pt-4 border-t border-gray-100">
+               <button onClick={() => setShowBackups(false)} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50">Close</button>
              </div>
            </div>
          </div>
@@ -3536,6 +3935,21 @@ const ProjectIMGenerator: React.FC = () => {
                        <div className="flex items-center gap-2 text-xs text-muted">
                           <span>For: {project?.name}</span>
                           {instance?.status === 'generated' && <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">GENERATED</span>}
+                          {/* Out for supplier review on Markup.io. Derived, never stored: editing
+                              (status back to draft) or republishing (version bump) ends it. */}
+                          {instance && isInReview(instance) && (
+                            instance.reviewUrl ? (
+                              <a
+                                href={instance.reviewUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={`Sent for review${instance.reviewRequestedBy ? ` by ${instance.reviewRequestedBy}` : ''}${instance.reviewRequestedAt ? ` on ${new Date(instance.reviewRequestedAt).toLocaleDateString()}` : ''} — open the Markup.io review`}
+                                className="flex items-center gap-1 bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide hover:bg-sky-200"
+                              ><Eye size={10} /> In Review</a>
+                            ) : (
+                              <span className="flex items-center gap-1 bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"><Eye size={10} /> In Review</span>
+                            )
+                          )}
                           {locked && <span className="flex items-center gap-1 bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"><Lock size={10} /> Final</span>}
                        </div>
                    </div>
@@ -3593,17 +4007,11 @@ const ProjectIMGenerator: React.FC = () => {
                        </button>
                        {showExportMenu && (
                            <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
-                               <button 
-                                  onClick={() => handleExport('json')}
+                               <button
+                                  onClick={() => handleExport()}
                                   className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2"
                                >
                                   <FileJson size={16} /> Export as JSON
-                               </button>
-                               <button 
-                                  onClick={() => handleExport('xml')}
-                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2"
-                               >
-                                  <Code size={16} /> XML (InDesign)
                                </button>
                            </div>
                        )}
@@ -3611,7 +4019,8 @@ const ProjectIMGenerator: React.FC = () => {
 
                    <button onClick={handlePublishClick} disabled={isBusy} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
                       {(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
-                      <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${activeLang.toUpperCase()})`}</span>
+                      {/* Says what it does: publishes EVERY required language, not the active tab. */}
+                      <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'})`}</span>
                    </button>
 
                    {/* Settings menu — houses destructive/rare actions (Delete Draft / Reset)
@@ -3646,6 +4055,16 @@ const ProjectIMGenerator: React.FC = () => {
                                    </button>
                                  )
                                )}
+                               {instance && (
+                                 <button
+                                    onClick={() => { setShowSettingsMenu(false); void openBackups(); }}
+                                    disabled={loading || isBusy || locked}
+                                    title="Load one of the last 3 daily snapshots into the editor"
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2 disabled:opacity-60"
+                                 >
+                                    <RotateCcw size={16} /> Restore daily backup
+                                 </button>
+                               )}
                                <button
                                   onClick={() => { setShowSettingsMenu(false); handleDeleteDraft(); }}
                                   disabled={loading || isBusy || locked}
@@ -3660,12 +4079,87 @@ const ProjectIMGenerator: React.FC = () => {
                </div>
            </div>
 
+           {/* Manual pipeline — where this manual stands and what's next, each step
+               clickable to its action. Derivations use only data this page already has
+               (plus the three async pipeline signals fetched above). */}
+           {(() => {
+             const checklist = buildPublishChecklist();
+             const contentIssues = checklist.blocking.length + checklist.values.length + checklist.slots.length + checklist.conditionsNoData.length;
+             const published = instance?.status === 'generated';
+             const inReview = !!instance && isInReview(instance);
+             const reviewDone = inReview && instance?.reviewDone === true;
+             const threads = instance?.reviewActiveThreads;
+
+             const steps: PipelineStep[] = [
+               {
+                 key: 'content', label: 'Content',
+                 state: contentIssues === 0 ? 'done' : 'todo',
+                 detail: contentIssues > 0 ? `${contentIssues} open item${contentIssues === 1 ? '' : 's'}` : undefined,
+                 title: contentIssues > 0 ? 'Open the checklist of missing values / slots / conditions' : 'All values, slots and conditions are filled',
+                 onClick: contentIssues > 0 ? () => setChecklist(checklist) : undefined,
+               },
+               otherRequiredLangs.length === 0
+                 ? { key: 'translation', label: 'Translation', state: 'skipped', detail: 'EN only', title: 'This manual only produces English' }
+                 : {
+                     key: 'translation', label: 'Translation',
+                     state: untranslatedSectionLabels.size === 0 ? 'done' : 'todo',
+                     detail: untranslatedSectionLabels.size > 0 ? `${untranslatedSectionLabels.size} untranslated` : `${otherRequiredLangs.length} lang${otherRequiredLangs.length === 1 ? '' : 's'}`,
+                     title: 'Review & translate project-authored content',
+                     onClick: locked ? undefined : () => setIsTranslateModalOpen(true),
+                   },
+               {
+                 key: 'publish', label: 'Published',
+                 state: !published ? 'todo' : pipelineStale ? 'warn' : 'done',
+                 detail: !published ? undefined : pipelineStale ? `v${instance?.version} · out of date` : `v${instance?.version}`,
+                 title: !published ? 'Publish every required language' : pipelineStale ? 'Sources changed since this publish — publish again' : 'Published and up to date',
+                 onClick: () => handlePublishClick(),
+               },
+               !inReview
+                 ? {
+                     key: 'review', label: 'Review', state: locked ? 'skipped' : 'optional',
+                     detail: locked ? 'not reviewed' : 'optional',
+                     title: 'Optional: send a print PDF to Markup.io from the Print dialog',
+                     onClick: published ? () => openPrintForPublished() : undefined,
+                   }
+                 : reviewDone
+                   ? {
+                       key: 'review', label: 'Review', state: 'done', detail: 'Review done',
+                       title: `Markup.io review finished${instance?.reviewStatus ? ` (${instance.reviewStatus})` : ''} — open it`,
+                       onClick: instance?.reviewUrl ? () => window.open(instance.reviewUrl!, '_blank', 'noreferrer') : undefined,
+                     }
+                   : {
+                       key: 'review', label: 'Review', state: 'warn',
+                       detail: typeof threads === 'number' ? `in review · ${threads} open` : 'in review',
+                       title: 'Out on Markup.io collecting feedback — open the review',
+                       onClick: instance?.reviewUrl ? () => window.open(instance.reviewUrl!, '_blank', 'noreferrer') : undefined,
+                     },
+               {
+                 key: 'final', label: 'Final',
+                 state: locked ? 'done' : 'todo',
+                 detail: locked && instance?.finalizedAt ? new Date(instance.finalizedAt).toLocaleDateString() : undefined,
+                 title: locked ? 'Signed off and locked' : 'Mark this manual FINAL (locks its content)',
+                 onClick: !locked && instance ? () => setShowFinalizeConfirm(true) : undefined,
+               },
+               ...(isPrintExportAvailable() ? [{
+                 key: 'print', label: 'Print',
+                 state: (latestRenderVersion == null ? 'todo'
+                   : instance?.version != null && latestRenderVersion < instance.version ? 'warn' : 'done') as PipelineStep['state'],
+                 detail: latestRenderVersion === null ? 'no PDF yet'
+                   : latestRenderVersion === undefined ? undefined
+                   : instance?.version != null && latestRenderVersion < instance.version ? `v${latestRenderVersion} outdated` : `v${latestRenderVersion}`,
+                 title: published ? 'Open the print-PDF dialog' : 'Publish first — the print PDF is built from the published files',
+                 onClick: published ? () => openPrintForPublished() : undefined,
+               } satisfies PipelineStep] : []),
+             ];
+             return <PipelineStepper steps={steps} />;
+           })()}
+
            {locked && (
              <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900">
                <Lock size={18} className="shrink-0 text-emerald-600" />
                <div className="text-sm flex-1">
                  <span className="font-semibold">This {typeLabel.toLowerCase()} is marked FINAL and is locked against changes.</span>{' '}
-                 {instance?.finalizedAt && <>Finalized {new Date(instance.finalizedAt).toLocaleString()}. </>}
+                 {instance?.finalizedAt && <>Finalized {new Date(instance.finalizedAt).toLocaleString()}{instance?.finalizedBy ? ` by ${instance.finalizedBy}` : ''}. </>}
                  To make changes, unlock it first — this prevents accidental edits to a finalized manual. You can still publish and export it.
                </div>
                <button onClick={() => setShowUnlockConfirm(true)} disabled={isBusy} className="flex items-center gap-1.5 bg-white border border-emerald-300 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-emerald-100 disabled:opacity-60"><Unlock size={14} /> Unlock to edit</button>
@@ -3836,18 +4330,17 @@ const ProjectIMGenerator: React.FC = () => {
                                const override = sectionVisibility[s.id];
                                const autoResult = (() => {
                                  if (!s.conditionFeatureId || !s.conditionLabel) return true;
-                                 const val = submittedAttrValues[s.conditionFeatureId];
-                                 if (!val) return null; // no data
+                                 const val = formData[s.conditionFeatureId] ?? submittedAttrValues[s.conditionFeatureId];
+                                 if (val === undefined) return null; // no data
                                  return attr ? matchesConditionValue(val, s.conditionLabel, attr) : true;
                                })();
                                const outcome = visible
                                  ? { tone: 'emerald' as const, icon: <Check size={11} />, text: 'In the manual' }
                                  : { tone: 'gray' as const, icon: <Minus size={11} />, text: 'Left out' };
-                               // Mirror isSectionVisible: a chapter with no submitted value is
-                               // INCLUDED by default (unlike a conditional block, which is left
-                               // out until its data arrives). Assuming `false` here would have
-                               // flagged every no-data chapter as an override.
-                               const autoVisible = autoResult === null ? true : autoResult;
+                               // Mirror isSectionVisible (and the resolver): a chapter whose
+                               // condition has no data is LEFT OUT until the value arrives, so
+                               // the preview always matches the published output.
+                               const autoVisible = autoResult === null ? false : autoResult;
                                const contrary = override !== undefined && override !== autoVisible;
                                return (
                                  <div key={s.id} className={`px-3 py-2.5 ${visible ? '' : 'bg-gray-50/60'}`}>
@@ -3861,7 +4354,7 @@ const ProjectIMGenerator: React.FC = () => {
                                          <span className="text-[11px] text-gray-500">
                                            {attr?.name ?? '?'} = {s.conditionLabel}
                                            {autoResult === null
-                                             ? ': no value entered yet, kept in by default'
+                                             ? ': no value entered yet — left out until the value arrives'
                                              : autoResult ? ': matches' : ': no match'}
                                          </span>
                                          {contrary && (
@@ -3907,14 +4400,16 @@ const ProjectIMGenerator: React.FC = () => {
                                // Condition/placeholder metadata still comes from the template ref
                                // (an override copies those fields and can't change them).
                                const shownRef = ref.kind === 'inline'
-                                 ? (blockOverrides[section.id]?.[String(index)] ?? ref)
+                                 ? (getBlockOverride(section.id, index, ref) ?? ref)
                                  : ref;
                                const rawContent = shownRef.kind === 'block'
                                  ? (() => { const blk = availableBlocks[(shownRef as any).block_id]; return blk?.content?.[activeLang] || blk?.content?.['en'] || ''; })()
                                  : ((shownRef as any).content?.[activeLang] || (shownRef as any).content?.['en'] || '');
                                const snippet = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
                                return {
-                                 key: `${section.id}:${index}`,
+                                 // Stable id key when the ref has one — survives template block
+                                 // reordering (legacy positional key otherwise).
+                                 key: refVisKey(section.id, index, ref),
                                  sectionId: section.id,
                                  sectionTitle: localizedSectionTitle(section, activeLang),
                                  label: snippet || (ref.kind === 'block' ? 'Shared block' : 'Inline content'),
@@ -3925,7 +4420,7 @@ const ProjectIMGenerator: React.FC = () => {
                                    : describeRefCondition(ref as FeatureConditionFields),
                                  autoVisible: refAutoVisible(ref),
                                  visible: isRefVisible(section.id, index, ref),
-                                 override: refVisibility[`${section.id}:${index}`],
+                                 override: refVisibility[refVisKey(section.id, index, ref)] ?? refVisibility[`${section.id}:${index}`],
                                  noData: !isPlaceholder && !!condAttrId && !merged[condAttrId],
                                };
                              })

@@ -38,7 +38,14 @@ const SEGMENT_RE = /(\{\{FRZ_\d+\}\}|<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s[^<>]*)?\/?>)/
 const escText = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const unescText = (s: string): string =>
+/**
+ * Decode the XLIFF/HTML entity forms this codec emits back to plain characters.
+ *
+ * Exported because im-tm-normalize.ts needs exactly this decoding to canonicalize
+ * a segment for translation-memory matching, and two entity decoders that drift
+ * apart would mean a stored TM key that no longer matches its own source text.
+ */
+export const unescapeEntities = (s: string): string =>
   s
     .replace(/&#x([0-9a-fA-F]+);/g, (_m, h: string) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_m, d: string) => String.fromCodePoint(parseInt(d, 10)))
@@ -132,7 +139,7 @@ export const decodeInlineXliff = (xml: string): { html: string; markerIds: strin
   ELEMENT_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = ELEMENT_RE.exec(xml))) {
-    html += unescText(xml.slice(lastIndex, m.index));
+    html += unescapeEntities(xml.slice(lastIndex, m.index));
     if (m[1] !== undefined) {
       markerIds.push(`x${m[1]}`);
       html += '<br/>';
@@ -141,11 +148,11 @@ export const decodeInlineXliff = (xml: string): { html: string; markerIds: strin
       const id = m[3];
       const payload = m[4] ?? '';
       markerIds.push(`${kind}${id}`);
-      html += unescText(payload);
+      html += unescapeEntities(payload);
     }
     lastIndex = ELEMENT_RE.lastIndex;
   }
-  html += unescText(xml.slice(lastIndex));
+  html += unescapeEntities(xml.slice(lastIndex));
   return { html, markerIds };
 };
 

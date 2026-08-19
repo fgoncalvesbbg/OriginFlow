@@ -77,7 +77,24 @@ describe('saveIMSection', () => {
     // sync its state and never re-upload the same images.
     expect(saved.content.en).toContain('https://cdn.example/img.png');
     expect((saved.blockRefs?.[0] as any).content.en).toContain('https://cdn.example/img.png');
-    expect(saved.blockRefs?.[1]).toEqual({ kind: 'block', block_id: 'b-1' });
+    // Every ref is backfilled with a stable id on save — project overrides key on it,
+    // so template reordering can't re-point them.
+    expect(saved.blockRefs?.[1]).toEqual(expect.objectContaining({ kind: 'block', block_id: 'b-1' }));
+    expect((saved.blockRefs?.[0] as any).id).toMatch(/[0-9a-f-]{36}/);
+    expect((saved.blockRefs?.[1] as any).id).toMatch(/[0-9a-f-]{36}/);
+  });
+
+  it('preserves an existing ref id instead of regenerating it', async () => {
+    const saved = await saveIMSection({
+      id: 'sec-ids',
+      templateId: 'tmpl-1',
+      title: 'T',
+      order: 1,
+      isPlaceholder: false,
+      content: { en: '' },
+      blockRefs: [{ kind: 'inline', id: 'keep-me', content: { en: '<p>x</p>' } } as any],
+    });
+    expect((saved.blockRefs?.[0] as any).id).toBe('keep-me');
   });
 
   it('leaves clean content untouched and skips block-ref externalization when nothing is inline-base64', async () => {

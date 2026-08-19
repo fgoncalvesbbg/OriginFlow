@@ -132,10 +132,32 @@ export interface ProjectIM {
   // IMTemplate.isFinalized. Defaults to false for existing/legacy rows.
   isFinalized?: boolean;
   finalizedAt?: string | null;
+  // Who marked the manual FINAL (email/id) — the sign-off attribution. Null when not final.
+  finalizedBy?: string | null;
   updatedAt: string;
+  // Who last saved the row (email/id) — shown when a concurrent-edit conflict is detected.
+  updatedBy?: string | null;
   // Monotonic publish counter — 0/absent while only ever saved as a draft, then
   // +1 on each publish (status='generated'). Stamped in the generated PDF footer.
   version?: number;
+  // Markup.io review round (migration 111), written by the send-to-markup function.
+  // "In Review" is DERIVED: status='generated' AND reviewRequestedAt set AND
+  // reviewVersion = version. A draft save or a republish ends it implicitly; the
+  // link is kept afterwards as the last round's history.
+  reviewUrl?: string | null;
+  reviewMarkupId?: string | null;
+  reviewRequestedAt?: string | null;
+  reviewRequestedBy?: string | null;
+  reviewVersion?: number | null;
+  // Cached review OUTCOME, polled from the Markup.io API (migration 112).
+  /** Raw Markup.io markup status at last check ('editing', 'complete', …; 'deleted'). Null = never checked. */
+  reviewStatus?: string | null;
+  /** True when the markup reads completed/approved or has >=1 explicit approval. Null = never checked. */
+  reviewDone?: boolean | null;
+  /** Open (unresolved) Markup.io comment threads at last check. */
+  reviewActiveThreads?: number | null;
+  /** When the Markup.io API was last polled. */
+  reviewCheckedAt?: string | null;
   // project_skus.id values this IM is bound to (the SKUs it covers). Empty/absent =
   // all of the project's SKUs (backward compatible). Bound SKUs drive resolution.
   boundSkuIds?: string[];
@@ -208,6 +230,14 @@ export interface FeatureConditionFields {
 
 export interface InlineBlockRef extends FeatureConditionFields {
   kind: 'inline';
+  /**
+   * Stable identity for this ref, assigned on template save (saveIMSection backfills
+   * missing ones). Project overrides (refvis_ visibility, blockOverrides) are keyed by
+   * this id (`ref:<id>`), so inserting/reordering/deleting blocks in the template no
+   * longer silently re-points every downstream project's overrides. Legacy refs without
+   * an id fall back to positional `<sectionId>:<index>` keys.
+   */
+  id?: string;
   content: Record<string, string>; // lang -> html
   // When set, the entire row content is wrapped in this ISO callout box on
   // resolve (same treatment a shared block gets from its blockType). Absent =
@@ -224,11 +254,15 @@ export interface InlineBlockRef extends FeatureConditionFields {
 
 export interface SharedBlockRef extends FeatureConditionFields {
   kind: 'block';
+  /** Stable ref identity — see InlineBlockRef.id. */
+  id?: string;
   block_id: string;
 }
 
 export interface SKUSlotRef {
   kind: 'sku_slot';
+  /** Stable ref identity — see InlineBlockRef.id. */
+  id?: string;
   slot: string;
   schema: 'rich_text' | 'annotated_image_set' | 'legend_table' | 'step_sequence';
   label: Record<string, string>;

@@ -10,7 +10,9 @@
  * margin boxes, `target-counter()`):
  *   - page numbers are added by the engine's footer (see netlify/functions/render-print-pdf.ts),
  *     not via CSS counters;
- *   - the TOC lists clickable section links (internal anchors) without printed page numbers;
+ *   - the TOC lists clickable section links (internal anchors); printed page numbers cannot come
+ *     from CSS (`target-counter()` is Prince-only) — they are STAMPED at merge time from the
+ *     links' own GoTo destinations (see stampTocPageNumbers in render-print-merge.ts);
  *   - pagination is flow-based (`break-before: page` per page-block) so long sections flow across
  *     pages instead of being clipped.
  *
@@ -85,6 +87,35 @@ export interface PrintManual {
   sections: PrintSection[];
 }
 
+/**
+ * Unresolved {{attribute}} tokens still present in published manual HTML. The resolver
+ * leaves an unmatched token as literal `{{name}}` text (im-resolver substituteTokens),
+ * which would otherwise print verbatim in the final booklet. The print pipeline's
+ * prepare step scans with this and refuses to render — a print-shop artifact is the
+ * least reversible output, so it fails loudly instead of shipping placeholder braces.
+ */
+export const findUnresolvedTokens = (
+  manuals: PrintManual[],
+): Array<{ language: string; section: string; token: string }> => {
+  const out: Array<{ language: string; section: string; token: string }> = [];
+  const seen = new Set<string>();
+  const TOKEN_RE = /\{\{\s*[^{}]+?\s*\}\}/g;
+  for (const manual of manuals) {
+    for (const section of manual.sections) {
+      for (const node of section.nodes) {
+        if (!('html' in node) || !node.html) continue;
+        for (const m of node.html.match(TOKEN_RE) ?? []) {
+          const key = `${manual.language}::${section.id}::${m}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({ language: manual.language, section: section.title, token: m });
+        }
+      }
+    }
+  }
+  return out;
+};
+
 export interface PrintCoverOptions {
   logoUrl?: string;
   coverImageUrl?: string;
@@ -143,6 +174,7 @@ export interface PrintHtmlOptions {
 // ---------------------------------------------------------------------------
 
 const GOOGLE_FONT_IMPORTS: Record<string, string> = {
+  Inter: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap',
   Roboto: 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap',
   'Open Sans': 'https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap',
   Lato: 'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap',
@@ -151,8 +183,12 @@ const GOOGLE_FONT_IMPORTS: Record<string, string> = {
   'Noto Sans': 'https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap',
 };
 
-const getFontImport = (fontFamily?: string): string =>
-  fontFamily && GOOGLE_FONT_IMPORTS[fontFamily] ? `@import url('${GOOGLE_FONT_IMPORTS[fontFamily]}');` : '';
+// The default font stack is Inter (see getFontStack), so an absent/unknown family must
+// still import Inter — otherwise every default-font PDF silently rendered in Arial.
+const getFontImport = (fontFamily?: string): string => {
+  const key = fontFamily && GOOGLE_FONT_IMPORTS[fontFamily] ? fontFamily : 'Inter';
+  return `@import url('${GOOGLE_FONT_IMPORTS[key]}');`;
+};
 
 const getFontStack = (fontFamily?: string): string =>
   !fontFamily || fontFamily === 'Inter' ? 'Inter, Arial, sans-serif' : `'${fontFamily}', Arial, sans-serif`;
@@ -165,10 +201,14 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+// Keep in sync with IM_LANGUAGES (src/config/im-languages.ts) — a missing entry makes the
+// language divider print the raw code ("BG") instead of the native name.
 const LANGUAGE_NAMES: Record<string, string> = {
   en: 'English', de: 'Deutsch', fr: 'Français', es: 'Español', it: 'Italiano',
   nl: 'Nederlands', pt: 'Português', pl: 'Polski', cs: 'Čeština', sv: 'Svenska',
   da: 'Dansk', fi: 'Suomi', no: 'Norsk', ro: 'Română', hu: 'Magyar',
+  bg: 'Български', hr: 'Hrvatski', et: 'Eesti', el: 'Ελληνικά',
+  lv: 'Latviešu', lt: 'Lietuvių', sk: 'Slovenčina', sl: 'Slovenščina',
 };
 const languageName = (code: string) => LANGUAGE_NAMES[code] ?? code.toUpperCase();
 
@@ -561,10 +601,12 @@ const buildStyles = (
     .im-divider-title { color: ${primaryColor}; font-size: ${mm(14)}; margin: 0; }
     .im-divider-code { color: #64748b; letter-spacing: 0.3em; margin: ${mm(2)} 0 0; }
 
-    /* TOC — clickable links (no printed page numbers on a Chromium engine) */
+    /* TOC — clickable links. Page numbers are stamped into each row's link rectangle at
+       merge time (stampTocPageNumbers), so the row reserves right padding for them: a long
+       title must not run under the stamped number. */
     .im-page-toc .im-toc-title { color: ${primaryColor}; font-size: ${mm(7)}; border-bottom: 0.6mm solid ${primaryColor}; margin: 0 0 ${mm(6)}; padding-bottom: ${mm(2)}; }
     .im-toc { display: block; }
-    .im-toc-row { display: block; text-decoration: none; color: #1f2937; padding: ${mm(1.6)} 0; border-bottom: 1px solid #f1f5f9; font-size: ${mm(3.8)}; }
+    .im-toc-row { display: block; text-decoration: none; color: #1f2937; padding: ${mm(1.6)} ${mm(10)} ${mm(1.6)} 0; border-bottom: 1px solid #f1f5f9; font-size: ${mm(3.8)}; }
     .im-toc-row.im-toc-sub { padding-left: ${mm(6)}; color: #475569; font-size: ${mm(3.5)}; }
 
     /* Section content — sections flow continuously (like the preview); the whole content block

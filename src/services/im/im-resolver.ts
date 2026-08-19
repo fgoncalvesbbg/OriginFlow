@@ -495,16 +495,23 @@ export const resolveManual = (
       const ref = refs[i];
       let node: ResolvedNode | null = null;
 
-      // Per-ref manual visibility override, keyed by `<sectionId>:<index>`
-      // (normalizeResolverData expands the persisted `refvis_` keys to this form).
-      const refKey = `${section.id}:${i}`;
-      const refOverride = typeof conditions[refKey] === 'boolean' ? (conditions[refKey] as boolean) : undefined;
+      // Per-ref manual visibility override: keyed by the ref's stable id (`ref:<id>`)
+      // when it has one, with the legacy positional `<sectionId>:<index>` key as a
+      // fallback for overrides saved before ids existed. (normalizeResolverData expands
+      // the persisted `refvis_` keys to these forms.)
+      const idKey = ref.id ? `ref:${ref.id}` : null;
+      const posKey = `${section.id}:${i}`;
+      const refOverride =
+        idKey && typeof conditions[idKey] === 'boolean' ? (conditions[idKey] as boolean)
+        : typeof conditions[posKey] === 'boolean' ? (conditions[posKey] as boolean)
+        : undefined;
 
       // Per-project inline block override (e.g. an edited table): replace this template
       // inline ref with the project's version. Only inline refs are overridable — shared
       // and sku_slot refs are never touched. Not applied to section overrides (which are
-      // already the project's own content).
-      const inlineOverride = !override ? projectIM?.blockOverrides?.[section.id]?.[String(i)] : undefined;
+      // already the project's own content). Same id-first, position-fallback keying.
+      const overridesForSection = !override ? projectIM?.blockOverrides?.[section.id] : undefined;
+      const inlineOverride = (idKey ? overridesForSection?.[idKey] : undefined) ?? overridesForSection?.[String(i)];
       const effectiveRef: BlockRef = (ref.kind === 'inline' && inlineOverride) ? inlineOverride : ref;
 
       if (effectiveRef.kind === 'inline') {

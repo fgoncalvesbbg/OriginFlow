@@ -24,8 +24,17 @@ vi.mock('../../data', async () => {
       selectMaybeOne: vi.fn(() => Promise.resolve(readResult.current)),
       update: vi.fn(takeWrite),
       insert: vi.fn(takeWrite),
+      // Consumed only by the fire-and-forget daily-backup routine — inert here so it
+      // neither throws into the queue-based write mock nor affects assertions.
+      updateWhere: vi.fn(() => Promise.resolve()),
+      select: vi.fn(() => Promise.resolve([])),
+      delete: vi.fn(() => Promise.resolve()),
     },
-    auth: { refreshSession },
+    auth: {
+      refreshSession,
+      // saveProjectIM records updated_by from the session user.
+      getUser: vi.fn(() => Promise.resolve({ email: 'tester@example.com' })),
+    },
     isPermanent: errors.isPermanent,
     withDeadline: resilience.withDeadline,
     orEmpty: resilience.orEmpty,

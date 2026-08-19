@@ -64,17 +64,21 @@ describe('IM translation export/import pipeline', () => {
   });
 
   it('builds an XLIFF file, and a translator-filled copy round-trips back onto sections', async () => {
-    const xml = await buildTranslationXliff({ template, sections, targetLangs: ['de'], skipExisting: true });
-    expect(xml).toBeTruthy();
+    const built = await buildTranslationXliff({ template, sections, targetLangs: ['de'], skipExisting: true });
+    expect(built).toBeTruthy();
+    const xml = built!.xml;
     expect(xml).toContain('target-language="de"');
+    // No translation memory supplied, so nothing is pre-filled.
+    expect(built!.prefilled).toBe(0);
+    expect(built!.fresh).toBe(5);
 
     // Untranslated: every target should come back empty.
-    const untouched = parseTranslationXliff(xml!);
+    const untouched = parseTranslationXliff(xml);
     expect(untouched.files).toHaveLength(1);
     expect(untouched.files[0].units).toHaveLength(5);
     expect(untouched.files[0].units.every(u => u.html === null && u.warning)).toBe(true);
 
-    const translatedXml = fillTargetsWithSource(xml!);
+    const translatedXml = fillTargetsWithSource(xml);
     const parsed = parseTranslationXliff(translatedXml);
     expect(parsed.errors).toEqual([]);
     expect(parsed.files[0].units.every(u => u.html !== null)).toBe(true);
@@ -118,23 +122,24 @@ describe('IM translation export/import pipeline', () => {
         ],
       },
     ];
-    const xml = await buildTranslationXliff({ template, sections: withVerbatim, targetLangs: ['de'], skipExisting: false });
-    expect(xml).toContain('Nicht in Wasser tauchen');
-    expect(xml).not.toContain('Do not immerse in water');
+    const built = await buildTranslationXliff({ template, sections: withVerbatim, targetLangs: ['de'], skipExisting: false });
+    expect(built!.xml).toContain('Nicht in Wasser tauchen');
+    expect(built!.xml).not.toContain('Do not immerse in water');
   });
 
   it('skips fragments whose target language already has content when skipExisting is true', async () => {
     const alreadyTranslated: IMSection[] = [
       { ...sectionB, id: 'sec-d', titleI18n: { de: 'Reinigung' }, content: { en: sectionB.content.en, de: 'schon da' } },
     ];
-    const xml = await buildTranslationXliff({ template, sections: alreadyTranslated, targetLangs: ['de'], skipExisting: true });
-    expect(xml).toBeNull();
+    const built = await buildTranslationXliff({ template, sections: alreadyTranslated, targetLangs: ['de'], skipExisting: true });
+    expect(built).toBeNull();
   });
 
   it('flags a fragment id that no longer resolves as a structural-drift failure', () => {
     const parsed = {
       files: [{ targetLang: 'de', units: [{ id: 'sec-a#inline:99', html: '<p>Ghost row</p>' }] }],
       errors: [],
+      hasLegacyIds: true,
     };
     const { report, changedSectionIds } = applyTranslationImport(sections, parsed);
     expect(report.ok).toBe(0);

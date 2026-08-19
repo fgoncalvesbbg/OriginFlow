@@ -31,6 +31,7 @@ import {
   getProjectIM,
   getProjectIMStaleReasons,
   getPrintRenders,
+  getPublishHistory,
   getProductionUpdates,
   saveProductionUpdate,
   createAttributeRequest,
@@ -60,6 +61,7 @@ import {
 import * as XLSX from 'xlsx';
 import AttributeInput from '../components/common/AttributeInput';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
+import PublishDiffModal from './im/PublishDiffModal';
 
 // --- Internal Components ---
 
@@ -103,9 +105,17 @@ const ProjectDetail: React.FC = () => {
   // Drill-down reasons a published manual is out of date (empty = up to date).
   const [imStaleReasons, setImStaleReasons] = useState<import('../services').StaleReason[]>([]);
   const [leafletStaleReasons, setLeafletStaleReasons] = useState<import('../services').StaleReason[]>([]);
+  // "What changed?" drill-down (PublishDiffModal) for the stale IM / leaflet panels.
+  const [diffTarget, setDiffTarget] = useState<'im' | 'warning_leaflet' | null>(null);
+  // True when the up-to-date check FAILED — shown as "unknown", never as silently fine.
+  const [imStaleCheckFailed, setImStaleCheckFailed] = useState(false);
+  const [leafletStaleCheckFailed, setLeafletStaleCheckFailed] = useState(false);
   // Historical print-PDF renders (PDFShift final versions), newest first — one list per doc type.
   const [imRenders, setImRenders] = useState<PrintRender[]>([]);
   const [leafletRenders, setLeafletRenders] = useState<PrintRender[]>([]);
+  // Publish events (digital JSON artifact), newest first — who published which languages, when.
+  const [imPublishHistory, setImPublishHistory] = useState<import('../services').PublishHistoryEvent[]>([]);
+  const [leafletPublishHistory, setLeafletPublishHistory] = useState<import('../services').PublishHistoryEvent[]>([]);
 
   // Manufacturing State
   const [productionUpdates, setProductionUpdates] = useState<ProductionUpdate[]>([]);
@@ -229,19 +239,43 @@ const ProjectDetail: React.FC = () => {
   }, [id]);
 
   // Why each published manual is out of date vs its source blocks/template (if at all).
+  // A FAILED check is tracked separately — it must render as "couldn't check", not as
+  // "up to date" (no chip).
   useEffect(() => {
     let active = true;
     if (id && projectIM?.status === 'generated') {
-      getProjectIMStaleReasons(id, 'im').then(r => { if (active) setImStaleReasons(r); }).catch(() => {});
-    } else setImStaleReasons([]);
+      getProjectIMStaleReasons(id, 'im')
+        .then(r => { if (active) { setImStaleReasons(r); setImStaleCheckFailed(false); } })
+        .catch(e => { console.error('IM staleness check failed:', e); if (active) setImStaleCheckFailed(true); });
+    } else { setImStaleReasons([]); setImStaleCheckFailed(false); }
     return () => { active = false; };
   }, [id, projectIM?.status, projectIM?.updatedAt]);
 
   useEffect(() => {
     let active = true;
     if (id && projectLeaflet?.status === 'generated') {
-      getProjectIMStaleReasons(id, 'warning_leaflet').then(r => { if (active) setLeafletStaleReasons(r); }).catch(() => {});
-    } else setLeafletStaleReasons([]);
+      getProjectIMStaleReasons(id, 'warning_leaflet')
+        .then(r => { if (active) { setLeafletStaleReasons(r); setLeafletStaleCheckFailed(false); } })
+        .catch(e => { console.error('Leaflet staleness check failed:', e); if (active) setLeafletStaleCheckFailed(true); });
+    } else { setLeafletStaleReasons([]); setLeafletStaleCheckFailed(false); }
+    return () => { active = false; };
+  }, [id, projectLeaflet?.status, projectLeaflet?.updatedAt]);
+
+  // Publish history (im_publish_snapshots): who published which languages, when. Loaded
+  // whenever an instance exists — a draft can still have earlier publishes on record.
+  useEffect(() => {
+    let active = true;
+    if (id && projectIM) {
+      getPublishHistory(id, 'im').then(h => { if (active) setImPublishHistory(h); }).catch(() => {});
+    } else setImPublishHistory([]);
+    return () => { active = false; };
+  }, [id, projectIM?.status, projectIM?.updatedAt]);
+
+  useEffect(() => {
+    let active = true;
+    if (id && projectLeaflet) {
+      getPublishHistory(id, 'warning_leaflet').then(h => { if (active) setLeafletPublishHistory(h); }).catch(() => {});
+    } else setLeafletPublishHistory([]);
     return () => { active = false; };
   }, [id, projectLeaflet?.status, projectLeaflet?.updatedAt]);
 
@@ -281,6 +315,9 @@ const ProjectDetail: React.FC = () => {
                     {i === 0 && (
                       <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Latest</span>
                     )}
+                    {r.market && (
+                      <span className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200" title="Market this booklet was produced for">{r.market}</span>
+                    )}
                     <span className="text-sm font-semibold text-gray-800 uppercase">{r.languages.join(', ')}</span>
                     <span className="text-xs text-muted">· {r.pageSize?.toUpperCase()}{r.bytes ? ` · ${fmtRenderBytes(r.bytes)}` : ''}</span>
                   </div>
@@ -297,6 +334,41 @@ const ProjectDetail: React.FC = () => {
                 >
                   <Download size={13} /> Download
                 </a>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  };
+
+  // Publish history for the digital (JSON) artifact: one row per publish event — when,
+  // by whom, which languages. This is the read side of im_publish_snapshots, so "what is
+  // live, since when, published by whom" is answerable without asking a colleague.
+  const renderPublishHistory = (events: import('../services').PublishHistoryEvent[], accent: 'indigo' | 'amber') => {
+    if (!events.length) return null;
+    const dot = accent === 'indigo' ? 'bg-indigo-500' : 'bg-amber-500';
+    return (
+      <div className="mt-6 bg-white p-6 rounded-xl border border-gray-200 shadow">
+        <h4 className="text-xs font-bold text-muted uppercase mb-4 flex items-center gap-2">
+          <BookOpen size={14} /> Publish history ({events.length})
+        </h4>
+        <ol className="relative border-l border-gray-200 ml-2">
+          {events.map((ev, i) => (
+            <li key={`${ev.publishedAt}-${i}`} className="ml-5 pb-5 last:pb-0">
+              <span className={`absolute -left-[7px] mt-1.5 h-3.5 w-3.5 rounded-full border-2 border-white ${i === 0 ? dot : 'bg-gray-300'}`} />
+              <div className="flex items-center gap-2 flex-wrap">
+                {i === 0 && (
+                  <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Live</span>
+                )}
+                <span className="text-sm font-semibold text-gray-800 uppercase">
+                  {ev.languages.map(l => l.language).join(', ')}
+                </span>
+                <span className="text-xs text-muted">· {ev.languages.length} language{ev.languages.length > 1 ? 's' : ''}</span>
+              </div>
+              <div className="text-xs text-muted mt-1 flex items-center gap-1.5 flex-wrap">
+                <Clock size={11} /> {new Date(ev.publishedAt).toLocaleString()}
+                {ev.publishedBy && <span className="flex items-center gap-1"><UserIcon size={11} /> {ev.publishedBy}</span>}
               </div>
             </li>
           ))}
@@ -326,8 +398,10 @@ const ProjectDetail: React.FC = () => {
             console.error('Error loading categories:', err);
             return [];
           }),
-          getProjectIM(p.id),
-          getProjectIM(p.id, 'warning_leaflet'),
+          // getProjectIM propagates load failures (so the generator can't mistake them for
+          // "no draft"); here a failure only hides the status card, so degrade to null.
+          getProjectIM(p.id).catch(err => { console.error('Error loading project IM:', err); return null; }),
+          getProjectIM(p.id, 'warning_leaflet').catch(err => { console.error('Error loading leaflet IM:', err); return null; }),
           getProductionUpdates(p.id)
         ]);
         setSupplier(sData || null);
@@ -2049,6 +2123,16 @@ const ProjectDetail: React.FC = () => {
                               <RefreshCw size={11} /> Needs re-publish
                            </div>
                            <div className="text-[11px] text-orange-600/80 mt-1">↳ {staleSummary(imStaleReasons)}</div>
+                           <button
+                              onClick={() => setDiffTarget('im')}
+                              className="text-[11px] text-orange-700 underline font-semibold mt-0.5 hover:text-orange-900"
+                              title="Show which sections a re-publish would change, per language"
+                           >What changed?</button>
+                        </div>
+                     )}
+                     {imStaleCheckFailed && (
+                        <div className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200" title="The up-to-date check failed — this manual may or may not need a re-publish. Reload to retry.">
+                           <AlertCircle size={11} /> Up-to-date check failed
                         </div>
                      )}
                   </div>
@@ -2058,6 +2142,8 @@ const ProjectDetail: React.FC = () => {
                   </div>
                </div>
             )}
+
+            {renderPublishHistory(imPublishHistory, 'indigo')}
 
             {renderPrintTimeline(imRenders, 'indigo')}
 
@@ -2086,6 +2172,16 @@ const ProjectDetail: React.FC = () => {
                               <RefreshCw size={11} /> Needs re-publish
                            </div>
                            <div className="text-[11px] text-orange-600/80 mt-1">↳ {staleSummary(leafletStaleReasons)}</div>
+                           <button
+                              onClick={() => setDiffTarget('warning_leaflet')}
+                              className="text-[11px] text-orange-700 underline font-semibold mt-0.5 hover:text-orange-900"
+                              title="Show which sections a re-publish would change, per language"
+                           >What changed?</button>
+                        </div>
+                     )}
+                     {leafletStaleCheckFailed && (
+                        <div className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200" title="The up-to-date check failed — this leaflet may or may not need a re-publish. Reload to retry.">
+                           <AlertCircle size={11} /> Up-to-date check failed
                         </div>
                      )}
                   </div>
@@ -2095,6 +2191,8 @@ const ProjectDetail: React.FC = () => {
                   </div>
                </div>
             )}
+
+            {renderPublishHistory(leafletPublishHistory, 'amber')}
 
             {renderPrintTimeline(leafletRenders, 'amber')}
          </div>
@@ -2486,6 +2584,15 @@ const ProjectDetail: React.FC = () => {
             <button onClick={() => setAttrLinkModal({ open: false, url: '' })} className="mt-3 w-full py-2 text-sm text-gray-400 hover:text-gray-600">Close</button>
           </div>
         </div>
+      )}
+
+      {diffTarget && (
+        <PublishDiffModal
+          projectId={project.id}
+          templateType={diffTarget}
+          title={`${project.name}${diffTarget === 'warning_leaflet' ? ' — Warning Leaflet' : ''}`}
+          onClose={() => setDiffTarget(null)}
+        />
       )}
 
     </Layout>

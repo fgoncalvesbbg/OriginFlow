@@ -17,7 +17,21 @@ export interface IMShare {
   createdBy: string | null;
   createdAt: string;
   revokedAt: string | null;
+  /** Who revoked the link (audit trail). */
+  revokedBy: string | null;
+  /** Optional TTL — the public resolver stops honoring the token after this instant. */
+  expiresAt: string | null;
+  /** Free-text purpose/recipient ("DE distributor") so a list of links is tellable-apart. */
+  label: string | null;
+  /** When the public token was last successfully resolved (viewer opened). Null = never opened. */
+  lastUsedAt: string | null;
+  /** How many times the public token has been successfully resolved. */
+  useCount: number;
 }
+
+/** True once the link's TTL has passed (the RPC also enforces this server-side). */
+export const isShareExpired = (share: IMShare): boolean =>
+  !!share.expiresAt && new Date(share.expiresAt).getTime() <= Date.now();
 
 const mapRow = (row: any): IMShare => ({
   id: row.id,
@@ -27,6 +41,11 @@ const mapRow = (row: any): IMShare => ({
   createdBy: row.created_by,
   createdAt: row.created_at,
   revokedAt: row.revoked_at,
+  revokedBy: row.revoked_by ?? null,
+  expiresAt: row.expires_at ?? null,
+  label: row.label ?? null,
+  lastUsedAt: row.last_used_at ?? null,
+  useCount: row.use_count ?? 0,
 });
 
 /** Active (non-revoked) share links for a manual, most recent first. */
@@ -49,10 +68,11 @@ export const getIMShares = async (
   return rows.map(mapRow);
 };
 
-/** Mint a new public share link for a manual. */
+/** Mint a new public share link for a manual, optionally labeled and with a TTL. */
 export const createIMShare = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
+  opts?: { label?: string; expiresAt?: string | null },
 ): Promise<IMShare> => {
   const user = await auth.getUser();
   const createdBy = user?.email ?? user?.id ?? null;
@@ -60,13 +80,19 @@ export const createIMShare = async (
     project_id: projectId,
     template_type: templateType,
     created_by: createdBy,
+    label: opts?.label?.trim() || null,
+    expires_at: opts?.expiresAt ?? null,
   });
   return mapRow(created);
 };
 
-/** Revoke a share link — the public URL stops resolving immediately. */
+/** Revoke a share link — the public URL stops resolving immediately. Records who revoked. */
 export const revokeIMShare = async (id: string): Promise<void> => {
-  await db.updateWhere('im_shares', { revoked_at: new Date().toISOString() }, { where: { id } });
+  const user = await auth.getUser();
+  await db.updateWhere('im_shares', {
+    revoked_at: new Date().toISOString(),
+    revoked_by: user?.email ?? user?.id ?? null,
+  }, { where: { id } });
 };
 
 /**

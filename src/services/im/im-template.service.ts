@@ -5,9 +5,11 @@
 
 import { db, orEmpty, orUndefined, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { IMTemplate, IMTemplateType } from '../../types';
+import { BlockRef, IMSection, IMTemplate, IMTemplateType } from '../../types';
 import { generateUUID } from '../../utils';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
+import { getIMSections, saveIMSection } from './im-section.service';
+import { mapWithConcurrency } from '../core/save-retry';
 
 const mapTemplate = (t: any): IMTemplate => ({
   id: t.id,
@@ -80,6 +82,79 @@ export const createIMTemplate = async (
     });
     if (!data) throw new Error('createIMTemplate: no data returned');
     return mapTemplate(data);
+};
+
+/**
+ * Duplicate a template — sections and all — into another category.
+ *
+ * Sibling categories (fridge vs. freezer) share most of their structure and
+ * safety prose; without this, a new category starts from blank or a reviewed
+ * import doc and the author rebuilds sections that already exist one category
+ * over. The clone gets fresh section ids (parent links remapped) and FRESH
+ * block-ref ids (project overrides key on ref ids, and a new template starts
+ * with no projects — stale keys must not be inheritable). Shared-block
+ * references are kept as-is: the block library is cross-category by design.
+ * The clone is never FINAL, whatever the source was.
+ *
+ * Sections are written parents-first (parent_id FK) in waves; a mid-way failure
+ * leaves a partially-cloned template, which the error message says to open and
+ * finish or delete — silent partial success is worse than a loud one.
+ */
+export const duplicateIMTemplate = async (
+  sourceTemplateId: string,
+  targetCategoryId: string,
+  name: string,
+): Promise<IMTemplate> => {
+  const source = await getIMTemplateById(sourceTemplateId);
+  if (!source) throw new Error('Source template not found.');
+  const existing = await getIMTemplateByCategoryId(targetCategoryId, source.templateType);
+  if (existing) throw new Error('The target category already has a template of this type.');
+
+  const data = await db.insert<Row>('im_templates', {
+    id: generateUUID(),
+    category_id: targetCategoryId,
+    template_type: source.templateType,
+    name,
+    languages: source.languages?.length ? source.languages : ['en'],
+    is_finalized: false,
+    metadata: JSON.parse(JSON.stringify(source.metadata ?? {})),
+    updated_at: new Date().toISOString(),
+  });
+  if (!data) throw new Error('duplicateIMTemplate: no data returned');
+  const target = mapTemplate(data);
+
+  const sections = await getIMSections(sourceTemplateId);
+  const idMap = new Map(sections.map((s) => [s.id, generateUUID()]));
+
+  const insertedOldIds = new Set<string>();
+  let remaining = [...sections];
+  try {
+    while (remaining.length) {
+      // A wave = every section whose parent is already inserted (or is a root, or
+      // points outside this template). An all-blocked remainder (cyclic/corrupt
+      // parent links) is force-flushed as roots rather than looping forever.
+      let wave = remaining.filter((s) => !s.parentId || insertedOldIds.has(s.parentId) || !idMap.has(s.parentId));
+      if (!wave.length) wave = remaining;
+      remaining = remaining.filter((s) => !wave.includes(s));
+
+      await mapWithConcurrency(wave, 4, (s) => saveIMSection({
+        ...s,
+        id: idMap.get(s.id)!,
+        templateId: target.id,
+        parentId: s.parentId && idMap.has(s.parentId) ? idMap.get(s.parentId)! : null,
+        // Strip ref ids — saveIMSection backfills fresh ones.
+        blockRefs: (s.blockRefs ?? []).map(({ id: _oldRefId, ...rest }) => rest as BlockRef),
+        isFinal: false,
+      } as Partial<IMSection>));
+      wave.forEach((s) => insertedOldIds.add(s.id));
+    }
+  } catch (e) {
+    throw new Error(
+      `Copying sections failed after ${insertedOldIds.size} of ${sections.length} — the new template exists ` +
+      `but is incomplete. Open it to finish by hand, or delete it and try again. (${(e as Error).message})`,
+    );
+  }
+  return target;
 };
 
 /** Name of the shared, category-less template that project-based imports bind to. */

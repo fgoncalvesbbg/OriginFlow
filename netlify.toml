@@ -11,10 +11,13 @@
   framework = "#custom"
 
 # Server-side functions (PDF render, supplier file signed-URL issuer, IM
-# translation proxy). These read secrets from the Netlify site environment
-# (server-only — do NOT use a VITE_ prefix):
+# translation proxy, Markup.io review upload). These read secrets from the
+# Netlify site environment (server-only — do NOT use a VITE_ prefix):
 #   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  — storage + data access
 #   ANTHROPIC_API_KEY                          — translate.ts (IM AI translation)
+#   MARKUPIO_API_KEY                           — send-to-markup.ts (workspace API key)
+#   MARKUPIO_FOLDER_ID                         — send-to-markup.ts (optional target folder)
+# The matching public UI flag is VITE_MARKUP_REVIEW_ENABLED=true.
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"

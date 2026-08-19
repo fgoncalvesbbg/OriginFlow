@@ -3,21 +3,23 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
-  getCategories, getIMTemplates, createIMTemplate, updateIMTemplate, getAllProjectIMs,
-  getStaleProjectIMDetails, republishProjectIM, stalenessKey
+  getCategories, getIMTemplates, createIMTemplate, duplicateIMTemplate, updateIMTemplate, getAllProjectIMs,
+  getStaleProjectIMDetails, republishProjectIM, stalenessKey,
+  getLatestRendersByManual, checkMarkupReviewStatus, isMarkupReviewAvailable
 } from '../../services';
-import type { StaleManual } from '../../services';
+import type { StaleManual, MarkupReviewStatus } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
-  FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson
+  FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X
 } from 'lucide-react';
 import {
-  MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, type ManualStatus,
+  MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf, isInReview, type ManualStatus,
 } from './im-manual-status';
 import { IMViewerTab } from './IMViewerTab';
 import { ImImportDialog } from './ImImportDialog';
+import PublishDiffModal from './PublishDiffModal';
 import type { ImImportResult } from '../../services';
 
 const TEMPLATE_TYPE_ORDER: IMTemplateType[] = ['im', 'warning_leaflet'];
@@ -40,6 +42,9 @@ const fmtDate = (iso: string) =>
 const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
   final: <Lock size={10} />,
   needs_republish: <RefreshCw size={10} />,
+  unknown: <AlertTriangle size={10} />,
+  review_done: <CheckCircle2 size={10} />,
+  in_review: <Eye size={10} />,
   published: <CheckCircle2 size={10} />,
   draft: <Clock size={10} />,
 };
@@ -62,31 +67,100 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   // Published manuals whose source changed since publish, keyed by
   // `projectId::templateType` → drill-down reasons. Computed after mount.
   const [staleInfo, setStaleInfo] = useState<Map<string, StaleManual>>(new Map());
+  // True when the staleness check itself FAILED — rendered as "Status unknown", never as
+  // a green "Published" (an error must not read as a clean bill of health).
+  const [staleCheckFailed, setStaleCheckFailed] = useState(false);
   // Bulk re-publish selection (by ProjectIMSummary id) + in-flight flag.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [republishing, setRepublishing] = useState(false);
+  // "What changed?" drill-down target (opens PublishDiffModal on a stale row).
+  const [diffTarget, setDiffTarget] = useState<{ projectId: string; templateType: ProjectIMSummary['templateType']; title: string } | null>(null);
 
   const refreshStaleness = () =>
-    getStaleProjectIMDetails().then(setStaleInfo).catch(() => {});
+    getStaleProjectIMDetails()
+      .then(info => { setStaleInfo(info); setStaleCheckFailed(false); })
+      .catch(e => { console.error('[IMDashboard] staleness check failed:', e); setStaleCheckFailed(true); });
 
   useEffect(() => {
     let active = true;
-    getStaleProjectIMDetails().then(info => { if (active) setStaleInfo(info); }).catch(() => {});
+    getStaleProjectIMDetails()
+      .then(info => { if (active) { setStaleInfo(info); setStaleCheckFailed(false); } })
+      .catch(e => { console.error('[IMDashboard] staleness check failed:', e); if (active) setStaleCheckFailed(true); });
     return () => { active = false; };
   }, []);
+
+  // Print freshness: newest render per manual, so a published row can say
+  // "printed v3, current v5" / "never printed". null = not loaded (say nothing).
+  const [latestRenders, setLatestRenders] = useState<Map<string, { imVersion: number | null; createdAt: string }> | null>(null);
+  useEffect(() => {
+    let active = true;
+    getLatestRendersByManual()
+      .then(m => { if (active) setLatestRenders(m); })
+      .catch(e => console.error('[IMDashboard] latest renders failed:', e));
+    return () => { active = false; };
+  }, []);
+
+  // Live Markup.io review outcomes for the rows currently in review — polled via the
+  // markup-review-status function (which also caches the result on the manual, so the
+  // next dashboard load starts from the cached value). Small pool, best-effort.
+  const [reviewChecks, setReviewChecks] = useState<Map<string, MarkupReviewStatus>>(new Map());
+  useEffect(() => {
+    if (!isMarkupReviewAvailable()) return;
+    const targets = ims.filter(im => isInReview(im) && im.reviewDone !== true).slice(0, 12);
+    if (!targets.length) return;
+    let active = true;
+    let cursor = 0;
+    const worker = async () => {
+      while (active && cursor < targets.length) {
+        const im = targets[cursor++];
+        try {
+          const res = await checkMarkupReviewStatus(im.projectId, im.templateType);
+          if (active) setReviewChecks(prev => new Map(prev).set(im.id, res));
+        } catch { /* best-effort: the cached/derived state stands */ }
+      }
+    };
+    Promise.all(Array.from({ length: Math.min(3, targets.length) }, worker));
+    return () => { active = false; };
+  }, [ims]);
+
+  /** Row's review outcome: live check first, then the cached column. */
+  const reviewStateOf = (im: ProjectIMSummary) => {
+    const live = reviewChecks.get(im.id);
+    return {
+      reviewDone: live ? live.done : im.reviewDone,
+      activeThreads: live ? live.activeThreads : im.reviewActiveThreads,
+    };
+  };
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
 
   // Derive used categories for the filter dropdown
   const usedCatIds = [...new Set(ims.map(im => im.categoryId).filter(Boolean))] as string[];
 
-  const isStale = (im: ProjectIMSummary) =>
-    im.status === 'generated' && staleInfo.has(stalenessKey(im.projectId, im.templateType));
+  // null = the check failed (status renders as "unknown"), not "up to date".
+  const isStale = (im: ProjectIMSummary): boolean | null => {
+    if (im.status !== 'generated') return false;
+    if (staleCheckFailed) return null;
+    return staleInfo.has(stalenessKey(im.projectId, im.templateType));
+  };
   const staleReasons = (im: ProjectIMSummary) =>
     staleInfo.get(stalenessKey(im.projectId, im.templateType))?.reasons ?? [];
 
   /** Mutually-exclusive display status used for the badge, the filter and the grouping. */
-  const statusOf = (im: ProjectIMSummary) => manualStatusOf(im, isStale(im));
+  const statusOf = (im: ProjectIMSummary) =>
+    manualStatusOf({ ...im, reviewDone: reviewStateOf(im).reviewDone }, isStale(im));
+
+  /** One-line "what next" hint per row (null = nothing actionable — stay quiet). */
+  const nextAction = (im: ProjectIMSummary): string | null => {
+    const review = reviewStateOf(im);
+    return nextActionOf({
+      status: statusOf(im),
+      version: im.version,
+      reviewRequestedAt: im.reviewRequestedAt,
+      reviewActiveThreads: review.activeThreads,
+      printedVersion: latestRenders ? (latestRenders.get(stalenessKey(im.projectId, im.templateType))?.imVersion ?? null) : undefined,
+    });
+  };
 
   const filtered = ims.filter(im => {
     // Filter on the DERIVED status so the dropdown, the badges and the groups agree.
@@ -114,8 +188,9 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
    *
    * Re-publishing regenerates the published artifact from the current template and shared
    * blocks, so running it on a signed-off manual would silently replace the very output the
-   * FINAL lock exists to preserve. Migration 98 added no database trigger for project_ims, so
-   * nothing else stops it — the guard has to live here.
+   * FINAL lock exists to preserve. republishProjectIM refuses FINAL manuals at the service
+   * level too (and migration 102 locks the row server-side); this filter just keeps them
+   * out of the selection UI.
    */
   const selectableRows = filtered.filter(im => im.status === 'generated' && !im.isFinalized);
   const isSelectable = (im: ProjectIMSummary) => im.status === 'generated' && !im.isFinalized;
@@ -191,6 +266,23 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
         </select>
       </div>
 
+      {/* The staleness check failed — say so instead of quietly showing everything as fine. */}
+      {staleCheckFailed && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900">
+          <AlertTriangle size={16} className="shrink-0 text-amber-600" />
+          <span className="text-sm flex-1">
+            Couldn't check which manuals are out of date — published manuals below show as
+            <strong> Status unknown</strong> rather than falsely "Published".
+          </span>
+          <button
+            onClick={refreshStaleness}
+            className="flex items-center gap-1.5 bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-amber-100"
+          >
+            <RefreshCw size={13} /> Retry check
+          </button>
+        </div>
+      )}
+
       {/* Count + bulk action bar */}
       <div className="flex items-center justify-between gap-3 mb-4 min-h-[32px]">
         <p className="text-xs text-gray-400">
@@ -254,7 +346,8 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
             </thead>
             {/* One tbody per status group: keeps a single table (so columns stay aligned)
                 while giving each group a spanning header row. */}
-            {groupByStatus(filtered, isStale).map(({ status, items }) => {
+            {/* Rows carry the LIVE review outcome so grouping agrees with statusOf. */}
+            {groupByStatus(filtered.map(im => ({ ...im, reviewDone: reviewStateOf(im).reviewDone })), isStale).map(({ status, items }) => {
               const meta = MANUAL_STATUS_META[status];
               return (
               <tbody key={status} className="divide-y divide-gray-50">
@@ -335,12 +428,25 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                           return (
                             <span
                               className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${MANUAL_STATUS_META[s].classes}`}
-                              title={im.isFinalized && im.finalizedAt ? `Marked final on ${fmtDate(im.finalizedAt)}` : undefined}
+                              title={
+                                im.isFinalized && im.finalizedAt ? `Marked final on ${fmtDate(im.finalizedAt)}`
+                                : s === 'in_review' && im.reviewRequestedAt ? `Sent for review on ${fmtDate(im.reviewRequestedAt)}`
+                                : undefined
+                              }
                             >
                               {STATUS_ICON[s]} {MANUAL_STATUS_META[s].label}
                             </span>
                           );
                         })()}
+                        {statusOf(im) === 'in_review' && im.reviewUrl && (
+                          <a
+                            href={im.reviewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] font-semibold text-sky-700 underline hover:text-sky-900"
+                            title="Open the Markup.io review"
+                          >Open review</a>
+                        )}
                         {/* A final manual keeps its underlying publish state visible: "Final"
                             says it's locked, not whether it was ever published. */}
                         {im.isFinalized && (
@@ -371,7 +477,23 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                         const blocks = reasons.filter(r => r.type === 'block').map(r => r.label);
                         const others = reasons.filter(r => r.type !== 'block').map(r => r.label);
                         const summary = [blocks.length ? `block${blocks.length > 1 ? 's' : ''}: ${blocks.join(', ')}` : '', ...others.map(o => o.toLowerCase())].filter(Boolean).join(' · ');
-                        return <div className="text-[10px] text-orange-600/80 mt-1 max-w-[220px] truncate" title={summary}>↳ {summary}</div>;
+                        return (
+                          <div className="text-[10px] text-orange-600/80 mt-1 max-w-[220px] flex items-center gap-1.5">
+                            <span className="truncate" title={summary}>↳ {summary}</span>
+                            <button
+                              onClick={() => setDiffTarget({ projectId: im.projectId, templateType: im.templateType, title: `${im.projectName}${im.templateType === 'warning_leaflet' ? ' — Warning Leaflet' : ''}` })}
+                              className="shrink-0 underline font-semibold hover:text-orange-800"
+                              title="Show which sections a re-publish would change, per language"
+                            >What changed?</button>
+                          </div>
+                        );
+                      })()}
+                      {/* "What next" hint — quiet (null) when nothing is actionable. */}
+                      {(() => {
+                        const hint = nextAction(im);
+                        return hint ? (
+                          <div className="text-[10px] text-gray-400 mt-1 max-w-[220px] truncate" title={hint}>↳ {hint}</div>
+                        ) : null;
                       })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-400">{fmtDate(im.updatedAt)}</td>
@@ -392,6 +514,15 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
           </table>
         </div>
       )}
+
+      {diffTarget && (
+        <PublishDiffModal
+          projectId={diffTarget.projectId}
+          templateType={diffTarget.templateType}
+          title={diffTarget.title}
+          onClose={() => setDiffTarget(null)}
+        />
+      )}
     </div>
   );
 };
@@ -407,6 +538,7 @@ interface TemplatesTabProps {
   togglingId: string | null;   // template id whose finalized state is updating
   onCreate: (cat: CategoryL3, type: IMTemplateType) => void;
   onToggleFinalized: (t: IMTemplate) => void;
+  onDuplicate: (t: IMTemplate) => void;
   onImport: () => void;
 }
 
@@ -419,10 +551,11 @@ interface TemplateRowProps {
   toggling: boolean;
   onCreate: (cat: CategoryL3, type: IMTemplateType) => void;
   onToggleFinalized: (t: IMTemplate) => void;
+  onDuplicate: (t: IMTemplate) => void;
 }
 
 const TemplateRow: React.FC<TemplateRowProps> = ({
-  category, type, template, creating, toggling, onCreate, onToggleFinalized
+  category, type, template, creating, toggling, onCreate, onToggleFinalized, onDuplicate
 }) => {
   const Icon = type === 'warning_leaflet' ? AlertTriangle : FileText;
   const accent = type === 'warning_leaflet' ? 'text-amber-600' : 'text-indigo-600';
@@ -442,12 +575,21 @@ const TemplateRow: React.FC<TemplateRowProps> = ({
       <div className="mt-2 flex items-center justify-between">
         {template ? (
           <>
-            <Link
-              to={editorPath(category.id, type)}
-              className="flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-blue-800"
-            >
-              Edit <ArrowRight size={14} />
-            </Link>
+            <span className="flex items-center gap-2">
+              <Link
+                to={editorPath(category.id, type)}
+                className="flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-blue-800"
+              >
+                Edit <ArrowRight size={14} />
+              </Link>
+              <button
+                onClick={() => onDuplicate(template)}
+                title="Duplicate this template — sections and all — into another category"
+                className="p-1 text-gray-300 hover:text-indigo-600"
+              >
+                <Copy size={13} />
+              </button>
+            </span>
             <button
               onClick={() => onToggleFinalized(template)}
               disabled={toggling}
@@ -477,7 +619,7 @@ const TemplateRow: React.FC<TemplateRowProps> = ({
 };
 
 const TemplatesTab: React.FC<TemplatesTabProps> = ({
-  categories, templates, creatingId, togglingId, onCreate, onToggleFinalized, onImport
+  categories, templates, creatingId, togglingId, onCreate, onToggleFinalized, onDuplicate, onImport
 }) => (
   <div>
     <div className="flex items-center justify-between mb-4">
@@ -506,6 +648,7 @@ const TemplatesTab: React.FC<TemplatesTabProps> = ({
                 toggling={!!templates.find(t => t.categoryId === cat.id && t.templateType === type && t.id === togglingId)}
                 onCreate={onCreate}
                 onToggleFinalized={onToggleFinalized}
+                onDuplicate={onDuplicate}
               />
             ))}
           </div>
@@ -539,6 +682,29 @@ const IMDashboard: React.FC = () => {
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  // "Duplicate template into another category" modal state.
+  const [dupSource, setDupSource] = useState<IMTemplate | null>(null);
+  const [dupTargetCatId, setDupTargetCatId] = useState('');
+  const [duplicating, setDuplicating] = useState(false);
+
+  const handleDuplicate = async () => {
+    if (!dupSource || !dupTargetCatId || duplicating) return;
+    const targetCat = categories.find(c => c.id === dupTargetCatId);
+    if (!targetCat) return;
+    setDuplicating(true);
+    try {
+      await duplicateIMTemplate(dupSource.id, targetCat.id, defaultTemplateName(targetCat.name, dupSource.templateType));
+      setDupSource(null);
+      await loadTemplateData();
+      navigate(editorPath(targetCat.id, dupSource.templateType));
+    } catch (e) {
+      alert(`Duplicating the template failed: ${e instanceof Error ? e.message : String(e)}`);
+      // Keep the modal open; the error says whether a partial clone exists.
+      await loadTemplateData();
+    } finally {
+      setDuplicating(false);
+    }
+  };
 
   useEffect(() => {
     loadTemplateData();
@@ -663,6 +829,7 @@ const IMDashboard: React.FC = () => {
               togglingId={togglingId}
               onCreate={handleCreate}
               onToggleFinalized={handleToggleFinalized}
+              onDuplicate={(t) => { setDupSource(t); setDupTargetCatId(''); }}
               onImport={() => setShowImport(true)}
             />
       )}
@@ -676,6 +843,61 @@ const IMDashboard: React.FC = () => {
           onImported={handleImported}
         />
       )}
+
+      {/* Duplicate template into another category — offered only for categories that
+          don't already have a template of this type (one template per category+type). */}
+      {dupSource && (() => {
+        const sourceCat = categories.find(c => c.id === dupSource.categoryId);
+        const eligible = categories.filter(c =>
+          c.id !== dupSource.categoryId
+          && !templates.some(t => t.categoryId === c.id && t.templateType === dupSource.templateType));
+        return (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => !duplicating && setDupSource(null)}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-3.5 border-b">
+                <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                  <Copy size={16} /> Duplicate template
+                </h3>
+                <button onClick={() => !duplicating && setDupSource(null)} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <p className="text-gray-600">
+                  Copy <strong>{dupSource.name}</strong>{sourceCat ? <> ({sourceCat.name})</> : null} — all sections,
+                  languages and settings — into another category. Shared blocks stay references to the same block
+                  library; the copy starts unlocked (not FINAL) with no projects attached.
+                </p>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Target category</label>
+                  <select
+                    value={dupTargetCatId}
+                    onChange={(e) => setDupTargetCatId(e.target.value)}
+                    className="w-full text-sm border rounded px-2 py-1.5 mt-1 bg-white"
+                  >
+                    <option value="">Choose a category…</option>
+                    {eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {eligible.length === 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1.5">
+                      Every other category already has a {IM_TEMPLATE_TYPE_LABELS[dupSource.templateType]} template —
+                      a category holds at most one per type.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t">
+                <button onClick={() => setDupSource(null)} disabled={duplicating} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                <button
+                  onClick={handleDuplicate}
+                  disabled={!dupTargetCatId || duplicating}
+                  className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  {duplicating ? <><Loader2 size={14} className="animate-spin" /> Copying sections…</> : 'Duplicate'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Layout>
   );
 };

@@ -72,7 +72,12 @@ const externalizeSectionImages = async (
  * isn't downloaded again on every save.
  */
 export const saveIMSection = async (section: Partial<IMSection>): Promise<IMSection> => {
-    const { content, blockRefs } = await externalizeSectionImages(section);
+    const { content, blockRefs: extRefs } = await externalizeSectionImages(section);
+
+    // Backfill a stable id on every block ref that lacks one. Project overrides are keyed
+    // by this id, so reordering/inserting template blocks can't re-point them. Safe for
+    // published-content hashes: the resolver never serializes ref ids into its output.
+    const blockRefs = extRefs?.map((r) => (r.id ? r : { ...r, id: generateUUID() }));
 
     const payload: any = {
         title: section.title,

@@ -30,14 +30,14 @@ import { IMBlock, IMSection, IMTemplate, IMTemplateType, CategoryAttribute } fro
 import { getIMTemplates, getIMTemplateById } from './im-template.service';
 import { getIMSections } from './im-section.service';
 import { getIMBlocks } from './im-block.service';
-import { getGeneratedProjectIMs, getProjectIM } from './project-im.service';
+import { getGeneratedProjectIMs, getProjectIM, saveProjectIM } from './project-im.service';
 import { getProjectSkus } from '../project/project-sku.service';
 import { getProjectRequiredLanguages, resolveContentHash, publishResolvedManuals, getAttributesById, PublishResult } from './im-publish.service';
 
 export const stalenessKey = (projectId: string, templateType: IMTemplateType) => `${projectId}::${templateType}`;
 
 export interface StaleReason {
-  type: 'block' | 'template' | 'content';
+  type: 'block' | 'template' | 'content' | 'languages';
   label: string;
 }
 
@@ -45,6 +45,8 @@ export interface StaleManual {
   projectId: string;
   templateType: IMTemplateType;
   reasons: StaleReason[];
+  /** WHICH languages' published output no longer matches a re-resolve (uppercased codes). */
+  staleLanguages: string[];
 }
 
 const blocksByIdMap = (blocks: IMBlock[]): Record<string, IMBlock> => {
@@ -109,8 +111,12 @@ const computeReasons = (
   return reasons;
 };
 
-/** Is this manual's published output different from re-resolving it now? */
-const isStale = async (
+/**
+ * WHICH languages' published output differs from re-resolving now (empty = fresh).
+ * Deliberately does NOT short-circuit on the first mismatch: "stale in DE and FR"
+ * is a far cheaper republish decision than a bare "stale".
+ */
+const staleLanguagesOf = async (
   template: IMTemplate,
   sections: IMSection[],
   blocksById: Record<string, IMBlock>,
@@ -120,17 +126,24 @@ const isStale = async (
   // Attribute definitions, so the re-resolved hash uses the SAME section-condition matching
   // as publish. Must be passed here or every manual falsely reports stale.
   attributesById: Record<string, CategoryAttribute>,
-): Promise<boolean> => {
+): Promise<string[]> => {
   const langs = getProjectRequiredLanguages(template, projectIM.placeholderData);
   // Same SKU context publish uses, so re-resolved hashes match the published output.
   const projectSkus = (await getProjectSkus(projectId)).map(s => ({ id: s.id, skuNumber: s.skuNumber }));
+  const stale: string[] = [];
   for (const lang of langs) {
     const published = hashes.get(`${projectId}::${projectIM.templateType}::${lang}`);
     const { contentHash } = await resolveContentHash(template, sections, blocksById, projectIM, lang, projectSkus, attributesById);
-    if (!published || published !== contentHash) return true;
+    if (!published || published !== contentHash) stale.push(lang);
   }
-  return false;
+  return stale;
 };
+
+/** Reason entry naming the out-of-date languages, shown first in every drill-down. */
+const languagesReason = (staleLangs: string[]): StaleReason => ({
+  type: 'languages',
+  label: `Out of date in: ${staleLangs.map((l) => l.toUpperCase()).join(', ')}`,
+});
 
 /**
  * Detailed staleness for every published manual, keyed by `${projectId}::${templateType}`.
@@ -162,9 +175,16 @@ export const getStaleProjectIMDetails = async (): Promise<Map<string, StaleManua
     const template = templateById.get(im.templateId);
     if (!template) continue;
     const sections = sectionsByTemplate.get(im.templateId) ?? [];
-    if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes, attributesById))) continue;
-    const reasons = computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, im.templateType)));
-    result.set(stalenessKey(projectId, im.templateType), { projectId, templateType: im.templateType, reasons });
+    const staleLangs = await staleLanguagesOf(template, sections, blocksById, im, projectId, snapshots.hashes, attributesById);
+    if (!staleLangs.length) continue;
+    const reasons = [
+      languagesReason(staleLangs),
+      ...computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, im.templateType))),
+    ];
+    result.set(stalenessKey(projectId, im.templateType), {
+      projectId, templateType: im.templateType, reasons,
+      staleLanguages: staleLangs.map((l) => l.toUpperCase()),
+    });
   }
   return result;
 };
@@ -187,15 +207,26 @@ export const getProjectIMStaleReasons = async (
     getAttributesById(),
   ]);
   const blocksById = blocksByIdMap(blocks);
-  if (!(await isStale(template, sections, blocksById, im, projectId, snapshots.hashes, attributesById))) return [];
-  return computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, templateType)));
+  const staleLangs = await staleLanguagesOf(template, sections, blocksById, im, projectId, snapshots.hashes, attributesById);
+  if (!staleLangs.length) return [];
+  return [
+    languagesReason(staleLangs),
+    ...computeReasons(template, sections, blocksById, snapshots.publishedAt.get(stalenessKey(projectId, templateType))),
+  ];
 };
 
 /**
  * Re-publish a project's manual: re-resolve its current template + sections +
  * blocks and overwrite the published JSON / snapshots. Clears its staleness.
- * Refreshes the structured (digital) artifact only — it does not regenerate the
- * PDF or bump the version (those belong to the interactive generator).
+ *
+ * Re-publishing CHANGES the published content, so it bumps the version like any
+ * other publish — otherwise the version stops identifying content and the print
+ * dialog's "unchanged since vN" guard would report the new content as already
+ * printed. It still does not regenerate the print PDF; the bumped version is what
+ * makes the print dialog correctly report the last render as outdated.
+ *
+ * FINAL manuals are refused: the lock exists to preserve the signed-off published
+ * output, and this function would regenerate it from the CURRENT template/blocks.
  */
 export const republishProjectIM = async (
   projectId: string,
@@ -203,8 +234,15 @@ export const republishProjectIM = async (
 ): Promise<PublishResult> => {
   const im = await getProjectIM(projectId, templateType);
   if (!im) throw new Error('No saved manual to re-publish.');
+  if (im.isFinalized) throw new Error('This manual is marked FINAL — unlock it before re-publishing.');
   const template = await getIMTemplateById(im.templateId);
   if (!template) throw new Error('Template not found.');
   const sections = await getIMSections(im.templateId);
-  return publishResolvedManuals(projectId, template, sections, im);
+  const nextVersion = (im.version ?? 0) + 1;
+  const saved = await saveProjectIM(
+    projectId, im.templateId, im.placeholderData, 'generated', im.skuContent, templateType,
+    im.sectionAdditions, im.extraSections, im.sectionOverrides, nextVersion,
+    im.boundSkuIds, im.sectionSkus, im.blockOverrides,
+  );
+  return publishResolvedManuals(projectId, template, sections, saved);
 };

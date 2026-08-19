@@ -22,6 +22,7 @@ import {
   tempPartPath,
   BUCKET,
   AuthError,
+  PermanentError,
 } from './lib/print-render-shared';
 
 interface PartRequest extends RenderRequestBase {
@@ -82,6 +83,9 @@ export const handler = async (event: NetlifyEvent) => {
   } catch (e) {
     if (e instanceof AuthError) return json(401, { error: e.message });
     const message = e instanceof Error ? e.message : 'Print part render failed.';
+    // Permanent failures (bad HTML, unpublished language) get 422 so the client
+    // fails fast instead of retrying a conversion that can never succeed.
+    if (e instanceof PermanentError) return json(422, { error: message });
     return json(502, { error: message });
   }
 };

@@ -3,7 +3,7 @@
  * IMTemplateEditor — authoring UI for IM templates: section tree, block references, metadata,
  * per-language content, and live preview (with AI-assisted translation).
  */
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useDeferredValue } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, deleteIMTemplate, getProjectIMCountForTemplate, getCategoryAttributes, getIMBlocks, resolveManual } from '../../services';
@@ -12,10 +12,14 @@ import { sanitizeHtml } from '../../utils';
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle, ResolvedSection } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark, Replace, Maximize2, Minimize2 } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
-import { parseTranslationXliff, applyTranslationImport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
+import { parseTranslationXliff, applyTranslationImport, countTranslationOverwrites, countChangedPrefills, saveTranslationImportReport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
+import { collectTranslationFragments, refFragmentId, sectionFragmentId } from '../../services/im/im-translation-fragments';
+import { planTmTranslation, translateFragmentWithMemory, recordImportedTranslations, getProtectedPhrases, reuseEventsOf, planKey, type TmPlanResult, type TmPlanContext } from '../../services/im/im-tm-translate';
+import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../services/im/im-tm-write.service';
+import { generateUUID } from '../../utils/uuid.utils';
 import { useAuth } from '../../context/AuthContext';
 import { getAttributesForCategory } from '../../utils';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
@@ -28,6 +32,7 @@ import { useListDnd } from './editor/useListDnd';
 import { useUndoRedo } from './editor/useUndoRedo';
 import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } from './editor/insertTarget';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
+import { findInTemplate, applyReplacements, matchKey, type FindReplaceMatch } from '../../services/im/im-find-replace';
 
 import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
 
@@ -58,6 +63,16 @@ interface TranslateRunReport {
   failures: Array<{ lang: string; label: string; error: string }>;
   /** Which flow produced this report — AI "Translate", or an imported XLIFF file. Absent = AI (legacy reports). */
   source?: 'ai' | 'xliff-import';
+  /** Fragments supplied by the translation memory with no model call at all. */
+  reusedFromMemory?: number;
+  /** The memory could not be read, so the run paid for everything. Absent on older reports. */
+  memoryUnavailable?: boolean;
+  /** Pre-filled units an XLIFF vendor returned untouched (import reports only). */
+  unchangedPrefills?: number;
+  /** Pre-filled units the vendor altered (import reports only). */
+  changedPrefills?: number;
+  /** The imported file addressed rows by position (import reports only). */
+  hadLegacyIds?: boolean;
 }
 
 const IMTemplateEditor: React.FC = () => {
@@ -148,6 +163,14 @@ const IMTemplateEditor: React.FC = () => {
   const [exportTargets, setExportTargets] = useState<string[]>([]);
   const [exportSkipExisting, setExportSkipExisting] = useState(true);
   const [exporting, setExporting] = useState(false);
+  /**
+   * What the last export actually contained. Shown after download so procurement has
+   * a number to check the vendor's quote against — the pre-filled units should not be
+   * billed.
+   */
+  const [exportCoverage, setExportCoverage] = useState<
+    { prefilled: number; suggested: number; fresh: number; warnings: string[] } | null
+  >(null);
 
   // Import Translation (XLIFF) — pick a file, preview what will change, then commit.
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -155,6 +178,12 @@ const IMTemplateEditor: React.FC = () => {
   const [importParsed, setImportParsed] = useState<ParseTranslationXliffResult | null>(null);
   const [importParseError, setImportParseError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  /**
+   * Opt-in to applying vendor edits to wording we had pre-translated from APPROVED
+   * memory. Off by default: such an edit contradicts a review decision, so it needs a
+   * deliberate act rather than a default.
+   */
+  const [acceptChangedPrefills, setAcceptChangedPrefills] = useState(false);
 
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -808,6 +837,51 @@ const IMTemplateEditor: React.FC = () => {
   // Inline preview drawer (#2): resolves the whole document for the active language and
   // renders it read-only, so authors don't have to leave for the standalone /im/preview route.
   const [showPreview, setShowPreview] = useState(false);
+  // Focus mode: the section editor takes the whole screen with a LIVE preview of just
+  // that section beside it. The preview resolves on every state change, so it renders
+  // from a DEFERRED snapshot of sections — typing stays responsive, the preview follows.
+  const [focusMode, setFocusMode] = useState(false);
+  const deferredSections = useDeferredValue(sections);
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFocusMode(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusMode]);
+
+  // Template-wide find & replace (chip-safe — see im-find-replace.ts).
+  const [showFindReplace, setShowFindReplace] = useState(false);
+  const [frQuery, setFrQuery] = useState('');
+  const [frReplace, setFrReplace] = useState('');
+  const [frCase, setFrCase] = useState(false);
+  const [frMatches, setFrMatches] = useState<FindReplaceMatch[] | null>(null);
+  const [frSelected, setFrSelected] = useState<Set<string>>(new Set());
+  const [frDone, setFrDone] = useState<number | null>(null);
+
+  const runFindReplaceSearch = () => {
+    const blocksById: Record<string, IMBlock> = {};
+    for (const b of availableBlocks) blocksById[b.id] = b;
+    const matches = findInTemplate(sections, blocksById, templateLanguages, frQuery, frCase);
+    setFrMatches(matches);
+    setFrSelected(new Set(matches.filter(m => m.replaceable).map(matchKey)));
+    setFrDone(null);
+  };
+
+  const runReplaceSelected = () => {
+    if (!frMatches || locked) return;
+    const selected = frMatches.filter(m => frSelected.has(matchKey(m)));
+    if (!selected.length) return;
+    const result = applyReplacements(sections, selected, frQuery, frReplace, frCase);
+    setSections(result.sections);
+    setFrDone(result.replaced);
+    // Re-scan against the replaced content so the list reflects what's left.
+    const blocksById: Record<string, IMBlock> = {};
+    for (const b of availableBlocks) blocksById[b.id] = b;
+    const matches = findInTemplate(result.sections, blocksById, templateLanguages, frQuery, frCase);
+    setFrMatches(matches);
+    setFrSelected(new Set(matches.filter(m => m.replaceable).map(matchKey)));
+  };
+
   // Jump-to-section search (#5).
   const [sectionSearch, setSectionSearch] = useState('');
   // Confirm-on-delete for content rows (#7): only prompts when there's content to lose.
@@ -860,24 +934,27 @@ const IMTemplateEditor: React.FC = () => {
     setShowRowSnippets(false);
   };
 
-  const renderPreviewDrawer = () => {
-    if (!showPreview || !template) return null;
-    // Shared blocks must be resolved by id so rows that reference the block library
-    // (not just inline content) actually render here — otherwise resolveManual silently
-    // drops them (unresolvable block warning), which is what made this preview look
-    // stale/incomplete next to the real generator.
+  /**
+   * Resolve `secs` for the active language and return a recursive section renderer.
+   * Shared by the whole-document preview drawer and the focus-mode live preview
+   * (which passes a DEFERRED sections snapshot so typing stays responsive).
+   * Shared blocks must be resolved by id so rows that reference the block library
+   * (not just inline content) actually render here — otherwise resolveManual silently
+   * drops them (unresolvable block warning).
+   */
+  const makeSectionPreviewRenderer = (secs: IMSection[]) => {
+    if (!template) return null;
     const blocksById: Record<string, IMBlock> = {};
     for (const b of availableBlocks) blocksById[b.id] = b;
-    const resolved = resolveManual(template, sections, blocksById, null, activeLang);
+    const resolved = resolveManual(template, secs, blocksById, null, activeLang);
     const byId: Record<string, ResolvedSection> = {};
     for (const rs of resolved.sections) byId[rs.id] = rs;
     const nodesToHtml = (rs?: ResolvedSection): string => !rs ? '' : rs.nodes.map(n =>
       n.type === 'html' ? n.html
       : n.type === 'callout' ? wrapBlockCallout(n.variant, n.html, activeLang)
       : `<p class="text-gray-400 italic text-sm">[${n.type} — rendered in project view]</p>`).join('');
-    const roots = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
     const renderSec = (s: IMSection, prefix: string, level: number): React.ReactNode => {
-      const children = sections.filter(c => c.parentId === s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+      const children = secs.filter(c => c.parentId === s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
       const html = nodesToHtml(byId[s.id]);
       return (
         <div key={s.id} className={level > 0 ? 'mt-5 ml-6' : 'mt-8'}>
@@ -894,6 +971,14 @@ const IMTemplateEditor: React.FC = () => {
         </div>
       );
     };
+    return renderSec;
+  };
+
+  const renderPreviewDrawer = () => {
+    if (!showPreview || !template) return null;
+    const renderSec = makeSectionPreviewRenderer(sections);
+    if (!renderSec) return null;
+    const roots = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
     return (
       <div className="fixed inset-0 z-40 flex justify-end">
         <div className="absolute inset-0 bg-black/30" onClick={() => setShowPreview(false)} />
@@ -1129,12 +1214,80 @@ const IMTemplateEditor: React.FC = () => {
     const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
     const logOk = (lang: string) => { okByLang[lang] = (okByLang[lang] ?? 0) + 1; };
 
+    // --- Translation memory --------------------------------------------------
+    // Read the memory ONCE for the whole run, before any engine call. A fragment we
+    // already own an approved translation for is applied with no model call at all;
+    // everything else is translated exactly as before and, where it can be aligned
+    // segment-for-segment, remembered as an UNREVIEWED candidate for a human to approve.
+    //
+    // A memory failure never blocks a run: tmCtx stays undefined and the flow below is
+    // byte-for-byte the old behaviour.
+    let tmPlan: TmPlanResult | undefined;
+    let tmCtx: TmPlanContext | undefined;
+    const tmWriteBack: RecordTmSegmentInput[] = [];
+    // Collected per fragment ACTUALLY processed, not harvested from the whole plan: the
+    // plan covers every fragment, while "skip already-translated" means only some are
+    // translated. Logging the plan wholesale would overstate the memory's leverage.
+    const tmEvents: TmReuseEvent[] = [];
+    const tmApplied: string[] = [];
+    let reusedFromMemory = 0;
+
+    // Reading the memory takes a round trip, so show the overlay for it rather than
+    // appearing to hang before the run starts.
+    setTranslating(true);
+    setTranslateProgress({ done: 0, total: 0 });
+    try {
+      const protectedPhrases = await getProtectedPhrases();
+      tmCtx = {
+        sourceLocale: source,
+        protectedPhrases,
+        domainCategoryId: categoryId ?? null,
+        runId: generateUUID(),
+        runKind: 'ai',
+        scope: 'template',
+        templateId: template.id,
+        templateType,
+      };
+      const fragments = collectTranslationFragments(working, source).map(f => ({
+        id: f.id,
+        sourceHtml: f.sourceHtml,
+        label: f.label,
+      }));
+      tmPlan = await planTmTranslation(fragments, targets, tmCtx);
+    } catch (e) {
+      console.warn('[IMTemplateEditor] translation memory unavailable; translating everything.', e);
+      tmPlan = undefined;
+    }
+
+    /**
+     * Translate one fragment, preferring the memory. Falls back to the plain
+     * `translateHtml` call when there is no plan, so this is a strict superset of the
+     * previous behaviour.
+     */
+    const translateFragment = async (fragmentId: string, html: string, target: string): Promise<string> => {
+      if (!tmPlan || !tmCtx) return translateHtml(html, source, target);
+      const out = await translateFragmentWithMemory(
+        fragmentId,
+        html,
+        target,
+        tmPlan,
+        tmCtx,
+        (h) => translateHtml(h, source, target),
+      );
+      if (out.fromMemory) reusedFromMemory += 1;
+      tmWriteBack.push(...out.writeBack);
+      tmEvents.push(...out.reuseEvents);
+      tmApplied.push(...out.appliedSegmentIds);
+      return out.html;
+    };
+
     for (const target of targets) {
       for (const s of working) {
         const titleSrc = s.titleI18n?.[source] ?? s.title;
         if (needs(s.titleI18n, titleSrc, target)) {
+          const fid = sectionFragmentId(s.id, 'title');
           tasks.push(async () => {
-            try { s.titleI18n = { ...s.titleI18n, [target]: await translateHtml(titleSrc!, source, target) }; changed.add(s.id); logOk(target); }
+            try { s.titleI18n = { ...s.titleI18n, [target]: await translateFragment(fid, titleSrc!, target) }; changed.add(s.id); logOk(target); }
             catch (e) { failures.push({ lang: target, label: `title “${s.title}”`, error: errMsg(e) }); }
           });
         }
@@ -1144,9 +1297,10 @@ const IMTemplateEditor: React.FC = () => {
           if (ref.kind === 'inline' && needs(ref.content, ref.content?.[source], target)) {
             const src = ref.content[source];
             const mirror = firstInlineMirror; firstInlineMirror = false;
+            const fid = refFragmentId(s.id, 'inline', idx, ref.id);
             tasks.push(async () => {
               try {
-                const out = await translateHtml(src, source, target);
+                const out = await translateFragment(fid, src, target);
                 (s.blockRefs![idx] as InlineBlockRef).content = { ...(s.blockRefs![idx] as InlineBlockRef).content, [target]: out };
                 // Mirror the first inline row into section.content for the legacy renderer path.
                 if (mirror) s.content = { ...s.content, [target]: out };
@@ -1156,16 +1310,18 @@ const IMTemplateEditor: React.FC = () => {
             });
           } else if (ref.kind === 'sku_slot' && needs(ref.label, ref.label?.[source], target)) {
             const src = ref.label[source];
+            const fid = refFragmentId(s.id, 'sku_label', idx, ref.id);
             tasks.push(async () => {
-              try { (s.blockRefs![idx] as SKUSlotRef).label = { ...(s.blockRefs![idx] as SKUSlotRef).label, [target]: await translateHtml(src, source, target) }; changed.add(s.id); logOk(target); }
+              try { (s.blockRefs![idx] as SKUSlotRef).label = { ...(s.blockRefs![idx] as SKUSlotRef).label, [target]: await translateFragment(fid, src, target) }; changed.add(s.id); logOk(target); }
               catch (e) { failures.push({ lang: target, label: `field in “${s.title}”`, error: errMsg(e) }); }
             });
           }
         });
         // Section with legacy content but no inline rows (rare after normalization).
         if (refs.length === 0 && needs(s.content, s.content?.[source], target)) {
+          const fid = sectionFragmentId(s.id, 'legacy');
           tasks.push(async () => {
-            try { s.content = { ...s.content, [target]: await translateHtml(s.content[source], source, target) }; changed.add(s.id); logOk(target); }
+            try { s.content = { ...s.content, [target]: await translateFragment(fid, s.content[source], target) }; changed.add(s.id); logOk(target); }
             catch (e) { failures.push({ lang: target, label: `section “${s.title}”`, error: errMsg(e) }); }
           });
         }
@@ -1173,11 +1329,11 @@ const IMTemplateEditor: React.FC = () => {
     }
 
     if (tasks.length === 0) {
+      setTranslating(false);
       alert(`Nothing to translate — every fragment already has content in the selected language(s). Uncheck “skip already-translated” to overwrite.`);
       return;
     }
 
-    setTranslating(true);
     setTranslateProgress({ done: 0, total: tasks.length });
     let done = 0;
     // Small concurrency pool so a large template doesn't run one call at a time.
@@ -1213,6 +1369,28 @@ const IMTemplateEditor: React.FC = () => {
         } catch (e) { console.error('Failed to enable languages after translate', e); }
       }
 
+      // Flush the translation memory AFTER the content is safe. All best-effort: the
+      // translations are already in state and in the localStorage draft, so losing a
+      // memory write or a log row must never look like a failed translation run.
+      if (tmEvents.length) void logTmReuse(tmEvents);
+      if (tmApplied.length) void noteTmSegmentsUsed(tmApplied);
+      if (tmWriteBack.length) {
+        try {
+          const recorded = await recordTmSegments(tmWriteBack);
+          if (recorded.divergences.length) {
+            // The model produced something different from wording a reviewer already
+            // approved. Nothing was overwritten; surfacing it is the point.
+            console.warn(
+              `[IMTemplateEditor] ${recorded.divergences.length} translation(s) disagreed with `
+              + 'approved translation memory and were NOT stored.',
+              recorded.divergences,
+            );
+          }
+        } catch (e) {
+          console.warn('[IMTemplateEditor] could not record translations to the memory.', e);
+        }
+      }
+
       setIsTranslateModalOpen(false);
       // Full run report — shown now, and kept in localStorage so "what got done"
       // is still answerable after a reload.
@@ -1224,6 +1402,8 @@ const IMTemplateEditor: React.FC = () => {
         saved: savedOk,
         okByLang,
         failures,
+        reusedFromMemory,
+        memoryUnavailable: tmPlan?.memoryUnavailable ?? !tmPlan,
       };
       setTranslateReport(report);
       if (reportKey) { try { localStorage.setItem(reportKey, JSON.stringify(report)); } catch { /* quota — best-effort */ } }
@@ -1244,6 +1424,16 @@ const IMTemplateEditor: React.FC = () => {
       `${isImport ? 'Translation import (XLIFF)' : 'AI translation run'} — ${template?.name ?? ''} — ${new Date(r.finishedAt).toLocaleString()}`,
       `Languages: ${r.targets.map(t => t.toUpperCase()).join(', ')}`,
       `Fragments: ${r.total} total, ${r.ok} ${isImport ? 'imported' : 'translated'}, ${r.failures.length} failed`,
+      ...(!isImport && (r.reusedFromMemory ?? 0) > 0
+        ? [`Reused from approved translation memory (no AI call): ${r.reusedFromMemory}`] : []),
+      ...(!isImport && r.memoryUnavailable
+        ? ['Translation memory: UNAVAILABLE for this run — everything was translated from scratch.'] : []),
+      ...(isImport && (r.unchangedPrefills ?? 0) > 0
+        ? [`Pre-translated units returned untouched (not billable): ${r.unchangedPrefills}`] : []),
+      ...(isImport && (r.changedPrefills ?? 0) > 0
+        ? [`Approved wording changed by the vendor: ${r.changedPrefills}`] : []),
+      ...(isImport && r.hadLegacyIds
+        ? ['WARNING: this file addressed rows by position; a reordered row could not be detected.'] : []),
       `Saved to server: ${r.saved ? 'yes' : 'NO — retry Save All (work is backed up locally)'}`,
       '',
       'Per language:',
@@ -1279,26 +1469,81 @@ const IMTemplateEditor: React.FC = () => {
    * verbatim phrases are protected the same way translateHtml protects them, via
    * im-chip-freeze.ts, just encoded as XLIFF inline codes instead of {{FRZ_n}}
    * tokens sent to the model.
+   *
+   * Consults the translation memory first, so any fragment we already own an approved
+   * translation for goes out already translated and marked for wordcount exclusion.
+   * A memory failure NEVER blocks the export — it just means the vendor gets quoted
+   * for text we may already have, which is a cost problem rather than a correctness one.
    */
   const handleExportTranslation = async () => {
     if (!template || !exportTargets.length || exporting) return;
     setExporting(true);
     try {
-      const xml = await buildTranslationXliff({
+      const fragments = collectTranslationFragments(sections, 'en').map(f => ({
+        id: f.id,
+        sourceHtml: f.sourceHtml,
+        label: f.label,
+      }));
+
+      let tmPlan: TmPlanResult | undefined;
+      try {
+        tmPlan = await planTmTranslation(fragments, exportTargets, {
+          sourceLocale: 'en',
+          protectedPhrases: await getProtectedPhrases(),
+          domainCategoryId: categoryId ?? null,
+          runId: generateUUID(),
+          runKind: 'xliff_export',
+          scope: 'template',
+          templateId: template.id,
+          templateType,
+        });
+      } catch (e) {
+        console.warn('[IMTemplateEditor] translation-memory lookup failed; exporting without pre-translation.', e);
+      }
+
+      const result = await buildTranslationXliff({
         template,
         sections,
         targetLangs: exportTargets,
         skipExisting: exportSkipExisting,
+        tmPlan,
       });
-      if (!xml) {
+      if (!result) {
         alert('Nothing to export — every fragment already has content in the selected language(s). Uncheck “skip already-translated” to export everything.');
         return;
       }
-      downloadTranslationXliff(xml, template.name, exportTargets);
+      downloadTranslationXliff(result.xml, template.name, exportTargets);
+
+      // Record the export decisions — but ONLY for the units that actually went into
+      // the file. "Skip already-translated" means the plan covers more than the export
+      // does, and logging the whole plan would credit the memory with decisions about
+      // units nobody sent to a vendor.
+      if (tmPlan) {
+        const shipped = new Set(
+          Object.entries(result.unitIdsByLang).flatMap(([lang, ids]) =>
+            ids.map(id => planKey(id, lang)),
+          ),
+        );
+        const events = reuseEventsOf(tmPlan).filter(e =>
+          e.fragmentId ? shipped.has(planKey(e.fragmentId, e.targetLocale)) : false,
+        );
+        const applied = [...tmPlan.plans.entries()]
+          .filter(([key]) => shipped.has(key))
+          .flatMap(([, plan]) => plan.appliedSegmentIds);
+        if (events.length) void logTmReuse(events);
+        if (applied.length) void noteTmSegmentsUsed(applied);
+      }
+
+      setExportCoverage({
+        prefilled: result.prefilled,
+        suggested: result.suggested,
+        fresh: result.fresh,
+        warnings: result.warnings,
+      });
       setIsExportModalOpen(false);
     } catch (e) {
       console.error('Export for translation failed', e);
-      alert('Export failed — see console for details.');
+      alert(`Export failed: ${e instanceof Error ? e.message : 'see console for details.'}`);
     } finally {
       setExporting(false);
     }
@@ -1309,6 +1554,7 @@ const IMTemplateEditor: React.FC = () => {
     setImportFileName(null);
     setImportParsed(null);
     setImportParseError(null);
+    setAcceptChangedPrefills(false);
     setIsImportModalOpen(true);
   };
 
@@ -1340,10 +1586,64 @@ const IMTemplateEditor: React.FC = () => {
     if (!template || !importParsed || importing) return;
     setImporting(true);
     try {
-      const { sections: updated, changedSectionIds, report } = applyTranslationImport(sections, importParsed);
+      const { sections: updated, changedSectionIds, report } = applyTranslationImport(
+        sections,
+        importParsed,
+        { acceptChangedPrefills },
+      );
       setSections(updated);
       const changedSections = updated.filter(s => changedSectionIds.has(s.id));
       const savedOk = changedSections.length ? await persistSections(changedSections) : true;
+
+      // Remember what the vendor produced, so the same boilerplate is not bought again
+      // on the next product. Stored unreviewed under this file's name — a vendor
+      // translation is not authoritative until somebody approves it, and recording the
+      // file name means an unreliable supplier's whole contribution stays revocable.
+      //
+      // Only translations that were actually APPLIED are offered: recording a rejected
+      // unit would put content in the memory that is not in the template. Entirely
+      // best-effort — the import itself has already succeeded at this point.
+      try {
+        const sourceById = new Map(
+          collectTranslationFragments(updated, 'en').map(f => [f.id, f.sourceHtml]),
+        );
+        const imported = importParsed.files.flatMap(f =>
+          f.units
+            .filter(u => u.html !== null
+              && sourceById.has(u.id)
+              // An untouched pre-fill is already in the memory; a rejected change was not applied.
+              && !(u.prefilledHtml != null && u.prefilledHtml === u.html)
+              && !(u.prefilledHtml != null && !acceptChangedPrefills))
+            .map(u => ({
+              fragmentId: u.id,
+              sourceHtml: sourceById.get(u.id)!,
+              targetLocale: f.targetLang,
+              targetHtml: u.html as string,
+            })),
+        );
+        if (imported.length) {
+          const recorded = await recordImportedTranslations(imported, {
+            sourceLocale: 'en',
+            protectedPhrases: await getProtectedPhrases(),
+            domainCategoryId: categoryId ?? null,
+            runId: generateUUID(),
+            runKind: 'xliff_import',
+            scope: 'template',
+            templateId: template.id,
+            templateType,
+            sourceRef: importFileName,
+          });
+          if (recorded.rejected) {
+            console.warn(
+              `[IMTemplateEditor] ${recorded.rejected} imported fragment(s) could not be aligned `
+              + 'segment-for-segment and were not added to the translation memory.',
+              recorded.rejections,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('[IMTemplateEditor] could not record imported translations to the memory.', e);
+      }
 
       // Enable any language that received at least one imported fragment, same
       // tail behavior handleTranslate already has for the AI path.
@@ -1363,6 +1663,8 @@ const IMTemplateEditor: React.FC = () => {
       const fullReport: TranslateRunReport = { ...report, saved: savedOk };
       setTranslateReport(fullReport);
       if (reportKey) { try { localStorage.setItem(reportKey, JSON.stringify(fullReport)); } catch { /* quota — best-effort */ } }
+      // Durable audit row (im_translation_imports) — localStorage alone dies with the browser.
+      void saveTranslationImportReport(template.id, importFileName, { ...report, saved: savedOk, source: 'xliff-import' });
     } catch (e) {
       console.error('Translation import failed', e);
       alert('Import failed — see console for details. No partial changes were saved.');
@@ -1540,6 +1842,7 @@ const IMTemplateEditor: React.FC = () => {
                <button onClick={openExportModal} disabled={locked} title="Export English content as an XLIFF file for an external translator or TMS (e.g. XTM)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Download size={16} /> Export for Translation</button>
                <button onClick={openImportModal} disabled={locked} title="Import a translated XLIFF file back into a specific language" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><FileUp size={16} /> Import Translation</button>
                <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Eye size={16} /> Preview</button>
+               <button onClick={() => { setShowFindReplace(true); setFrMatches(null); setFrDone(null); }} title="Find & replace a phrase across every section and language (placeholder/condition chips are never touched)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Replace size={16} /> Find &amp; replace</button>
                {!locked && (
                  <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow ml-2">
                    <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
@@ -1611,7 +1914,10 @@ const IMTemplateEditor: React.FC = () => {
                className="shrink-0 w-1.5 -mx-2 cursor-col-resize rounded bg-transparent hover:bg-indigo-300 active:bg-indigo-400 transition-colors"
              />
 
-             {/* Editor Area */}
+             {/* Editor Area — in focus mode the SAME editor moves into a fullscreen
+                 overlay next to a live preview of just this section ('contents' keeps
+                 the normal layout byte-identical when focus mode is off). */}
+             <div className={focusMode && currentSection ? 'fixed inset-0 z-[65] bg-gray-100 p-4 flex gap-4' : 'contents'}>
              <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
                 {currentSection ? (
                    <>
@@ -1676,6 +1982,16 @@ const IMTemplateEditor: React.FC = () => {
                            <button key={lang.code} onClick={() => setActiveLang(lang.code)} className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${activeLang === lang.code ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-muted hover:text-gray-700'}`}>{lang.label}</button>
                            ))}
                         </div>
+                        <button
+                          onClick={() => setFocusMode(f => !f)}
+                          title={focusMode ? 'Exit focus mode (Esc)' : 'Focus mode — this section fullscreen, with a live preview beside the editor'}
+                          className={`shrink-0 ml-2 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                            focusMode ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-100'
+                          }`}
+                        >
+                          {focusMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                          {focusMode ? 'Exit focus' : 'Focus'}
+                        </button>
                      </div>
 
                      {/* Row composer — language tabs above stay clickable so a FINAL
@@ -1799,6 +2115,7 @@ const IMTemplateEditor: React.FC = () => {
                                        onInsertPlaceholder={handleInsertPlaceholder}
                                        onInsertCondition={handleOpenConditionModal}
                                        enableTranslate
+                                       attributes={categoryFeatures}
                                      />
                                      {/* Whole-row visibility condition — hides the row unless the condition is met */}
                                      {(() => {
@@ -2006,8 +2323,28 @@ const IMTemplateEditor: React.FC = () => {
                    <div className="flex-1 flex items-center justify-center text-gray-400">Select a section to edit</div>
                 )}
              </div>
+
+             {/* Focus-mode live preview — resolves the DEFERRED sections snapshot so the
+                 editor keeps up with typing while the preview follows a beat behind. */}
+             {focusMode && currentSection && (
+               <div className="w-[44%] min-w-0 shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden" style={getIMThemeVariables(metaSettings)}>
+                 <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 shrink-0">
+                   <span className="text-sm font-bold text-gray-700 flex items-center gap-2"><Eye size={15} /> Live preview — {activeLang.toUpperCase()}</span>
+                   <span className="text-[11px] text-gray-400">updates as you type · Esc to exit</span>
+                 </div>
+                 <div className="flex-1 overflow-y-auto px-6 py-2 pb-6">
+                   {(() => {
+                     const renderSec = makeSectionPreviewRenderer(deferredSections);
+                     const root = deferredSections.find(s => s.id === currentSection.id);
+                     if (!renderSec || !root) return null;
+                     return renderSec(root, '', 0);
+                   })()}
+                 </div>
+               </div>
+             )}
+             </div>
           </div>
-          
+
           {/* Modals */}
           {isSettingsModalOpen && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -2339,6 +2676,41 @@ const IMTemplateEditor: React.FC = () => {
                   </div>
               </div>
           )}
+          {exportCoverage && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                      <div className="flex justify-between items-center mb-3">
+                          <h3 className="font-bold text-lg flex items-center gap-2"><Download size={18} className="text-emerald-600" /> XLIFF downloaded</h3>
+                          <button onClick={() => setExportCoverage(null)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+                      </div>
+                      <p className="text-xs text-muted mb-3">
+                          What went into the file, per unit. The pre-translated units are marked
+                          <code className="mx-1 px-1 bg-gray-100 rounded">approved="yes"</code> so a CAT tool excludes
+                          them from the billable word count — worth checking the quote against.
+                      </p>
+                      <div className="border rounded divide-y text-xs mb-3">
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-emerald-700 font-medium">Already translated from approved memory</span>
+                              <span className="font-bold">{exportCoverage.prefilled}</span>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-indigo-700">With a memory suggestion (target left empty)</span>
+                              <span className="font-bold">{exportCoverage.suggested}</span>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-gray-700">New — needs translating</span>
+                              <span className="font-bold">{exportCoverage.fresh}</span>
+                          </div>
+                      </div>
+                      {exportCoverage.warnings.map((w, i) => (
+                          <div key={i} className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded p-2 mb-2">{w}</div>
+                      ))}
+                      <div className="flex justify-end">
+                          <button onClick={() => setExportCoverage(null)} className="px-4 py-2 bg-gray-100 rounded text-sm font-medium hover:bg-gray-200">Close</button>
+                      </div>
+                  </div>
+              </div>
+          )}
           {isImportModalOpen && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                   <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 flex flex-col max-h-[85vh]">
@@ -2364,7 +2736,22 @@ const IMTemplateEditor: React.FC = () => {
                       {importParseError && (
                         <div className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded p-2.5 mb-3">{importParseError}</div>
                       )}
-                      {importParsed && (
+                      {importParsed && (() => {
+                        // Overwrite preview: how many usable units replace an EXISTING translation
+                        // (vs fill a blank) — imports write into the live shared template with no
+                        // undo, so what gets destroyed must be visible before Commit.
+                        const overwrites = countTranslationOverwrites(sections, importParsed);
+                        const totalOverwrites = Object.values(overwrites).reduce((a, b) => a + b, 0);
+                        // Vendor edits to wording we pre-translated from APPROVED memory. A
+                        // different and more serious class of overwrite: it contradicts a
+                        // review decision rather than replacing an untranslated slot.
+                        const changedPrefills = countChangedPrefills(importParsed);
+                        const totalChangedPrefills = Object.values(changedPrefills).reduce((a, b) => a + b, 0);
+                        const unchangedPrefills = importParsed.files.reduce(
+                          (n, f) => n + f.units.filter(u => u.prefilledHtml != null && u.prefilledHtml === u.html).length,
+                          0,
+                        );
+                        return (
                         <div className="flex-1 min-h-0 overflow-y-auto mb-3">
                           <div className="border rounded divide-y text-xs mb-2">
                             {importParsed.files.map(f => {
@@ -2375,12 +2762,53 @@ const IMTemplateEditor: React.FC = () => {
                                   <span className="font-bold uppercase">{ALL_LANGUAGES.find(l => l.code === f.targetLang)?.label ?? f.targetLang}</span>
                                   <span>
                                     <span className="text-emerald-700">{okCount} ready</span>
+                                    {(overwrites[f.targetLang] ?? 0) > 0 && <span className="text-orange-600"> · {overwrites[f.targetLang]} overwrite existing</span>}
+                                    {(changedPrefills[f.targetLang] ?? 0) > 0 && <span className="text-rose-600"> · {changedPrefills[f.targetLang]} changed approved</span>}
                                     {warnCount > 0 && <span className="text-amber-600"> · {warnCount} skipped</span>}
                                   </span>
                                 </div>
                               );
                             })}
                           </div>
+                          {importParsed.hasLegacyIds && (
+                            <div className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                              <strong>This file was exported before rows were given stable ids.</strong> It addresses
+                              content rows by position, so if any rows were reordered since the export, a translation
+                              can land on the wrong row and nothing will detect it. Check the applied rows afterwards,
+                              or re-export and re-translate to be certain.
+                            </div>
+                          )}
+                          {unchangedPrefills > 0 && (
+                            <div className="text-[11px] text-emerald-900 bg-emerald-50 border border-emerald-200 rounded p-2 mb-2">
+                              <strong>{unchangedPrefills} unit{unchangedPrefills !== 1 ? 's' : ''} came back exactly as sent</strong> —
+                              these were pre-translated from approved memory and need no import. They should not appear
+                              on the vendor's invoice either.
+                            </div>
+                          )}
+                          {totalChangedPrefills > 0 && (
+                            <div className="text-[11px] text-rose-900 bg-rose-50 border border-rose-200 rounded p-2 mb-2">
+                              <strong>The vendor changed {totalChangedPrefills} unit{totalChangedPrefills !== 1 ? 's' : ''} we
+                              had pre-translated from approved memory.</strong> That is either a genuine error report worth
+                              acting on, or CAT-tool noise — both need a person to look. These are <em>not</em> applied
+                              unless you tick the box below.
+                              <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  className="rounded accent-rose-600"
+                                  checked={acceptChangedPrefills}
+                                  disabled={importing}
+                                  onChange={e => setAcceptChangedPrefills(e.target.checked)}
+                                />
+                                <span>I have reviewed these changes — overwrite the approved wording</span>
+                              </label>
+                            </div>
+                          )}
+                          {totalOverwrites > 0 && (
+                            <div className="text-[11px] text-orange-800 bg-orange-50 border border-orange-200 rounded p-2 mb-2">
+                              <strong>{totalOverwrites} fragment{totalOverwrites !== 1 ? 's' : ''} already have a translation</strong> that
+                              this file will replace. This edits the live shared template (every project using it) and cannot be undone.
+                            </div>
+                          )}
                           {importParsed.errors.length > 0 && (
                             <div className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded p-2 mb-2">
                               {importParsed.errors.map((e, i) => <div key={i}>{e}</div>)}
@@ -2401,7 +2829,8 @@ const IMTemplateEditor: React.FC = () => {
                             </details>
                           )}
                         </div>
-                      )}
+                        );
+                      })()}
                       <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-auto">
                           <button onClick={() => setIsImportModalOpen(false)} disabled={importing} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm disabled:opacity-50">Cancel</button>
                           <button onClick={commitTranslationImport} disabled={importing || !importParsed} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
@@ -2434,6 +2863,39 @@ const IMTemplateEditor: React.FC = () => {
                           <strong>Not saved to the server yet.</strong> The translations are held in this editor and backed up
                           locally on this device — nothing is lost. Autosave keeps retrying in the background; you can also
                           press <strong>Save All</strong> to retry now. Don't close the tab until the header shows “Saved”.
+                        </div>
+                      )}
+
+                      {(translateReport.reusedFromMemory ?? 0) > 0 && (
+                        <div className="text-xs text-emerald-900 bg-emerald-50 border border-emerald-200 rounded p-2.5 mb-3">
+                          <strong>{translateReport.reusedFromMemory} fragment{translateReport.reusedFromMemory !== 1 ? 's' : ''} came
+                          from approved translation memory</strong> — reused exactly, with no AI call and no cost.
+                        </div>
+                      )}
+                      {translateReport.memoryUnavailable && translateReport.source !== 'xliff-import' && (
+                        <div className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                          The translation memory could not be read, so every fragment was translated from scratch. The result
+                          is correct — it just cost more than it needed to.
+                        </div>
+                      )}
+                      {(translateReport.unchangedPrefills ?? 0) > 0 && (
+                        <div className="text-xs text-emerald-900 bg-emerald-50 border border-emerald-200 rounded p-2.5 mb-3">
+                          <strong>{translateReport.unchangedPrefills} unit{translateReport.unchangedPrefills !== 1 ? 's' : ''} came
+                          back exactly as sent</strong> — these were pre-translated from approved memory, so nothing was imported
+                          and they should not be on the invoice.
+                        </div>
+                      )}
+                      {(translateReport.changedPrefills ?? 0) > 0 && (
+                        <div className="text-xs text-rose-900 bg-rose-50 border border-rose-200 rounded p-2.5 mb-3">
+                          <strong>The vendor changed {translateReport.changedPrefills} unit{translateReport.changedPrefills !== 1 ? 's' : ''} we
+                          had pre-translated from approved memory.</strong> Listed below among the skipped fragments unless you
+                          enabled the override.
+                        </div>
+                      )}
+                      {translateReport.hadLegacyIds && (
+                        <div className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                          That file addressed content rows by position rather than by id. If any rows were reordered since it
+                          was exported, a translation may have landed on the wrong row — worth spot-checking.
                         </div>
                       )}
 
@@ -2964,6 +3426,111 @@ const IMTemplateEditor: React.FC = () => {
           })()}
        </div>
        {renderPreviewDrawer()}
+
+       {/* Template-wide find & replace — chip-safe (see im-find-replace.ts). */}
+       {showFindReplace && (
+         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setShowFindReplace(false)}>
+           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+             <div className="flex items-center justify-between px-5 py-3.5 border-b">
+               <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><Replace size={17} /> Find &amp; replace — whole template</h3>
+               <button onClick={() => setShowFindReplace(false)} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+             </div>
+             <div className="px-5 py-4 space-y-3 overflow-y-auto">
+               <div className="grid grid-cols-2 gap-3">
+                 <div>
+                   <label className="text-xs font-semibold text-gray-500 uppercase">Find</label>
+                   <input value={frQuery} onChange={(e) => setFrQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && frQuery.trim()) runFindReplaceSearch(); }}
+                     placeholder="e.g. EN 60335" className="w-full text-sm border rounded px-2 py-1.5 mt-1" autoFocus />
+                 </div>
+                 <div>
+                   <label className="text-xs font-semibold text-gray-500 uppercase">Replace with</label>
+                   <input value={frReplace} onChange={(e) => setFrReplace(e.target.value)}
+                     placeholder="e.g. EN 60335-1" className="w-full text-sm border rounded px-2 py-1.5 mt-1" />
+                 </div>
+               </div>
+               <div className="flex items-center justify-between gap-3">
+                 <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                   <input type="checkbox" checked={frCase} onChange={(e) => setFrCase(e.target.checked)} /> Match case
+                 </label>
+                 <button onClick={runFindReplaceSearch} disabled={!frQuery.trim()}
+                   className="flex items-center gap-1.5 text-sm px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-light disabled:opacity-40">
+                   <Search size={14} /> Search
+                 </button>
+               </div>
+               <p className="text-[11px] text-gray-400">
+                 Searches prose only: placeholder/condition chips, images and HTML markup are never touched. A phrase split
+                 across two paragraphs is not matched. Careful with legally-mandated wording — verbatim phrases are plain
+                 prose here and CAN be changed.
+               </p>
+
+               {frDone !== null && (
+                 <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+                   Replaced {frDone} occurrence{frDone !== 1 ? 's' : ''}. The change is in the editor now — it saves with the next autosave / Save All.
+                 </div>
+               )}
+
+               {frMatches !== null && (
+                 frMatches.length === 0 ? (
+                   <div className="text-sm text-gray-500 py-2">No matches for “{frQuery}”.</div>
+                 ) : (
+                   <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
+                     {frMatches.map((m) => {
+                       const key = matchKey(m);
+                       return (
+                         <div key={key} className={`flex items-start gap-2.5 px-3 py-2 text-xs ${m.replaceable ? '' : 'bg-gray-50'}`}>
+                           <input
+                             type="checkbox"
+                             className="mt-0.5"
+                             disabled={!m.replaceable}
+                             checked={m.replaceable && frSelected.has(key)}
+                             onChange={(e) => setFrSelected(prev => {
+                               const next = new Set(prev);
+                               e.target.checked ? next.add(key) : next.delete(key);
+                               return next;
+                             })}
+                           />
+                           <div className="min-w-0 flex-1">
+                             <div className="flex items-center gap-1.5 flex-wrap">
+                               <span className="font-semibold text-gray-800 truncate">{m.sectionTitle}</span>
+                               <span className="shrink-0 uppercase font-bold text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">{m.language}</span>
+                               <span className="shrink-0 text-gray-400">
+                                 {m.target.kind === 'title' ? 'Section title'
+                                   : m.target.kind === 'inline' ? `Row ${m.target.refIndex + 1}`
+                                   : `Shared block: ${m.target.blockTitle}`}
+                               </span>
+                               <span className="shrink-0 text-gray-400">· {m.count}×</span>
+                             </div>
+                             <div className="text-gray-500 truncate mt-0.5" title={m.snippet}>{m.snippet}</div>
+                             {!m.replaceable && (
+                               <div className="text-[10px] text-amber-600 mt-0.5">Shared block — edit it in the Block Library (changes there affect every template using it).</div>
+                             )}
+                           </div>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 )
+               )}
+             </div>
+             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t">
+               <span className="text-[11px] text-gray-400">
+                 {locked ? 'This template is FINAL — unlock it to replace.' :
+                   frMatches ? `${frMatches.filter(m => frSelected.has(matchKey(m))).length} of ${frMatches.filter(m => m.replaceable).length} replaceable rows selected` : ''}
+               </span>
+               <div className="flex gap-2">
+                 <button onClick={() => setShowFindReplace(false)} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50">Close</button>
+                 <button
+                   onClick={runReplaceSelected}
+                   disabled={locked || !frMatches || !frMatches.some(m => frSelected.has(matchKey(m)))}
+                   className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40"
+                 >
+                   Replace in selected
+                 </button>
+               </div>
+             </div>
+           </div>
+         </div>
+       )}
     </Layout>
   );
 };

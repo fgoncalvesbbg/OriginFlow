@@ -14,20 +14,205 @@ import {
   ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS,
   getAIPrompts, updateAIPrompt,
   getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry,
-  getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim
+  getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim,
+  getIMMarkets, saveIMMarket, deleteIMMarket
 } from '../services';
+import type { IMMarket } from '../services';
 import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../utils';
 import type { ParsedAttributeRow } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 
+/**
+ * Markets admin — the market → language mapping the print-export dialog offers as
+ * one-click presets ("DACH → DE, EN"). Which languages a market's manuals must
+ * include is a compliance decision, so it is maintained here by admins, not typed
+ * ad hoc per export. Stored in im_markets (migration 107).
+ */
+const MarketsAdminSection: React.FC = () => {
+  const [markets, setMarkets] = useState<IMMarket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  // null = list view; 'new' or an IMMarket id = the edit form.
+  const [editing, setEditing] = useState<'new' | string | null>(null);
+  const [form, setForm] = useState<{ code: string; name: string; languages: string[] }>({ code: '', name: '', languages: [] });
+  const [deleteTarget, setDeleteTarget] = useState<IMMarket | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try { setMarkets(await getIMMarkets()); }
+    catch (e) { console.error('[AdminDashboard] loading markets failed:', e); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const startEdit = (m?: IMMarket) => {
+    setEditing(m?.id ?? 'new');
+    setForm(m ? { code: m.code, name: m.name, languages: [...m.languages] } : { code: '', name: '', languages: [] });
+  };
+
+  const toggleLang = (code: string) =>
+    setForm(prev => ({
+      ...prev,
+      languages: prev.languages.includes(code) ? prev.languages.filter(l => l !== code) : [...prev.languages, code],
+    }));
+
+  const save = async () => {
+    if (!form.code.trim() || !form.name.trim() || !form.languages.length || saving) return;
+    setSaving(true);
+    try {
+      await saveIMMarket({
+        id: editing === 'new' ? undefined : editing ?? undefined,
+        code: form.code,
+        name: form.name,
+        languages: form.languages,
+        sort: editing === 'new' ? markets.length : markets.find(m => m.id === editing)?.sort,
+      });
+      setEditing(null);
+      await load();
+    } catch (e: any) {
+      alert(`Failed to save market: ${e?.message ?? e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteIMMarket(deleteTarget.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (e: any) {
+      alert(`Failed to delete market: ${e?.message ?? e}`);
+    }
+  };
+
+  return (
+    <div>
+      <div className="px-6 py-4 bg-light border-b border-gray-200 flex justify-between items-center">
+        <div>
+          <h3 className="font-bold text-gray-800">Markets</h3>
+          <p className="text-xs text-muted mt-0.5">
+            Which languages each market's manuals must include. The print-export dialog offers these
+            as one-click presets and records the chosen market on every generated PDF.
+          </p>
+        </div>
+        <button onClick={() => startEdit()} className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+          <Plus size={15} /> Add market
+        </button>
+      </div>
+
+      {editing !== null && (
+        <div className="px-6 py-4 border-b border-gray-100 bg-indigo-50/40">
+          <div className="flex flex-wrap items-end gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Code (short, stable)</label>
+              <input
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-32 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="DACH"
+                value={form.code}
+                onChange={e => setForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                disabled={editing !== 'new'}
+                title={editing !== 'new' ? 'The code is stamped on existing render history — it cannot be changed' : undefined}
+              />
+            </div>
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Name</label>
+              <input
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="Germany / Austria / Switzerland"
+                value={form.name}
+                onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+          </div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5">Languages this market's manuals must include</label>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {IM_LANGUAGES.map(l => {
+              const on = form.languages.includes(l.code);
+              return (
+                <button
+                  key={l.code}
+                  type="button"
+                  onClick={() => toggleLang(l.code)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${on ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'}`}
+                  title={l.name}
+                >{l.code.toUpperCase()}</button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={save}
+              disabled={saving || !form.code.trim() || !form.name.trim() || !form.languages.length}
+              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />} {editing === 'new' ? 'Create market' : 'Save changes'}
+            </button>
+            <button onClick={() => setEditing(null)} disabled={saving} className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="px-6 py-10 text-center text-gray-400 text-sm">Loading markets…</div>
+      ) : markets.length === 0 ? (
+        <div className="px-6 py-10 text-center text-gray-400 text-sm">
+          No markets configured yet. Add one — e.g. code <span className="font-mono">DACH</span> with DE + EN —
+          and the print-export dialog will offer it as a preset.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-light border-b border-gray-100">
+            <tr>
+              <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Code</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Languages</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {markets.map(m => (
+              <tr key={m.id} className="hover:bg-light/60">
+                <td className="px-6 py-3 font-mono font-bold text-gray-800">{m.code}</td>
+                <td className="px-4 py-3 text-gray-700">{m.name}</td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {m.languages.map(l => (
+                      <span key={l} className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">{l}</span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <button onClick={() => startEdit(m)} title="Edit" className="p-1.5 text-gray-400 hover:text-indigo-600"><Edit2 size={15} /></button>
+                  <button onClick={() => setDeleteTarget(m)} title="Delete" className="p-1.5 text-gray-400 hover:text-rose-600"><Trash2 size={15} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <ConfirmationModal
+        variant="danger"
+        isOpen={!!deleteTarget}
+        title={`Delete market ${deleteTarget?.code}?`}
+        message="Existing render-history rows keep their market stamp; only the preset disappears from the print dialog."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </div>
+  );
+};
+
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'prompts'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'prompts' | 'markets'>('users');
   const [refreshing, setRefreshing] = useState(false);
 
   // Core Data
@@ -1149,10 +1334,16 @@ const AdminDashboard: React.FC = () => {
         <button onClick={() => setActiveTab('prompts')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'prompts' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Sparkles size={18} /> AI Prompts
         </button>
+        <button onClick={() => setActiveTab('markets')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'markets' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <Globe size={18} /> Markets
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow border border-gray-200 min-h-[400px]">
-        
+
+        {/* MARKETS TAB */}
+        {activeTab === 'markets' && <MarketsAdminSection />}
+
         {/* USERS TAB */}
         {activeTab === 'users' && (
           <div>

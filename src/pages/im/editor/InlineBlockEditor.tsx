@@ -12,8 +12,9 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, type LucideIcon } from 'lucide-react';
+import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
+import { markTranslatedFromEn, translationStaleAgainstEn } from '../../../services/im/im-translation-marker';
 import { getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim } from '../../../services/ai/translation-verbatim.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
@@ -101,7 +102,10 @@ type TextMark = 'bold' | 'italic' | 'underline' | 'temp';
 type InlineNode =
   | { type: 'text'; text: string; marks?: Array<TextMark> }
   | { type: 'placeholder'; id: string; placeholderType: 'text' | 'image'; label: string; attrId?: string }
-  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string }
+  // `always` marks an "any value — always show" chip (data-always): the attribute's
+  // live value is injected unconditionally. Must round-trip or the chip degrades
+  // into a normal condition on the next edit.
+  | { type: 'condition'; id: string; featureId: string; featureName?: string; conditionLabel?: string; content: string; always?: boolean }
   // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
   // `width` is the optional CSS width set via the resize control (e.g. "50%");
   // `align` is the chosen inline/left/right/center placement; `border` draws a
@@ -114,15 +118,24 @@ type InlineNode =
 export type CellAlign = 'left' | 'center' | 'right';
 interface TableCellData { align?: CellAlign; content: InlineNode[]; }
 
+// One list item at a nesting depth (0 = top level). Depth-flat storage lets the
+// parser/serializer round-trip nested <ul>/<ol> instead of flattening them.
+interface ListItemData { depth: number; content: InlineNode[]; }
+
 type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
   | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean }
-  | { id: string; type: 'list'; ordered: boolean; items: InlineNode[][] }
+  | { id: string; type: 'list'; ordered: boolean; items: ListItemData[] }
   | { id: string; type: 'table'; rows: TableCellData[][] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
   | { id: string; type: 'legacy_html'; html: string };
+
+/** Everything a placeholder chip carries, read off its data-* attributes for editing. */
+export interface PlaceholderChipData { id: string; type: 'text' | 'image'; label: string; attrId?: string }
+/** Everything a condition chip carries, read off its data-* attributes for editing. */
+export interface ConditionChipData { id: string; featureId: string; featureName: string; content: string; conditionLabel: string; always: boolean }
 
 interface EditorProps {
   initialContent: string;
@@ -130,6 +143,13 @@ interface EditorProps {
   placeholder?: string;
   onInsertPlaceholder?: (type: 'text' | 'image') => void;
   onInsertCondition?: () => void;
+  /**
+   * Click-to-edit for existing chips: called with the chip's current data and a
+   * `replace` callback that swaps the clicked chip's HTML in place. When absent,
+   * chips stay inert (the pre-edit behaviour).
+   */
+  onEditPlaceholder?: (data: PlaceholderChipData, replace: (html: string) => void) => void;
+  onEditCondition?: (data: ConditionChipData, replace: (html: string) => void) => void;
   minimal?: boolean;
   /**
    * Enables verbatim phrase badges + the "Save as Verbatim" toolbar action.
@@ -138,6 +158,13 @@ interface EditorProps {
    * save/edit modal offers.
    */
   verbatimLanguages?: { code: string; label: string }[];
+  /**
+   * BCP-47 code of the language being edited (e.g. "de"). Set on the
+   * contentEditable so the browser spellchecks with the RIGHT dictionary —
+   * without it, German/French prose is checked against the UI language and
+   * either everything squiggles or real typos pass silently.
+   */
+  lang?: string;
 }
 
 const createId = () => Math.random().toString(36).slice(2, 11);
@@ -215,7 +242,7 @@ const normalizeCellInlines = (nodes: InlineNode[]): InlineNode[] => {
   return collapsed.filter((n) => !(n.type === 'text' && n.text === ''));
 };
 
-const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, minimal, verbatimLanguages }) => {
+const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, onEditPlaceholder, onEditCondition, minimal, verbatimLanguages, lang }) => {
   const { user } = useAuth();
   const verbatimEnabled = !!verbatimLanguages?.length;
   const [verbatims, setVerbatims] = useState<TranslationVerbatim[]>(() => verbatimsCache ?? []);
@@ -238,6 +265,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [imgWidth, setImgWidth] = useState<string>('');
   const [imgAlign, setImgAlign] = useState<ImgAlign | undefined>(undefined);
   const [imgBorder, setImgBorder] = useState(false);
+  // Editable alt text of the selected image — previously settable only once, at upload.
+  const [imgAlt, setImgAlt] = useState<string>('');
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -460,8 +489,12 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           id: el.dataset.id || createId(),
           featureId: el.dataset.featureId || 'manual',
           featureName: el.dataset.featureName || '',
-          conditionLabel: decodeURIComponent(el.dataset.conditionLabel || ''),
-          content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || ''
+          // Chips store the expected value as data-condition-value (dataset.conditionValue).
+          // This used to read dataset.conditionLabel — an attribute that never existed —
+          // so the condition's value silently emptied on every editor round-trip.
+          conditionLabel: decodeURIComponent((el.dataset.conditionValue === '*' ? '' : el.dataset.conditionValue) || ''),
+          content: decodeURIComponent(el.dataset.content || '').trim() || el.textContent || '',
+          always: el.dataset.always === 'true' || undefined,
         });
         return;
       }
@@ -497,14 +530,21 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     if (inline.type === 'placeholder') {
       const colorClass = inline.placeholderType === 'text' ? 'bg-amber-100 border-yellow-300 text-amber-800' : 'bg-indigo-100 border-indigo-300 text-blue-800';
       const attrAttr = inline.attrId ? ` data-attr-id="${inline.attrId}"` : '';
-      return `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${inline.placeholderType}" data-id="${inline.id}"${attrAttr} data-label="${encodeURIComponent(inline.label)}">[${inline.label}]</span>&nbsp;`;
+      return `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1 cursor-pointer" contenteditable="false" data-type="${inline.placeholderType}" data-id="${inline.id}"${attrAttr} data-label="${encodeURIComponent(inline.label)}" title="Placeholder: ${inline.label} — click to edit">[${inline.label}]</span>&nbsp;`;
     }
 
     if (inline.type === 'condition') {
+      if (inline.always) {
+        // "Any value — always show" chip: the attribute's live value is injected
+        // unconditionally. data-always/data-condition-value="*" must survive the
+        // round-trip — dropping them silently degraded the chip into a condition.
+        const name = inline.featureName || inline.content || 'Value';
+        return `&nbsp;<span class="im-condition bg-amber-50 border-amber-300 text-amber-800 border border-dashed px-2 py-1 rounded text-sm mx-1 cursor-pointer" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-feature-name="${inline.featureName || ''}" data-content="${encodeURIComponent(inline.content)}" data-condition-value="*" data-always="true" title="Value: ${name} — click to edit"><span class="font-bold text-xs uppercase mr-1">[${name}]</span></span>&nbsp;`;
+      }
       const displayLabel = inline.featureId === 'manual'
           ? 'Optional'
           : inline.conditionLabel ? `${inline.featureName}: ${inline.conditionLabel}` : (inline.featureName || 'Auto-Spec');
-      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionLabel || '')}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
+      return `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1 cursor-pointer" contenteditable="false" data-id="${inline.id}" data-feature-id="${inline.featureId}" data-content="${encodeURIComponent(inline.content)}" data-feature-name="${inline.featureName || ''}" data-condition-value="${encodeURIComponent(inline.conditionLabel || '')}" title="Condition: ${displayLabel} — click to edit"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${inline.content.substring(0, 20)}${inline.content.length > 20 ? '...' : ''}</span>&nbsp;`;
     }
 
     if (inline.type === 'image') {
@@ -551,9 +591,27 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (el.classList.contains('im-block-wrapper')) {
         const contentEl = el.querySelector('.im-block-content') as HTMLElement | null;
         const variant = (['warning', 'danger', 'caution', 'electric', 'flammable', 'hot_surface', 'info'].find(v => el.classList.contains(`im-block-${v}`)) || 'info') as CalloutVariant;
-        // Use only the <p> body — the .im-block-title strong is re-generated on serialize, exclude it
-        const bodyEl = contentEl?.querySelector('p') as HTMLElement | null;
-        parsed.push({ id: createId(), type: 'callout', variant, content: parseInlineNodes(bodyEl || contentEl || el) });
+        // Parse the WHOLE body minus the generated title (re-added on serialize).
+        // Multi-paragraph callout bodies (from imports/legacy content) used to be cut
+        // to their FIRST <p> here — silent data loss in safety text. Paragraph
+        // boundaries are preserved as line breaks (serialized back as <br/>).
+        let content: InlineNode[];
+        if (contentEl) {
+          const body = contentEl.cloneNode(true) as HTMLElement;
+          body.querySelector('.im-block-title')?.remove();
+          const paras = Array.from(body.children).filter((c) => c.tagName === 'P') as HTMLElement[];
+          if (paras.length > 1) {
+            content = paras.flatMap((p, i) => {
+              const nodes = parseInlineNodes(p);
+              return i === 0 ? nodes : [{ type: 'text', text: '\n' } as InlineNode, ...nodes];
+            });
+          } else {
+            content = parseInlineNodes(paras[0] ?? body);
+          }
+        } else {
+          content = parseInlineNodes(el);
+        }
+        parsed.push({ id: createId(), type: 'callout', variant, content });
         return;
       }
       if (el.tagName === 'IMG') {
@@ -561,11 +619,26 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
       if (el.tagName === 'UL' || el.tagName === 'OL') {
-        // Direct <li> children only; inline content per item (nested lists flatten).
-        const items = Array.from(el.children)
-          .filter((c) => c.tagName === 'LI')
-          .map((li) => parseInlineNodes(li as HTMLElement));
-        parsed.push({ id: createId(), type: 'list', ordered: el.tagName === 'OL', items: items.length ? items : [[]] });
+        // Depth-aware walk so nested <ul>/<ol> round-trip instead of flattening.
+        // Each <li>'s OWN content is parsed with its nested lists removed (they are
+        // collected as deeper items right after it, preserving document order).
+        // Known simplification: nested levels take the top list's ordered/unordered
+        // kind on serialize (a <ul> inside an <ol> comes back as a nested <ol>).
+        const items: ListItemData[] = [];
+        const collect = (listEl: Element, depth: number) => {
+          Array.from(listEl.children).forEach((child) => {
+            if (child.tagName === 'UL' || child.tagName === 'OL') { collect(child, depth + 1); return; }
+            if (child.tagName !== 'LI') return;
+            const own = child.cloneNode(true) as HTMLElement;
+            own.querySelectorAll('ul, ol').forEach((n) => n.remove());
+            items.push({ depth, content: parseInlineNodes(own) });
+            Array.from(child.children)
+              .filter((c) => c.tagName === 'UL' || c.tagName === 'OL')
+              .forEach((n) => collect(n, depth + 1));
+          });
+        };
+        collect(el, 0);
+        parsed.push({ id: createId(), type: 'list', ordered: el.tagName === 'OL', items: items.length ? items : [{ depth: 0, content: [] }] });
         return;
       }
       if (el.tagName === 'TABLE') {
@@ -604,8 +677,27 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       }
       if (block.type === 'list') {
         const tag = block.ordered ? 'ol' : 'ul';
-        const items = block.items.length ? block.items : [[]];
-        return `<${tag}>${items.map((item) => `<li>${serializeInline(item)}</li>`).join('')}</${tag}>`;
+        const items = block.items.length ? block.items : [{ depth: 0, content: [] as InlineNode[] }];
+        // Rebuild nesting from the flat depth sequence: a deeper run nests inside
+        // the previous <li> (standard HTML list structure).
+        let i = 0;
+        const renderLevel = (depth: number): string => {
+          let out = '';
+          while (i < items.length && items[i].depth >= depth) {
+            if (items[i].depth === depth) {
+              out += `<li>${serializeInline(items[i].content)}`;
+              i++;
+              if (i < items.length && items[i].depth > depth) out += `<${tag}>${renderLevel(depth + 1)}</${tag}>`;
+              out += '</li>';
+            } else {
+              // Sequence starts deeper than expected (e.g. first item indented) —
+              // wrap the deeper run in an empty item so the HTML stays valid.
+              out += `<li><${tag}>${renderLevel(depth + 1)}</${tag}></li>`;
+            }
+          }
+          return out;
+        };
+        return `<${tag}>${renderLevel(0)}</${tag}>`;
       }
       if (block.type === 'table') {
         // `data-align` is the round-trip source of truth (re-read on parse); the
@@ -659,6 +751,33 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
   }, []);
 
+  // Top-level child of the contentEditable that contains the caret — used to insert
+  // new blocks AFTER the block the user is working in, instead of at the very end.
+  const caretTopLevelIndex = useCallback((): number | null => {
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    const live = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    const range = live && el && el.contains(live.startContainer) ? live : savedRangeRef.current;
+    if (!el || !range || !el.contains(range.startContainer)) return null;
+    let node: Node | null = range.startContainer;
+    while (node && node.parentNode !== el) node = node.parentNode;
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return null;
+    const idx = Array.from(el.children).indexOf(node as Element);
+    return idx >= 0 ? idx : null;
+  }, []);
+
+  /** Insert whole blocks right after the caret's block (or at the end without a caret). */
+  const insertBlocksAtCaret = useCallback((newBlocks: EditorBlock[]) => {
+    const el = contentRef.current;
+    if (!el || !newBlocks.length) return;
+    const fresh = deserializeHtmlToBlocks(el.innerHTML); // don't lose in-progress typing
+    const idx = caretTopLevelIndex();
+    const at = idx != null ? idx + 1 : fresh.length;
+    isUserEditingRef.current = false; // force the render effect to rewrite the DOM
+    setBlocks([...fresh.slice(0, at), ...newBlocks, ...fresh.slice(at)]);
+    setSelectedBlockId(newBlocks[0].id);
+  }, [deserializeHtmlToBlocks, caretTopLevelIndex]);
+
   // Upload pasted/dropped image files to Storage and insert the URL, instead of
   // letting the browser inline them as base64 data URIs. A pasted screenshot
   // stored inline gets duplicated into every language on save and can push a
@@ -685,11 +804,29 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
       .map((item) => item.getAsFile())
       .filter((f): f is File => !!f);
-    if (!files.length) return; // plain text/HTML paste — let the browser handle it
-    event.preventDefault();
-    saveSelection(); // pin the caret so the async insert lands where the user pasted
-    void uploadAndInsertImages(files);
-  }, [saveSelection, uploadAndInsertImages]);
+    if (files.length) {
+      event.preventDefault();
+      saveSelection(); // pin the caret so the async insert lands where the user pasted
+      void uploadAndInsertImages(files);
+      return;
+    }
+
+    // A paste carrying an HTML <table> (Excel/Sheets/Word ranges): letting the browser
+    // insert it mid-paragraph would flatten it to bare text on the next round-trip
+    // (parseInlineNodes keeps only text runs). Parse the pasted HTML into proper
+    // blocks instead and insert them after the caret's block — tables stay tables.
+    const html = event.clipboardData?.getData('text/html') ?? '';
+    if (/<table[\s>]/i.test(html)) {
+      event.preventDefault();
+      saveSelection();
+      const pasted = deserializeHtmlToBlocks(html)
+        // Drop the empty paragraphs clipboard wrappers tend to produce.
+        .filter((b) => !(b.type === 'paragraph' && b.content.every((n) => n.type === 'text' && !n.text.trim())));
+      if (pasted.length) insertBlocksAtCaret(pasted);
+      return;
+    }
+    // Plain text/HTML paste — let the browser handle it.
+  }, [saveSelection, uploadAndInsertImages, deserializeHtmlToBlocks, insertBlocksAtCaret]);
 
   const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     const files = Array.from(event.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
@@ -757,6 +894,40 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (existing) setVerbatimModal({ id: existing.id, phrase: existing.phrase, note: existing.note ?? '', translations: { ...existing.translations } });
       return;
     }
+
+    // Click-to-edit an existing chip: hand its data + an in-place replace callback to
+    // the row (which opens the matching modal pre-filled). Previously chips were inert
+    // — fixing a typo in a condition meant deleting and rebuilding it from scratch.
+    const chip = target.closest?.('.im-placeholder, .im-condition') as HTMLElement | null;
+    const editorEl = contentRef.current;
+    if (chip && editorEl?.contains(chip)) {
+      const replace = (html: string) => {
+        chip.outerHTML = html;
+        isUserEditingRef.current = true; // keep the live DOM; just sync blocks + emit
+        if (contentRef.current) setBlocks(deserializeHtmlToBlocks(contentRef.current.innerHTML));
+      };
+      if (chip.classList.contains('im-placeholder') && onEditPlaceholder) {
+        onEditPlaceholder({
+          id: chip.dataset.id || '',
+          type: (chip.dataset.type as 'text' | 'image') || 'text',
+          label: decodeURIComponent(chip.dataset.label || '').trim() || 'Text',
+          attrId: chip.dataset.attrId || undefined,
+        }, replace);
+        return;
+      }
+      if (chip.classList.contains('im-condition') && onEditCondition) {
+        onEditCondition({
+          id: chip.dataset.id || '',
+          featureId: chip.dataset.featureId || 'manual',
+          featureName: chip.dataset.featureName || '',
+          content: decodeURIComponent(chip.dataset.content || ''),
+          conditionLabel: decodeURIComponent(chip.dataset.conditionValue === '*' ? '' : (chip.dataset.conditionValue || '')),
+          always: chip.dataset.always === 'true',
+        }, replace);
+        return;
+      }
+    }
+
     const prev = selectedImgRef.current;
     if (prev && prev !== target) prev.style.outline = '';
     if (target.tagName === 'IMG') {
@@ -767,12 +938,13 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       setImgWidth(img.style.width || '');
       setImgAlign(readImgAlign(img));
       setImgBorder(readImgBorder(img));
+      setImgAlt(img.getAttribute('alt') || '');
     } else {
       selectedImgRef.current = null;
       setImgSelected(false);
     }
     refreshCaretTable();
-  }, [refreshCaretTable, verbatims]);
+  }, [refreshCaretTable, verbatims, onEditPlaceholder, onEditCondition, deserializeHtmlToBlocks]);
 
   // Resize / re-align / re-border the selected image. All rebuild the whole inline
   // style (via imgStyleFor) so a previous float/margin/border is fully cleared,
@@ -813,6 +985,21 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     restyleSelectedImg(img.style.width || undefined, readImgAlign(img), border);
   }, [restyleSelectedImg]);
 
+  // Apply the typed alt text to the selected image (accessibility of the generated
+  // manual). Alt used to be settable only once, in the upload prompt — pasted/dropped
+  // images silently kept their filename forever.
+  const commitImgAlt = useCallback(() => {
+    const img = selectedImgRef.current;
+    const el = contentRef.current;
+    if (!img || !el) return;
+    // Double quotes would break the serialized alt="…" attribute (imgTag inserts raw).
+    const v = imgAlt.trim().replace(/"/g, "'");
+    if ((img.getAttribute('alt') || '') === v) return;
+    img.setAttribute('alt', v);
+    isUserEditingRef.current = true; // keep the live DOM; just sync blocks + emit
+    setBlocks(deserializeHtmlToBlocks(el.innerHTML));
+  }, [imgAlt, deserializeHtmlToBlocks]);
+
   // Apply the free-typed width. Empty → natural size; a bare number → px; otherwise a
   // valid CSS length (px/%/rem/em) is accepted, anything else is ignored (no-op).
   const commitCustomWidth = useCallback(() => {
@@ -829,14 +1016,60 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // DOM-sync effect rewrites the editor from those stale blocks — so a numbered
   // list reverts to plain paragraphs and is never emitted/saved. Reading innerHTML
   // right after execCommand (synchronous) captures the change deterministically.
-  const execCmd = useCallback((command: string) => {
+  const execCmd = useCallback((command: string, value?: string) => {
     const el = contentRef.current;
     if (!el) return;
     el.focus();
-    document.execCommand(command);
+    document.execCommand(command, false, value);
     isUserEditingRef.current = true; // keep the native DOM; just sync blocks + emit
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
   }, [deserializeHtmlToBlocks]);
+
+  /**
+   * Convert the block the caret is in to a heading/paragraph — what H1/H2/H3 mean in
+   * every editor operators know. Falls back to APPENDING a new block (the old
+   * behaviour) when the caret isn't in the editor, or sits somewhere a heading can't
+   * live (inside a table cell or a callout body, where the parser would silently
+   * flatten it back to text on the next round-trip).
+   */
+  const applyBlockType = useCallback((tag: 'h1' | 'h2' | 'h3' | 'p') => {
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    const container = range?.commonAncestorContainer ?? null;
+    const containerEl = container
+      ? (container.nodeType === Node.ELEMENT_NODE ? (container as HTMLElement) : container.parentElement)
+      : null;
+    const caretInside = !!(el && container && el.contains(container));
+    const inUnconvertible = !!containerEl?.closest('td, th, .im-block-wrapper');
+    if (caretInside && !inUnconvertible) {
+      execCmd('formatBlock', `<${tag}>`);
+      return;
+    }
+    setBlocks((prev) => [
+      ...prev,
+      tag === 'p'
+        ? { id: createId(), type: 'paragraph', content: [] }
+        : { id: createId(), type: 'heading', level: Number(tag[1]) as 1 | 2 | 3, content: [{ type: 'text', text: `Heading ${tag[1]}` }] },
+    ]);
+  }, [execCmd]);
+
+  // Tab / Shift+Tab inside a list item: indent/outdent (creates or unwinds a nested
+  // list, which the parser now round-trips). Outside lists, Tab keeps its browser
+  // default (focus move) — authors expect that for accessibility.
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0) return;
+    const container = sel.getRangeAt(0).startContainer;
+    const containerEl = container.nodeType === Node.ELEMENT_NODE ? (container as HTMLElement) : container.parentElement;
+    const li = containerEl?.closest('li');
+    if (!li || !el.contains(li)) return;
+    event.preventDefault();
+    execCmd(event.shiftKey ? 'outdent' : 'indent');
+  }, [execCmd]);
+
 
   // Toggle a "temporary — not final yet" highlight over the current selection. Unlike
   // bold/italic/underline there's no native execCommand for a custom-classed wrapper, so
@@ -922,8 +1155,28 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const newBlock: EditorBlock = type === 'table'
       ? { id: createId(), type: 'table', rows: [[textCell('Header 1'), textCell('Header 2')], [textCell('Row 1 Col 1'), textCell('Row 1 Col 2')]] }
       : { id: createId(), type: 'callout', variant: type, content: [{ type: 'text', text: CALLOUT_DEFAULT_TEXT[type] }] };
-    setBlocks((prev) => [...prev, newBlock]);
-    setSelectedBlockId(newBlock.id);
+    // Land right after the block the caret is in (not at the very end of the row).
+    insertBlocksAtCaret([newBlock]);
+  };
+
+  // Delete the whole table the caret is in. The row/column removers deliberately keep
+  // the header and the last column, so without this an unwanted table was permanently
+  // stuck in the content.
+  const removeCaretTable = () => {
+    const el = contentRef.current;
+    const ctx = getTableContext();
+    if (!el || !ctx) return;
+    if (!window.confirm('Delete this entire table?')) return;
+    const fresh = deserializeHtmlToBlocks(el.innerHTML);
+    let seen = -1;
+    const next = fresh.filter((b) => {
+      if (b.type !== 'table') return true;
+      seen++;
+      return seen !== ctx.tableIdx;
+    });
+    isUserEditingRef.current = false; // force the render effect to rewrite the DOM
+    setBlocks(next.length ? next : [{ id: createId(), type: 'paragraph', content: [] }]);
+    setCaretInTable(false);
   };
 
   // Apply a structural change to the table the caret is in. Reads the live DOM first
@@ -1017,10 +1270,11 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       <div className="flex-none sticky top-0 flex items-center gap-1 p-2 bg-light border-b border-gray-200 rounded-t-xl select-none z-20 flex-wrap">
         {mode === 'rich' && (
           <>
-            <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 1, content: [{ type: 'text', text: 'Heading 1' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H1</button>
-            <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 2, content: [{ type: 'text', text: 'Heading 2' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H2</button>
-            <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'heading', level: 3, content: [{ type: 'text', text: 'Heading 3' }] }]); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded">H3</button>
-            <button onMouseDown={(e) => { e.preventDefault(); setBlocks((prev) => [...prev, { id: createId(), type: 'paragraph', content: [] }]); }} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Paragraph</button>
+            {/* Convert the caret's block (appends a new one only when the caret isn't in the editor). */}
+            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('h1'); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a Heading 1">H1</button>
+            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('h2'); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a Heading 2">H2</button>
+            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('h3'); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a Heading 3">H3</button>
+            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('p'); }} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a plain paragraph">Paragraph</button>
             <div className="w-px h-4 bg-gray-300 mx-1"></div>
             {/* Inline formatting — applies to the current selection; execCmd re-parses the marks from the DOM */}
             <button onMouseDown={(e) => { e.preventDefault(); execCmd('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold (Ctrl+B)"><Bold size={16} /></button>
@@ -1046,6 +1300,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                 <button onMouseDown={(e) => { e.preventDefault(); addTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded" title="Add a column after the current one">+ Col</button>
                 <button onMouseDown={(e) => { e.preventDefault(); removeTableRow(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current row (header can't be removed)">− Row</button>
                 <button onMouseDown={(e) => { e.preventDefault(); removeTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current column">− Col</button>
+                <button onMouseDown={(e) => { e.preventDefault(); removeCaretTable(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete this entire table">− Table</button>
                 <div className="w-px h-4 bg-gray-300 mx-0.5"></div>
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Align the current cell's content (text or image)">Cell</span>
                 {([
@@ -1121,6 +1376,18 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               className={`flex items-center gap-1 px-1.5 py-1 text-[11px] rounded ${imgBorder ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
               title={imgBorder ? 'Remove the border from the selected image' : 'Add a border around the selected image'}
             ><Square size={14} /> Border</button>
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Alt text of the selected image (read by screen readers; part of the published manual)">Alt</span>
+            <input
+              value={imgAlt}
+              onChange={(e) => setImgAlt(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitImgAlt(); } }}
+              onBlur={commitImgAlt}
+              placeholder="Describe the image…"
+              className="w-36 px-1.5 py-1 text-[11px] border border-gray-300 rounded"
+              title="Accessibility description of the selected image — press Enter to apply"
+            />
           </>
         )}
         {mode === 'html' && (
@@ -1159,9 +1426,12 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               ref={contentRef}
               className="min-h-[160px] p-4 outline-none im-content max-w-none font-sans"
               contentEditable
+              lang={lang}
+              spellCheck={true}
               onInput={handleChange}
               onPaste={handlePaste}
               onDrop={handleDrop}
+              onKeyDown={handleKeyDown}
               onClick={handleEditorClick}
               onFocus={() => { setIsFocused(true); registerAsInsertTarget(); }}
               onBlur={() => { setIsFocused(false); saveSelection(); decorateVerbatims(); }}
@@ -1264,12 +1534,35 @@ interface InlineHtmlRowProps {
   onInsertCondition: () => void;
   /** Per-box AI translation: "Translate from EN" on non-English tabs, "Translate to all" on EN. */
   enableTranslate?: boolean;
+  /**
+   * Category attributes — enables click-to-edit on existing placeholder/condition
+   * chips (the edit modals need the attribute list). Absent = chips stay inert.
+   */
+  attributes?: CategoryAttribute[];
 }
 
-export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate }) => {
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Matches one placeholder chip span by its data-id (chip inner is plain text — no nested tags). */
+const placeholderChipRe = (id: string) =>
+  new RegExp(`<span[^>]*class="[^"]*im-placeholder[^"]*"[^>]*data-id="${escapeRegExp(id)}"[^>]*>[^<]*</span>`, 'g');
+
+export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes }) => {
   const [rowLang, setRowLang] = useState('en');
   const [translating, setTranslating] = useState(false);
   const [translateErr, setTranslateErr] = useState<string | null>(null);
+  // English reference pane (shown while editing a translation). Open/closed is a
+  // GLOBAL preference — a translator who collapses it once means it, everywhere.
+  const [showEnRef, setShowEnRef] = useState<boolean>(() => {
+    try { return localStorage.getItem('im-en-ref-open') !== '0'; } catch { return true; }
+  });
+  const toggleEnRef = () => setShowEnRef((v) => {
+    const next = !v;
+    try { localStorage.setItem('im-en-ref-open', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
+  // Click-to-edit modal state for existing chips (data + in-place replace callback).
+  const [editPlaceholder, setEditPlaceholder] = useState<{ data: PlaceholderChipData; replace: (html: string) => void } | null>(null);
+  const [editCondition, setEditCondition] = useState<{ data: ConditionChipData; replace: (html: string) => void } | null>(null);
   // Guard against the active row language being disabled on the template later.
   const activeCode = languages.some(l => l.code === rowLang) ? rowLang : (languages[0]?.code ?? 'en');
   const variantCfg = variant ? CALLOUT_VARIANTS.find(v => v.value === variant) : undefined;
@@ -1315,6 +1608,22 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     onInsertPlaceholder(type);
   }, [commitPlaceholder, onInsertPlaceholder]);
 
+  // Commit an EDITED placeholder chip: replace it in the active language's live DOM,
+  // then swap the same chip (matched by its OLD data-id) in every other language, so
+  // a renamed/re-bound placeholder stays one placeholder everywhere.
+  const commitPlaceholderEdit = useCallback((oldId: string, html: string, replace: (h: string) => void) => {
+    replace(html);
+    const cnt = contentRef.current;
+    const active = activeCodeRef.current;
+    languagesRef.current.forEach(l => {
+      if (l.code === active) return;
+      const existing = cnt[l.code] ?? '';
+      const re = placeholderChipRe(oldId);
+      if (!re.test(existing)) return;
+      onChangeRef.current(l.code, existing.replace(placeholderChipRe(oldId), html));
+    });
+  }, []);
+
   useEffect(() => () => clearCommitPlaceholderTarget(commitPlaceholder), [commitPlaceholder]);
 
   // Switching to a language that has no content yet backfills the placeholder
@@ -1347,7 +1656,9 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     setTranslating(true);
     try {
       const out = await translateHtml(source, 'en', target);
-      onChangeRef.current(target, out);
+      // Marked with the EN source hash so the tab dot can flag this translation as
+      // stale if English is edited later (see im-translation-marker.ts).
+      onChangeRef.current(target, markTranslatedFromEn(out, source));
     } catch (e: any) {
       setTranslateErr(e?.message || 'Translation failed');
     } finally {
@@ -1375,7 +1686,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
         const t = targets[cursor++];
         try {
           const out = await translateHtml(source, 'en', t);
-          onChangeRef.current(t, out);
+          onChangeRef.current(t, markTranslatedFromEn(out, source));
         } catch { failed.push(t.toUpperCase()); }
         done += 1;
         setTranslatingAll({ done, total: targets.length });
@@ -1414,22 +1725,27 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
         })}
       </div>
 
-      {/* Per-row language tabs — a filled dot marks languages that already have content */}
+      {/* Per-row language tabs. Dot per language: green = has content; amber = this
+          translation was machine-translated from an English source that has since been
+          EDITED (stale — retranslate or review). Human-edited translations carry no
+          marker and are never flagged. */}
       <div className="flex items-center gap-1 flex-wrap shrink-0">
         {languages.map(l => {
           const filled = !!(content[l.code] && content[l.code].trim());
+          const stale = l.code !== 'en' && filled && translationStaleAgainstEn(content['en'], content[l.code]);
           const isActive = activeCode === l.code;
           return (
             <button
               key={l.code}
               type="button"
               onClick={() => handleSelectLang(l.code)}
+              title={stale ? 'English was edited after this translation was made — retranslate or review' : undefined}
               className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                 isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
               {l.code.toUpperCase()}
-              {filled && <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500'}`} />}
+              {filled && <span className={`w-1.5 h-1.5 rounded-full ${stale ? 'bg-amber-400' : isActive ? 'bg-white' : 'bg-emerald-500'}`} />}
             </button>
           );
         })}
@@ -1462,6 +1778,34 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
       </div>
       {translateErr && <div className="text-[11px] text-rose-600 shrink-0 -mt-1">{translateErr}</div>}
 
+      {/* English reference — read-only EN source shown while editing a translation, so
+          fixing a stale DE/FR doesn't mean flipping tabs and holding English in your head.
+          This is the natural companion of the stale (amber) dot on the language tabs. */}
+      {activeCode !== 'en' && enSource.trim() && (
+        <div className="shrink-0 border border-gray-200 rounded-lg bg-gray-50 overflow-hidden">
+          <button
+            type="button"
+            onClick={toggleEnRef}
+            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold text-gray-500 uppercase tracking-wide hover:bg-gray-100"
+            title={showEnRef ? 'Hide the English source' : 'Show the English source while translating'}
+          >
+            {showEnRef ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            English reference
+            {translationStaleAgainstEn(content['en'], content[activeCode] ?? '') && (
+              <span className="normal-case font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                English was edited after this translation
+              </span>
+            )}
+          </button>
+          {showEnRef && (
+            <div
+              className="im-content text-xs text-gray-700 leading-relaxed px-3 py-2 border-t border-gray-200 bg-white max-h-48 overflow-y-auto"
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(enSource) }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Editor — when a variant is set, the surface is framed to show everything inside is wrapped */}
       <div className={`flex-1 min-h-0 flex flex-col ${variantCfg ? `border-l-4 rounded-r ${variantCfg.frame} pl-2` : ''}`}>
         {variantCfg && (
@@ -1479,10 +1823,32 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
             placeholder="Enter content…"
             onInsertPlaceholder={handleInsertPlaceholder}
             onInsertCondition={onInsertCondition}
+            onEditPlaceholder={attributes ? (data, replace) => setEditPlaceholder({ data, replace }) : undefined}
+            onEditCondition={attributes ? (data, replace) => setEditCondition({ data, replace }) : undefined}
             verbatimLanguages={activeCode === 'en' ? languages : undefined}
+            lang={activeCode}
           />
         </div>
       </div>
+
+      {/* Click-to-edit modals for existing chips (only when attributes were provided). */}
+      {editPlaceholder && attributes && (
+        <PlaceholderModal
+          type={editPlaceholder.data.type}
+          attributes={attributes}
+          initial={editPlaceholder.data}
+          onCommit={(html) => commitPlaceholderEdit(editPlaceholder.data.id, html, editPlaceholder.replace)}
+          onClose={() => setEditPlaceholder(null)}
+        />
+      )}
+      {editCondition && attributes && (
+        <ConditionModal
+          attributes={attributes}
+          initial={editCondition.data}
+          onCommit={(html) => editCondition.replace(html)}
+          onClose={() => setEditCondition(null)}
+        />
+      )}
     </div>
   );
 };
@@ -1497,10 +1863,14 @@ const insertHtmlToCurrentEditor = (html: string) => { insertToActiveEditor(html)
 const PlaceholderModal: React.FC<{
   type: 'text' | 'image';
   attributes: CategoryAttribute[];
+  /** Prefill for click-to-edit; absent = inserting a new chip. */
+  initial?: PlaceholderChipData;
+  /** Receives the built chip HTML. Insert flows fan out / insert at caret; edit flows replace in place. */
+  onCommit: (html: string) => void;
   onClose: () => void;
-}> = ({ type, attributes, onClose }) => {
-  const [label, setLabel] = useState('');
-  const [attrId, setAttrId] = useState('');
+}> = ({ type, attributes, initial, onCommit, onClose }) => {
+  const [label, setLabel] = useState(initial?.label ?? '');
+  const [attrId, setAttrId] = useState(initial?.attrId ?? '');
 
   const attrOptions = attributes.filter(f =>
     type === 'image' ? (f as any).dataType === 'image' : (f as any).dataType !== 'image'
@@ -1510,20 +1880,19 @@ const PlaceholderModal: React.FC<{
     const finalLabel = label.trim() || (type === 'text' ? 'Text' : 'Image');
     // When bound to an attribute, use the attribute id as data-id so the generator
     // resolves the value (e.g. a supplier-uploaded product image) automatically.
-    const id = attrId || createId();
+    // On edit, an unbound chip keeps its original id so filled-in values stay attached.
+    const id = attrId || initial?.id || createId();
     const colorClass = type === 'text' ? 'bg-amber-100 border-yellow-300 text-amber-800' : 'bg-indigo-100 border-indigo-300 text-blue-800';
     const attrAttr = attrId ? ` data-attr-id="${attrId}"` : '';
-    const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1" contenteditable="false" data-type="${type}" data-id="${id}"${attrAttr} data-label="${encodeURIComponent(finalLabel)}">[${finalLabel}]</span>&nbsp;`;
-    // Prefer the row-aware fan-out (shares the placeholder across all languages);
-    // fall back to a plain caret insert if no row registered one.
-    commitPlaceholderToTarget(html);
+    const html = `&nbsp;<span class="im-placeholder ${colorClass} border px-2 py-0.5 rounded text-xs font-bold select-none mx-1 cursor-pointer" contenteditable="false" data-type="${type}" data-id="${id}"${attrAttr} data-label="${encodeURIComponent(finalLabel)}" title="Placeholder: ${finalLabel} — click to edit">[${finalLabel}]</span>&nbsp;`;
+    onCommit(html);
     onClose();
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 animate-in fade-in zoom-in duration-200">
-        <h3 className="font-bold text-lg mb-4">Add {type === 'text' ? 'Text' : 'Image'} Placeholder</h3>
+        <h3 className="font-bold text-lg mb-4">{initial ? 'Edit' : 'Add'} {type === 'text' ? 'Text' : 'Image'} Placeholder</h3>
         {attrOptions.length > 0 && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">From Attribute (optional)</label>
@@ -1561,17 +1930,48 @@ const PlaceholderModal: React.FC<{
 
 const ConditionModal: React.FC<{
   attributes: CategoryAttribute[];
+  /** Prefill for click-to-edit; absent = inserting a new chip. */
+  initial?: ConditionChipData;
+  /** Receives the built chip HTML. Insert flows insert at caret; edit flows replace in place. */
+  onCommit: (html: string) => void;
   onClose: () => void;
-}> = ({ attributes, onClose }) => {
-  const [featureId, setFeatureId] = useState('manual');
-  const [text, setText] = useState('');
-  const [enumSelected, setEnumSelected] = useState<string[]>([]);
-  const [numMin, setNumMin] = useState('');
-  const [numMax, setNumMax] = useState('');
-  const [boolValue, setBoolValue] = useState('true');
-  const [textValue, setTextValue] = useState('');
-  const [useAttrValue, setUseAttrValue] = useState(false);
-  const [anyValue, setAnyValue] = useState(false);
+}> = ({ attributes, initial, onCommit, onClose }) => {
+  // Best-effort prefill of the typed value controls from the chip's display value
+  // (the chip stores only the rendered string, e.g. "10–50 W" / "Yes" / "A, B").
+  const pre = (() => {
+    const out = { enumSelected: [] as string[], numMin: '', numMax: '', boolValue: 'true', textValue: '' };
+    if (!initial?.conditionLabel) return out;
+    const attr = attributes.find(f => f.id === initial.featureId) as any;
+    const label = initial.conditionLabel;
+    switch (attr?.dataType) {
+      case 'enum':
+        out.enumSelected = label.split(',').map(s => s.trim()).filter(v => (attr.validationRules?.enumOptions || []).includes(v));
+        break;
+      case 'integer':
+      case 'decimal': {
+        const m = label.match(/^([\d.]+)?(?:\s*–\s*([\d.]+))?/);
+        out.numMin = m?.[1] ?? '';
+        out.numMax = m?.[2] ?? '';
+        break;
+      }
+      case 'boolean':
+        out.boolValue = label === 'Yes' ? 'true' : 'false';
+        break;
+      default:
+        out.textValue = label;
+    }
+    return out;
+  })();
+
+  const [featureId, setFeatureId] = useState(initial?.featureId ?? 'manual');
+  const [text, setText] = useState(initial && !initial.always && initial.content !== initial.conditionLabel ? initial.content : '');
+  const [enumSelected, setEnumSelected] = useState<string[]>(pre.enumSelected);
+  const [numMin, setNumMin] = useState(pre.numMin);
+  const [numMax, setNumMax] = useState(pre.numMax);
+  const [boolValue, setBoolValue] = useState(pre.boolValue);
+  const [textValue, setTextValue] = useState(pre.textValue);
+  const [useAttrValue, setUseAttrValue] = useState(!!initial && !initial.always && !!initial.conditionLabel && initial.content === initial.conditionLabel);
+  const [anyValue, setAnyValue] = useState(initial?.always ?? false);
 
   const resetValue = () => {
     setEnumSelected([]); setNumMin(''); setNumMax(''); setBoolValue('true');
@@ -1596,7 +1996,8 @@ const ConditionModal: React.FC<{
   };
 
   const confirm = () => {
-    const id = createId();
+    // Editing keeps the chip's id so the generator's saved cond_<id> toggle stays attached.
+    const id = initial?.id || createId();
     let featureName = '';
     let conditionLabel = '';
     if (featureId !== 'manual') {
@@ -1607,8 +2008,8 @@ const ConditionModal: React.FC<{
 
     // "Any value" mode: inserts an always-visible value placeholder
     if (anyValue && featureId !== 'manual') {
-      const html = `&nbsp;<span class="im-condition bg-amber-50 border-amber-300 text-amber-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${featureId}" data-feature-name="${featureName}" data-content="${encodeURIComponent(featureName)}" data-condition-value="*" data-always="true" title="Value: ${featureName}"><span class="font-bold text-xs uppercase mr-1">[${featureName}]</span></span>&nbsp;`;
-      insertHtmlToCurrentEditor(html);
+      const html = `&nbsp;<span class="im-condition bg-amber-50 border-amber-300 text-amber-800 border border-dashed px-2 py-1 rounded text-sm mx-1 cursor-pointer" contenteditable="false" data-id="${id}" data-feature-id="${featureId}" data-feature-name="${featureName}" data-content="${encodeURIComponent(featureName)}" data-condition-value="*" data-always="true" title="Value: ${featureName} — click to edit"><span class="font-bold text-xs uppercase mr-1">[${featureName}]</span></span>&nbsp;`;
+      onCommit(html);
       onClose();
       return;
     }
@@ -1616,8 +2017,8 @@ const ConditionModal: React.FC<{
     const effectiveContent = useAttrValue && conditionLabel ? conditionLabel : text;
     if (!effectiveContent.trim()) return;
     const displayLabel = featureId === 'manual' ? 'Optional' : conditionLabel ? `${featureName}: ${conditionLabel}` : featureName;
-    const html = `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1" contenteditable="false" data-id="${id}" data-feature-id="${featureId}" data-content="${encodeURIComponent(effectiveContent)}" data-feature-name="${featureName}" data-condition-value="${encodeURIComponent(conditionLabel)}" title="Condition: ${displayLabel}"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${effectiveContent.substring(0, 20)}${effectiveContent.length > 20 ? '...' : ''}</span>&nbsp;`;
-    insertHtmlToCurrentEditor(html);
+    const html = `&nbsp;<span class="im-condition bg-purple-50 border-indigo-300 text-purple-800 border border-dashed px-2 py-1 rounded text-sm mx-1 cursor-pointer" contenteditable="false" data-id="${id}" data-feature-id="${featureId}" data-content="${encodeURIComponent(effectiveContent)}" data-feature-name="${featureName}" data-condition-value="${encodeURIComponent(conditionLabel)}" title="Condition: ${displayLabel} — click to edit"><span class="font-bold text-xs uppercase mr-1">[${displayLabel}]</span> ${effectiveContent.substring(0, 20)}${effectiveContent.length > 20 ? '...' : ''}</span>&nbsp;`;
+    onCommit(html);
     onClose();
   };
 
@@ -1626,7 +2027,7 @@ const ConditionModal: React.FC<{
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
-        <h3 className="font-bold text-lg mb-4">Add Condition</h3>
+        <h3 className="font-bold text-lg mb-4">{initial ? 'Edit' : 'Add'} Condition</h3>
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">Condition Trigger</label>
           <AttributePicker
@@ -1771,14 +2172,17 @@ export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, v
         onChange={onChange}
         onVariantChange={onVariantChange}
         enableTranslate={enableTranslate}
+        attributes={attributes}
         onInsertPlaceholder={(type) => setPlaceholderType(type)}
         onInsertCondition={() => setConditionOpen(true)}
       />
       {placeholderType && (
-        <PlaceholderModal type={placeholderType} attributes={attributes} onClose={() => setPlaceholderType(null)} />
+        // Insert flow: the row-aware fan-out shares the new placeholder across all
+        // languages (falls back to a plain caret insert if no row registered one).
+        <PlaceholderModal type={placeholderType} attributes={attributes} onCommit={commitPlaceholderToTarget} onClose={() => setPlaceholderType(null)} />
       )}
       {conditionOpen && (
-        <ConditionModal attributes={attributes} onClose={() => setConditionOpen(false)} />
+        <ConditionModal attributes={attributes} onCommit={insertHtmlToCurrentEditor} onClose={() => setConditionOpen(false)} />
       )}
     </>
   );

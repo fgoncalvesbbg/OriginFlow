@@ -9,7 +9,7 @@
  * See db_migrations/54_create_im_published_bucket.sql.
  */
 
-import { auth, db, storage } from '../../data';
+import { auth, db, storage, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import {
   IMTemplate,
@@ -24,6 +24,8 @@ import { resolveManual, findTempHighlightSections } from './im-resolver';
 import { getIMBlocks } from './im-block.service';
 import { getProjectSkus } from '../project/project-sku.service';
 import { getCategoryAttributes } from '../compliance/compliance-requirement.service';
+import { getTranslationVerbatims } from '../ai/translation-verbatim.service';
+import type { TranslationVerbatim } from '../../types';
 
 /** Fetch all category attributes as an id→attribute map for data-type-aware condition matching. */
 export const getAttributesById = async (): Promise<Record<string, CategoryAttribute>> => {
@@ -148,6 +150,75 @@ export const resolveContentHash = async (
   return { resolved, json, contentHash };
 };
 
+// ---------------------------------------------------------------------------
+// Verbatim preflight — the XLIFF pipeline freezes legally-mandated wording
+// (im-chip-freeze.ts), but a human editing inline HTML afterwards can still
+// mangle it, and publish did no content validation at all. This check verifies,
+// per publish, that every mandated phrase PRESENT in the English output still
+// appears (as its officially approved wording) in every other published
+// language. Warn on ordinary manuals; hard-block on FINAL ones — the signed-off
+// artifact must not ship with altered mandated wording.
+// ---------------------------------------------------------------------------
+
+/** Whitespace-insensitive text normalization (NBSP → space, runs collapsed). */
+const normText = (s: string): string => s.replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+
+/** All human-readable text of a resolved manual (prose, callouts, steps, legends, titles). */
+const manualCorpus = (resolved: ResolvedManual): string => {
+  const parts: string[] = [];
+  for (const section of resolved.sections) {
+    parts.push(section.title);
+    for (const node of section.nodes) {
+      if (node.type === 'html' || node.type === 'callout') parts.push(node.text);
+      else if (node.type === 'step_sequence') for (const st of node.steps) parts.push(st.text);
+      else if (node.type === 'legend_table') for (const r of node.rows) parts.push(r.label);
+    }
+  }
+  return normText(parts.join('\n'));
+};
+
+export interface VerbatimViolation {
+  /** The mandated source (EN) phrase. */
+  phrase: string;
+  /** Uppercased languages whose output is missing/altering its approved wording. */
+  languages: string[];
+}
+
+/**
+ * For every verbatim phrase present in the ENGLISH output, check that each other
+ * language's output contains that language's officially approved wording (or the
+ * source phrase itself when no translation is stored — the language-neutral
+ * identifier case, mirroring im-chip-freeze's thaw semantics). Whitespace-
+ * insensitive, case-SENSITIVE (verbatim means verbatim). Pure — exported for tests.
+ */
+export const findVerbatimViolations = (
+  manuals: Array<{ language: string; resolved: ResolvedManual }>,
+  verbatims: TranslationVerbatim[],
+): VerbatimViolation[] => {
+  const en = manuals.find((m) => m.language.toLowerCase() === 'en');
+  if (!en) return [];
+  const enCorpus = manualCorpus(en.resolved);
+  const others = manuals
+    .filter((m) => m.language.toLowerCase() !== 'en')
+    .map((m) => ({ lang: m.language, corpus: manualCorpus(m.resolved) }));
+
+  const out: VerbatimViolation[] = [];
+  for (const v of verbatims) {
+    const phrase = normText(v.phrase ?? '');
+    if (!phrase || !enCorpus.includes(phrase)) continue;
+    const missing: string[] = [];
+    for (const { lang, corpus } of others) {
+      const stored = v.translations?.[lang] ?? v.translations?.[lang.toLowerCase()];
+      const expected = normText(stored?.trim() ? stored : v.phrase);
+      if (expected && !corpus.includes(expected)) missing.push(lang.toUpperCase());
+    }
+    if (missing.length) out.push({ phrase: v.phrase, languages: missing });
+  }
+  return out;
+};
+
+const shortPhrase = (p: string): string => (p.length > 60 ? `${p.slice(0, 57)}…` : p);
+
 /** SHA-256 hex digest of a string — used as content_hash for change detection between publishes. */
 const sha256Hex = async (text: string): Promise<string> => {
   const bytes = new TextEncoder().encode(text);
@@ -155,6 +226,58 @@ const sha256Hex = async (text: string): Promise<string> => {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+};
+
+// ---------------------------------------------------------------------------
+// Publish history — surfaces the im_publish_snapshots rows every publish already
+// writes (language, content hash, when, by whom), grouped into publish events.
+// This is the read side of the audit trail; without it "what is live, since when,
+// published by whom" is unanswerable in-app.
+// ---------------------------------------------------------------------------
+
+export interface PublishHistoryEvent {
+  publishedAt: string;
+  publishedBy: string | null;
+  languages: Array<{ language: string; contentHash: string }>;
+}
+
+/**
+ * The project's publish events, newest first. Snapshot rows are written one per
+ * language within a single publish, seconds apart — rows by the same publisher
+ * within a 60s window are grouped into one event.
+ */
+export const getPublishHistory = async (
+  projectId: string,
+  templateType: 'im' | 'warning_leaflet' = 'im',
+  limit = 20,
+): Promise<PublishHistoryEvent[]> => {
+  if (!isLive) return [];
+  const rows = await orEmpty(
+    db.select<Row>('im_publish_snapshots', {
+      columns: 'language, content_hash, published_at, published_by',
+      where: { project_id: projectId, template_type: templateType },
+      order: { column: 'published_at', ascending: false },
+    }),
+    '[getPublishHistory]',
+  );
+  const events: PublishHistoryEvent[] = [];
+  for (const r of rows as any[]) {
+    const last = events[events.length - 1];
+    const sameEvent = last
+      && (last.publishedBy ?? null) === (r.published_by ?? null)
+      && Math.abs(new Date(last.publishedAt).getTime() - new Date(r.published_at).getTime()) < 60_000;
+    if (sameEvent) {
+      last.languages.push({ language: r.language, contentHash: r.content_hash });
+    } else {
+      if (events.length >= limit) break;
+      events.push({
+        publishedAt: r.published_at,
+        publishedBy: r.published_by ?? null,
+        languages: [{ language: r.language, contentHash: r.content_hash }],
+      });
+    }
+  }
+  return events;
 };
 
 /**
@@ -168,6 +291,16 @@ export const getPublishedManifestUrl = (
   if (!isLive) return null;
   const path = `${projectId}/${templateType}/manifest.json`;
   return storage.publicUrl(BUCKET, path);
+};
+
+/** Public URL of one published language's resolved-manual JSON (deterministic path). */
+export const getPublishedManualUrl = (
+  projectId: string,
+  templateType: 'im' | 'warning_leaflet',
+  language: string,
+): string | null => {
+  if (!isLive) return null;
+  return storage.publicUrl(BUCKET, `${projectId}/${templateType}/${language}.json`);
 };
 
 /** Upsert a JSON string to a deterministic path in the public bucket; return its public URL. */
@@ -249,31 +382,97 @@ export const publishResolvedManuals = async (
     throw new Error(`text is still marked as temporary in: ${list}. Remove the highlight before publishing.`);
   }
 
+  // Verbatim preflight (see findVerbatimViolations). Warn per language; hard-block
+  // for FINAL manuals — those must not republish with mandated wording missing/altered.
+  const verbatimWarnings = new Map<string, string[]>();
+  let verbatims: TranslationVerbatim[] | null = null;
+  try {
+    verbatims = await getTranslationVerbatims();
+  } catch (e) {
+    if (projectIM.isFinalized) {
+      throw new Error(
+        'the mandated-wording (verbatim) list could not be loaded, so its presence in this FINAL manual ' +
+        `cannot be verified. Try again, or check the Admin panel → Verbatims. (${(e as Error).message})`,
+      );
+    }
+    const note = 'The mandated-wording (verbatim) check could not run — the phrase list failed to load.';
+    for (const { language } of resolvedByLanguage) verbatimWarnings.set(language, [note]);
+  }
+  if (verbatims) {
+    const violations = findVerbatimViolations(resolvedByLanguage, verbatims);
+    if (violations.length && projectIM.isFinalized) {
+      const list = violations.map((v) => `"${shortPhrase(v.phrase)}" (${v.languages.join(', ')})`).join('; ');
+      throw new Error(
+        `mandated verbatim wording is missing or altered in: ${list}. This manual is FINAL — ` +
+        'fix the wording (or the verbatim list in the Admin panel) before publishing.',
+      );
+    }
+    for (const v of violations) {
+      for (const lang of v.languages) {
+        const key = resolvedByLanguage.find((r) => r.language.toUpperCase() === lang)?.language ?? lang.toLowerCase();
+        const arr = verbatimWarnings.get(key) ?? [];
+        arr.push(`Mandated wording missing or altered: "${shortPhrase(v.phrase)}"`);
+        verbatimWarnings.set(key, arr);
+      }
+    }
+  }
+
   const published: PublishedLanguage[] = [];
 
   for (let i = 0; i < resolvedByLanguage.length; i++) {
     const { language, resolved, json, contentHash } = resolvedByLanguage[i];
     onProgress?.(i + 1, resolvedByLanguage.length, language);
     const storagePath = `${projectId}/${templateType}/${language}.json`;
-    const url = await uploadJson(storagePath, json);
 
-    // Best-effort: the manual JSON is already uploaded, so a failed snapshot row
-    // costs staleness detection accuracy, not the publish itself.
+    let url: string;
     try {
-      await db.insertMany('im_publish_snapshots', [{
-        project_id: projectId,
-        language,
-        resolved,
-        content_hash: contentHash,
-        storage_path: storagePath,
-        template_type: templateType,
-        published_by: publishedBy,
-      }]);
+      url = await uploadJson(storagePath, json);
     } catch (e) {
-      console.error(TAG, `snapshot insert failed (${language}):`, e);
+      // Publish is not atomic (per-language uploads, manifest last). Say exactly where
+      // it stopped so the operator isn't left guessing what state the bucket is in.
+      const done = published.map((p) => p.language.toUpperCase()).join(', ') || 'none';
+      const remaining = resolvedByLanguage.slice(i).map((r) => r.language.toUpperCase()).join(', ');
+      throw new Error(
+        `Publish stopped at ${language.toUpperCase()} (${i + 1} of ${resolvedByLanguage.length}): ${(e as Error).message}\n` +
+        `Uploaded before the failure: ${done}. Not uploaded: ${remaining}.\n` +
+        `The manifest still points at the previous publish until every language succeeds — publish again to retry.`,
+      );
     }
 
-    published.push({ language, url, storagePath, contentHash, warnings: resolved.warnings });
+    // The snapshot row is what staleness detection compares against. A lost row makes
+    // this manual report "Needs re-publish" forever, so retry once and, if it still
+    // fails, surface it as a warning on the publish result instead of only logging.
+    let snapshotWarning: string | null = null;
+    const snapshotRow = {
+      project_id: projectId,
+      language,
+      resolved,
+      content_hash: contentHash,
+      storage_path: storagePath,
+      template_type: templateType,
+      published_by: publishedBy,
+    };
+    try {
+      await db.insertMany('im_publish_snapshots', [snapshotRow]);
+    } catch (firstErr) {
+      try {
+        await db.insertMany('im_publish_snapshots', [snapshotRow]);
+      } catch (e) {
+        console.error(TAG, `snapshot insert failed (${language}):`, firstErr, e);
+        snapshotWarning =
+          'The publish record (snapshot) could not be written — this manual will wrongly show ' +
+          '"Needs re-publish" until the next successful publish.';
+      }
+    }
+
+    published.push({
+      language, url, storagePath, contentHash,
+      warnings: [
+        ...resolved.warnings,
+        ...(verbatimWarnings.get(language) ?? []),
+        ...(snapshotWarning ? [snapshotWarning] : []),
+      ],
+    });
   }
 
   // Manifest — the stable entry point the render service polls for all languages.
@@ -283,6 +482,9 @@ export const publishResolvedManuals = async (
     projectId,
     templateId: template.id,
     templateType,
+    // The manual's publish version (ProjectIM.version), so a downstream consumer of the
+    // manifest URL can tell WHICH revision it is holding — the URL itself never changes.
+    version: projectIM.version ?? null,
     publishedAt: new Date().toISOString(),
     languages: published.map((p) => ({ lang: p.language, url: p.url, contentHash: p.contentHash })),
   };

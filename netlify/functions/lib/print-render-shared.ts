@@ -44,6 +44,8 @@ export interface RenderRequestBase {
   version?: number;
   /** Required change note describing this generation; stored in im_print_renders.comment. */
   comment?: string;
+  /** im_markets.code this booklet is produced for (from the dialog's market preset). */
+  market?: string;
   /** Compact-leaflet typography (points), applied to ALL text / headings. Optional. */
   leafletTextPt?: number;
   leafletHeadingPt?: number;
@@ -95,6 +97,15 @@ export const authenticate = async (
 /** Thrown by `authenticate` — handlers catch this to return 401 instead of 502. */
 export class AuthError extends Error {}
 
+/**
+ * A failure that retrying cannot fix (bad input HTML, a part missing from storage,
+ * an unpublished language). Handlers return 422 for these — 422 is NOT in the
+ * client's transient-retry set, so the job fails immediately with the message
+ * instead of burning time (and PDFShift credits) on doomed retries. Everything
+ * else still maps to 502 (retryable).
+ */
+export class PermanentError extends Error {}
+
 export interface PageMargin { top: string; bottom: string; left: string; right: string; }
 /** Full-IM margins (footer + page numbers sit in the generous bottom band). */
 export const IM_MARGIN: PageMargin = { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' };
@@ -114,7 +125,7 @@ export const fetchManifestAndManuals = async (
   const byLang = new Map(manifest.languages.map((l) => [l.lang, l.url]));
 
   const ordered = req.languages.filter((l) => byLang.has(l));
-  if (!ordered.length) throw new Error('None of the requested languages are published for this IM.');
+  if (!ordered.length) throw new PermanentError('None of the requested languages are published for this IM.');
 
   const manuals: PrintManual[] = [];
   for (const lang of ordered) manuals.push(await fetchJson<PrintManual>(byLang.get(lang)!));
@@ -155,7 +166,13 @@ export const renderPartPdf = async (
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`Print engine failed (${res.status}): ${detail.slice(0, 300)}`);
+    const message = `Print engine failed (${res.status}): ${detail.slice(0, 300)}`;
+    // 4xx from PDFShift (bad HTML, invalid options) will fail identically on every
+    // retry — surface it as permanent. 408/429 stay retryable (timeout/rate limit).
+    if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+      throw new PermanentError(message);
+    }
+    throw new Error(message);
   }
   return new Uint8Array(await res.arrayBuffer());
 };

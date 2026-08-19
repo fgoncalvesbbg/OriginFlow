@@ -67,6 +67,11 @@ export interface PrintRender {
   createdAt: string;
   /** Required change note captured when this PDF was generated. '' for legacy rows. */
   comment: string;
+  /** im_markets.code this booklet was produced for (market preset), or null for ad-hoc. */
+  market: string | null;
+  /** Markup.io share link this PDF was sent to for review (null = never sent). */
+  markupUrl: string | null;
+  markupId: string | null;
 }
 
 export interface PrintBackInput {
@@ -87,6 +92,8 @@ export interface RequestPrintPdfParams {
   version?: number;
   /** Required change note describing this generation; shown in the export history. */
   comment: string;
+  /** im_markets.code this booklet is produced for (from the dialog's market preset). */
+  market?: string;
   /** Compact-leaflet typography (points), applied to ALL body text / headings. Leaflets only. */
   leafletTextPt?: number;
   leafletHeadingPt?: number;
@@ -99,6 +106,8 @@ export interface PrintPdfResult {
   storagePath: string;
   bytes?: number;
   render?: PrintRender | null;
+  /** Non-fatal server-side problem (e.g. the history row could not be recorded). */
+  warning?: string;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -115,6 +124,9 @@ const mapRender = (r: any): PrintRender => ({
   createdBy: r.created_by ?? null,
   createdAt: r.created_at,
   comment: r.comment ?? '',
+  market: r.market ?? null,
+  markupUrl: r.markup_url ?? null,
+  markupId: r.markup_id ?? null,
 });
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -132,6 +144,34 @@ export const getPrintRenders = async (
     '[im-print-export] getPrintRenders',
   );
   return rows.map(mapRender);
+};
+
+/** The newest print render's version/date, keyed `${projectId}::${templateType}`. */
+export interface LatestRenderInfo {
+  imVersion: number | null;
+  createdAt: string;
+}
+
+/**
+ * Newest render per manual, across ALL projects — the dashboard's print-freshness
+ * signal ("printed v3, current v5" / "never printed"). One lean query; the map is
+ * first-seen-wins over a created_at-descending scan.
+ */
+export const getLatestRendersByManual = async (): Promise<Map<string, LatestRenderInfo>> => {
+  const out = new Map<string, LatestRenderInfo>();
+  if (!isLive) return out;
+  const rows = await orEmpty(
+    db.select<Row>('im_print_renders', {
+      columns: 'project_id, template_type, im_version, created_at',
+      order: { column: 'created_at', ascending: false },
+    }),
+    '[im-print-export] getLatestRendersByManual',
+  );
+  for (const r of rows as any[]) {
+    const key = `${r.project_id}::${r.template_type ?? 'im'}`;
+    if (!out.has(key)) out.set(key, { imVersion: r.im_version ?? null, createdAt: r.created_at });
+  }
+  return out;
 };
 
 /**
@@ -243,6 +283,7 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     back: params.back,
     version: params.version,
     comment: params.comment,
+    market: params.market,
     leafletTextPt: params.leafletTextPt,
     leafletHeadingPt: params.leafletHeadingPt,
   };
@@ -265,10 +306,20 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     let done = 0;
     const CONCURRENCY = 3;
     let cursor = 0;
+    // Set as soon as ANY part fails for good: sibling workers stop picking up new parts,
+    // so a doomed job doesn't keep spending PDFShift credits on output that cleanup will
+    // delete. (Parts already in flight still finish — aborting them mid-request isn't
+    // worth the plumbing; the point is not to START more.)
+    let jobFailed = false;
     const renderOne = async () => {
-      while (cursor < total) {
+      while (!jobFailed && cursor < total) {
         const index = cursor++;
-        await postJsonWithRetry('render-print-part', { ...base, jobId, partIndex: index }, token, 3, 45_000);
+        try {
+          await postJsonWithRetry('render-print-part', { ...base, jobId, partIndex: index }, token, 3, 45_000);
+        } catch (e) {
+          jobFailed = true;
+          throw e;
+        }
         done += 1;
         params.onProgress?.(prep.labels[index]?.toUpperCase() ?? `part ${index + 1}`, done, total);
       }

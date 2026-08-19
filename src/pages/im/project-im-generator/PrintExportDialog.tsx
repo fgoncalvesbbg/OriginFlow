@@ -11,10 +11,10 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History } from 'lucide-react';
+import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History, Send, ExternalLink } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
-import { requestPrintPdf, getPrintRenders, PrintPdfResult, PrintRender } from '../../../services';
+import { requestPrintPdf, getPrintRenders, getIMMarkets, checkPrintImageWeights, sendRenderToMarkup, isMarkupReviewAvailable, PrintPdfResult, PrintRender, IMMarket, PrintImageReport, MarkupReviewResult } from '../../../services';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { DEFAULT_LEAFLET_TEXT_PT, DEFAULT_LEAFLET_HEADING_PT } from '../../../services/im/im-print-html';
 
@@ -41,6 +41,11 @@ interface PrintExportDialogProps {
    * omitted for leaflets, which have no cover). Fire-and-forget.
    */
   onCoverPrefs?: (prefs: { logoUrl: string; coverImageUrl?: string }) => void;
+  /**
+   * Called after a PDF was successfully sent to Markup.io for review, so the caller
+   * can refresh the manual's review state (badge + link) without re-fetching.
+   */
+  onReviewSent?: (result: MarkupReviewResult) => void;
   onClose: () => void;
 }
 
@@ -55,6 +60,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   version,
   onRendered,
   onCoverPrefs,
+  onReviewSent,
   onClose,
 }) => {
   const meta = template?.metadata;
@@ -66,6 +72,27 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
   // Language selection — all on by default, preserving the published order.
   const [selected, setSelected] = useState<string[]>(languages);
+  // Admin-configured markets (im_markets): one-click language presets. Selecting one sets
+  // the languages to the market's list and stamps the market code onto the render history
+  // row, so "which booklet went to which market" is answerable later. Cleared when the
+  // languages are then changed by hand (the selection no longer IS that market's set).
+  const [markets, setMarkets] = useState<IMMarket[]>([]);
+  const [marketCode, setMarketCode] = useState<string>('');
+
+  useEffect(() => {
+    let alive = true;
+    getIMMarkets().then((m) => { if (alive) setMarkets(m); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const applyMarket = (code: string) => {
+    setMarketCode(code);
+    if (!code) return;
+    const market = markets.find((m) => m.code === code);
+    if (!market) return;
+    // The market's languages, restricted to what is actually published, in published order.
+    setSelected(languages.filter((l) => market.languages.includes(l)));
+  };
 
   const [pageSize, setPageSize] = useState<'a4' | 'a5'>(
     // Leaflets default to A5 (compact); full manuals honor the template's page size.
@@ -104,6 +131,23 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [result, setResult] = useState<PrintPdfResult | null>(null);
   // Saving the rendered PDF into the project's documents (via onRendered).
   const [attachState, setAttachState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  // What the last successful render attached (or failed to): kept so a failed attach can
+  // be retried for free — re-generating just to retry the attach would burn a credit.
+  const [attachParams, setAttachParams] = useState<{ res: PrintPdfResult; langs: string[]; pageSize: 'a4' | 'a5' } | null>(null);
+
+  // Advisory image-weight preflight over ALL published languages (run once per open;
+  // warnings below are filtered to the current selection). Never blocks generating.
+  const [imageReport, setImageReport] = useState<PrintImageReport | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    checkPrintImageWeights(projectId, templateType, languages)
+      .then((r) => { if (alive) setImageReport(r); })
+      .catch(() => {});
+    return () => { alive = false; };
+    // languages is stable for a dialog instance (published set) — run once per open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, templateType]);
 
   // Render history (for "already exists" + version comparison + credit guard).
   const [renders, setRenders] = useState<PrintRender[]>([]);
@@ -154,12 +198,15 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     setConfirmCredit(false);
   }, [pageSize, selected.join(',')]);
 
-  const toggleLang = (lang: string) =>
+  const toggleLang = (lang: string) => {
+    // A hand-edited selection is no longer the market's set — drop the stamp.
+    setMarketCode('');
     setSelected((prev) =>
       prev.includes(lang)
         ? prev.filter((l) => l !== lang)
         : languages.filter((l) => prev.includes(l) || l === lang),
     );
+  };
 
   const uploadTo = async (slot: string, file: File, set: (url: string) => void) => {
     setUploading(slot);
@@ -173,6 +220,64 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     }
   };
 
+  // Attach the (already rendered, already paid-for) PDF to the project's documents.
+  const doAttach = async (res: PrintPdfResult, langs: string[], size: 'a4' | 'a5') => {
+    if (!onRendered) return;
+    setAttachState('saving');
+    try {
+      await onRendered(res, langs, size);
+      setAttachState('saved');
+    } catch (attachErr) {
+      console.error('[print-export] Saving the PDF to the project failed:', attachErr);
+      setAttachState('failed');
+    }
+  };
+
+  // Retrying the attach costs nothing — the PDF is already rendered.
+  const retryAttach = () => {
+    if (attachParams) void doAttach(attachParams.res, attachParams.langs, attachParams.pageSize);
+  };
+
+  // --- Markup.io supplier review -------------------------------------------------
+  // Sends an ALREADY-rendered PDF (fresh result or any history row) to Markup.io.
+  // Each send creates a new markup, so earlier review rounds keep their links and
+  // supplier comments; a row that was already sent shows its link instead of the button.
+  const markupEnabled = isMarkupReviewAvailable();
+  const [sendingReviewId, setSendingReviewId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  // Non-fatal server-side warning (the markup exists but recording it failed).
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const [copiedReviewId, setCopiedReviewId] = useState<string | null>(null);
+
+  const markupNameFor = (r: PrintRender) =>
+    `${projectName} – ${isLeaflet ? 'Warning Leaflet' : 'Instruction Manual'}` +
+    `${r.imVersion != null ? ` v${r.imVersion}` : ''} (${r.languages.map((l) => l.toUpperCase()).join(', ')})`;
+
+  const sendForReview = async (r: PrintRender) => {
+    if (sendingReviewId) return;
+    setSendingReviewId(r.id);
+    setReviewError(null);
+    setReviewNotice(null);
+    try {
+      const res = await sendRenderToMarkup({ projectId, templateType, renderId: r.id, name: markupNameFor(r) });
+      setRenders((prev) => prev.map((x) => (x.id === r.id ? { ...x, markupUrl: res.markupUrl, markupId: res.markupId } : x)));
+      if (res.warning) setReviewNotice(res.warning);
+      onReviewSent?.(res);
+    } catch (e) {
+      setReviewError(e instanceof Error ? e.message : 'Sending to Markup.io failed.');
+    } finally {
+      setSendingReviewId(null);
+    }
+  };
+
+  const copyReviewLink = (r: PrintRender) => {
+    if (!r.markupUrl) return;
+    navigator.clipboard.writeText(r.markupUrl).then(() => {
+      setCopiedReviewId(r.id);
+      setTimeout(() => setCopiedReviewId((cur) => (cur === r.id ? null : cur)), 2000);
+    }).catch(() => {});
+  };
+
   const handleGenerate = async () => {
     setBusy(true);
     setElapsed(0);
@@ -180,6 +285,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     setError(null);
     setResult(null);
     setAttachState('idle');
+    setAttachParams(null);
     try {
       const res = await requestPrintPdf({
         projectId,
@@ -188,6 +294,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         pageSize,
         version,
         comment: comment.trim(),
+        market: marketCode || undefined,
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         ...(isLeaflet ? { leafletTextPt, leafletHeadingPt } : {}),
         cover: {
@@ -216,16 +323,11 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       onCoverPrefs?.(isLeaflet ? { logoUrl } : { logoUrl, coverImageUrl });
 
       // Persist the render as the project's "Generated …" document. Non-fatal: the PDF
-      // is already rendered and downloadable — a failure here only shows a warning.
+      // is already rendered and downloadable — a failure here only shows a warning
+      // (with a free retry; see retryAttach).
       if (onRendered) {
-        setAttachState('saving');
-        try {
-          await onRendered(res, selected, pageSize);
-          setAttachState('saved');
-        } catch (attachErr) {
-          console.error('[print-export] Saving the PDF to the project failed:', attachErr);
-          setAttachState('failed');
-        }
+        setAttachParams({ res, langs: selected, pageSize });
+        await doAttach(res, selected, pageSize);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Print render failed.');
@@ -283,6 +385,47 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         </div>
 
         <div className="px-6 py-4 overflow-auto space-y-5">
+          {/* Market preset — admin-configured market → language sets (Admin panel → Markets).
+              One click selects the market's languages and stamps the market on the render. */}
+          {markets.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Market (preset)</label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {markets.map((m) => {
+                  const available = languages.filter((l) => m.languages.includes(l));
+                  const missing = m.languages.filter((l) => !languages.includes(l));
+                  const on = marketCode === m.code;
+                  return (
+                    <button
+                      key={m.code}
+                      onClick={() => applyMarket(on ? '' : m.code)}
+                      disabled={!available.length}
+                      title={`${m.name} → ${m.languages.map((l) => l.toUpperCase()).join(', ')}${
+                        missing.length ? ` — NOT published yet: ${missing.map((l) => l.toUpperCase()).join(', ')}` : ''
+                      }`}
+                      className={`text-sm px-3 py-1.5 border rounded font-medium disabled:opacity-40 disabled:cursor-not-allowed ${
+                        on ? 'bg-primary/10 border-primary text-primary' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {m.code}
+                      {missing.length > 0 && <span className="ml-1 text-[10px] text-amber-600 font-bold" title={`Not published: ${missing.map((l) => l.toUpperCase()).join(', ')}`}>!</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {marketCode && (() => {
+                const m = markets.find((x) => x.code === marketCode);
+                const missing = m ? m.languages.filter((l) => !languages.includes(l)) : [];
+                return missing.length ? (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-2">
+                    {marketCode} requires {missing.map((l) => l.toUpperCase()).join(', ')}, which {missing.length === 1 ? 'is' : 'are'} not
+                    published for this manual yet — the booklet will be produced without {missing.length === 1 ? 'it' : 'them'}.
+                  </p>
+                ) : null;
+              })()}
+            </div>
+          )}
+
           {/* Languages */}
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase">
@@ -419,6 +562,35 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </p>
           </div>
 
+          {/* Advisory image-weight warning (preflight over the published JSONs). Heavy
+              images slow PDFShift (or time it out) and bloat the booklet — flag them
+              with the sections they live in so they can be re-exported smaller. */}
+          {imageReport && (() => {
+            const relevant = imageReport.heavy.filter((img) => img.languages.some((l) => selected.includes(l.toLowerCase())));
+            if (!relevant.length) return null;
+            const fmtMb = (b: number) => `${(b / 1_000_000).toFixed(1)} MB`;
+            const fileName = (u: string) => decodeURIComponent(u.split('/').pop()?.split('?')[0] ?? u);
+            return (
+              <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                <div className="flex items-start gap-2">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <strong>{relevant.length} large image{relevant.length > 1 ? 's' : ''}</strong> in the selected languages
+                    {' '}(≥ 1 MB) — rendering may be slow and the PDF unnecessarily big. Consider re-uploading them smaller.
+                    <ul className="mt-1.5 space-y-0.5 text-xs">
+                      {relevant.slice(0, 5).map((img) => (
+                        <li key={img.url} className="truncate" title={`${img.url} — used in: ${img.sections.join(', ')}`}>
+                          <span className="font-semibold">{fmtMb(img.bytes ?? 0)}</span> · {fileName(img.url)} · {img.sections.join(', ')}
+                        </li>
+                      ))}
+                      {relevant.length > 5 && <li className="italic">…and {relevant.length - 5} more</li>}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Existing-version / regeneration guard for the current selection */}
           {!loadingHistory && match && (
             <div
@@ -473,6 +645,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                   <div key={r.id} className="flex items-start justify-between gap-3 px-3 py-2 text-xs">
                     <div className="min-w-0 flex-1">
                       <span className="text-gray-600">
+                        {r.market && <span className="inline-block mr-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold">{r.market}</span>}
                         <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize?.toUpperCase()}
                         {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
                         {r.createdBy && <> · {r.createdBy}</>}
@@ -480,10 +653,34 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                       {r.comment && (
                         <p className="text-gray-500 mt-0.5 whitespace-pre-wrap break-words">{r.comment}</p>
                       )}
+                      {r.markupUrl && (
+                        <p className="mt-0.5 flex items-center gap-1.5 text-sky-700">
+                          <ExternalLink size={11} className="shrink-0" />
+                          <a href={r.markupUrl} target="_blank" rel="noreferrer" className="underline truncate" title={r.markupUrl}>
+                            Markup.io review
+                          </a>
+                          <button onClick={() => copyReviewLink(r)} className="shrink-0 underline text-sky-600 hover:text-sky-800">
+                            {copiedReviewId === r.id ? 'Copied!' : 'Copy link'}
+                          </button>
+                        </p>
+                      )}
                     </div>
-                    <a href={r.url} target="_blank" rel="noreferrer" className="shrink-0 px-2 py-1 border rounded hover:bg-gray-50">
-                      Download
-                    </a>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      {markupEnabled && !r.markupUrl && (
+                        <button
+                          onClick={() => void sendForReview(r)}
+                          disabled={sendingReviewId !== null}
+                          title="Upload this PDF to Markup.io and put the manual In Review"
+                          className="px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-50 disabled:opacity-50 flex items-center gap-1"
+                        >
+                          {sendingReviewId === r.id ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+                          Send for review
+                        </button>
+                      )}
+                      <a href={r.url} target="_blank" rel="noreferrer" className="px-2 py-1 border rounded hover:bg-gray-50">
+                        Download
+                      </a>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -510,32 +707,86 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</div>}
 
-          {result && (
-            <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded px-3 py-2.5">
-              <span className="text-sm text-emerald-800 flex items-center gap-1.5">
-                Print PDF ready.
-                {attachState === 'saving' && (
-                  <span className="text-emerald-700/80 flex items-center gap-1">
-                    <Loader2 size={12} className="animate-spin" /> Saving to project documents…
+          {result && (() => {
+            // The freshly rendered PDF's history row (carries the markup link once sent).
+            // Sending needs the row's id, so the button only shows when the row was recorded.
+            const fresh = result.render ? renders.find((x) => x.id === (result.render as PrintRender).id) ?? null : null;
+            return (
+              <div className="bg-emerald-50 border border-emerald-200 rounded px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-emerald-800 flex items-center gap-1.5">
+                    Print PDF ready.
+                    {attachState === 'saving' && (
+                      <span className="text-emerald-700/80 flex items-center gap-1">
+                        <Loader2 size={12} className="animate-spin" /> Saving to project documents…
+                      </span>
+                    )}
+                    {attachState === 'saved' && <span className="text-emerald-700/80">Saved to project documents.</span>}
                   </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {markupEnabled && fresh && !fresh.markupUrl && (
+                      <button
+                        onClick={() => void sendForReview(fresh)}
+                        disabled={sendingReviewId !== null}
+                        title="Upload this PDF to Markup.io and put the manual In Review"
+                        className="text-sm px-3 py-1.5 border border-sky-300 bg-white text-sky-700 rounded hover:bg-sky-50 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {sendingReviewId === fresh.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        Send for review
+                      </button>
+                    )}
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm px-3 py-1.5 bg-emerald-600 text-white rounded hover:opacity-90 flex items-center gap-1.5"
+                    >
+                      <Download size={14} /> Download
+                    </a>
+                  </div>
+                </div>
+                {fresh?.markupUrl && (
+                  <div className="flex items-center gap-2 border-t border-emerald-200/70 pt-2">
+                    <span className="text-xs font-semibold text-sky-800 shrink-0 flex items-center gap-1">
+                      <ExternalLink size={12} /> Review link
+                    </span>
+                    <input readOnly value={fresh.markupUrl} className="flex-1 min-w-0 text-xs border border-sky-200 rounded px-2 py-1 bg-white text-gray-700" />
+                    <button onClick={() => copyReviewLink(fresh)} className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-50 whitespace-nowrap">
+                      {copiedReviewId === fresh.id ? 'Copied!' : 'Copy'}
+                    </button>
+                    <a href={fresh.markupUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-50">
+                      Open
+                    </a>
+                  </div>
                 )}
-                {attachState === 'saved' && <span className="text-emerald-700/80">Saved to project documents.</span>}
-              </span>
-              <a
-                href={result.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm px-3 py-1.5 bg-emerald-600 text-white rounded hover:opacity-90 flex items-center gap-1.5"
-              >
-                <Download size={14} /> Download
-              </a>
+              </div>
+            );
+          })()}
+
+          {reviewError && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{reviewError}</div>
+          )}
+          {reviewNotice && (
+            <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">{reviewNotice}</div>
+          )}
+
+          {/* Non-fatal server-side warning (e.g. the render-history row could not be recorded). */}
+          {result?.warning && (
+            <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              {result.warning}
             </div>
           )}
 
           {attachState === 'failed' && (
-            <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-              The PDF was rendered, but saving it to the project's documents failed. Download it
-              above, or generate again to retry.
+            <div className="flex items-center justify-between gap-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              <span>
+                The PDF was rendered, but saving it to the project's documents failed. The file
+                itself is fine — download it above, or retry the save (free — no new render).
+              </span>
+              <button
+                onClick={retryAttach}
+                className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded border border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+              >Retry save</button>
             </div>
           )}
         </div>

@@ -12,24 +12,62 @@
  *                       final, that is the fact about it that matters most.
  *  2. `needs_republish`  published, but a template or shared block changed since. The only
  *                       status that implies an action, so it outranks plain `published`.
- *  3. `published`        published and up to date.
- *  4. `draft`            never published.
+ *  3. `in_review`        published and up to date, and the current version is out on
+ *                       Markup.io collecting supplier feedback. Below `needs_republish`
+ *                       on purpose: if the sources drifted, the PDF being reviewed is
+ *                       already outdated — that is the more actionable fact.
+ *  4. `published`        published and up to date.
+ *  5. `draft`            never published — or published, then edited again ("in progress"):
+ *                       a draft save flips the stored status back to 'draft', which is also
+ *                       what ends `in_review` when editing resumes.
  *
  * A final manual can also be stale; the row keeps showing the "Needs re-publish" chip as a
  * secondary signal, it just groups under Final.
  */
 
-export type ManualStatus = 'final' | 'needs_republish' | 'published' | 'draft';
+export type ManualStatus = 'final' | 'needs_republish' | 'unknown' | 'review_done' | 'in_review' | 'published' | 'draft';
 
 /** The fields this module needs. Kept structural so tests don't build a whole summary. */
 export interface ManualStatusInput {
   status: 'draft' | 'generated';
   isFinalized: boolean;
+  /** Publish counter + Markup.io review round (migration 111). Optional: rows that
+   *  predate the feature (or callers that don't track reviews) derive as before. */
+  version?: number | null;
+  reviewRequestedAt?: string | null;
+  reviewVersion?: number | null;
+  /** Cached review outcome from the Markup.io API (migration 112). Null/absent = never checked. */
+  reviewDone?: boolean | null;
 }
 
-export const manualStatusOf = (im: ManualStatusInput, isStale: boolean): ManualStatus => {
+/**
+ * True while the manual's CURRENT published version is out for review on Markup.io.
+ * Editing (stored status back to 'draft') or republishing (version bump past
+ * reviewVersion) ends it implicitly — nothing is ever cleared. A null reviewVersion
+ * (a legacy render without a stamped version) counts as current.
+ */
+export const isInReview = (
+  im: Pick<ManualStatusInput, 'status' | 'version' | 'reviewRequestedAt' | 'reviewVersion'>,
+): boolean =>
+  im.status === 'generated' &&
+  im.reviewRequestedAt != null &&
+  (im.reviewVersion == null || im.version == null || im.reviewVersion === im.version);
+
+/**
+ * `isStale`: true = out of date, false = up to date, null = THE CHECK FAILED. The null
+ * case exists so a failed staleness check renders as "Status unknown" instead of a green
+ * "Published" — an error must never be displayed as a clean bill of health.
+ */
+export const manualStatusOf = (im: ManualStatusInput, isStale: boolean | null): ManualStatus => {
   if (im.isFinalized) return 'final';
-  if (im.status === 'generated') return isStale ? 'needs_republish' : 'published';
+  if (im.status === 'generated') {
+    if (isStale === null) return 'unknown';
+    if (isStale) return 'needs_republish';
+    // The review round splits by its polled outcome (Markup.io status/approvals):
+    // finished → the next action is sign-off; still open → waiting on reviewers.
+    if (isInReview(im)) return im.reviewDone ? 'review_done' : 'in_review';
+    return 'published';
+  }
   return 'draft';
 };
 
@@ -59,6 +97,21 @@ export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
     classes: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     hint: 'Published and up to date with their sources.',
   },
+  review_done: {
+    label: 'Review done',
+    classes: 'bg-teal-100 text-teal-700 border-teal-200',
+    hint: 'The Markup.io review finished (completed status or an explicit approval). Mark the manual FINAL, or address remaining notes.',
+  },
+  in_review: {
+    label: 'In Review',
+    classes: 'bg-sky-100 text-sky-700 border-sky-200',
+    hint: 'The current PDF is on Markup.io collecting supplier feedback. Editing the manual returns it to In Progress.',
+  },
+  unknown: {
+    label: 'Status unknown',
+    classes: 'bg-gray-100 text-gray-600 border-gray-200',
+    hint: 'The up-to-date check failed — these may or may not need a re-publish. Retry the check.',
+  },
   final: {
     label: 'Final',
     classes: 'bg-indigo-100 text-indigo-700 border-indigo-200',
@@ -72,10 +125,75 @@ export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
  */
 export const MANUAL_STATUS_ORDER: readonly ManualStatus[] = [
   'needs_republish',
+  'unknown',
   'draft',
+  // Review done before In Review: a finished review has a concrete next action
+  // (sign off), while an open one is waiting on other people.
+  'review_done',
+  'in_review',
   'published',
   'final',
 ];
+
+// ---------------------------------------------------------------------------
+// Next action — the one-line "what do I do with this row" hint that turns the
+// status overview into a work queue. Deliberately quiet when there is nothing
+// to do (null), and silent about things the status badge/group hint already
+// says (a draft is obviously unpublished; a stale row already lists languages).
+// ---------------------------------------------------------------------------
+
+export interface NextActionInput {
+  status: ManualStatus;
+  /** Publish counter (0 = never published). */
+  version?: number | null;
+  reviewRequestedAt?: string | null;
+  /** Open Markup.io threads at last check; null/undefined = count unknown. */
+  reviewActiveThreads?: number | null;
+  /**
+   * im_version of the manual's NEWEST print render. undefined = render data not
+   * loaded (say nothing); null = never printed.
+   */
+  printedVersion?: number | null;
+}
+
+/** Days between an ISO instant and now, floored at 0. */
+const daysSince = (iso: string, now: number): number =>
+  Math.max(0, Math.floor((now - new Date(iso).getTime()) / 86_400_000));
+
+/** Print-freshness fragment shared by published/final rows. Null = fine or unknown. */
+const printHint = (version: number | null | undefined, printedVersion: number | null | undefined): string | null => {
+  if (printedVersion === undefined) return null;             // render data not loaded
+  if (printedVersion === null) return 'no print PDF yet';
+  if (version != null && printedVersion < version) return `print PDF is v${printedVersion} — regenerate for v${version}`;
+  return null;
+};
+
+export const nextActionOf = (im: NextActionInput, now: number = Date.now()): string | null => {
+  switch (im.status) {
+    case 'draft':
+      // Published before, edited since: the useful distinction over the group hint.
+      return (im.version ?? 0) > 0 ? `edited after v${im.version} — publish to update` : null;
+    case 'in_review': {
+      const parts: string[] = [];
+      if (im.reviewRequestedAt) {
+        const d = daysSince(im.reviewRequestedAt, now);
+        parts.push(d === 0 ? 'review sent today' : `review out ${d} day${d === 1 ? '' : 's'}`);
+      }
+      if (typeof im.reviewActiveThreads === 'number') {
+        parts.push(`${im.reviewActiveThreads} open thread${im.reviewActiveThreads === 1 ? '' : 's'}`);
+      }
+      return parts.join(' · ') || null;
+    }
+    case 'review_done':
+      return 'review finished — mark FINAL';
+    case 'published':
+    case 'final':
+      return printHint(im.version, im.printedVersion);
+    default:
+      // needs_republish carries its own stale-language line; unknown has its hint.
+      return null;
+  }
+};
 
 /**
  * Bucket manuals by derived status, preserving the incoming order within each group and
@@ -84,7 +202,7 @@ export const MANUAL_STATUS_ORDER: readonly ManualStatus[] = [
  */
 export const groupByStatus = <T extends ManualStatusInput>(
   ims: readonly T[],
-  isStale: (im: T) => boolean,
+  isStale: (im: T) => boolean | null,
 ): Array<{ status: ManualStatus; items: T[] }> => {
   const buckets = new Map<ManualStatus, T[]>();
   for (const im of ims) {

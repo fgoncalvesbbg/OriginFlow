@@ -3,7 +3,7 @@
  * Manages instruction manual generation for specific projects
  */
 
-import { db, orEmpty, withDeadline, type Row } from '../../data';
+import { auth, db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProjectIM, SKUContentValue, IMTemplateType, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef } from '../../types';
 import { saveWithRetry } from '../core/save-retry';
@@ -17,8 +17,19 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   status: data.status,
   isFinalized: data.is_finalized ?? false,
   finalizedAt: data.finalized_at ?? null,
+  finalizedBy: data.finalized_by ?? null,
   updatedAt: data.updated_at,
+  updatedBy: data.updated_by ?? null,
   version: data.version ?? 0,
+  reviewUrl: data.review_url ?? null,
+  reviewMarkupId: data.review_markup_id ?? null,
+  reviewRequestedAt: data.review_requested_at ?? null,
+  reviewRequestedBy: data.review_requested_by ?? null,
+  reviewVersion: data.review_version ?? null,
+  reviewStatus: data.review_status ?? null,
+  reviewDone: data.review_done ?? null,
+  reviewActiveThreads: data.review_active_threads ?? null,
+  reviewCheckedAt: data.review_checked_at ?? null,
   boundSkuIds: data.bound_sku_ids ?? [],
   sectionAdditions: data.section_additions ?? {},
   extraSections: data.extra_sections ?? [],
@@ -36,16 +47,32 @@ export const getProjectIM = async (
   templateType: IMTemplateType = 'im',
 ): Promise<ProjectIM | null> => {
     if (!isLive) return null;
-    try {
-      const data = await db.selectMaybeOne<Row>('project_ims', {
-        where: { project_id: projectId, template_type: templateType },
-      });
-      return data ? mapProjectIMRow(data) : null;
-    } catch (e) {
-      console.error('[project-im] getProjectIM failed:', e);
-      return null;
-    }
+    // Errors PROPAGATE deliberately: returning null on failure made "failed to load"
+    // indistinguishable from "no manual exists", which sent the generator to the
+    // template picker — from where a save would overwrite the real draft. Callers that
+    // can tolerate a miss must catch explicitly.
+    const data = await db.selectMaybeOne<Row>('project_ims', {
+      where: { project_id: projectId, template_type: templateType },
+    });
+    return data ? mapProjectIMRow(data) : null;
 };
+
+/**
+ * Thrown by saveProjectIM when the row changed since the caller's baseline — i.e. someone
+ * else (or another tab) saved in between. Carries who/when so the UI can say so.
+ */
+export class ProjectIMConflictError extends Error {
+  constructor(
+    public readonly lastUpdatedAt: string,
+    public readonly lastUpdatedBy: string | null,
+  ) {
+    super(
+      `This manual was saved by ${lastUpdatedBy ?? 'someone else'} at ${new Date(lastUpdatedAt).toLocaleString()} ` +
+      'after you loaded it. Reload to get their version — your edits are backed up locally on this device.',
+    );
+    this.name = 'ProjectIMConflictError';
+  }
+}
 
 /**
  * Save/create a project's instance for a given template type (defaults to 'im').
@@ -67,8 +94,13 @@ export const saveProjectIM = async (
   boundSkuIds?: string[],
   // Per-chapter SKU scope: sectionId → project_skus.id[]. Empty = applies to all.
   sectionSkus?: Record<string, string[]>,
-  // Per-project inline block overrides: sectionId → refIndex → replacement inline block.
+  // Per-project inline block overrides: sectionId → refIndexOrIdKey → replacement inline block.
   blockOverrides?: Record<string, Record<string, InlineBlockRef>>,
+  // Optimistic-concurrency baseline: the updated_at of the row the caller loaded/last
+  // saved. When provided and the stored row is newer, the save throws
+  // ProjectIMConflictError instead of silently overwriting the other person's work.
+  // Omit to skip the check (imports/scripts that intend to replace).
+  opts?: { baselineUpdatedAt?: string | null },
 ): Promise<ProjectIM> => {
     // Bound every network call so a stalled request / stale auth lock can't leave the
     // caller's "Saving…" state latched forever. The deadline's signal is forwarded into
@@ -76,8 +108,8 @@ export const saveProjectIM = async (
     // it holding row locks that the retry would then queue behind.
     const existing = await saveWithRetry(
       (timeoutMs) => withDeadline(
-        (signal) => db.selectMaybeOne<{ id: string }>('project_ims', {
-          columns: 'id',
+        (signal) => db.selectMaybeOne<{ id: string; updated_at: string; updated_by?: string | null }>('project_ims', {
+          columns: 'id, updated_at, updated_by',
           where: { project_id: projectId, template_type: templateType },
           signal,
         }),
@@ -86,6 +118,15 @@ export const saveProjectIM = async (
       ),
       { context: 'saveProjectIM lookup' },
     );
+
+    // Concurrent-edit guard (check-then-write; not fully atomic, but catches the
+    // human-scale case of two people/tabs on the same manual with 4s autosave).
+    if (existing && opts?.baselineUpdatedAt != null && existing.updated_at !== opts.baselineUpdatedAt) {
+      throw new ProjectIMConflictError(existing.updated_at, existing.updated_by ?? null);
+    }
+
+    const user = await auth.getUser();
+    const updatedBy = user?.email ?? user?.id ?? null;
 
     const payload: Record<string, unknown> = {
         project_id: projectId,
@@ -99,7 +140,8 @@ export const saveProjectIM = async (
         section_skus: sectionSkus ?? {},
         block_overrides: blockOverrides ?? {},
         status,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        updated_by: updatedBy,
     };
     if (version !== undefined) payload.version = version;
     if (boundSkuIds !== undefined) payload.bound_sku_ids = boundSkuIds;
@@ -122,6 +164,12 @@ export const saveProjectIM = async (
     );
 
     const data = await saveWithRetry(runWrite, { context, payloadBytes: JSON.stringify(payload).length });
+
+    // Daily rolling backup (best-effort — never blocks or fails the save). One snapshot
+    // per calendar day, overwritten by each save that day, pruned to the 3 newest days.
+    void backupProjectIM(projectId, templateType, payload, updatedBy)
+      .catch((e) => console.warn('[project-im] daily backup failed (non-fatal):', e));
+
     return mapProjectIMRow({ ...payload, ...data });
 };
 
@@ -165,24 +213,105 @@ export const setProjectIMFinalized = async (
   projectId: string,
   templateType: IMTemplateType,
   isFinalized: boolean,
-): Promise<{ isFinalized: boolean; finalizedAt: string | null; updatedAt: string }> => {
+): Promise<{ isFinalized: boolean; finalizedAt: string | null; finalizedBy: string | null; updatedAt: string }> => {
   const finalizedAt = isFinalized ? new Date().toISOString() : null;
+  // Record WHO signed the manual off — the single most audit-relevant fact about a
+  // FINAL compliance artifact. Cleared on unlock.
+  const user = isFinalized ? await auth.getUser() : null;
+  const finalizedBy = isFinalized ? (user?.email ?? user?.id ?? null) : null;
   const updatedAt = new Date().toISOString();
   await db.updateWhere(
     'project_ims',
-    { is_finalized: isFinalized, finalized_at: finalizedAt, updated_at: updatedAt },
+    { is_finalized: isFinalized, finalized_at: finalizedAt, finalized_by: finalizedBy, updated_at: updatedAt },
     { where: { project_id: projectId, template_type: templateType } },
   );
-  return { isFinalized, finalizedAt, updatedAt };
+  return { isFinalized, finalizedAt, finalizedBy, updatedAt };
+};
+
+// ---------------------------------------------------------------------------
+// Daily rolling backups (project_im_backups, migration 105)
+//
+// The editable row is compact JSONB — images are externalized to Storage before every
+// save — so keeping 3 daily snapshots per manual costs kilobytes, not megabytes. The
+// snapshot for "today" is upserted on every save (so at day rollover it froze at that
+// day's last state), and days beyond the newest 3 are pruned.
+// ---------------------------------------------------------------------------
+
+export interface ProjectIMBackup {
+  backupDate: string;          // YYYY-MM-DD
+  savedBy: string | null;
+  updatedAt: string;           // last save that refreshed this day's snapshot
+  im: ProjectIM;               // the editable state as of that snapshot
+}
+
+const backupProjectIM = async (
+  projectId: string,
+  templateType: IMTemplateType,
+  rowPayload: Record<string, unknown>,
+  savedBy: string | null,
+): Promise<void> => {
+  if (!isLive) return;
+  const backupDate = new Date().toISOString().slice(0, 10);
+  const where = { project_id: projectId, template_type: templateType, backup_date: backupDate };
+  const existing = await db.selectMaybeOne<{ id: string }>('project_im_backups', { columns: 'id', where });
+  const record = {
+    project_id: projectId,
+    template_type: templateType,
+    backup_date: backupDate,
+    payload: rowPayload,
+    saved_by: savedBy,
+    updated_at: new Date().toISOString(),
+  };
+  if (existing) await db.updateWhere('project_im_backups', record, { where: { id: existing.id } });
+  else await db.insert('project_im_backups', record);
+
+  // Prune to the 3 newest days (a handful of tiny rows — loop deletes are fine).
+  const all = await db.select<{ id: string; backup_date: string }>('project_im_backups', {
+    columns: 'id, backup_date',
+    where: { project_id: projectId, template_type: templateType },
+    order: { column: 'backup_date', ascending: false },
+  });
+  for (const stale of all.slice(3)) {
+    await db.delete('project_im_backups', { where: { id: stale.id } });
+  }
+};
+
+/** The last ≤3 daily snapshots for a manual, newest first. */
+export const getProjectIMBackups = async (
+  projectId: string,
+  templateType: IMTemplateType = 'im',
+): Promise<ProjectIMBackup[]> => {
+  if (!isLive) return [];
+  const rows = await orEmpty(
+    db.select<Row>('project_im_backups', {
+      where: { project_id: projectId, template_type: templateType },
+      order: { column: 'backup_date', ascending: false },
+    }),
+    '[getProjectIMBackups]',
+  );
+  return rows.slice(0, 3).map((r: any) => ({
+    backupDate: r.backup_date,
+    savedBy: r.saved_by ?? null,
+    updatedAt: r.updated_at,
+    im: mapProjectIMRow({ ...r.payload, id: r.id, updated_at: r.updated_at }),
+  }));
 };
 
 /**
  * Delete a project's instance for a given template type (defaults to 'im').
+ * A FINAL manual is refused: sign-off must be explicitly revoked (unlock) before the
+ * manual can be deleted. The DB trigger (migration 102) enforces the same rule
+ * server-side; this check just produces a friendlier error.
  */
 export const deleteProjectIM = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
 ): Promise<void> => {
+    const row = await db.selectMaybeOne<{ is_finalized?: boolean }>('project_ims', {
+      columns: 'is_finalized',
+      where: { project_id: projectId, template_type: templateType },
+    });
+    if (row?.is_finalized) throw new Error('This manual is marked FINAL — unlock it before deleting.');
     await db.delete('project_ims', { where: { project_id: projectId, template_type: templateType } });
 };
 
@@ -221,6 +350,16 @@ export interface ProjectIMSummary {
   isFinalized: boolean;
   finalizedAt: string | null;
   updatedAt: string;
+  /** Publish counter — needed (with the review fields) to derive the In Review status. */
+  version: number;
+  /** Markup.io review round (see mapProjectIMRow) — drives the derived In Review status. */
+  reviewUrl: string | null;
+  reviewRequestedAt: string | null;
+  reviewVersion: number | null;
+  /** Cached review outcome (migration 112) — drives the derived Review Done status. */
+  reviewDone: boolean | null;
+  reviewStatus: string | null;
+  reviewActiveThreads: number | null;
   skus: string[];            // SKU numbers on the project (a project can have several)
 }
 
@@ -242,6 +381,13 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       is_finalized,
       finalized_at,
       updated_at,
+      version,
+      review_url,
+      review_requested_at,
+      review_version,
+      review_done,
+      review_status,
+      review_active_threads,
       bound_sku_ids,
       project:projects ( id, name, category_id, project_id_code ),
       template:im_templates ( name )
@@ -289,6 +435,13 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       isFinalized: row.is_finalized ?? false,
       finalizedAt: row.finalized_at ?? null,
       updatedAt: row.updated_at,
+      version: row.version ?? 0,
+      reviewUrl: row.review_url ?? null,
+      reviewRequestedAt: row.review_requested_at ?? null,
+      reviewVersion: row.review_version ?? null,
+      reviewDone: row.review_done ?? null,
+      reviewStatus: row.review_status ?? null,
+      reviewActiveThreads: row.review_active_threads ?? null,
       skus,
     };
   });
