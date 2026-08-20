@@ -32,6 +32,7 @@ const mapEntry = (e: any): RFQEntry => ({
   supplierName: e.supplier?.name,
   rfqTitle: e.rfqs?.title,
   rfqIdentifier: e.rfqs?.rfq_id,
+  rfqDeadline: e.rfqs?.deadline ?? undefined,
   attributeResponses: e.attribute_responses ?? []
 });
 
@@ -110,7 +111,8 @@ export const createRFQ = async (
     categoryId?: string,
     attributes?: RFQAttributeValue[],
     thumbnailUrl?: string,
-    attachments?: RFQAttachment[]
+    attachments?: RFQAttachment[],
+    deadline?: string | null
 ): Promise<RFQ> => {
     const rfqData = await db.insert<Row>('rfqs', {
         title,
@@ -121,6 +123,7 @@ export const createRFQ = async (
         attributes: attributes,
         thumbnail_url: thumbnailUrl,
         attachments: attachments,
+        deadline: deadline || null,
         status: RFQStatus.OPEN,
         created_at: new Date().toISOString()
     });
@@ -161,4 +164,23 @@ export const deleteRFQ = async (id: string): Promise<void> => {
 export const awardRFQ = async (rfqId: string, entryId: string): Promise<void> => {
     await db.updateWhere('rfq_entries', { status: RFQEntryStatus.AWARDED }, { where: { id: entryId } });
     await db.updateWhere('rfqs', { status: RFQStatus.AWARDED }, { where: { id: rfqId } });
+};
+
+/**
+ * Return a submitted entry to 'pending' so the supplier can correct their quote.
+ *
+ * A quote is one-shot from the supplier's side: `submit_rfq_entry_secure` refuses a
+ * second submission, and the portal shows a read-only summary. That is the right
+ * default for a commercial record, but a mistyped price then has no route back into
+ * the comparison table except email. This is that route — a deliberate PM action.
+ *
+ * The previously submitted figures are left in place so the supplier sees what they
+ * are correcting rather than an empty form.
+ */
+export const reopenRFQEntry = async (entryId: string): Promise<void> => {
+    await db.updateWhere(
+        'rfq_entries',
+        { status: RFQEntryStatus.PENDING, submitted_at: null },
+        { where: { id: entryId } },
+    );
 };

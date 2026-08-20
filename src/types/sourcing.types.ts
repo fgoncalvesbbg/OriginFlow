@@ -53,6 +53,7 @@ export interface RFQEntry {
   supplierName?: string;
   rfqTitle?: string;
   rfqIdentifier?: string;
+  rfqDeadline?: string;           // parent RFQ's quote deadline, for the supplier dashboard
   attributeResponses?: RFQAttributeResponse[];  // supplier's proposed values per attribute
 }
 
@@ -67,6 +68,7 @@ export interface RFQ {
   attachments: RFQAttachment[];
   createdBy: string;
   createdAt: string;
+  deadline?: string;              // when the quote is due back from the supplier
   status: RFQStatus;
   categoryName?: string;
   entries?: RFQEntry[];

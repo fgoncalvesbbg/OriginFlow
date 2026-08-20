@@ -16,8 +16,13 @@ const SupplierPortal: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // Upload State
+  // Upload State.
+  // `targetDocId` is which document the file picker was opened for; `uploadingId` is
+  // what is actually in flight. Keeping them apart matters because a cancelled picker
+  // fires no event — conflating the two leaves the row stuck in a busy state forever.
+  const [targetDocId, setTargetDocId] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [adHocUploading, setAdHocUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadType, setUploadType] = useState<'standard' | 'adhoc'>('standard');
   const [adHocStepNumber, setAdHocStepNumber] = useState(1);
@@ -89,7 +94,7 @@ const SupplierPortal: React.FC = () => {
   };
 
   const triggerUpload = (docId: string) => {
-    setUploadingId(docId);
+    setTargetDocId(docId);
     setUploadType('standard');
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -109,21 +114,31 @@ const SupplierPortal: React.FC = () => {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
         const file = e.target.files[0];
-        if (uploadType === 'standard' && uploadingId) {
+        if (uploadType === 'standard' && targetDocId) {
+            const docId = targetDocId;
+            setUploadingId(docId);
             try {
-                const updatedDoc = await uploadFile(uploadingId, file, true, token);
-                setDocs(docs.map(d => d.id === uploadingId ? updatedDoc : d));
-            } catch (e) {
-                alert("Upload failed. Please try again.");
+                const updatedDoc = await uploadFile(docId, file, true, token);
+                setDocs(docs.map(d => d.id === docId ? updatedDoc : d));
+            } catch (err: any) {
+                // The service raises readable messages (size / type / token); a generic
+                // "try again" would just send the supplier round the same loop.
+                console.error('Document upload failed:', err);
+                alert(err?.message || 'Upload failed. Please try again.');
             } finally {
                 setUploadingId(null);
+                setTargetDocId(null);
             }
         } else if (uploadType === 'adhoc' && project) {
+            setAdHocUploading(true);
             try {
                 const newDoc = await uploadAdHocFile(project.id, adHocStepNumber, file, true, token);
                 setDocs([...docs, newDoc]);
-            } catch (e) {
-                alert("Upload failed. Please try again.");
+            } catch (err: any) {
+                console.error('Ad-hoc upload failed:', err);
+                alert(err?.message || 'Upload failed. Please try again.');
+            } finally {
+                setAdHocUploading(false);
             }
         }
     }
@@ -242,14 +257,17 @@ const SupplierPortal: React.FC = () => {
                                      Uploaded on {new Date(doc.uploadedAt!).toLocaleDateString()}
                                    </p>
                                    {!isAdHoc && (
-                                     <label className="block w-full text-center py-2 px-4 border border-gray-300 rounded bg-white hover:bg-light text-sm cursor-pointer transition-colors">
-                                        Replace File
-                                        <input 
-                                          type="file" 
-                                          className="hidden" 
-                                          onChange={(e) => e.target.files?.[0] && triggerUpload(doc.id)} 
-                                        />
-                                     </label>
+                                     /* One picker only. A nested <input type="file"> here would have
+                                        its selection discarded by triggerUpload, which opens the
+                                        shared input again — making the supplier choose twice. */
+                                     <button
+                                       type="button"
+                                       onClick={() => triggerUpload(doc.id)}
+                                       disabled={uploadingId === doc.id}
+                                       className="block w-full text-center py-2 px-4 border border-gray-300 rounded bg-white hover:bg-light text-sm transition-colors disabled:opacity-50"
+                                     >
+                                       {uploadingId === doc.id ? 'Uploading…' : 'Replace File'}
+                                     </button>
                                    )}
                                    {isAdHoc && (
                                       <button type="button" onClick={() => openDoc(doc)} className="block w-full text-center py-2 px-4 border border-gray-300 rounded bg-white hover:bg-light text-sm transition-colors">
@@ -314,6 +332,13 @@ const SupplierPortal: React.FC = () => {
                             {step.stepNumber === 3 ? 'Production validation — please confirm or update the product attribute data.' : 'Please fill in the technical attributes for this product/SKU.'}
                           </p>
                           {req.categoryName && <p className="text-xs text-gray-400">Category: {req.categoryName}</p>}
+                          {!isSubmitted && req.deadline && (
+                            <p className={`text-xs font-medium mt-1 flex items-center gap-1 ${
+                              new Date(req.deadline) < new Date() ? 'text-rose-600' : 'text-amber-600'
+                            }`}>
+                              <Clock size={12} /> Due: {new Date(req.deadline).toLocaleDateString()}
+                            </p>
+                          )}
                           {req.note && (
                             <div className="mt-3 bg-indigo-50 border border-indigo-100 rounded p-3 text-sm text-indigo-800">
                               <strong>Note from PM:</strong> {req.note}
@@ -359,11 +384,12 @@ const SupplierPortal: React.FC = () => {
                               <p className="text-xs text-muted">Need to send more files? Upload them here.</p>
                            </div>
                         </div>
-                        <button 
+                        <button
                           onClick={() => triggerAdHocUpload(step.stepNumber)}
-                          className="flex items-center gap-2 bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl text-sm font-medium shadow hover:bg-indigo-50 hover:border-indigo-300 transition-all"
+                          disabled={adHocUploading}
+                          className="flex items-center gap-2 bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl text-sm font-medium shadow hover:bg-indigo-50 hover:border-indigo-300 transition-all disabled:opacity-50"
                         >
-                          <Upload size={16} /> Upload Extra File
+                          <Upload size={16} /> {adHocUploading ? 'Uploading…' : 'Upload Extra File'}
                         </button>
                      </div>
                   )}

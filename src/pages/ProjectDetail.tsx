@@ -138,6 +138,9 @@ const ProjectDetail: React.FC = () => {
   const [attrReqSelectedSkuId, setAttrReqSelectedSkuId] = useState('');
   const [attrReqSourceStep2, setAttrReqSourceStep2] = useState<ProjectAttributeRequest | null>(null);
   const [attrReqNote, setAttrReqNote] = useState('');
+  // Optional due date shown to the supplier. Without one the request has no urgency
+  // the supplier can see, and chasing it falls back on the PM.
+  const [attrReqDeadline, setAttrReqDeadline] = useState('');
   const [attrReqSending, setAttrReqSending] = useState(false);
   const [attrReqSendingAll, setAttrReqSendingAll] = useState(false);
   // Sending a defined SKU (from the Attributes tab) to the supplier for review.
@@ -564,9 +567,40 @@ const ProjectDetail: React.FC = () => {
 
   // --- Attribute Requests ---
 
+  /**
+   * Regional variants (10XXXXX EU / 12XXXXX UK / 13XXXXX AU) are the same physical
+   * product and share nearly every technical attribute, but each SKU gets its own
+   * request — so the supplier retypes the same values per market, which is exactly
+   * where a UK-only figure ends up on the EU SKU.
+   *
+   * The trailing digits identify the product family. When a request has nothing of
+   * its own to start from, seed it from a sibling variant the supplier has already
+   * submitted and record which SKU that was, so the portal can label the values as
+   * copied rather than presenting them as confirmed.
+   */
+  const skuFamily = (sku: string): string => (sku || '').replace(/\D/g, '').slice(-5);
+
+  const siblingPrefill = (
+    skuNumber: string,
+  ): { data: SkuAttributeValue[]; fromSku: string } | null => {
+    const family = skuFamily(skuNumber);
+    if (family.length < 4) return null;   // too short to identify a family safely
+
+    const sibling = attrRequests
+      .filter(r => r.status === 'submitted' && r.submittedData?.length)
+      .filter(r => r.skuNumber && r.skuNumber !== skuNumber)
+      .filter(r => skuFamily(r.skuNumber) === family)
+      .sort((a, b) =>
+        new Date(b.submittedAt || b.createdAt).getTime() -
+        new Date(a.submittedAt || a.createdAt).getTime())[0];
+
+    return sibling ? { data: sibling.submittedData!, fromSku: sibling.skuNumber } : null;
+  };
+
   const handleOpenAttrReqModal = (step: 2 | 3, step2Req?: ProjectAttributeRequest) => {
     setAttrReqStep(step);
     setAttrReqNote('');
+    setAttrReqDeadline('');
     setAttrReqSourceStep2(step2Req || null);
     if (step === 3 && step2Req) {
       setAttrReqSelectedSkuId('');
@@ -592,16 +626,24 @@ const ProjectDetail: React.FC = () => {
       // selected defined SKU's attribute values (if any) so the supplier sees the PM's spec.
       const selectedSku = projectSkus.find(s => s.id === attrReqSelectedSkuId);
       const skuPrefill = selectedSku?.attributeValues?.filter(v => v.value) ?? [];
-      const prefill = attrReqStep === 3
+      let prefill = attrReqStep === 3
         ? (attrReqSourceStep2?.submittedData?.length ? attrReqSourceStep2.submittedData : undefined)
         : (skuPrefill.length ? skuPrefill : undefined);
+      // Nothing of this SKU's own to start from — fall back to a sibling variant.
+      let copiedFrom: string | null = null;
+      if (!prefill?.length) {
+        const sib = siblingPrefill(attrReqSkuNumber.trim());
+        if (sib) { prefill = sib.data; copiedFrom = sib.fromSku; }
+      }
       const req = await createAttributeRequest(
         project.id, project.name, project.projectId,
         attrReqCategoryId || null, cat?.name || '',
         attrReqStep,
         attrReqSkuNumber.trim(), attrReqSkuTitle.trim(),
         attrReqNote.trim() || undefined,
-        prefill
+        prefill,
+        attrReqDeadline || null,
+        copiedFrom
       );
       const url = `${window.location.origin}/#/attribute-request/${req.token}`;
       setAttrRequests(prev => [req, ...prev]);
@@ -623,16 +665,24 @@ const ProjectDetail: React.FC = () => {
     if (!toCreate.length) { showNotification('All SKUs already have production requests.', 'error'); return; }
     setAttrReqSendingAll(true);
     try {
-      const newReqs = await Promise.all(toCreate.map(s2 =>
-        createAttributeRequest(
+      const newReqs = await Promise.all(toCreate.map(s2 => {
+        let prefill = s2.status === 'submitted' && s2.submittedData?.length ? s2.submittedData : undefined;
+        let copiedFrom: string | null = null;
+        if (!prefill?.length) {
+          const sib = siblingPrefill(s2.skuNumber);
+          if (sib) { prefill = sib.data; copiedFrom = sib.fromSku; }
+        }
+        return createAttributeRequest(
           project.id, project.name, project.projectId,
           s2.categoryId, s2.categoryName,
           3,
           s2.skuNumber, s2.skuTitle,
           undefined,
-          s2.status === 'submitted' && s2.submittedData?.length ? s2.submittedData : undefined
-        )
-      ));
+          prefill,
+          null,
+          copiedFrom
+        );
+      }));
       setAttrRequests(prev => [...newReqs, ...prev]);
       showNotification(`${newReqs.length} production request(s) created.`, 'success');
     } catch (e: any) {
@@ -650,14 +700,21 @@ const ProjectDetail: React.FC = () => {
     try {
       const categoryId = project.categoryId || complianceRequests[0]?.categoryId || null;
       const cat = categories.find(c => c.id === categoryId);
-      const prefill = sku.attributeValues?.filter(v => v.value) ?? [];
+      let prefill: SkuAttributeValue[] | undefined = sku.attributeValues?.filter(v => v.value) ?? [];
+      let copiedFrom: string | null = null;
+      if (!prefill.length) {
+        const sib = siblingPrefill(sku.skuNumber);
+        if (sib) { prefill = sib.data; copiedFrom = sib.fromSku; }
+      }
       const req = await createAttributeRequest(
         project.id, project.name, project.projectId,
         categoryId, cat?.name || '',
         2,
         sku.skuNumber, sku.skuTitle,
         undefined,
-        prefill.length ? prefill : undefined
+        prefill.length ? prefill : undefined,
+        null,
+        copiedFrom
       );
       const url = `${window.location.origin}/#/attribute-request/${req.token}`;
       setAttrRequests(prev => [req, ...prev]);
@@ -681,14 +738,21 @@ const ProjectDetail: React.FC = () => {
       const categoryId = project.categoryId || complianceRequests[0]?.categoryId || null;
       const cat = categories.find(c => c.id === categoryId);
       const newReqs = await Promise.all(toSend.map(sku => {
-        const prefill = sku.attributeValues?.filter(v => v.value) ?? [];
+        let prefill: SkuAttributeValue[] | undefined = sku.attributeValues?.filter(v => v.value) ?? [];
+        let copiedFrom: string | null = null;
+        if (!prefill.length) {
+          const sib = siblingPrefill(sku.skuNumber);
+          if (sib) { prefill = sib.data; copiedFrom = sib.fromSku; }
+        }
         return createAttributeRequest(
           project.id, project.name, project.projectId,
           categoryId, cat?.name || '',
           2,
           sku.skuNumber, sku.skuTitle,
           undefined,
-          prefill.length ? prefill : undefined
+          prefill.length ? prefill : undefined,
+          null,
+          copiedFrom
         );
       }));
       setAttrRequests(prev => [...newReqs, ...prev]);
@@ -2530,6 +2594,16 @@ const ProjectDetail: React.FC = () => {
                 <option value="">— No category (predefined attributes only) —</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date (optional)</label>
+              <input
+                type="date"
+                className="w-full border border-gray-300 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                value={attrReqDeadline}
+                onChange={e => setAttrReqDeadline(e.target.value)}
+              />
             </div>
 
             <div className="mb-6">

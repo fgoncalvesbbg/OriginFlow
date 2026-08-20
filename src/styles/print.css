@@ -1,0 +1,81 @@
+/**
+ * Print rules for the supplier-facing portals.
+ *
+ * Suppliers sign a declaration that carries a liability clause, and submit attribute
+ * data and quotes that end up in a compliance file — but every export in the app
+ * pointed inward, at PM screens. Rather than build a second PDF generator for the
+ * portals, these rules make the existing read-only views printable, so the browser's
+ * own "Save as PDF" produces the supplier's copy.
+ *
+ * Conventions:
+ *   .no-print       — chrome that must not appear on paper (buttons, filters, nav)
+ *   .print-plain    — strip screen styling (shadow, dimming, coloured fills) on paper
+ *   .print-only     — hidden on screen, shown on paper (signature/provenance footers)
+ *   .print-avoid-break — keep a card on one page where possible
+ */
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .no-print,
+  .no-print * {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block;
+  }
+
+  /* Sticky headers/footers overlap or repeat badly on paper. */
+  .sticky {
+    position: static !important;
+  }
+
+  /* Read-only views dim themselves on screen (opacity-60 / pointer-events-none).
+     On paper that just makes the record hard to read. */
+  .print-plain,
+  .print-plain * {
+    opacity: 1 !important;
+  }
+
+  .print-plain {
+    box-shadow: none !important;
+    background-image: none !important;
+  }
+
+  /* Answers and evidence live in disabled inputs; browsers grey them out and can
+     clip a textarea to its screen height, silently truncating the printed record. */
+  .print-plain textarea,
+  .print-plain input {
+    color: #000 !important;
+    background: #fff !important;
+    border-color: #cbd5e1 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    resize: none !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Keep the colour coding of confirm / cannot-confirm on paper — it is the
+     content, not decoration. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

@@ -287,6 +287,7 @@ export {
   createRFQ,
   deleteRFQ,
   awardRFQ,
+  reopenRFQEntry,
   getRFQsForSupplier,
   submitRFQEntry,
   getAllSupplierProposals,

@@ -12,7 +12,45 @@ import {
   CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
 import { passesFeatureGate } from '../../utils';
-import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle, Printer } from 'lucide-react';
+
+/**
+ * What the comment box on a requirement is for, given the supplier's answer.
+ *
+ * The form already tells the supplier how compliance must be evidenced — the
+ * "Lab Report Req" / "Self-Decl OK" badge comes from `selfDeclarationAccepted` —
+ * but until now there was nowhere to put that evidence, so a Confirm on a
+ * lab-report item was an unbacked tick. Returns null when no box is warranted.
+ */
+const evidenceSpec = (
+  r: ComplianceRequirement,
+  answer: ComplianceResponseStatus,
+): { label: string; placeholder: string; hint: string; required: boolean } | null => {
+  if (answer === ComplianceResponseStatus.CANNOT_COMPLY) {
+    return {
+      label: 'Explanation Required',
+      placeholder: 'Please explain why you cannot confirm this requirement...',
+      hint: 'Comment is required for "Cannot Confirm" responses',
+      required: true,
+    };
+  }
+  if (answer !== ComplianceResponseStatus.COMPLY) return null;
+
+  const labReportRequired = r.selfDeclarationAccepted === false;
+  return labReportRequired
+    ? {
+        label: 'Lab report reference',
+        placeholder: 'Testing laboratory, report number and date (e.g. SGS, GZHL2409123, 2024-09-14)',
+        hint: 'This requirement needs a qualified lab report — please identify it here',
+        required: true,
+      }
+    : {
+        label: 'Evidence reference (optional)',
+        placeholder: 'Self-declaration, internal test or report reference, if you have one',
+        hint: '',
+        required: false,
+      };
+};
 
 const SupplierCompliancePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -28,7 +66,17 @@ const SupplierCompliancePortal: React.FC = () => {
   const [category, setCategory] = useState<CategoryL3 | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  
+  // A request the reviewer sent back. Editable — `submit_compliance_response_secure`
+  // locks only 'approved' and 'completed', so a rejected declaration can still be
+  // corrected and resubmitted. Terminal-looking UI here would be a dead end.
+  const [returned, setReturned] = useState(false);
+
+  // Draft save
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<Date | null>(null);
+  // True when there are answers on screen that have not been written to the server.
+  const [dirty, setDirty] = useState(false);
+
   // Form State
   const [answers, setAnswers] = useState<Record<string, ComplianceResponseStatus>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
@@ -36,8 +84,17 @@ const SupplierCompliancePortal: React.FC = () => {
   const [respondentPosition, setRespondentPosition] = useState('');
 
   // Filter and Sort State
-  const [filterMode, setFilterMode] = useState<'all' | 'unanswered' | 'mandatory' | 'answered'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'unanswered' | 'mandatory' | 'answered' | 'cannot_confirm' | 'needs_evidence'>('all');
   const [sortMode, setSortMode] = useState<'section' | 'mandatory'>('section');
+
+  // A long declaration is easy to lose to a closed tab or a stray back-navigation.
+  // Warn while answers are unsaved; the browser shows its own generic prompt.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   const handleLogin = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -50,7 +107,9 @@ const SupplierCompliancePortal: React.FC = () => {
       try {
           const requestData = await verifySupplierAccess(token, accessCodeInput.trim());
           setReq(requestData);
-          if (['submitted', 'approved', 'rejected'].includes(requestData.status)) {
+          if (requestData.status === 'rejected') {
+              setReturned(true);
+          } else if (['submitted', 'approved'].includes(requestData.status)) {
               setSubmitted(true);
           }
           if (requestData.respondentName) setRespondentName(requestData.respondentName);
@@ -114,6 +173,43 @@ const SupplierCompliancePortal: React.FC = () => {
       }
   };
 
+  /**
+   * Persist the current answers without submitting. The portal RPC accepts
+   * 'pending_supplier' precisely for this, and the login path rehydrates
+   * `answers`/`comments` from `requestData.responses`, so a saved draft comes
+   * back intact. Only answered items are written — an unanswered requirement
+   * should stay unanswered, not be stored as a null response.
+   */
+  const handleSaveDraft = async () => {
+      if (!req || !token) return;
+      setSavingDraft(true);
+      try {
+          const responseItems: ComplianceResponseItem[] = requirements
+              .filter(r => answers[r.id])
+              .map(r => ({
+                  requirementId: r.id,
+                  status: answers[r.id],
+                  comment: comments[r.id]
+              }));
+
+          await submitComplianceResponseSecure(
+              token,
+              accessCodeInput.trim(),
+              responseItems,
+              ComplianceRequestStatus.PENDING_SUPPLIER,
+              respondentName,
+              respondentPosition
+          );
+          setDraftSavedAt(new Date());
+          setDirty(false);
+      } catch (e: any) {
+          console.error("[Portal] Draft save error:", e);
+          alert("Could not save your draft: " + e.message + "\n\nYour answers are still on screen — please keep this tab open and try again.");
+      } finally {
+          setSavingDraft(false);
+      }
+  };
+
   const handleSubmit = async () => {
       if (!req || !token) return;
       if (!respondentName.trim() || !respondentPosition.trim()) {
@@ -127,14 +223,24 @@ const SupplierCompliancePortal: React.FC = () => {
           return;
       }
 
-      // Check if all "Cannot Confirm" responses have mandatory comments
-      const cannotConfirmWithoutComments = requirements.filter(r =>
-          answers[r.id] === ComplianceResponseStatus.CANNOT_COMPLY &&
-          !comments[r.id]?.trim()
-      );
+      // Every answer that owes a comment must have one: an explanation for
+      // "Cannot Confirm", and a lab report reference for a "Confirm" on an item
+      // that cannot be self-declared.
+      const missingEvidence = requirements.filter(r => {
+          const spec = answers[r.id] ? evidenceSpec(r, answers[r.id]) : null;
+          return spec?.required && !comments[r.id]?.trim();
+      });
 
-      if (cannotConfirmWithoutComments.length > 0) {
-          alert(`Please provide a comment for all "Cannot Confirm" responses. Missing comments for ${cannotConfirmWithoutComments.length} requirement(s).`);
+      if (missingEvidence.length > 0) {
+          const explanations = missingEvidence.filter(r => answers[r.id] === ComplianceResponseStatus.CANNOT_COMPLY).length;
+          const labRefs = missingEvidence.length - explanations;
+          const parts = [
+              explanations ? `${explanations} “Cannot Confirm” explanation(s)` : '',
+              labRefs ? `${labRefs} lab report reference(s)` : '',
+          ].filter(Boolean);
+          alert(`Please complete ${parts.join(' and ')} before submitting.`);
+          setFilterMode('needs_evidence');
+          window.scrollTo(0, 0);
           return;
       }
 
@@ -156,6 +262,8 @@ const SupplierCompliancePortal: React.FC = () => {
               respondentName,
               respondentPosition
           );
+          setDirty(false);
+          setReturned(false);
           setSubmitted(true);
           window.scrollTo(0, 0);
       } catch (e: any) {
@@ -228,6 +336,12 @@ const SupplierCompliancePortal: React.FC = () => {
         return hasAnswer;
       case 'mandatory':
         return req.isMandatory;
+      case 'cannot_confirm':
+        return answers[req.id] === ComplianceResponseStatus.CANNOT_COMPLY;
+      case 'needs_evidence': {
+        const spec = answers[req.id] ? evidenceSpec(req, answers[req.id]) : null;
+        return !!spec?.required && !comments[req.id]?.trim();
+      }
       case 'all':
       default:
         return true;
@@ -268,6 +382,11 @@ const SupplierCompliancePortal: React.FC = () => {
   const unansweredCount = requirements.filter(r => !answers[r.id]).length;
   const answeredCount = completedReqs;
   const mandatoryCount = requirements.filter(r => r.isMandatory).length;
+  const cannotConfirmCount = requirements.filter(r => answers[r.id] === ComplianceResponseStatus.CANNOT_COMPLY).length;
+  const needsEvidenceCount = requirements.filter(r => {
+    const spec = answers[r.id] ? evidenceSpec(r, answers[r.id]) : null;
+    return spec?.required && !comments[r.id]?.trim();
+  }).length;
 
   // Tooltip Component
   const Tooltip: React.FC<{text: string, children: React.ReactNode}> = ({text, children}) => {
@@ -280,7 +399,7 @@ const SupplierCompliancePortal: React.FC = () => {
           onMouseEnter={() => setShow(true)}
           onMouseLeave={() => setShow(false)}
           onClick={(e) => { e.preventDefault(); setShow(!show); }}
-          className="text-gray-400 hover:text-indigo-600 transition-colors inline-flex items-center"
+          className="text-gray-400 hover:text-indigo-600 transition-colors inline-flex items-center no-print"
         >
           {children}
         </button>
@@ -300,8 +419,8 @@ const SupplierCompliancePortal: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-light font-sans pb-20 text-primary">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex justify-between items-center">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow no-print">
+        <div className="max-w-4xl mx-auto px-6 py-4 flex justify-between items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-indigo-100 p-2 rounded-xl text-indigo-700"><ShieldCheck size={24} /></div>
             <div>
@@ -309,12 +428,37 @@ const SupplierCompliancePortal: React.FC = () => {
                 <p className="text-[10px] text-muted font-mono">{req.requestId}</p>
             </div>
           </div>
-          <div className="text-right">
-             <div className="text-[10px] text-gray-400 uppercase tracking-wide font-bold">Project</div>
-             <div className="text-sm font-bold text-gray-800">{req.projectName}</div>
+          <div className="flex items-center gap-4">
+            {/* The supplier signs a declaration carrying a liability clause and, until
+                now, kept no copy of what they signed. The read-only view is already the
+                record — this just gets it onto paper or into a PDF. */}
+            <button
+              type="button"
+              onClick={() => window.print()}
+              title="Print or save a PDF copy of this declaration"
+              className="flex items-center gap-2 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg px-3 py-2 hover:bg-gray-50"
+            >
+              <Printer size={14} /> Print / Save PDF
+            </button>
+            <div className="text-right">
+               <div className="text-[10px] text-gray-400 uppercase tracking-wide font-bold">Project</div>
+               <div className="text-sm font-bold text-gray-800">{req.projectName}</div>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Paper-only masthead — the on-screen header is chrome and is suppressed. */}
+      <div className="print-only" style={{ marginBottom: '1rem' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: 700 }}>Technical Compliance File — Declaration</h1>
+        <p style={{ fontSize: '11px' }}>
+          {req.requestId} · {req.projectName}
+          {category?.name ? ` · ${category.name}` : ''}
+        </p>
+        <p style={{ fontSize: '11px' }}>
+          Status: {req.status.replace(/_/g, ' ')} · Printed {new Date().toLocaleString()}
+        </p>
+      </div>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         {submitted && (
@@ -322,6 +466,25 @@ const SupplierCompliancePortal: React.FC = () => {
                 <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-100 rounded-full text-emerald-600 mb-4"><CheckCircle size={32} /></div>
                 <h1 className="text-3xl font-bold text-emerald-900 mb-2">Form Successfully Submitted</h1>
                 <p className="text-emerald-800 max-w-md mx-auto">Your technical compliance response has been recorded. Our team will review the declaration.</p>
+            </div>
+        )}
+
+        {returned && (
+            <div className="mb-8 bg-amber-50 border border-amber-300 rounded-xl p-6 animate-in fade-in slide-in-from-top-4">
+                <div className="flex items-start gap-4">
+                    <div className="inline-flex items-center justify-center w-12 h-12 bg-amber-100 rounded-full text-amber-700 shrink-0"><AlertTriangle size={24} /></div>
+                    <div>
+                        <h2 className="text-xl font-bold text-amber-900 mb-1">Returned for correction</h2>
+                        <p className="text-sm text-amber-900 leading-relaxed">
+                            This declaration was reviewed and sent back. Your previous answers are restored below —
+                            update the items that need changing and submit again.
+                            {cannotConfirmCount > 0 && (
+                                <> The review flagged <strong>{cannotConfirmCount}</strong> requirement{cannotConfirmCount === 1 ? '' : 's'} answered
+                                “Cannot Confirm”; use the <em>Cannot Confirm</em> filter below to jump straight to them.</>
+                            )}
+                        </p>
+                    </div>
+                </div>
             </div>
         )}
 
@@ -338,7 +501,7 @@ const SupplierCompliancePortal: React.FC = () => {
 
         {/* Intro / Legend Card */}
         {!submitted && (
-          <div className="mb-6 bg-white border border-gray-200 rounded-xl shadow p-6">
+          <div className="mb-6 bg-white border border-gray-200 rounded-xl shadow p-6 no-print">
             <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-2">
               <ShieldCheck size={18} className="text-indigo-600" />
               About this declaration
@@ -373,7 +536,7 @@ const SupplierCompliancePortal: React.FC = () => {
 
         {/* Progress Overview Card */}
         {!submitted && (
-          <div className="mb-6 bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl shadow p-6">
+          <div className="mb-6 bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl shadow p-6 no-print">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800 flex items-center gap-2">
                 <CheckCircle size={20} className="text-indigo-600" />
@@ -408,7 +571,7 @@ const SupplierCompliancePortal: React.FC = () => {
 
         {/* Filter and Sort Bar */}
         {!submitted && (
-          <div className="mb-6 bg-white border border-gray-200 rounded-xl shadow p-4">
+          <div className="mb-6 bg-white border border-gray-200 rounded-xl shadow p-4 no-print">
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm font-medium text-gray-700">Show:</span>
 
@@ -456,6 +619,32 @@ const SupplierCompliancePortal: React.FC = () => {
                 Answered ({answeredCount})
               </button>
 
+              {needsEvidenceCount > 0 && (
+                <button
+                  onClick={() => setFilterMode('needs_evidence')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                    filterMode === 'needs_evidence'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                >
+                  Needs evidence ({needsEvidenceCount})
+                </button>
+              )}
+
+              {cannotConfirmCount > 0 && (
+                <button
+                  onClick={() => setFilterMode('cannot_confirm')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                    filterMode === 'cannot_confirm'
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                  }`}
+                >
+                  Cannot Confirm ({cannotConfirmCount})
+                </button>
+              )}
+
               <div className="h-6 w-px bg-gray-300 mx-1" />
 
               <span className="text-sm font-medium text-gray-700">Sort:</span>
@@ -486,7 +675,7 @@ const SupplierCompliancePortal: React.FC = () => {
         )}
 
         {/* Requirements Section - Read-only if submitted, editable otherwise */}
-        <div className={`space-y-8 ${submitted ? 'opacity-60 pointer-events-none' : ''}`}>
+        <div className={`space-y-8 print-plain ${submitted ? 'opacity-60 pointer-events-none' : ''}`}>
                 {sortedSections.map(section => {
                     const sectionReqs = groupedReqs[section];
                     const completedCount = sectionReqs.filter(r => answers[r.id]).length;
@@ -520,7 +709,7 @@ const SupplierCompliancePortal: React.FC = () => {
                                     return (
                                         <div
                                             key={r.id}
-                                            className={`border-l-4 ${borderColor} ${bgColor} border border-gray-200 rounded-lg shadow-sm transition-all`}
+                                            className={`border-l-4 ${borderColor} ${bgColor} border border-gray-200 rounded-lg shadow-sm transition-all print-avoid-break`}
                                         >
                                             <div className="p-4">
                                                 {/* Header with Title and Buttons */}
@@ -557,12 +746,20 @@ const SupplierCompliancePortal: React.FC = () => {
                                                         </div>
                                                     </div>
 
+                                                    <span className="print-only" style={{ fontSize: '11px', fontWeight: 700 }}>
+                                                        {answer === ComplianceResponseStatus.COMPLY
+                                                            ? 'CONFIRMED'
+                                                            : answer === ComplianceResponseStatus.CANNOT_COMPLY
+                                                              ? 'CANNOT CONFIRM'
+                                                              : 'NOT ANSWERED'}
+                                                    </span>
+
                                                     {/* Right: Response Buttons */}
-                                                    <div className="flex gap-2 flex-shrink-0">
+                                                    <div className="flex gap-2 flex-shrink-0 no-print">
                                                         <button
                                                             onClick={() =>
                                                                 !submitted &&
-                                                                setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})
+                                                                (setDirty(true), setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY}))
                                                             }
                                                             disabled={submitted}
                                                             className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
@@ -577,10 +774,10 @@ const SupplierCompliancePortal: React.FC = () => {
                                                         <button
                                                             onClick={() =>
                                                                 !submitted &&
-                                                                setAnswers({
+                                                                (setDirty(true), setAnswers({
                                                                     ...answers,
                                                                     [r.id]: ComplianceResponseStatus.CANNOT_COMPLY
-                                                                })
+                                                                }))
                                                             }
                                                             disabled={submitted}
                                                             className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
@@ -645,34 +842,40 @@ const SupplierCompliancePortal: React.FC = () => {
                                                     )}
                                                 </div>
 
-                                                {/* Comment Section */}
-                                                {answer === ComplianceResponseStatus.CANNOT_COMPLY && (
-                                                    <div className="mt-3 pt-3 border-t border-gray-200">
-                                                        <label className="block text-xs font-medium text-gray-700 mb-2">
-                                                            Explanation Required <span className="text-rose-500">*</span>
-                                                        </label>
-                                                        <textarea
-                                                            value={comments[r.id] || ''}
-                                                            onChange={(e) =>
-                                                                !submitted &&
-                                                                setComments({...comments, [r.id]: e.target.value})
-                                                            }
-                                                            disabled={submitted}
-                                                            className={`w-full px-3 py-2 text-xs border rounded-lg ${
-                                                                !comments[r.id]?.trim()
-                                                                    ? 'border-rose-300 bg-rose-50'
-                                                                    : 'border-gray-300'
-                                                            } focus:ring-2 focus:ring-indigo-500 outline-none resize-none`}
-                                                            rows={2}
-                                                            placeholder="Please explain why you cannot confirm this requirement..."
-                                                        />
-                                                        {!comments[r.id]?.trim() && (
-                                                            <p className="text-xs text-rose-600 mt-1">
-                                                                Comment is required for "Cannot Confirm" responses
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                )}
+                                                {/* Comment / evidence section.
+                                                    A bare green tick on a "Lab Report Req" item is a compliance
+                                                    record with nothing behind it, so a Confirm on such an item
+                                                    must name the report. Self-declarable items take an optional
+                                                    reference; Cannot Confirm still requires an explanation. */}
+                                                {answer && (() => {
+                                                    const spec = evidenceSpec(r, answer);
+                                                    if (!spec) return null;
+                                                    const missing = spec.required && !comments[r.id]?.trim();
+                                                    return (
+                                                        <div className="mt-3 pt-3 border-t border-gray-200">
+                                                            <label className="block text-xs font-medium text-gray-700 mb-2">
+                                                                {spec.label}
+                                                                {spec.required && <span className="text-rose-500 ml-1">*</span>}
+                                                            </label>
+                                                            <textarea
+                                                                value={comments[r.id] || ''}
+                                                                onChange={(e) =>
+                                                                    !submitted &&
+                                                                    (setDirty(true), setComments({...comments, [r.id]: e.target.value}))
+                                                                }
+                                                                disabled={submitted}
+                                                                className={`w-full px-3 py-2 text-xs border rounded-lg ${
+                                                                    missing ? 'border-rose-300 bg-rose-50' : 'border-gray-300'
+                                                                } focus:ring-2 focus:ring-indigo-500 outline-none resize-none`}
+                                                                rows={2}
+                                                                placeholder={spec.placeholder}
+                                                            />
+                                                            {missing && (
+                                                                <p className="text-xs text-rose-600 mt-1">{spec.hint}</p>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     );
@@ -682,7 +885,7 @@ const SupplierCompliancePortal: React.FC = () => {
                     );
                 })}
 
-                <div className={`bg-white border rounded-xl shadow p-8 mt-8 ${submitted ? 'border-gray-100 bg-gray-50' : 'border-gray-200'}`}>
+                <div className={`bg-white border rounded-xl shadow p-8 mt-8 print-avoid-break ${submitted ? 'border-gray-100 bg-gray-50' : 'border-gray-200'}`}>
                     <div className="flex items-center gap-2 mb-6 pb-2 border-b border-gray-100"><PenTool className={submitted ? 'text-gray-400' : 'text-indigo-600'} size={20} /><h3 className={`font-bold ${submitted ? 'text-gray-400' : 'text-gray-800'}`}>Final Declaration</h3></div>
                     <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${submitted ? 'opacity-60' : ''}`}>
                         <div>
@@ -694,6 +897,17 @@ const SupplierCompliancePortal: React.FC = () => {
                             <input type="text" disabled={submitted} className={`w-full border rounded p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none ${submitted ? 'bg-gray-100 border-gray-100 cursor-not-allowed' : 'border-gray-300'}`} placeholder="e.g. Quality Manager" value={respondentPosition} onChange={(e) => !submitted && setRespondentPosition(e.target.value)} />
                         </div>
                     </div>
+
+                    {(submitted || returned) && (
+                        <p className="print-only" style={{ fontSize: '11px', marginTop: '0.75rem' }}>
+                            Declared by {respondentName || '—'}
+                            {respondentPosition ? `, ${respondentPosition}` : ''}
+                            {req.submittedAt ? ` on ${new Date(req.submittedAt).toLocaleDateString()}` : ''}.
+                            By submitting this declaration the supplier confirmed the responses above are
+                            accurate and agreed to honour the stated compliance commitments, evidence
+                            requirements and deadlines.
+                        </p>
+                    )}
 
                     {!submitted && (
                         <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
@@ -709,16 +923,36 @@ const SupplierCompliancePortal: React.FC = () => {
                 </div>
 
                 {!submitted && (
-                    <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 -mx-6 px-6 mt-12 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)] flex justify-between items-center z-10">
+                    <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 -mx-6 px-6 mt-12 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)] flex justify-between items-center z-10 no-print">
                         <div className="flex items-center gap-3">
                           <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                             <div className="h-full bg-indigo-600 transition-all duration-700" style={{ width: `${requirements.length ? (requirements.filter(r => answers[r.id]).length / requirements.length) * 100 : 100}%` }} />
                           </div>
-                          <span className="text-[10px] font-bold text-muted uppercase tracking-wide">{requirements.filter(r => answers[r.id]).length} / {requirements.length} Items Done</span>
+                          <div>
+                            <span className="block text-[10px] font-bold text-muted uppercase tracking-wide">{requirements.filter(r => answers[r.id]).length} / {requirements.length} Items Done</span>
+                            {draftSavedAt && (
+                              <span className="block text-[10px] text-emerald-600 font-medium">
+                                Draft saved {draftSavedAt.toLocaleTimeString()}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <button onClick={handleSubmit} disabled={loading || (requirements.length > 0 && requirements.filter(r => answers[r.id]).length < requirements.length)} className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-bold hover:bg-indigo-700 shadow-lg transition-all disabled:opacity-50 disabled:bg-gray-200 flex items-center gap-2">
-                            {loading ? <Loader2 className="animate-spin" size={18} /> : <><CheckCircle size={18}/> Submit Response</>}
-                        </button>
+                        <div className="flex items-center gap-3">
+                            {/* Answers live only in this tab until something is written. Let the
+                                supplier bank partial progress instead of losing a long session. */}
+                            <button
+                                type="button"
+                                onClick={handleSaveDraft}
+                                disabled={savingDraft || loading || answeredCount === 0}
+                                title={answeredCount === 0 ? 'Answer at least one requirement first' : 'Save your progress and finish later'}
+                                className="border border-gray-300 text-gray-700 px-5 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all disabled:opacity-40 flex items-center gap-2"
+                            >
+                                {savingDraft ? <Loader2 className="animate-spin" size={18} /> : 'Save draft'}
+                            </button>
+                            <button onClick={handleSubmit} disabled={loading || savingDraft || (requirements.length > 0 && requirements.filter(r => answers[r.id]).length < requirements.length)} className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-bold hover:bg-indigo-700 shadow-lg transition-all disabled:opacity-50 disabled:bg-gray-200 flex items-center gap-2">
+                                {loading ? <Loader2 className="animate-spin" size={18} /> : <><CheckCircle size={18}/> {returned ? 'Resubmit Response' : 'Submit Response'}</>}
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

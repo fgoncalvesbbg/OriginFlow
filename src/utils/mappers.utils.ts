@@ -174,6 +174,7 @@ export const mapRFQ = (r: any): RFQ => {
     attachments: r.attachments || [],
     createdBy: r.created_by,
     createdAt: r.created_at,
+    deadline: r.deadline ?? undefined,
     status: r.status,
     categoryName: r.category_l3?.name || r.category_name
   };

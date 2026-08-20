@@ -235,6 +235,12 @@ import reports (108); admin-configured Markets (107) with print-dialog presets +
    generator polls once per open; a new review round clears the previous outcome.
    Deleted markups are detected and recorded. Editing/republishing still ends the round
    implicitly — a stale cached outcome cannot resurrect it (tested).
+4. **Kanban board view** — All Manuals gains a persisted Table ⇄ Board toggle. The board
+   renders one column per derived status in work order, ALWAYS including empty columns
+   ("No manuals at this step" is information). Cards carry type/version/date, link into
+   the generator, and reuse the next-action hint + "What changed?" drill-down. Statuses
+   are derived, so cards are deliberately NOT draggable — publishing/finalizing is the
+   move, not the drag. Bulk re-publish stays a table-view feature.
 
 ---
 

@@ -23,6 +23,8 @@ const map = (r: any): ProjectAttributeRequest => ({
   status: r.status,
   submittedData: r.submitted_data ?? null,
   note: r.note ?? null,
+  deadline: r.deadline ?? null,
+  copiedFromSku: r.copied_from_sku ?? null,
   createdAt: r.created_at,
   submittedAt: r.submitted_at ?? null,
 });
@@ -37,7 +39,9 @@ export const createAttributeRequest = async (
   skuNumber: string,
   skuTitle: string,
   note?: string,
-  prefillData?: SubmittedValue[]
+  prefillData?: SubmittedValue[],
+  deadline?: string | null,
+  copiedFromSku?: string | null
 ): Promise<ProjectAttributeRequest> => {
   if (!isLive) throw new Error('Database not configured.');
 
@@ -55,6 +59,8 @@ export const createAttributeRequest = async (
     note: note || null,
     token,
     submitted_data: prefillData?.length ? prefillData : null,
+    deadline: deadline || null,
+    copied_from_sku: copiedFromSku || null,
   });
   return map(created);
 };

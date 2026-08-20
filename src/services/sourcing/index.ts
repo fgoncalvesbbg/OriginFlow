@@ -9,7 +9,8 @@ export {
   getRFQEntryByToken,
   createRFQ,
   deleteRFQ,
-  awardRFQ
+  awardRFQ,
+  reopenRFQEntry
 } from './rfq.service';
 
 export {
