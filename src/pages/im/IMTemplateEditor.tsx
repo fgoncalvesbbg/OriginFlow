@@ -12,7 +12,7 @@ import { sanitizeHtml } from '../../utils';
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle, ResolvedSection } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark, Replace, Maximize2, Minimize2 } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark, Replace, Maximize2, Minimize2, Scale } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
 import { parseTranslationXliff, applyTranslationImport, countTranslationOverwrites, countChangedPrefills, saveTranslationImportReport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
@@ -33,6 +33,7 @@ import { useUndoRedo } from './editor/useUndoRedo';
 import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } from './editor/insertTarget';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { findInTemplate, applyReplacements, matchKey, type FindReplaceMatch } from '../../services/im/im-find-replace';
+import { RegulatoryCheckModal } from './IMRegulatoryCheckModal';
 
 import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
 
@@ -851,6 +852,7 @@ const IMTemplateEditor: React.FC = () => {
 
   // Template-wide find & replace (chip-safe — see im-find-replace.ts).
   const [showFindReplace, setShowFindReplace] = useState(false);
+  const [showRegCheck, setShowRegCheck] = useState(false);
   const [frQuery, setFrQuery] = useState('');
   const [frReplace, setFrReplace] = useState('');
   const [frCase, setFrCase] = useState(false);
@@ -1843,6 +1845,9 @@ const IMTemplateEditor: React.FC = () => {
                <button onClick={openImportModal} disabled={locked} title="Import a translated XLIFF file back into a specific language" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><FileUp size={16} /> Import Translation</button>
                <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Eye size={16} /> Preview</button>
                <button onClick={() => { setShowFindReplace(true); setFrMatches(null); setFrDone(null); }} title="Find & replace a phrase across every section and language (placeholder/condition chips are never touched)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Replace size={16} /> Find &amp; replace</button>
+               {/* Deliberately NOT disabled when locked: the check is read-only, and a
+                   template marked FINAL is exactly the one you most want to audit. */}
+               <button onClick={() => setShowRegCheck(true)} title="Audit this template against its assigned regulations with AI — read-only, produces a report of required changes and mandated verbatim wording" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Scale size={16} /> Regulatory check</button>
                {!locked && (
                  <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow ml-2">
                    <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
@@ -3426,6 +3431,22 @@ const IMTemplateEditor: React.FC = () => {
           })()}
        </div>
        {renderPreviewDrawer()}
+
+       {/* AI regulatory check — read-only audit against the template's assigned
+           regulations. Never gated on `locked`: a FINAL template is the one most
+           worth auditing. */}
+       {showRegCheck && template && (
+         <RegulatoryCheckModal
+           template={template}
+           sections={sections}
+           categoryName={category?.name}
+           onClose={() => setShowRegCheck(false)}
+           onGoToSection={(sectionId) => {
+             setSelectedSectionId(sectionId);
+             setShowRegCheck(false);
+           }}
+         />
+       )}
 
        {/* Template-wide find & replace — chip-safe (see im-find-replace.ts). */}
        {showFindReplace && (

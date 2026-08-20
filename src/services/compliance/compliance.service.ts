@@ -143,14 +143,24 @@ export const submitComplianceResponseSecure = async (
     respondentName: string,
     respondentPosition: string
 ): Promise<void> => {
-    await portalDb.rpc('submit_compliance_response_secure', {
-        p_token: token,
-        p_code: accessCode,
-        p_responses: responses,
-        p_status: status,
-        p_respondent_name: respondentName,
-        p_respondent_position: respondentPosition
-    });
+    // This routine signals refusal by RETURNING { success: false, message } rather than
+    // raising — a bad access code or a finalized request comes back as a normal result.
+    // Ignoring it would report a save that never happened.
+    const data = await portalDb.rpc<{ success: boolean; message: string } | { success: boolean; message: string }[] | null>(
+        'submit_compliance_response_secure',
+        {
+            p_token: token,
+            p_code: accessCode,
+            p_responses: responses,
+            p_status: status,
+            p_respondent_name: respondentName,
+            p_respondent_position: respondentPosition
+        },
+    );
+
+    const result = Array.isArray(data) ? data[0] : data;
+    if (!result) throw new Error('The server did not confirm the save. Please try again.');
+    if (!result.success) throw new Error(result.message || 'The server rejected this submission.');
 };
 
 /**

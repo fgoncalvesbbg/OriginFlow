@@ -7,12 +7,26 @@ import {
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
   logAccessCodeAttempt, getSupplierProposals, addDocumentComment,
-  getAttributeRequestsForSupplier, verifySupplierPortalAccess
+  getAttributeRequestsForSupplier, verifySupplierPortalAccess, uploadFile
 } from '../services';
+import { validateUploadFile } from '../utils/upload-validation.utils';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
 import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag, ClipboardList } from 'lucide-react';
+
+/** Relative-due-date pill, matching the colouring already used for compliance deadlines. */
+const DueDate: React.FC<{ date?: string | null; label?: string }> = ({ date, label = 'Due' }) => {
+  if (!date) return null;
+  const days = Math.ceil((new Date(date).getTime() - Date.now()) / 86400000);
+  const tone = days < 0 ? 'text-red-600 font-medium' : days <= 7 ? 'text-orange-600' : 'text-gray-500';
+  const rel = days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'today' : `${days} days`;
+  return (
+    <p className={`text-xs mt-1 ${tone}`}>
+      📅 {label}: {new Date(date).toLocaleDateString()} ({rel})
+    </p>
+  );
+};
 
 const SupplierDashboard: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -38,6 +52,8 @@ const SupplierDashboard: React.FC = () => {
     delayReason: '' as ProductionDelayReason | '',
     notes: ''
   });
+  const [updateFormError, setUpdateFormError] = useState('');
+  const [submittingDelay, setSubmittingDelay] = useState(false);
 
   // Access Code Verification
   const [isAccessVerified, setIsAccessVerified] = useState(false);
@@ -51,7 +67,6 @@ const SupplierDashboard: React.FC = () => {
 
   // Document Upload State
   const [uploadingDocs, setUploadingDocs] = useState<Record<string, boolean>>({});
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const [docComments, setDocComments] = useState<Record<string, string>>({});
@@ -456,6 +471,8 @@ const SupplierDashboard: React.FC = () => {
 
   const handleConfirmEtd = async (project: Project, currentEtd: string) => {
     try {
+      // Supplier writes go through the portal RPC, which needs the token + access
+      // code the supplier authenticated with — omitting it makes every call throw.
       await saveProductionUpdate({
         projectId: project.id,
         previousEtd: currentEtd,
@@ -464,7 +481,7 @@ const SupplierDashboard: React.FC = () => {
         isSupplierUpdate: true,
         updatedBy: 'Supplier',
         notes: 'Confirmed via Supplier Portal'
-      });
+      }, { token: token!, code: enteredAccessCode });
       setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== project.id));
       setToastMessage('ETD confirmed successfully!');
       setToastType('success');
@@ -477,6 +494,20 @@ const SupplierDashboard: React.FC = () => {
 
   const handleReportDelay = async () => {
     if (!updatingProject) return;
+
+    // Validate here rather than letting the service throw: the catch below would
+    // replace a precise message ("New ETD date is required") with a generic one.
+    if (!updateForm.newDate) {
+      setUpdateFormError('Please choose the new ETD date.');
+      return;
+    }
+    if (!updateForm.delayReason) {
+      setUpdateFormError('Please select a reason for the delay.');
+      return;
+    }
+    setUpdateFormError('');
+    setSubmittingDelay(true);
+
     try {
       await saveProductionUpdate({
         projectId: updatingProject.id,
@@ -487,16 +518,18 @@ const SupplierDashboard: React.FC = () => {
         notes: updateForm.notes,
         isSupplierUpdate: true,
         updatedBy: 'Supplier'
-      });
+      }, { token: token!, code: enteredAccessCode });
       setProjectsNeedingUpdate(prev => prev.filter(p => p.project.id !== updatingProject.id));
       setIsUpdateModalOpen(false);
       setUpdatingProject(null);
+      setUpdateForm({ newDate: '', delayReason: '', notes: '' });
       setToastMessage('Delay reported successfully. Your PM has been notified.');
       setToastType('success');
     } catch (err: any) {
       console.error('Error reporting delay:', err);
-      setToastMessage('Failed to report delay. Please try again.');
-      setToastType('error');
+      setUpdateFormError(err?.message || 'Failed to report delay. Please try again.');
+    } finally {
+      setSubmittingDelay(false);
     }
   };
 
@@ -523,22 +556,25 @@ const SupplierDashboard: React.FC = () => {
     return statusConfig[status];
   };
 
-  // Document upload handlers
+  // Document upload handlers.
+  //
+  // Supplier uploads are written by `supplier_set_document_file`, which authorises
+  // on the *project's* supplier_link_token — not the supplier portal token used to
+  // sign in here. `getProjectsBySupplierToken` returns the whole project row, so the
+  // token is already in `projects`; look it up by the document's projectId.
+  const projectTokenForDoc = (doc: ProjectDocument): string | undefined =>
+    projects.find(p => p.id === doc.projectId)?.supplierLinkToken;
+
   const handleDocumentSelect = async (docId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
 
-    // Validation
-    const maxSize = 5 * 1024 * 1024; // 5MB
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png'];
-
-    if (file.size > maxSize) {
-      setUploadErrors({ ...uploadErrors, [docId]: 'File size exceeds 5MB limit' });
-      return;
-    }
-
-    if (!allowedTypes.includes(file.type)) {
-      setUploadErrors({ ...uploadErrors, [docId]: 'Invalid file type. Allowed: PDF, DOC, DOCX, JPG, PNG' });
+    // Mirror the bucket's own limits (50 MB, DOCUMENT_MIME_TYPES) rather than a
+    // stricter local guess, so nothing is rejected here that storage would accept.
+    try {
+      validateUploadFile(file);
+    } catch (err: any) {
+      setUploadErrors({ ...uploadErrors, [docId]: err.message });
       return;
     }
 
@@ -550,32 +586,33 @@ const SupplierDashboard: React.FC = () => {
     const file = selectedFiles[docId];
     if (!file) return;
 
+    const doc = missingDocs.find(d => d.id === docId);
+    if (!doc) return;
+
+    const projectToken = projectTokenForDoc(doc);
+    if (!projectToken) {
+      setUploadErrors({ ...uploadErrors, [docId]: 'Cannot upload: this project has no portal link. Please contact your Project Manager.' });
+      return;
+    }
+
     setUploadingDocs({ ...uploadingDocs, [docId]: true });
-    setUploadProgress({ ...uploadProgress, [docId]: 0 });
+    setUploadErrors({ ...uploadErrors, [docId]: '' });
 
     try {
-      // Simulate upload with progress (in real implementation, this would be actual file upload)
-      const doc = missingDocs.find(d => d.id === docId);
-      if (doc) {
-        // Progress simulation
-        for (let i = 0; i <= 100; i += 20) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          setUploadProgress(prev => ({ ...prev, [docId]: i }));
-        }
+      await uploadFile(docId, file, true, projectToken);
 
-        // Remove from missing docs
-        setMissingDocs(prev => prev.filter(d => d.id !== docId));
-        setToastMessage(`${file.name} uploaded successfully!`);
-        setToastType('success');
-        setSelectedFiles({ ...selectedFiles, [docId]: null });
-      }
+      // Only drop the row once the write has actually come back.
+      setMissingDocs(prev => prev.filter(d => d.id !== docId));
+      setSelectedFiles(prev => ({ ...prev, [docId]: null }));
+      setToastMessage(`${file.name} uploaded successfully!`);
+      setToastType('success');
     } catch (err: any) {
-      setUploadErrors({ ...uploadErrors, [docId]: 'Failed to upload. Please try again.' });
-      setToastMessage('Upload failed. Please try again.');
+      console.error('Document upload failed:', err);
+      setUploadErrors({ ...uploadErrors, [docId]: err?.message || 'Failed to upload. Please try again.' });
+      setToastMessage('Upload failed. The document is still outstanding.');
       setToastType('error');
     } finally {
       setUploadingDocs({ ...uploadingDocs, [docId]: false });
-      setUploadProgress({ ...uploadProgress, [docId]: 0 });
     }
   };
 
@@ -1121,6 +1158,26 @@ const SupplierDashboard: React.FC = () => {
                     {isExpanded && (
                       <div className="border-t border-gray-200 bg-gray-50">
                         <div className="p-3 sm:p-4 space-y-4">
+                          {/* The project document portal is a separate surface that holds the
+                              step-by-step document list, the reviewer's rejection comments and
+                              the "additional files" path. Nothing here linked to it, so a
+                              supplier only reached it if their PM sent a second URL. */}
+                          {p.supplierLinkToken && (
+                            <a
+                              href={`${window.location.origin}/#/supplier/${p.supplierLinkToken}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center justify-between gap-3 bg-white rounded-lg p-3 border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 transition"
+                            >
+                              <span className="flex items-center gap-2 text-sm font-medium text-indigo-700">
+                                <FileText size={16} /> Open document workspace
+                              </span>
+                              <span className="text-xs text-muted">
+                                Full document list, review comments & extra files
+                              </span>
+                            </a>
+                          )}
+
                           {/* Project Details */}
                           <div className="bg-white rounded-lg p-3 border border-gray-200">
                             <h4 className="font-bold text-sm mb-3">Project Details</h4>
@@ -1172,7 +1229,6 @@ const SupplierDashboard: React.FC = () => {
                                 {allDocsForProject.map(d => {
                                   const isUploading = uploadingDocs[d.id];
                                   const hasFile = selectedFiles[d.id];
-                                  const progress = uploadProgress[d.id] || 0;
                                   const error = uploadErrors[d.id];
                                   const isSubmittingComment = submittingComments[d.id];
                                   const comment = docComments[d.id] || '';
@@ -1208,11 +1264,9 @@ const SupplierDashboard: React.FC = () => {
                                             <p className="font-medium text-blue-700 break-words">✓ {selectedFiles[d.id]?.name}</p>
                                           </div>
                                           {isUploading && (
-                                            <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
-                                              <div
-                                                className="bg-green-600 h-1.5 rounded-full transition-all"
-                                                style={{ width: `${progress}%` }}
-                                              />
+                                            <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2 overflow-hidden">
+                                              {/* Storage gives no progress events — show motion, not a fake percentage. */}
+                                              <div className="bg-green-600 h-1.5 w-1/3 rounded-full animate-pulse" />
                                             </div>
                                           )}
                                           <div className="flex gap-2">
@@ -1221,7 +1275,7 @@ const SupplierDashboard: React.FC = () => {
                                               disabled={isUploading}
                                               className="flex-1 px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
                                             >
-                                              {isUploading ? `${progress}%` : '📤 Upload'}
+                                              {isUploading ? 'Uploading…' : '📤 Upload'}
                                             </button>
                                             {!isUploading && (
                                               <button
@@ -1337,6 +1391,7 @@ const SupplierDashboard: React.FC = () => {
                                           {submitted ? 'Submitted' : 'Action Required'}
                                         </span>
                                       </div>
+                                      {req.status !== 'submitted' && <DueDate date={req.deadline} />}
                                       <p className="text-xs text-gray-500">
                                         {req.step === 3 ? 'Production Validation' : 'Business Case & Development'}
                                       </p>
@@ -1382,6 +1437,7 @@ const SupplierDashboard: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <h3 className="font-bold text-base break-words">{rfq.rfqTitle}</h3>
                       <p className="text-xs sm:text-sm text-muted mt-1">{rfq.rfqIdentifier}</p>
+                      <DueDate date={rfq.rfqDeadline} label="Quote due" />
                     </div>
                     <span className={`text-xs px-3 py-1 rounded whitespace-nowrap flex-shrink-0 font-semibold ${
                       rfq.status === 'pending' ? 'bg-amber-100 text-amber-800' :
@@ -1495,6 +1551,7 @@ const SupplierDashboard: React.FC = () => {
                           {req.projectName}{req.projectIdCode && ` · ${req.projectIdCode}`}
                         </p>
                         {req.categoryName && <p className="text-xs text-gray-400 mt-0.5">Category: {req.categoryName}</p>}
+                        {req.status !== 'submitted' && <DueDate date={req.deadline} />}
                       </div>
                       <span className={`text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap flex-shrink-0 ${
                         submitted ? 'text-green-700 bg-green-50 border-green-300' : 'text-amber-700 bg-amber-50 border-amber-300'
@@ -1655,19 +1712,25 @@ const SupplierDashboard: React.FC = () => {
             <h2 className="text-lg sm:text-xl font-bold mb-4">Report Delay</h2>
             <form onSubmit={(e) => { e.preventDefault(); handleReportDelay(); }} className="space-y-4">
               <div>
-                <label className="block text-xs sm:text-sm font-medium mb-2">New ETD</label>
+                <label className="block text-xs sm:text-sm font-medium mb-2">
+                  New ETD <span className="text-rose-500">*</span>
+                </label>
                 <input
                   type="date"
+                  required
                   value={updateForm.newDate}
-                  onChange={(e) => setUpdateForm({ ...updateForm, newDate: e.target.value })}
+                  onChange={(e) => { setUpdateForm({ ...updateForm, newDate: e.target.value }); setUpdateFormError(''); }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
               <div>
-                <label className="block text-xs sm:text-sm font-medium mb-2">Reason for Delay</label>
+                <label className="block text-xs sm:text-sm font-medium mb-2">
+                  Reason for Delay <span className="text-rose-500">*</span>
+                </label>
                 <select
+                  required
                   value={updateForm.delayReason}
-                  onChange={(e) => setUpdateForm({ ...updateForm, delayReason: e.target.value as ProductionDelayReason })}
+                  onChange={(e) => { setUpdateForm({ ...updateForm, delayReason: e.target.value as ProductionDelayReason }); setUpdateFormError(''); }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 >
                   <option value="">Select a reason...</option>
@@ -1687,19 +1750,26 @@ const SupplierDashboard: React.FC = () => {
                   rows={3}
                 />
               </div>
+              {updateFormError && (
+                <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                  {updateFormError}
+                </p>
+              )}
+
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsUpdateModalOpen(false)}
+                  onClick={() => { setIsUpdateModalOpen(false); setUpdateFormError(''); }}
                   className="flex-1 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark"
+                  disabled={submittingDelay}
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50"
                 >
-                  Report Delay
+                  {submittingDelay ? 'Reporting…' : 'Report Delay'}
                 </button>
               </div>
             </form>

@@ -100,3 +100,20 @@ export type { Toast, ToastType, ToastContextType } from './toast.types';
 
 // AI types
 export type { AIPrompt, PromptLibraryEntry, TranslationVerbatim } from './ai.types';
+
+// Regulatory types
+export type {
+  RegulationStatus,
+  Regulation,
+  RegulationInput,
+  TemplateRegulation,
+  RegCheckSeverity,
+  RegCheckFindingKind,
+  RegCheckStatus,
+  VerbatimVerification,
+  RegulatoryFinding,
+  RegulatoryVerbatim,
+  RegulatoryCheckFailure,
+  RegulatoryCheckReport,
+  RegulatoryCheckRun
+} from './regulatory.types';

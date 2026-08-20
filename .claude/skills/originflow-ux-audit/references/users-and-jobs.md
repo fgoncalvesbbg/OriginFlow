@@ -17,7 +17,7 @@ Fill the two columns that matter most and are hardest to infer from code: **how 
 | Director / reviewer | Fabio | Spot-checks, portfolio views, exception reports | Reviews by sampling; needs provenance fast |
 | Developer | Mani Shankarr | The repo | Consumer of these findings |
 | CS agent | Klarstein CS | Spare parts & service info lookup, R2R repair routing | `[Guessing]` may read published output rather than use OriginFlow directly — confirm, it changes whether CS-facing surfaces are in scope |
-| Supplier | HK/CN suppliers | IM intake submissions | `[Guessing]` intake may be file-based, not in-app |
+| Supplier | HK/CN suppliers | Token-based portals: `/supplier-dashboard/:token`, `/supplier/:token`, `/attribute-request/:token`, `/compliance/supplier/:token`, `/sourcing/supplier/:token` | **Corrected 2026-08-20:** intake is in-app, not file-based — five distinct supplier-facing surfaces exist in code (`src/app/App.tsx:75-79`). IM draft intake is separate and still file-based. |
 
 ---
 
@@ -40,6 +40,13 @@ Stakes: **regulatory** (escapes to a published manual, EPREL, label, or R2R obli
 | J10 | Check who is behind on what | Team lead | weekly | team | internal-time | Jira dashboard |
 | J11 | Spot-check an output before it goes out | Director | weekly | sampled | regulatory | Reads the artefact directly |
 | J12 | Answer "where did this value come from?" | any | ad hoc | 1 value | regulatory | Asks a person |
+| J13 | Submit requested project documents through the portal | Supplier | `[Guessing]` per-launch, several rounds | 5–15 docs per project | regulatory | `[Guessing]` email / WeChat attachments to the PM |
+| J14 | Fill a per-SKU attribute data request | Supplier | `[Guessing]` per-launch, twice per SKU (step 2 + step 3) | 1 form × N SKUs | regulatory + commercial | `[Guessing]` Excel spec sheet returned by email |
+| J15 | Complete a TCF compliance declaration | Supplier | `[Guessing]` per-launch | 57 requirements in the live library, filtered by category | regulatory | `[Guessing]` signed PDF checklist |
+| J16 | Submit a quote against an RFQ | Supplier | `[Guessing]` per-launch / per-sourcing-round | 1 quote + N attributes | commercial | `[Guessing]` emailed quote sheet |
+| J17 | Confirm or revise the production ETD | Supplier | prompted at ETD−45/−30/−16 days (`SupplierDashboard.tsx:285-291`) | 1 project | commercial | `[Guessing]` PM chases by email |
+
+> **Live volume as of 2026-08-20** (queried against the OriginFlow Supabase project `ecueltibpmpnhnaxlskx`): 3 suppliers, 8 projects, 66 project documents, 1 attribute request, **0 RFQs, 0 RFQ entries, 0 compliance requests**. The supplier portal has effectively never carried production traffic. Treat every frequency in J13–J17 as a plan, not an observation, until someone confirms a real supplier has been sent a link.
 
 > J12 is the load-bearing one. In a tool whose output lands in a legal document, provenance-at-point-of-decision is a feature, not a nice-to-have. If tracing a value's origin requires asking a colleague, that is a ladder-B finding wherever it appears.
 

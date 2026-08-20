@@ -2,9 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { getRFQById, awardRFQ, deleteRFQ } from '../../services';
+import { getRFQById, awardRFQ, deleteRFQ, reopenRFQEntry } from '../../services';
 import { RFQ, RFQEntry, RFQEntryStatus, RFQStatus, UserRole } from '../../types';
-import { ArrowLeft, Link as LinkIcon, Award, CheckCircle, DollarSign, Package, Truck, Wrench, Plus, Copy, List, Paperclip, FileText, Download, Trash2, Eye, X, Sliders } from 'lucide-react';
+import { ArrowLeft, Link as LinkIcon, Award, CheckCircle, DollarSign, Package, Truck, Wrench, Plus, Copy, List, Paperclip, FileText, Download, Trash2, Eye, X, Sliders, RotateCcw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRefetchOnFocus } from '../../hooks';
 import { safeHref } from '../../utils/url.utils';
@@ -41,6 +41,7 @@ const RFQDetail: React.FC = () => {
   const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [drawerEntry, setDrawerEntry] = useState<RFQEntry | null>(null);
+  const [reopeningEntryId, setReopeningEntryId] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) loadData();
@@ -55,6 +56,29 @@ const RFQDetail: React.FC = () => {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Hand a submitted quote back to the supplier for correction. Their portal is
+  // read-only once submitted, so without this a mistyped price can only be fixed
+  // by email — which never reaches this comparison table.
+  const handleReopenEntry = async (entry: RFQEntry) => {
+    if (!window.confirm(
+      `Reopen ${entry.supplierName || 'this supplier'}'s quote?
+
+` +
+      'They will be able to edit and resubmit it using their existing link. ' +
+      'Their current figures stay visible to them until they resubmit.'
+    )) return;
+    setReopeningEntryId(entry.id);
+    try {
+      await reopenRFQEntry(entry.id);
+      await loadData();
+    } catch (e: any) {
+      console.error('Failed to reopen entry', e);
+      alert('Could not reopen this quote: ' + (e?.message || 'unknown error'));
+    } finally {
+      setReopeningEntryId(null);
     }
   };
 
@@ -375,7 +399,19 @@ const RFQDetail: React.FC = () => {
                                                   </button>
                                               </div>
                                           ) : (
-                                              <span className="text-gray-700 font-medium capitalize">{entry.status}</span>
+                                              <div className="flex items-center gap-2">
+                                                  <span className="text-gray-700 font-medium capitalize">{entry.status}</span>
+                                                  {entry.status === RFQEntryStatus.SUBMITTED && rfq.status === RFQStatus.OPEN && (
+                                                      <button
+                                                          onClick={() => handleReopenEntry(entry)}
+                                                          disabled={reopeningEntryId === entry.id}
+                                                          className="text-gray-400 hover:text-indigo-600 p-1 rounded disabled:opacity-50"
+                                                          title="Reopen for correction — lets the supplier edit and resubmit"
+                                                      >
+                                                          <RotateCcw size={13} />
+                                                      </button>
+                                                  )}
+                                              </div>
                                           )}
                                       </td>
                                       <td className="px-4 py-3 text-right">

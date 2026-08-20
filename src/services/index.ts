@@ -287,6 +287,7 @@ export {
   createRFQ,
   deleteRFQ,
   awardRFQ,
+  reopenRFQEntry,
   getRFQsForSupplier,
   submitRFQEntry,
   getAllSupplierProposals,
@@ -297,3 +298,39 @@ export {
 
 // AI module
 export { getAIPrompts, updateAIPrompt, getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry, getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim } from './ai';
+
+// Regulatory module — regulation library, per-template assignment, AI regulatory check
+export {
+  getRegulations,
+  getRegulationById,
+  createRegulation,
+  updateRegulation,
+  deleteRegulation,
+  getRegulationUsageCounts,
+  summaryByteLength,
+  RegulationInUseError,
+  MAX_SUMMARY_BYTES,
+  SUMMARY_WARN_BYTES,
+  getTemplateRegulations,
+  getTemplateRegulationCounts,
+  assignRegulationToTemplate,
+  updateTemplateRegulationNotes,
+  unassignRegulationFromTemplate,
+  buildRegCheckDocument,
+  runRegulatoryCheck,
+  getRegulatoryCheckHistory,
+  verifyVerbatimPhrase,
+  registerVerbatimFinding,
+  serializeTemplateForRegCheck,
+  chunkRegCheckDocument,
+  htmlToStructuredText,
+  REG_CHECK_BLOCK_CHAR_CAP,
+  REG_CHECK_CHUNK_CHARS
+} from './regulatory';
+export type {
+  RegCheckProgress,
+  RegCheckDocument,
+  RegCheckSection,
+  RegCheckBlock,
+  RegCheckBlockKind
+} from './regulatory';

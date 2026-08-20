@@ -29,7 +29,7 @@ export const getRFQsForSupplier = async (token: string, code: string): Promise<R
       unitPrice: e.unit_price,
       moq: e.moq,
       leadTimeWeeks: e.lead_time_weeks,
-      tooling_cost: e.tooling_cost,
+      toolingCost: e.tooling_cost,
       currency: e.currency,
       supplierNotes: e.supplier_notes,
       quoteFileUrl: e.quote_file_url,
@@ -38,6 +38,7 @@ export const getRFQsForSupplier = async (token: string, code: string): Promise<R
       createdAt: e.created_at,
       rfqTitle: e.rfq_title,
       rfqIdentifier: e.rfq_identifier,
+      rfqDeadline: e.rfq_deadline ?? undefined,
       attributeResponses: e.attribute_responses ?? []
     }));
 };

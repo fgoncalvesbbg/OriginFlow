@@ -5,14 +5,16 @@ import Layout from '../../components/Layout';
 import {
   getCategories, getIMTemplates, createIMTemplate, duplicateIMTemplate, updateIMTemplate, getAllProjectIMs,
   getStaleProjectIMDetails, republishProjectIM, stalenessKey,
-  getLatestRendersByManual, checkMarkupReviewStatus, isMarkupReviewAvailable
+  getLatestRendersByManual, checkMarkupReviewStatus, isMarkupReviewAvailable,
+  getTemplateRegulationCounts
 } from '../../services';
 import type { StaleManual, MarkupReviewStatus } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
-  FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X
+  FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X,
+  List, Kanban, Scale
 } from 'lucide-react';
 import {
   MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf, isInReview, type ManualStatus,
@@ -21,6 +23,8 @@ import { IMViewerTab } from './IMViewerTab';
 import { ImImportDialog } from './ImImportDialog';
 import PublishDiffModal from './PublishDiffModal';
 import type { ImImportResult } from '../../services';
+import { RegulationLibraryContent } from './IMRegulationLibrary';
+import { TemplateRegulationsModal } from './IMTemplateRegulations';
 
 const TEMPLATE_TYPE_ORDER: IMTemplateType[] = ['im', 'warning_leaflet'];
 
@@ -75,6 +79,16 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   const [republishing, setRepublishing] = useState(false);
   // "What changed?" drill-down target (opens PublishDiffModal on a stale row).
   const [diffTarget, setDiffTarget] = useState<{ projectId: string; templateType: ProjectIMSummary['templateType']; title: string } | null>(null);
+  // Table vs. kanban board. The board is a VISUALIZATION of the derived statuses —
+  // they can't be dragged between columns (you publish/finalize, you don't drag to
+  // "Published") — so there is deliberately no drag-and-drop. Preference persists.
+  const [viewMode, setViewMode] = useState<'table' | 'board'>(() => {
+    try { return localStorage.getItem('im-manuals-view') === 'board' ? 'board' : 'table'; } catch { return 'table'; }
+  });
+  const switchView = (mode: 'table' | 'board') => {
+    setViewMode(mode);
+    try { localStorage.setItem('im-manuals-view', mode); } catch { /* ignore */ }
+  };
 
   const refreshStaleness = () =>
     getStaleProjectIMDetails()
@@ -264,6 +278,20 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
             <option key={id} value={id}>{catMap[id] ?? id}</option>
           ))}
         </select>
+        {/* Table ⇄ board toggle */}
+        <div className="flex items-center rounded-lg border border-gray-200 bg-white overflow-hidden shrink-0">
+          <button
+            onClick={() => switchView('table')}
+            title="Table view (grouped by status; bulk re-publish lives here)"
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${viewMode === 'table' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+          ><List size={14} /> Table</button>
+          <div className="w-px h-5 bg-gray-200" />
+          <button
+            onClick={() => switchView('board')}
+            title="Board view — one column per status, including empty ones"
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${viewMode === 'board' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+          ><Kanban size={14} /> Board</button>
+        </div>
       </div>
 
       {/* The staleness check failed — say so instead of quietly showing everything as fine. */}
@@ -309,8 +337,8 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
         )}
       </div>
 
-      {/* Empty */}
-      {filtered.length === 0 && (
+      {/* Empty (table view only — the board always renders its columns, empty or not) */}
+      {viewMode === 'table' && filtered.length === 0 && (
         <div className="text-center py-16 border border-dashed border-gray-200 rounded-xl text-gray-400 bg-light">
           {ims.length === 0
             ? 'No manuals created yet. Open a project and generate its IM.'
@@ -319,7 +347,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
       )}
 
       {/* Table */}
-      {filtered.length > 0 && (
+      {viewMode === 'table' && filtered.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-light border-b border-gray-100">
@@ -515,6 +543,76 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
         </div>
       )}
 
+      {/* Board — one column per derived status, ALWAYS all columns (an empty step is
+          information: nothing is waiting there). Statuses are derived, so cards are
+          not draggable; each card links into the generator where the action happens. */}
+      {viewMode === 'board' && (() => {
+        const decorated = filtered.map(im => ({ ...im, reviewDone: reviewStateOf(im).reviewDone }));
+        const byStatus = new Map<ManualStatus, typeof decorated>();
+        for (const im of decorated) {
+          const s = manualStatusOf(im, isStale(im));
+          if (!byStatus.has(s)) byStatus.set(s, []);
+          byStatus.get(s)!.push(im);
+        }
+        return (
+          <div className="flex gap-3 overflow-x-auto pb-3 items-start">
+            {MANUAL_STATUS_ORDER.map(status => {
+              const meta = MANUAL_STATUS_META[status];
+              const items = byStatus.get(status) ?? [];
+              return (
+                <div key={status} className="w-[250px] shrink-0 bg-light/70 border border-gray-200 rounded-xl flex flex-col max-h-[calc(100vh-330px)] min-h-[140px]">
+                  <div className="px-3 py-2.5 border-b border-gray-100 flex items-center gap-2" title={meta.hint}>
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>
+                      {STATUS_ICON[status]} {meta.label}
+                    </span>
+                    <span className="text-xs font-semibold text-gray-500 ml-auto">{items.length}</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                    {items.length === 0 ? (
+                      <div className="text-[11px] text-gray-400 italic text-center border border-dashed border-gray-200 rounded-lg py-6 px-2">
+                        No manuals at this step
+                      </div>
+                    ) : items.map(im => {
+                      const hint = nextAction(im);
+                      return (
+                        <div key={im.id} className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            {im.templateType === 'warning_leaflet'
+                              ? <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"><AlertTriangle size={9} /> LEAFLET</span>
+                              : <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100"><FileText size={9} /> IM</span>}
+                            {im.version > 0 && <span className="text-[9px] font-bold text-gray-400">v{im.version}</span>}
+                            <span className="text-[9px] text-gray-300 ml-auto">{fmtDate(im.updatedAt)}</span>
+                          </div>
+                          <Link
+                            to={`/project/${im.projectId}/im-generator${im.templateType === 'warning_leaflet' ? '/warning_leaflet' : ''}`}
+                            className="block font-semibold text-sm text-gray-800 hover:text-indigo-700 truncate"
+                            title={`${im.projectName} — open in the generator`}
+                          >
+                            {im.projectCode ? `${im.projectCode} — ` : ''}{im.projectName}
+                          </Link>
+                          <div className="text-[10px] text-gray-400 truncate">
+                            {im.categoryId ? (catMap[im.categoryId] ?? '') : ''}
+                            {im.skus.length ? ` · ${im.skus.slice(0, 2).join(', ')}${im.skus.length > 2 ? ` +${im.skus.length - 2}` : ''}` : ''}
+                          </div>
+                          {isStale(im) && (
+                            <button
+                              onClick={() => setDiffTarget({ projectId: im.projectId, templateType: im.templateType, title: `${im.projectName}${im.templateType === 'warning_leaflet' ? ' — Warning Leaflet' : ''}` })}
+                              className="text-[10px] text-orange-600 underline font-semibold mt-1 hover:text-orange-800"
+                              title="Show which sections a re-publish would change, per language"
+                            >What changed?</button>
+                          )}
+                          {hint && <div className="text-[10px] text-gray-500 mt-1 truncate" title={hint}>↳ {hint}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {diffTarget && (
         <PublishDiffModal
           projectId={diffTarget.projectId}
@@ -536,9 +634,11 @@ interface TemplatesTabProps {
   templates: IMTemplate[];
   creatingId: string | null;   // composite key `${categoryId}:${type}` of the row being created
   togglingId: string | null;   // template id whose finalized state is updating
+  regulationCounts: Record<string, number>; // template id -> assigned regulations
   onCreate: (cat: CategoryL3, type: IMTemplateType) => void;
   onToggleFinalized: (t: IMTemplate) => void;
   onDuplicate: (t: IMTemplate) => void;
+  onEditRegulations: (t: IMTemplate) => void;
   onImport: () => void;
 }
 
@@ -549,13 +649,16 @@ interface TemplateRowProps {
   template?: IMTemplate;
   creating: boolean;
   toggling: boolean;
+  regulationCount: number;
   onCreate: (cat: CategoryL3, type: IMTemplateType) => void;
   onToggleFinalized: (t: IMTemplate) => void;
   onDuplicate: (t: IMTemplate) => void;
+  onEditRegulations: (t: IMTemplate) => void;
 }
 
 const TemplateRow: React.FC<TemplateRowProps> = ({
-  category, type, template, creating, toggling, onCreate, onToggleFinalized, onDuplicate
+  category, type, template, creating, toggling, regulationCount,
+  onCreate, onToggleFinalized, onDuplicate, onEditRegulations
 }) => {
   const Icon = type === 'warning_leaflet' ? AlertTriangle : FileText;
   const accent = type === 'warning_leaflet' ? 'text-amber-600' : 'text-indigo-600';
@@ -589,6 +692,16 @@ const TemplateRow: React.FC<TemplateRowProps> = ({
               >
                 <Copy size={13} />
               </button>
+              <button
+                onClick={() => onEditRegulations(template)}
+                title="Regulations this template must satisfy — used by the AI regulatory check"
+                className="p-1 text-gray-300 hover:text-indigo-600 flex items-center gap-0.5"
+              >
+                <Scale size={13} />
+                {regulationCount > 0 && (
+                  <span className="text-[9px] font-bold text-indigo-600">{regulationCount}</span>
+                )}
+              </button>
             </span>
             <button
               onClick={() => onToggleFinalized(template)}
@@ -619,7 +732,8 @@ const TemplateRow: React.FC<TemplateRowProps> = ({
 };
 
 const TemplatesTab: React.FC<TemplatesTabProps> = ({
-  categories, templates, creatingId, togglingId, onCreate, onToggleFinalized, onDuplicate, onImport
+  categories, templates, creatingId, togglingId, regulationCounts,
+  onCreate, onToggleFinalized, onDuplicate, onEditRegulations, onImport
 }) => (
   <div>
     <div className="flex items-center justify-between mb-4">
@@ -638,19 +752,24 @@ const TemplatesTab: React.FC<TemplatesTabProps> = ({
         <div key={cat.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow flex flex-col hover:shadow-md transition-all">
           <h3 className="text-lg font-bold text-gray-800 mb-3">{cat.name}</h3>
           <div className="flex flex-col gap-2">
-            {TEMPLATE_TYPE_ORDER.map(type => (
-              <TemplateRow
-                key={type}
-                category={cat}
-                type={type}
-                template={templates.find(t => t.categoryId === cat.id && t.templateType === type)}
-                creating={creatingId === `${cat.id}:${type}`}
-                toggling={!!templates.find(t => t.categoryId === cat.id && t.templateType === type && t.id === togglingId)}
-                onCreate={onCreate}
-                onToggleFinalized={onToggleFinalized}
-                onDuplicate={onDuplicate}
-              />
-            ))}
+            {TEMPLATE_TYPE_ORDER.map(type => {
+              const template = templates.find(t => t.categoryId === cat.id && t.templateType === type);
+              return (
+                <TemplateRow
+                  key={type}
+                  category={cat}
+                  type={type}
+                  template={template}
+                  creating={creatingId === `${cat.id}:${type}`}
+                  toggling={!!template && template.id === togglingId}
+                  regulationCount={template ? (regulationCounts[template.id] ?? 0) : 0}
+                  onCreate={onCreate}
+                  onToggleFinalized={onToggleFinalized}
+                  onDuplicate={onDuplicate}
+                  onEditRegulations={onEditRegulations}
+                />
+              );
+            })}
           </div>
         </div>
       ))}
@@ -668,7 +787,7 @@ const TemplatesTab: React.FC<TemplatesTabProps> = ({
 // Main dashboard
 // ---------------------------------------------------------------------------
 
-type Tab = 'templates' | 'manuals' | 'blocks' | 'viewer';
+type Tab = 'templates' | 'manuals' | 'blocks' | 'regulations' | 'viewer';
 
 const IMDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -682,6 +801,10 @@ const IMDashboard: React.FC = () => {
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  // Assigned-regulation counts per template id, and the template whose regulation list
+  // is open in the modal.
+  const [regulationCounts, setRegulationCounts] = useState<Record<string, number>>({});
+  const [regTarget, setRegTarget] = useState<IMTemplate | null>(null);
   // "Duplicate template into another category" modal state.
   const [dupSource, setDupSource] = useState<IMTemplate | null>(null);
   const [dupTargetCatId, setDupTargetCatId] = useState('');
@@ -713,9 +836,12 @@ const IMDashboard: React.FC = () => {
 
   const loadTemplateData = async () => {
     try {
-      const [cats, temps] = await Promise.all([getCategories(), getIMTemplates()]);
+      const [cats, temps, regCounts] = await Promise.all([
+        getCategories(), getIMTemplates(), getTemplateRegulationCounts(),
+      ]);
       setCategories(cats);
       setTemplates(temps);
+      setRegulationCounts(regCounts);
     } catch (e) {
       console.error('[IMDashboard] loadTemplateData failed:', e);
     } finally {
@@ -773,6 +899,7 @@ const IMDashboard: React.FC = () => {
     { id: 'manuals',   label: 'All Manuals',        count: allIMs.length, icon: <Layers size={15} /> },
     { id: 'templates', label: 'Category Templates',                        icon: <FileText size={15} /> },
     { id: 'blocks',    label: 'Block Library',                             icon: <BookOpen size={15} /> },
+    { id: 'regulations', label: 'Regulations',                             icon: <Scale size={15} /> },
     { id: 'viewer',    label: 'Viewer',                                    icon: <Eye size={15} /> },
   ];
 
@@ -827,13 +954,16 @@ const IMDashboard: React.FC = () => {
               templates={templates}
               creatingId={creatingId}
               togglingId={togglingId}
+              regulationCounts={regulationCounts}
               onCreate={handleCreate}
               onToggleFinalized={handleToggleFinalized}
               onDuplicate={(t) => { setDupSource(t); setDupTargetCatId(''); }}
+              onEditRegulations={setRegTarget}
               onImport={() => setShowImport(true)}
             />
       )}
       {activeTab === 'blocks' && <BlockLibraryContent />}
+      {activeTab === 'regulations' && <RegulationLibraryContent />}
       {activeTab === 'viewer' && <IMViewerTab ims={allIMs} />}
 
       {showImport && (
@@ -841,6 +971,17 @@ const IMDashboard: React.FC = () => {
           categories={categories}
           onClose={() => setShowImport(false)}
           onImported={handleImported}
+        />
+      )}
+
+      {/* Regulations this template must satisfy. Per template (category + type), because a
+          manual and its warning leaflet answer for different obligations. */}
+      {regTarget && (
+        <TemplateRegulationsModal
+          template={regTarget}
+          categoryName={categories.find(c => c.id === regTarget.categoryId)?.name}
+          onClose={() => setRegTarget(null)}
+          onChanged={loadTemplateData}
         />
       )}
 

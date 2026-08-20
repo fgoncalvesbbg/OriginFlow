@@ -23,6 +23,9 @@ const CreateRFQ: React.FC = () => {
   const [title, setTitle] = useState('');
   const [rfqId, setRfqId] = useState(`RFQ-2025-${Math.floor(Math.random()*1000).toString().padStart(3,'0')}`);
   const [description, setDescription] = useState('');
+  // Suppliers juggle requests from several customers; without a due date the RFQ
+  // becomes a PM chase cycle. Optional, so it never blocks creating an RFQ.
+  const [deadline, setDeadline] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<Set<string>>(new Set());
   
@@ -192,7 +195,8 @@ const CreateRFQ: React.FC = () => {
               categoryParam,
               attributesPayload,
               thumbnailUrl,
-              attachments
+              attachments,
+              deadline || null
           );
           navigate(`/sourcing/${rfq.id}`);
       } catch (e: any) {
@@ -232,12 +236,27 @@ const CreateRFQ: React.FC = () => {
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">RFQ ID</label>
-                    <input 
-                        required 
+                    <input
+                        required
                         className="w-full border border-gray-300 rounded p-2 bg-light font-mono text-sm"
                         value={rfqId}
                         onChange={e => setRfqId(e.target.value)}
                     />
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Quote Deadline</label>
+                    <input
+                        type="date"
+                        className="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={deadline}
+                        onChange={e => setDeadline(e.target.value)}
+                    />
+                    <p className="text-xs text-muted mt-1">
+                        Shown to the supplier in their portal. Leave blank if there is no fixed date.
+                    </p>
                 </div>
             </div>
 

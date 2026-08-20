@@ -100,6 +100,8 @@ export interface ProjectAttributeRequest {
   status: 'pending' | 'submitted';
   submittedData?: Array<{ attributeId: string; name: string; value: string; type?: string }> | null;
   note?: string | null;
+  deadline?: string | null;       // when the data is due back from the supplier
+  copiedFromSku?: string | null;  // sibling SKU the prefilled values came from, if any
   createdAt: string;
   submittedAt?: string | null;
 }

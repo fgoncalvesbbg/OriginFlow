@@ -6,7 +6,7 @@ import { getRFQEntryByToken, submitRFQEntry } from '../../services';
 import { uploadIMAsset } from '../../services/im/im-asset.service';
 import { RFQ, RFQEntry, RFQEntryStatus, RFQAttributeResponse, RFQAttachment } from '../../types';
 import { normalizeExternalLink } from '../../utils/url.utils';
-import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, Upload, Paperclip, Sliders, X, Tag } from 'lucide-react';
+import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, Upload, Paperclip, Sliders, X, Tag, Lock, Clock, Printer } from 'lucide-react';
 import RFQAttributeComparison from '../../components/sourcing/RFQAttributeComparison';
 
 const SupplierRFQPortal: React.FC = () => {
@@ -173,6 +173,16 @@ const SupplierRFQPortal: React.FC = () => {
       }
   };
 
+  // Relative due-date label for the quote deadline.
+  const dueLabel = (() => {
+      if (!rfq?.deadline) return null;
+      const days = Math.ceil((new Date(rfq.deadline).getTime() - Date.now()) / 86400000);
+      if (days < 0) return { text: `${Math.abs(days)} days overdue`, tone: 'text-rose-600' };
+      if (days === 0) return { text: 'today', tone: 'text-amber-600' };
+      if (days <= 7) return { text: `in ${days} day${days === 1 ? '' : 's'}`, tone: 'text-amber-600' };
+      return { text: `in ${days} days`, tone: 'text-emerald-700' };
+  })();
+
   if (loading) return <div className="min-h-screen bg-light flex items-center justify-center"><Loader2 className="animate-spin text-gray-400" /></div>;
   if (error) return <div className="min-h-screen bg-light flex items-center justify-center text-red-500 font-medium">{error}</div>;
 
@@ -188,15 +198,110 @@ const SupplierRFQPortal: React.FC = () => {
       );
   }
 
-  if (success) {
+  // The sourcing round is over. Say so rather than presenting a form whose
+  // submission the server will refuse — and never let a late quote look accepted.
+  if (!success && rfq.status !== 'open') {
       return (
           <div className="min-h-screen bg-light flex items-center justify-center p-4">
               <div className="bg-white p-8 rounded-xl shadow max-w-md w-full text-center">
-                  <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
-                  <h1 className="text-3xl font-bold text-primary mb-2">Quote Submitted</h1>
-                  <p className="text-gray-600 mb-6">Thank you for your submission to <strong>{rfq.title}</strong>.</p>
+                  <Lock className="w-14 h-14 text-gray-400 mx-auto mb-4" />
+                  <h1 className="text-2xl font-bold text-primary mb-2">This RFQ is closed</h1>
+                  <p className="text-gray-600 mb-6">
+                      <strong>{rfq.title}</strong> is no longer accepting quotes
+                      {rfq.status === 'awarded' ? ' — it has been awarded.' : '.'}
+                  </p>
                   <div className="bg-light p-4 rounded text-sm text-muted">
-                      We will notify you if your quote is selected.
+                      If you believe this is a mistake, please contact your buyer at Klarstein.
+                  </div>
+              </div>
+          </div>
+      );
+  }
+
+  if (success) {
+      const money = (v?: number) => (v != null ? `${entry.currency ?? ''} ${v}`.trim() : '—');
+      const submittedRows: Array<[string, string]> = [
+          ['Unit price', money(entry.unitPrice)],
+          ['MOQ', entry.moq != null ? String(entry.moq) : '—'],
+          ['Lead time', entry.leadTimeWeeks != null ? `${entry.leadTimeWeeks} weeks` : '—'],
+          ['Tooling cost', money(entry.toolingCost)],
+      ];
+      return (
+          <div className="min-h-screen bg-light flex items-center justify-center p-4">
+              <div className="bg-white p-8 rounded-xl shadow max-w-lg w-full print-plain">
+                  <div className="text-center">
+                      <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+                      <h1 className="text-3xl font-bold text-primary mb-2">
+                          {entry.status === RFQEntryStatus.AWARDED ? 'Quote Awarded' : 'Quote Submitted'}
+                      </h1>
+                      <p className="text-gray-600 mb-6">
+                          Thank you for your submission to <strong>{rfq.title}</strong>.
+                      </p>
+                  </div>
+
+                  {/* A supplier who cannot re-read their own figures has to keep a shadow
+                      copy elsewhere, and cannot spot a typo they need corrected. */}
+                  <div className="print-only" style={{ marginBottom: '1rem', fontSize: '11px' }}>
+                      Quote for {rfq.rfqId} — {rfq.title} · printed {new Date().toLocaleString()}
+                  </div>
+
+                  <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4 text-sm print-avoid-break">
+                      <div className="px-4 py-2 bg-light text-xs font-bold uppercase tracking-wide text-gray-500 flex items-center justify-between gap-3">
+                          <span>
+                              What you submitted
+                              {entry.submittedAt && ` · ${new Date(entry.submittedAt).toLocaleDateString()}`}
+                          </span>
+                          {/* Their own figures, on their own paper — otherwise the only
+                              copy of a quote they are bound by lives on our server. */}
+                          <button
+                              type="button"
+                              onClick={() => window.print()}
+                              className="no-print flex items-center gap-1 normal-case font-medium text-gray-600 hover:text-primary"
+                          >
+                              <Printer size={12} /> Print
+                          </button>
+                      </div>
+                      {submittedRows.map(([label, value]) => (
+                          <div key={label} className="px-4 py-2 flex justify-between gap-4">
+                              <span className="text-muted">{label}</span>
+                              <span className="font-medium text-primary text-right">{value}</span>
+                          </div>
+                      ))}
+                      {entry.supplierNotes && (
+                          <div className="px-4 py-2">
+                              <span className="text-muted block mb-1">Notes / conditions</span>
+                              <span className="text-primary whitespace-pre-wrap">{entry.supplierNotes}</span>
+                          </div>
+                      )}
+                      {!!entry.attributeResponses?.length && (
+                          <div className="px-4 py-2">
+                              <span className="text-muted block mb-1">Proposed attribute values</span>
+                              {entry.attributeResponses.map(r => (
+                                  <div key={r.attributeId} className="flex justify-between gap-4 py-0.5">
+                                      <span className="text-gray-500">{r.name}</span>
+                                      <span className="font-medium text-primary text-right">{r.proposedValue}</span>
+                                  </div>
+                              ))}
+                          </div>
+                      )}
+                      {!!entry.attachments?.length && (
+                          <div className="px-4 py-2">
+                              <span className="text-muted block mb-1">Documents</span>
+                              <div className="flex flex-wrap gap-2">
+                                  {entry.attachments.map((att, i) => (
+                                      <a key={i} href={att.url} target="_blank" rel="noreferrer"
+                                         className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline bg-indigo-50 px-2 py-1 rounded border border-indigo-100">
+                                          <FileText size={11} /> {att.name}
+                                      </a>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="bg-light p-4 rounded text-sm text-muted text-center no-print">
+                      We will notify you if your quote is selected. To change any of the figures
+                      above, contact your buyer and ask them to reopen your quote.
                   </div>
               </div>
           </div>
@@ -229,6 +334,12 @@ const SupplierRFQPortal: React.FC = () => {
                         <span className="inline-flex items-center gap-1">
                             <Calendar size={13} /> Created {new Date(rfq.createdAt).toLocaleDateString()}
                         </span>
+                        {rfq.deadline && (
+                            <span className={`inline-flex items-center gap-1 font-semibold ${dueLabel ? dueLabel.tone : ''}`}>
+                                <Clock size={13} /> Quote due {new Date(rfq.deadline).toLocaleDateString()}
+                                {dueLabel && <span className="font-medium">({dueLabel.text})</span>}
+                            </span>
+                        )}
                     </div>
                 </div>
             </div>
