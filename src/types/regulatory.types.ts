@@ -25,6 +25,14 @@ export interface Regulation {
   jurisdiction?: string;
   notes?: string;
   /**
+   * Pre-publish checklist items, one per line — obligations a PERSON verifies by hand
+   * (migration 119). Every regulation applying to a template contributes its items to one
+   * combined checklist shown before a manual is published. Present on list rows, unlike
+   * `summaryMd`. NEVER sent to the AI check: unlike `notes` it describes what the check
+   * structurally cannot see.
+   */
+  checklist?: string;
+  /**
    * The uploaded Markdown summary — the ONLY thing the AI check is told about the
    * regulation. UNDEFINED on rows returned by `getRegulations()`, which excludes the
    * column so opening the library does not download every summary. Use
@@ -51,6 +59,8 @@ export interface RegulationInput {
   referenceCode: string;
   jurisdiction?: string;
   notes?: string;
+  /** One checklist item per line. Empty/`null` clears the checklist, omit to leave it alone. */
+  checklist?: string | null;
   /** Pass a string to replace the summary, `null` to clear it, omit to leave it alone. */
   summaryMd?: string | null;
   summaryFileName?: string | null;

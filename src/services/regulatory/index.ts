@@ -26,7 +26,31 @@ export {
   isDerivedAssignmentId,
 } from './regulation-assignment.service';
 
-export { parseRegulationNotes } from './regulation-notes';
+export { parseRegulationNotes, parseBulletLines } from './regulation-notes';
+
+export {
+  parseRegulationChecklist,
+  checklistItemKey,
+  buildTemplateChecklist,
+  getChecklistState,
+  setChecklistItemState,
+  getTemplateChecklistState,
+  setTemplateChecklistItemState,
+  summarizeChecklist,
+} from './regulation-checklist';
+export type {
+  ChecklistItem,
+  ChecklistItemState,
+  ChecklistItemStatus,
+  ChecklistSummary,
+} from './regulation-checklist';
+
+export {
+  findingKey,
+  getFindingStatuses,
+  setFindingStatus,
+} from './regulation-finding-status';
+export type { FindingStatus, FindingStatusEntry } from './regulation-finding-status';
 
 export {
   buildRegCheckDocument,

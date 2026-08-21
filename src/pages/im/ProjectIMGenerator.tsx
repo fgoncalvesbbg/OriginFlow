@@ -16,8 +16,11 @@ import {
     getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
     updateProjectIMPlaceholders, getProjectRequiredLanguages,
     getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
-    checkMarkupReviewStatus, isMarkupReviewAvailable
+    checkMarkupReviewStatus, isMarkupReviewAvailable,
+    getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
+    getTemplateChecklistState, summarizeChecklist
 } from '../../services';
+import type { ChecklistItem, ChecklistItemState, ChecklistItemStatus } from '../../services';
 import type { ProjectIMBackup } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
@@ -32,6 +35,7 @@ import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender, MarkupReviewResult } from '../../services';
 import { isInReview } from './im-manual-status';
+import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useUndoRedo } from './editor/useUndoRedo';
@@ -73,6 +77,9 @@ const ProjectIMGenerator: React.FC = () => {
   const templateType: IMTemplateType = templateTypeParam === 'warning_leaflet' ? 'warning_leaflet' : 'im';
   const typeLabel = IM_TEMPLATE_TYPE_LABELS[templateType];
   const navigate = useNavigate();
+  // Only used to stamp who confirmed a regulatory checklist item — that record is the
+  // point of the checklist, so it must not be anonymous.
+  const { user } = useAuth();
   
   const [project, setProject] = useState<Project | null>(null);
   const [templates, setTemplates] = useState<IMTemplate[]>([]);
@@ -547,6 +554,69 @@ const ProjectIMGenerator: React.FC = () => {
           .then(rs => setLatestRenderVersion(rs[0]?.imVersion ?? null))
           .catch(() => { /* stepper shows the print step without freshness */ });
   }, [loading, projectId, templateType]);
+
+  // --- Pre-publish regulatory checklist (migration 119) --------------------
+  // The ITEMS come from the regulations that apply to this template; the TICKS are per
+  // manual (project + template type), because "the declaration of conformity is in the
+  // box" is a fact about this product's manual, not about the template it came from.
+  // Loaded here rather than on the Publish click, so pressing Publish never waits on a
+  // round trip -- and a failure to load leaves the checklist empty rather than standing
+  // between a finished manual and its publish.
+  const [regChecklist, setRegChecklist] = useState<ChecklistItem[]>([]);
+  const [regChecklistState, setRegChecklistState] = useState<Record<string, ChecklistItemState>>({});
+  const [regChecklistBusy, setRegChecklistBusy] = useState<string | null>(null);
+  const [regChecklistError, setRegChecklistError] = useState('');
+  // What the TEMPLATE author confirmed (migration 120). Read-only context here: covering an
+  // obligation in the template and satisfying it in this manual are different claims, so
+  // this never pre-fills a tick — it just stops the publisher wondering whether the
+  // template author already dealt with it.
+  const [regTemplateState, setRegTemplateState] = useState<Record<string, ChecklistItemState>>({});
+
+  useEffect(() => {
+      if (!template?.id || !projectId) { setRegChecklist([]); setRegChecklistState({}); setRegTemplateState({}); return; }
+      let alive = true;
+      Promise.all([
+          getTemplateRegulations(template.id, template.categoryId),
+          getChecklistState(projectId, templateType),
+          getTemplateChecklistState(template.id),
+      ])
+          .then(([assignments, state, templateState]) => {
+              if (!alive) return;
+              setRegChecklist(buildTemplateChecklist(assignments));
+              setRegChecklistState(state);
+              setRegTemplateState(templateState);
+          })
+          .catch(e => console.error('[ProjectIMGenerator] regulatory checklist unavailable:', e));
+      return () => { alive = false; };
+  }, [template?.id, template?.categoryId, projectId, templateType]);
+
+  const regChecklistSummary = summarizeChecklist(regChecklist, regChecklistState);
+
+  /**
+   * Record or clear one item's decision. Written immediately (there is no Save button in
+   * a publish dialog) and applied optimistically, rolling back if the write fails --
+   * a tick that looks saved but is not would be the one failure mode worth avoiding here.
+   */
+  const setChecklistDecision = async (key: string, status: ChecklistItemStatus | null) => {
+      if (!projectId) return;
+      const previous = regChecklistState;
+      setRegChecklistBusy(key);
+      setRegChecklistError('');
+      setRegChecklistState(prev => {
+          const next = { ...prev };
+          if (!status) delete next[key];
+          else next[key] = { status, updatedBy: user?.email, updatedAt: new Date().toISOString() };
+          return next;
+      });
+      try {
+          await setChecklistItemState(projectId, templateType, key, status, { actor: user?.email });
+      } catch (e) {
+          setRegChecklistState(previous);
+          setRegChecklistError(`Could not save that: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+          setRegChecklistBusy(null);
+      }
+  };
 
   // Poll Markup.io once per open while a round is out and undecided; the function
   // caches the outcome on the manual, so this also heals the dashboard's view.
@@ -2974,9 +3044,15 @@ const ProjectIMGenerator: React.FC = () => {
 
   // Checklist step (2nd stage of Publish): if anything's missing (or blocked), show it
   // for review; otherwise publish straight away.
+  //
+  // An undecided regulatory checklist item opens the dialog too -- that IS the pre-publish
+  // review, and it would be pointless to add a checklist nobody is ever shown. Once every
+  // item is decided the dialog stops appearing for that reason, so re-publishing a manual
+  // whose checklist is settled is still one click.
   const proceedToChecklist = () => {
     const result = buildPublishChecklist();
-    if (result.blocking.length || result.values.length || result.slots.length || result.conditionsNoData.length || result.translations.length) {
+    const regOpen = summarizeChecklist(regChecklist, regChecklistState).open;
+    if (result.blocking.length || result.values.length || result.slots.length || result.conditionsNoData.length || result.translations.length || regOpen > 0) {
       setChecklist(result);
     } else {
       handleGenerate();
@@ -3735,7 +3811,9 @@ const ProjectIMGenerator: React.FC = () => {
              <p className="text-sm text-muted mb-4">
                {checklist.blocking.length > 0
                  ? 'This manual can’t be published yet — resolve the blocking items below.'
-                 : 'Some items look incomplete. Review them below — you can fix them first or publish anyway.'}
+                 : checklist.values.length + checklist.slots.length + checklist.conditionsNoData.length + checklist.translations.length === 0
+                   ? 'Everything looks complete. Confirm the regulatory checklist below — ticking is optional, and you can publish either way.'
+                   : 'Some items look incomplete. Review them below — you can fix them first or publish anyway.'}
              </p>
              <div className="overflow-y-auto space-y-4 pr-1">
                {checklist.blocking.length > 0 && (
@@ -3746,6 +3824,98 @@ const ProjectIMGenerator: React.FC = () => {
                        <li key={i} className="text-sm text-rose-800 flex items-start gap-2"><AlertCircle size={14} className="text-rose-500 mt-0.5 shrink-0" /> {v}</li>
                      ))}
                    </ul>
+                 </div>
+               )}
+               {/* REGULATORY CHECKLIST (migration 119) — the items every regulation applying to
+                   this template obliges a person to verify by hand. Advisory by design: an
+                   unticked box records that nobody confirmed it, and never blocks the publish,
+                   because a checklist that blocks only teaches people to tick everything. */}
+               {regChecklist.length > 0 && (
+                 <div className="border border-emerald-200 rounded-lg overflow-hidden">
+                   <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border-b border-emerald-200">
+                     <div className="text-xs font-bold uppercase tracking-wide text-emerald-800 flex items-center gap-1.5">
+                       <CheckSquare size={13} /> Regulatory checklist
+                     </div>
+                     <div className="text-[10px] font-semibold text-emerald-700">
+                       {regChecklistSummary.done} confirmed
+                       {regChecklistSummary.na > 0 && <> · {regChecklistSummary.na} n/a</>}
+                       {regChecklistSummary.open > 0
+                         ? <> · {regChecklistSummary.open} to review</>
+                         : <> · all {regChecklistSummary.total} decided</>}
+                     </div>
+                   </div>
+                   <p className="text-[11px] text-muted px-3 pt-2">
+                     From the regulations that apply to this template. Optional — an unticked item
+                     just records that nobody confirmed it.
+                   </p>
+                   <ul className="divide-y divide-gray-100 mt-1">
+                     {regChecklist.map(item => {
+                       const decided = regChecklistState[item.key];
+                       const busy = regChecklistBusy === item.key;
+                       const done = decided?.status === 'done';
+                       const na = decided?.status === 'na';
+                       return (
+                         <li key={item.key} className="flex items-start gap-2 px-3 py-2">
+                           <button
+                             onClick={() => setChecklistDecision(item.key, done ? null : 'done')}
+                             disabled={busy}
+                             title={done ? 'Clear this confirmation' : 'Mark as taken into account'}
+                             className="shrink-0 mt-0.5 disabled:opacity-40"
+                           >
+                             {busy
+                               ? <Loader2 size={15} className="animate-spin text-gray-400" />
+                               : done
+                                 ? <CheckSquare size={15} className="text-emerald-600" />
+                                 : <Square size={15} className={na ? 'text-gray-300' : 'text-gray-400'} />}
+                           </button>
+                           <div className="min-w-0 flex-1">
+                             <p className={`text-sm ${na ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                               {item.text}
+                             </p>
+                             <p className="text-[10px] text-gray-400 mt-0.5">
+                               <span className="font-mono">{item.regulationReferences.join(' · ')}</span>
+                               {decided && (
+                                 <>
+                                   {' — '}
+                                   {done ? 'confirmed' : 'not applicable'}
+                                   {decided.updatedBy ? ` by ${decided.updatedBy}` : ''}
+                                 </>
+                               )}
+                             </p>
+                             {/* Provenance, not inheritance: the template author's decision
+                                 is shown, never applied. */}
+                             {regTemplateState[item.key] && (
+                               <p className="text-[10px] text-gray-400 italic">
+                                 Template: {regTemplateState[item.key].status === 'done'
+                                   ? 'covered'
+                                   : 'not applicable'}
+                                 {regTemplateState[item.key].updatedBy
+                                   ? ` — ${regTemplateState[item.key].updatedBy}`
+                                   : ''}
+                               </p>
+                             )}
+                           </div>
+                           <button
+                             onClick={() => setChecklistDecision(item.key, na ? null : 'na')}
+                             disabled={busy}
+                             title={na ? 'This item applies after all' : 'Not applicable to this manual'}
+                             className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border disabled:opacity-40 ${
+                               na
+                                 ? 'bg-gray-100 text-gray-600 border-gray-300'
+                                 : 'text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300'
+                             }`}
+                           >
+                             N/A
+                           </button>
+                         </li>
+                       );
+                     })}
+                   </ul>
+                   {regChecklistError && (
+                     <p className="text-[11px] text-rose-700 bg-rose-50 border-t border-rose-200 px-3 py-1.5">
+                       {regChecklistError}
+                     </p>
+                   )}
                  </div>
                )}
                {checklist.values.length > 0 && (
@@ -3797,7 +3967,9 @@ const ProjectIMGenerator: React.FC = () => {
                  disabled={checklist.blocking.length > 0}
                  title={checklist.blocking.length > 0 ? 'Resolve the blocking items first' : undefined}
                  className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-               >Publish anyway</button>
+               >{checklist.values.length + checklist.slots.length + checklist.conditionsNoData.length + checklist.translations.length + checklist.blocking.length === 0
+                   ? 'Publish'
+                   : 'Publish anyway'}</button>
              </div>
            </div>
          </div>

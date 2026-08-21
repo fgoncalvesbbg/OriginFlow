@@ -19,13 +19,19 @@
  * so, because when this was only a picker hint operators reasonably read it as associating
  * the regulation and were left wondering why their template reported zero.
  *
+ * `checklist` (migration 119) is the second functional list on a regulation, and NOT the
+ * same thing as `notes`: notes are interpolated into the AI check's prompt, while checklist
+ * items are the obligations a person verifies by hand before publishing a manual and are
+ * never sent to the model. The editor says which is which, because two adjacent textareas
+ * of bullet points are otherwise indistinguishable.
+ *
  * Exported as `RegulationLibraryContent` (no Layout wrapper) so IMDashboard can embed it
  * as a tab — the same shape as `BlockLibraryContent`.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, ChevronUp, Edit2, FileText, Loader2, Plus, Scale,
+  AlertTriangle, ChevronDown, ChevronUp, CheckSquare, Edit2, FileText, Loader2, Plus, Scale,
   Search, Trash2, Upload, X,
 } from 'lucide-react';
 import {
@@ -38,6 +44,7 @@ import {
   updateRegulation,
   summaryByteLength,
   parseRegulationNotes,
+  parseRegulationChecklist,
   MAX_SUMMARY_BYTES,
   SUMMARY_WARN_BYTES,
   RegulationInUseError,
@@ -63,6 +70,7 @@ const emptyDraft = (): Draft => ({
   referenceCode: '',
   jurisdiction: '',
   notes: '',
+  checklist: '',
   applicableCategories: [],
   status: 'active',
 });
@@ -88,6 +96,7 @@ const RegulationEditor: React.FC<EditorProps> = ({
   const [uploadError, setUploadError] = useState('');
 
   const noteLines = parseRegulationNotes(draft.notes);
+  const checklistLines = parseRegulationChecklist(draft.checklist);
   const summaryBytes = draft.summaryMd ? summaryByteLength(draft.summaryMd) : 0;
   const tooBig = summaryBytes > MAX_SUMMARY_BYTES;
   const large = summaryBytes > SUMMARY_WARN_BYTES && !tooBig;
@@ -195,6 +204,46 @@ const RegulationEditor: React.FC<EditorProps> = ({
                 {noteLines.map((line, i) => (
                   <li key={i} className="text-[11px] text-gray-600 flex gap-1.5">
                     <span className="text-gray-400 shrink-0">&bull;</span>
+                    <span className="min-w-0 break-words">{line}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Pre-publish checklist (migration 119). Sits next to Notes because both are
+              bullet lists, and is labelled hard because they feed opposite consumers:
+              notes go to the model, these go to a person. */}
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1.5">
+              <CheckSquare size={13} /> Pre-publish checklist
+            </label>
+            <textarea
+              value={draft.checklist ?? ''}
+              onChange={(e) => onChange({ ...draft, checklist: e.target.value })}
+              rows={4}
+              placeholder={'What a person must verify before the manual goes out.\n'
+                + 'Energy label is enclosed with the appliance\n'
+                + 'WEEE crossed-out bin symbol is on the rating plate\n'
+                + 'Declaration of conformity is included in the box'}
+              className="w-full text-sm border rounded px-2 py-1.5 mt-1"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              One item per line. Every regulation that applies to a template contributes its
+              items to <strong>one combined checklist</strong> shown before a manual is
+              published, where each can be ticked or marked not applicable. Ticking is
+              optional and never blocks a publish.
+            </p>
+            <p className="text-[11px] text-gray-400 mt-1">
+              These are <strong>not</strong> sent to the AI check — that reads the template
+              text, so it can never see the rating plate or what is in the box. Notes above
+              are what the model is told.
+            </p>
+            {checklistLines.length > 0 && (
+              <ul className="mt-2 space-y-0.5 bg-light border rounded p-2">
+                {checklistLines.map((line, i) => (
+                  <li key={i} className="text-[11px] text-gray-600 flex gap-1.5">
+                    <CheckSquare size={11} className="text-gray-400 shrink-0 mt-0.5" />
                     <span className="min-w-0 break-words">{line}</span>
                   </li>
                 ))}
@@ -380,7 +429,7 @@ export const RegulationLibraryContent: React.FC = () => {
     return regulations.filter((r) => {
       if (statusFilter !== 'all' && r.status !== statusFilter) return false;
       if (!needle) return true;
-      return [r.referenceCode, r.title, r.jurisdiction, r.notes]
+      return [r.referenceCode, r.title, r.jurisdiction, r.notes, r.checklist]
         .some((v) => (v ?? '').toLowerCase().includes(needle));
     });
   }, [regulations, search, statusFilter]);
@@ -397,6 +446,7 @@ export const RegulationLibraryContent: React.FC = () => {
       referenceCode: source.referenceCode,
       jurisdiction: source.jurisdiction ?? '',
       notes: source.notes ?? '',
+      checklist: source.checklist ?? '',
       summaryMd: source.summaryMd,
       summaryFileName: source.summaryFileName ?? null,
       applicableCategories: source.applicableCategories,
@@ -518,6 +568,17 @@ export const RegulationLibraryContent: React.FC = () => {
               <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold">
                 used by {usage[r.id] ?? 0} template{(usage[r.id] ?? 0) === 1 ? '' : 's'}
               </span>
+              {(() => {
+                const n = parseRegulationChecklist(r.checklist).length;
+                return n === 0 ? null : (
+                  <span
+                    className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
+                    title={parseRegulationChecklist(r.checklist).join('\n')}
+                  >
+                    <CheckSquare size={9} /> {n} checklist item{n === 1 ? '' : 's'}
+                  </span>
+                );
+              })()}
             </div>
 
             {r.summaryBytes > 0 ? (

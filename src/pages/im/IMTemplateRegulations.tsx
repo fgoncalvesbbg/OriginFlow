@@ -10,6 +10,11 @@
  * check's system prompt, so it genuinely narrows what the model reports — it is not a
  * comment field. The UI says so, because a note nobody knows is functional gets left blank.
  *
+ * The panel also carries the COMBINED compliance checklist these regulations produce
+ * (migrations 119/120): the template author ticks off what the template covers here, while
+ * each manual built from the template is confirmed separately at publish time. Both records
+ * exist because they are different claims — see regulation-checklist.ts.
+ *
  * `TemplateRegulationsPanel` is the body without a modal shell, so the check modal can
  * embed it and let assignments be fixed without leaving the run.
  */
@@ -20,6 +25,7 @@ import {
 } from 'lucide-react';
 import {
   assignRegulationToTemplate,
+  buildTemplateChecklist,
   getRegulations,
   getTemplateRegulations,
   unassignRegulationFromTemplate,
@@ -28,6 +34,7 @@ import {
 import type { IMTemplate, Regulation, TemplateRegulation } from '../../types';
 import { IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { TemplateComplianceChecklist } from './IMTemplateChecklist';
 
 const kb = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} kB`;
 
@@ -76,6 +83,9 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
     [library, assignedIds]);
 
   const derivedCount = assignments.filter((a) => a.source === 'category').length;
+
+  // Deduped across regulations: two regulations stating the same obligation are one item.
+  const checklistItems = useMemo(() => buildTemplateChecklist(assignments), [assignments]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -222,6 +232,17 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
             );
           })}
         </div>
+      )}
+
+      {/* The combined checklist these regulations produce (migrations 119/120), tickable
+          HERE as the template author's readiness gate. The per-manual confirmation is a
+          separate record made at publish time — see IMTemplateChecklist. */}
+      {checklistItems.length > 0 && (
+        <TemplateComplianceChecklist
+          template={template}
+          items={checklistItems}
+          readOnly={readOnly}
+        />
       )}
 
       {missingSummary.length > 0 && (

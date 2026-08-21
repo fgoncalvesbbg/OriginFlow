@@ -14,9 +14,19 @@
  * note opening with a negative value ("-20°C minimum") keeps its sign.
  */
 
-/** Split notes into display lines, one per bullet. Blank lines are dropped. */
-export const parseRegulationNotes = (notes?: string | null): string[] =>
-  (notes ?? '')
+/**
+ * Split one-bullet-per-line text into display lines. Blank lines are dropped.
+ *
+ * Shared by `regulations.notes` and `regulations.checklist` (migration 119), which
+ * follow the same convention for the same reasons — one implementation so the two
+ * cannot drift into parsing a pasted Markdown list differently.
+ */
+export const parseBulletLines = (text?: string | null): string[] =>
+  (text ?? '')
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*[-*•]\s+/, '').trim())
     .filter((line) => line !== '');
+
+/** Split notes into display lines, one per bullet. Blank lines are dropped. */
+export const parseRegulationNotes = (notes?: string | null): string[] =>
+  parseBulletLines(notes);

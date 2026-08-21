@@ -21,10 +21,18 @@
  * (mode='qa') that sees ONLY the translated fragment — no source, no other
  * context — and fixes grammar/spelling/typos, never content. If the QA call
  * fails or drops a token, the first-pass translation is kept.
+ *
+ * A fragment too large to translate inside the proxy's synchronous time limit is
+ * CHUNKED (see translation-chunk.ts) and translated piece by piece, because that
+ * timeout is deterministic: without chunking the biggest inline blocks failed in
+ * every target language, every run. Chunks run sequentially — the caller already
+ * runs several fragments concurrently, and piling more in-flight calls onto the
+ * same proxy is what the timeout is about in the first place.
  */
 
 import { auth } from '../../data';
 import { freeze, freezeVerbatims, thaw, hasProse, countTokens, VerbatimEntry } from '../im/im-chip-freeze';
+import { splitForTranslation, countTranslatablePieces } from './translation-chunk';
 import { getTranslationVerbatims } from './translation-verbatim.service';
 import type { TranslationVerbatim } from '../../types';
 
@@ -127,6 +135,50 @@ const callProxy = async (body: Record<string, unknown>): Promise<string> => {
 };
 
 /**
+ * Translate ONE already-frozen piece: primary pass, both safety nets, then the
+ * best-effort QA pass. `where` names the chunk in error messages when the caller
+ * had to split the fragment (empty string when the piece IS the whole fragment,
+ * so those messages stay exactly as they were).
+ *
+ * @throws if the model dropped/duplicated a token or returned a non-conforming
+ * response — the caller turns that into "fragment left untranslated".
+ */
+const translatePiece = async (
+  text: string,
+  sourceLang: string,
+  targetLang: string,
+  where: string,
+): Promise<string> => {
+  const translated = await callProxy({ text, sourceLang, targetLang });
+
+  // Safety net: the token count must be identical, or a chip/verbatim was lost.
+  const before = countTokens(text);
+  if (countTokens(translated) !== before) {
+    throw new Error(`Placeholder mismatch after translating to ${targetLang}${where} (${before} → ${countTokens(translated)}); fragment left untranslated.`);
+  }
+  // Second safety net (see isImplausibleLength) — catches a non-conforming response
+  // (e.g. a conversational refusal) that the token count alone can't, on fragments
+  // with zero tokens to begin with (short headers/titles are the common case).
+  if (isImplausibleLength(text, translated)) {
+    throw new Error(`Translation to ${targetLang}${where} returned an implausible result (${translated.length} chars for a ${text.length}-char fragment); fragment left untranslated.`);
+  }
+
+  // Best-effort QA pass: proofread the (still frozen) translation with no other
+  // context. Any failure — network, proxy error, a dropped token, or an implausibly
+  // long response — keeps the first-pass translation; QA never fails the fragment.
+  try {
+    const proofread = await callProxy({ text: translated, targetLang, mode: 'qa' });
+    if (countTokens(proofread) === before && !isImplausibleLength(translated, proofread)) {
+      return proofread;
+    }
+    console.warn(`[translation] QA pass returned an implausible/mismatched result for ${targetLang}${where}; keeping first-pass translation.`);
+  } catch (e) {
+    console.warn(`[translation] QA pass failed for ${targetLang}${where}; keeping first-pass translation.`, e);
+  }
+  return translated;
+};
+
+/**
  * Translate one HTML fragment from `sourceLang` to `targetLang`, preserving all
  * HTML formatting, placeholder/condition chips, and verbatim regulation phrases
  * exactly, then proofread the result (grammar/typos only) with a second pass.
@@ -156,36 +208,25 @@ export const translateHtml = async (
     return result;
   }
 
-  const translated = await callProxy({ text, sourceLang, targetLang });
-
-  // Safety net: the token count must be identical, or a chip/verbatim was lost.
-  const before = countTokens(text);
-  if (countTokens(translated) !== before) {
-    throw new Error(`Placeholder mismatch after translating to ${targetLang} (${before} → ${countTokens(translated)}); fragment left untranslated.`);
+  // One call per piece: a fragment inside the size budget is a single piece, so
+  // this is the previous single-call path unchanged.
+  const pieces = splitForTranslation(text);
+  const chunkCount = countTranslatablePieces(pieces);
+  if (chunkCount > 1) {
+    console.info(`[translation] Fragment of ${text.length} chars split into ${chunkCount} chunks for ${targetLang} (proxy time limit).`);
   }
-  // Second safety net (see isImplausibleLength) — catches a non-conforming response
-  // (e.g. a conversational refusal) that the token count alone can't, on fragments
-  // with zero tokens to begin with (short headers/titles are the common case).
-  if (isImplausibleLength(text, translated)) {
-    throw new Error(`Translation to ${targetLang} returned an implausible result (${translated.length} chars for a ${text.length}-char fragment); fragment left untranslated.`);
-  }
-
-  // Best-effort QA pass: proofread the (still frozen) translation with no other
-  // context. Any failure — network, proxy error, a dropped token, or an implausibly
-  // long response — keeps the first-pass translation; QA never fails the fragment.
-  let final = translated;
-  try {
-    const proofread = await callProxy({ text: translated, targetLang, mode: 'qa' });
-    if (countTokens(proofread) === before && !isImplausibleLength(translated, proofread)) {
-      final = proofread;
-    } else {
-      console.warn(`[translation] QA pass returned an implausible/mismatched result for ${targetLang}; keeping first-pass translation.`);
-    }
-  } catch (e) {
-    console.warn(`[translation] QA pass failed for ${targetLang}; keeping first-pass translation.`, e);
+  const out: string[] = [];
+  let chunkNo = 0;
+  for (const piece of pieces) {
+    if (!piece.translate) { out.push(piece.text); continue; }
+    chunkNo += 1;
+    // Name the chunk in any failure, so a run report points at WHICH part of an
+    // oversized fragment the model mishandled.
+    const where = chunkCount > 1 ? ` (chunk ${chunkNo}/${chunkCount})` : '';
+    out.push(await translatePiece(piece.text, sourceLang, targetLang, where));
   }
 
-  const result = thaw(final, frozen);
+  const result = thaw(out.join(''), frozen);
   cache.set(cacheKey, result);
   return result;
 };

@@ -34,6 +34,8 @@ import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } 
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { findInTemplate, applyReplacements, matchKey, type FindReplaceMatch } from '../../services/im/im-find-replace';
 import { RegulatoryCheckModal } from './IMRegulatoryCheckModal';
+import { TemplateChecklistModal, loadTemplateChecklistProgress } from './IMTemplateChecklist';
+import type { ChecklistSummary } from '../../services';
 
 import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
 
@@ -853,6 +855,21 @@ const IMTemplateEditor: React.FC = () => {
   // Template-wide find & replace (chip-safe — see im-find-replace.ts).
   const [showFindReplace, setShowFindReplace] = useState(false);
   const [showRegCheck, setShowRegCheck] = useState(false);
+  // Compliance checklist (migration 120): how much of the regulations' hand-verify
+  // checklist the author has confirmed for THIS template. Loaded for the toolbar badge —
+  // "is this ready to release" is only a useful question if the answer is visible without
+  // opening a dialog. Deferred and failure-tolerant: it is a badge, not a gate.
+  const [showChecklist, setShowChecklist] = useState(false);
+  const [checklistSummary, setChecklistSummary] = useState<ChecklistSummary | null>(null);
+
+  useEffect(() => {
+    if (!template?.id) return;
+    let alive = true;
+    loadTemplateChecklistProgress({ id: template.id, categoryId: template.categoryId })
+      .then(p => { if (alive) setChecklistSummary(p.summary); })
+      .catch(e => console.warn('[IMTemplateEditor] compliance checklist progress unavailable', e));
+    return () => { alive = false; };
+  }, [template?.id, template?.categoryId]);
   const [frQuery, setFrQuery] = useState('');
   const [frReplace, setFrReplace] = useState('');
   const [frCase, setFrCase] = useState(false);
@@ -1785,6 +1802,19 @@ const IMTemplateEditor: React.FC = () => {
   if (!template) return <Layout><div>Template not found.</div></Layout>;
 
   const currentSection = sections.find(s => s.id === selectedSectionId);
+  /**
+   * Save one section edited from the regulatory-check report.
+   *
+   * Routed through persistSections rather than saveIMSection directly, so a fix made from
+   * the report is indistinguishable from a normal edit: the FINAL lock is honoured, pasted
+   * images are externalized, and the dirty-snapshot bookkeeping stays consistent (otherwise
+   * autosave would immediately re-save the same section).
+   */
+  const saveSectionFromRegCheck = useCallback(async (updated: IMSection): Promise<boolean> => {
+    setSections(prev => prev.map(s => (s.id === updated.id ? updated : s)));
+    return persistSections([updated]);
+  }, [persistSections]);
+
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
   // Offer the synthetic SKU attribute first so authors can bind placeholders/conditions to the
@@ -1848,6 +1878,23 @@ const IMTemplateEditor: React.FC = () => {
                {/* Deliberately NOT disabled when locked: the check is read-only, and a
                    template marked FINAL is exactly the one you most want to audit. */}
                <button onClick={() => setShowRegCheck(true)} title="Audit this template against its assigned regulations with AI — read-only, produces a report of required changes and mandated verbatim wording" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Scale size={16} /> Regulatory check</button>
+               {/* The human half of the same job: the obligations the AI check structurally
+                   cannot see (symbol on the rating plate, DoC in the box). Shown only once
+                   the applying regulations actually define items, and never disabled when
+                   locked — re-reviewing a released template is the point. */}
+               {checklistSummary && checklistSummary.total > 0 && (
+                 <button
+                   onClick={() => setShowChecklist(true)}
+                   title="Confirm what this template covers of the checklist its regulations require a person to verify"
+                   className={`flex items-center gap-2 bg-white border px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow ${
+                     checklistSummary.open > 0
+                       ? 'border-amber-300 text-amber-700'
+                       : 'border-emerald-300 text-emerald-700'
+                   }`}
+                 >
+                   <CheckCircle size={16} /> Checklist {checklistSummary.done + checklistSummary.na}/{checklistSummary.total}
+                 </button>
+               )}
                {!locked && (
                  <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow ml-2">
                    <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
@@ -3432,6 +3479,16 @@ const IMTemplateEditor: React.FC = () => {
        </div>
        {renderPreviewDrawer()}
 
+       {/* Compliance checklist — the author's readiness gate over the same regulations. */}
+       {showChecklist && template && (
+         <TemplateChecklistModal
+           template={template}
+           categoryName={category?.name}
+           onProgress={setChecklistSummary}
+           onClose={() => setShowChecklist(false)}
+         />
+       )}
+
        {/* AI regulatory check — read-only audit against the template's assigned
            regulations. Never gated on `locked`: a FINAL template is the one most
            worth auditing. */}
@@ -3440,6 +3497,10 @@ const IMTemplateEditor: React.FC = () => {
            template={template}
            sections={sections}
            categoryName={category?.name}
+           languages={availableLangsForTabs}
+           attributes={categoryFeatures}
+           locked={locked}
+           onSaveSection={saveSectionFromRegCheck}
            onClose={() => setShowRegCheck(false)}
            onGoToSection={(sectionId) => {
              setSelectedSectionId(sectionId);

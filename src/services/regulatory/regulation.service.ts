@@ -41,7 +41,7 @@ export const SUMMARY_WARN_BYTES = 150_000;
  * src/data/PORTING.md).
  */
 const LIST_COLUMNS =
-  'id,title,reference_code,jurisdiction,notes,summary_file_name,summary_bytes,' +
+  'id,title,reference_code,jurisdiction,notes,checklist,summary_file_name,summary_bytes,' +
   'summary_uploaded_at,summary_uploaded_by,applicable_categories,status,' +
   'superseded_by_id,created_by,created_at,updated_at';
 
@@ -51,6 +51,9 @@ const mapRow = (r: any): Regulation => ({
   referenceCode: r.reference_code,
   jurisdiction: r.jurisdiction ?? undefined,
   notes: r.notes ?? undefined,
+  // Included in LIST_COLUMNS on purpose: the pre-publish checklist is built from the
+  // assignment list's rows, and a few lines of text per regulation is nothing like a summary.
+  checklist: r.checklist ?? undefined,
   // Absent on list rows by design — see LIST_COLUMNS.
   summaryMd: r.summary_md ?? undefined,
   summaryFileName: r.summary_file_name ?? undefined,
@@ -146,6 +149,7 @@ const buildPayload = (
   if (input.referenceCode !== undefined) payload.reference_code = input.referenceCode.trim();
   if (input.jurisdiction !== undefined) payload.jurisdiction = input.jurisdiction?.trim() || null;
   if (input.notes !== undefined) payload.notes = input.notes?.trim() || null;
+  if (input.checklist !== undefined) payload.checklist = input.checklist?.trim() || null;
   if (input.applicableCategories !== undefined) payload.applicable_categories = input.applicableCategories;
   if (input.status !== undefined) payload.status = input.status;
   if (input.supersededById !== undefined) payload.superseded_by_id = input.supersededById || null;
