@@ -319,6 +319,9 @@ export {
   derivedAssignmentId,
   isDerivedAssignmentId,
   parseRegulationNotes,
+  findingKey,
+  getFindingStatuses,
+  setFindingStatus,
   buildRegCheckDocument,
   runRegulatoryCheck,
   getRegulatoryCheckHistory,
@@ -331,6 +334,8 @@ export {
   REG_CHECK_CHUNK_CHARS
 } from './regulatory';
 export type {
+  FindingStatus,
+  FindingStatusEntry,
   RegCheckProgress,
   RegCheckDocument,
   RegCheckSection,

@@ -1785,6 +1785,19 @@ const IMTemplateEditor: React.FC = () => {
   if (!template) return <Layout><div>Template not found.</div></Layout>;
 
   const currentSection = sections.find(s => s.id === selectedSectionId);
+  /**
+   * Save one section edited from the regulatory-check report.
+   *
+   * Routed through persistSections rather than saveIMSection directly, so a fix made from
+   * the report is indistinguishable from a normal edit: the FINAL lock is honoured, pasted
+   * images are externalized, and the dirty-snapshot bookkeeping stays consistent (otherwise
+   * autosave would immediately re-save the same section).
+   */
+  const saveSectionFromRegCheck = useCallback(async (updated: IMSection): Promise<boolean> => {
+    setSections(prev => prev.map(s => (s.id === updated.id ? updated : s)));
+    return persistSections([updated]);
+  }, [persistSections]);
+
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
   // Offer the synthetic SKU attribute first so authors can bind placeholders/conditions to the
@@ -3440,6 +3453,10 @@ const IMTemplateEditor: React.FC = () => {
            template={template}
            sections={sections}
            categoryName={category?.name}
+           languages={availableLangsForTabs}
+           attributes={categoryFeatures}
+           locked={locked}
+           onSaveSection={saveSectionFromRegCheck}
            onClose={() => setShowRegCheck(false)}
            onGoToSection={(sectionId) => {
              setSelectedSectionId(sectionId);

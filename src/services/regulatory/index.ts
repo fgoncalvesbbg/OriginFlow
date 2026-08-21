@@ -29,6 +29,13 @@ export {
 export { parseRegulationNotes } from './regulation-notes';
 
 export {
+  findingKey,
+  getFindingStatuses,
+  setFindingStatus,
+} from './regulation-finding-status';
+export type { FindingStatus, FindingStatusEntry } from './regulation-finding-status';
+
+export {
   buildRegCheckDocument,
   runRegulatoryCheck,
   getRegulatoryCheckHistory,
