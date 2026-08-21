@@ -59,16 +59,33 @@ export interface RegulationInput {
   supersededById?: string | null;
 }
 
-/** One `im_template_regulations` row with its library regulation stitched in. */
+/**
+ * Where a template's obligation to a regulation comes from.
+ *  - 'explicit' — a real `im_template_regulations` row, assigned to THIS template.
+ *  - 'category' — derived at read time because the regulation is marked for the
+ *    template's category. No row exists, so it carries no scope note and cannot be
+ *    unassigned here (unmark the category, or add a note to materialize it).
+ */
+export type TemplateRegulationSource = 'explicit' | 'category';
+
+/** One regulation a template must satisfy, with its library row stitched in. */
 export interface TemplateRegulation {
+  /**
+   * The `im_template_regulations` row id for an explicit entry, or the synthetic
+   * `derived:<regulationId>` for a category one — never treat that as a database key.
+   */
   id: string;
   templateId: string;
   regulationId: string;
-  /** Scope note for THIS template. Interpolated into the check prompt — functional, not decorative. */
+  /**
+   * Scope note for THIS template. Interpolated into the check prompt — functional, not
+   * decorative. Only an explicit assignment can carry one.
+   */
   notes?: string;
   assignedBy?: string;
   createdAt: string;
-  /** Undefined only if the library row vanished between the two reads. */
+  source: TemplateRegulationSource;
+  /** Undefined only if the library row vanished between reads. */
   regulation?: Regulation;
 }
 

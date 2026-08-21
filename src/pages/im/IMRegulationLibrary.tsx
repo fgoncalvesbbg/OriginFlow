@@ -13,6 +13,12 @@
  * Writes are admin-only by RLS, so the write affordances are hidden for non-admins
  * rather than failing with an opaque policy error.
  *
+ * `applicableCategories` is NOT decoration: ticking a category makes the regulation apply
+ * to that category's IM and warning-leaflet templates automatically (see
+ * src/services/regulatory/regulation-assignment.service.ts). The label and helper text say
+ * so, because when this was only a picker hint operators reasonably read it as associating
+ * the regulation and were left wondering why their template reported zero.
+ *
  * Exported as `RegulationLibraryContent` (no Layout wrapper) so IMDashboard can embed it
  * as a tab — the same shape as `BlockLibraryContent`.
  */
@@ -263,7 +269,7 @@ const RegulationEditor: React.FC<EditorProps> = ({
             </div>
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase">
-                Suggested for categories
+                Applies to categories
               </label>
               <div className="mt-1 max-h-28 overflow-y-auto border rounded p-2 space-y-1 bg-white">
                 {categories.length === 0 && (
@@ -280,8 +286,9 @@ const RegulationEditor: React.FC<EditorProps> = ({
                   </label>
                 ))}
               </div>
-              <p className="text-[11px] text-gray-400 mt-1">
-                A hint for the assignment picker only — never used to decide what is checked.
+              <p className="text-[11px] text-indigo-600 mt-1">
+                Ticking a category makes this regulation apply to that category&apos;s manual and
+                warning-leaflet templates automatically — a regulatory check there will include it.
               </p>
             </div>
           </div>

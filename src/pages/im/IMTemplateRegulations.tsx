@@ -16,7 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, Check, FileText, Loader2, Plus, Scale, Trash2, X,
+  AlertTriangle, Check, FileText, Loader2, Lock, Plus, Scale, Trash2, X,
 } from 'lucide-react';
 import {
   assignRegulationToTemplate,
@@ -53,26 +53,29 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
 
   const load = useCallback(async () => {
     const [assigned, regs] = await Promise.all([
-      getTemplateRegulations(template.id),
+      getTemplateRegulations(template.id, template.categoryId),
       // Superseded regulations stay out of the picker but keep showing where already assigned.
       getRegulations({ status: 'active' }),
     ]);
     setAssignments(assigned);
     setLibrary(regs);
     setLoading(false);
-  }, [template.id]);
+  }, [template.id, template.categoryId]);
 
   useEffect(() => { load(); }, [load]);
 
   const assignedIds = useMemo(() => new Set(assignments.map((a) => a.regulationId)), [assignments]);
 
-  /** Regulations suggested for this template's category float to the top of the picker. */
-  const options = useMemo(() => {
-    const free = library.filter((r) => !assignedIds.has(r.id));
-    const suggested = free.filter((r) => r.applicableCategories.includes(template.categoryId));
-    const rest = free.filter((r) => !r.applicableCategories.includes(template.categoryId));
-    return { suggested, rest };
-  }, [library, assignedIds, template.categoryId]);
+  /**
+   * Regulations that do NOT yet apply, for the "add" picker. There is no longer a
+   * "suggested for this category" group: anything marked for this category already
+   * applies, so it is never free.
+   */
+  const options = useMemo(
+    () => library.filter((r) => !assignedIds.has(r.id)),
+    [library, assignedIds]);
+
+  const derivedCount = assignments.filter((a) => a.source === 'category').length;
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -108,9 +111,19 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
         <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">{error}</div>
       )}
 
+      {derivedCount > 0 && (
+        <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-200 rounded p-2">
+          {derivedCount} of these appl{derivedCount === 1 ? 'ies' : 'y'} because this category is
+          marked on the regulation. Unmark the category in the Regulations library to stop
+          {derivedCount === 1 ? ' it' : ' them'} applying here.
+        </p>
+      )}
+
       {assignments.length === 0 ? (
         <p className="text-xs text-gray-400 bg-light border border-dashed border-gray-200 rounded-lg p-4 text-center">
-          No regulations assigned yet. Add the ones this {IM_TEMPLATE_TYPE_LABELS[template.templateType]} must satisfy.
+          Nothing applies yet. Add the regulations this {IM_TEMPLATE_TYPE_LABELS[template.templateType]}{' '}
+          must satisfy below, or mark this category on a regulation in the Regulations library
+          and it will apply here automatically.
         </p>
       ) : (
         <div className="space-y-2">
@@ -125,16 +138,35 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
                     <span className="font-mono text-xs font-bold text-primary break-all">
                       {reg?.referenceCode ?? '(regulation removed)'}
                     </span>
+                    {a.source === 'category' && (
+                      <span
+                        className="ml-1.5 align-middle bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                        title="Applies because this category is marked on the regulation. Unmark it in the Regulations library to stop it applying here."
+                      >
+                        VIA CATEGORY
+                      </span>
+                    )}
                     {reg?.title && <p className="text-xs text-gray-600 mt-0.5">{reg.title}</p>}
                   </div>
-                  <button
-                    onClick={() => run(() => unassignRegulationFromTemplate(a.id))}
-                    disabled={busy}
-                    title="Unassign from this template"
-                    className="p-1 text-gray-300 hover:text-rose-600 disabled:opacity-50 shrink-0"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  {/* Only an explicit row can be removed here — a category-derived entry has
+                      no row, and goes away by unmarking the category on the regulation. */}
+                  {a.source === 'explicit' ? (
+                    <button
+                      onClick={() => run(() => unassignRegulationFromTemplate(a.id))}
+                      disabled={busy}
+                      title="Unassign from this template"
+                      className="p-1 text-gray-300 hover:text-rose-600 disabled:opacity-50 shrink-0"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  ) : (
+                    <span
+                      className="p-1 text-gray-200 shrink-0 cursor-help"
+                      title="Remove the category from this regulation in the Regulations library to stop it applying here."
+                    >
+                      <Lock size={13} />
+                    </span>
+                  )}
                 </div>
 
                 {reg && (
@@ -164,11 +196,18 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
                   <div className="flex items-center justify-between gap-2 mt-1">
                     <p className="text-[10px] text-gray-400">
                       Sent to the model as the scope for this template — it narrows what gets reported.
+                      {a.source === 'category' && ' Saving one pins this regulation to this template.'}
                     </p>
                     {noteDraft !== undefined && noteDraft !== (a.notes ?? '') && (
                       <button
                         onClick={() => run(async () => {
-                          await updateTemplateRegulationNotes(a.id, noteDraft);
+                          // A 'category' entry has no row — saving a note materializes the
+                          // explicit assignment carrying it (see the service).
+                          await updateTemplateRegulationNotes(a.id, noteDraft, {
+                            templateId: template.id,
+                            regulationId: a.regulationId,
+                            actor: user?.email,
+                          });
                           setEditingNotes((m) => { const next = { ...m }; delete next[a.id]; return next; });
                         })}
                         disabled={busy}
@@ -203,20 +242,9 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
               className="flex-1 text-sm border rounded px-2 py-1.5 bg-white"
             >
               <option value="">Choose from the library…</option>
-              {options.suggested.length > 0 && (
-                <optgroup label="Suggested for this category">
-                  {options.suggested.map((r) => (
-                    <option key={r.id} value={r.id}>{r.referenceCode} — {r.title}</option>
-                  ))}
-                </optgroup>
-              )}
-              {options.rest.length > 0 && (
-                <optgroup label="All other regulations">
-                  {options.rest.map((r) => (
-                    <option key={r.id} value={r.id}>{r.referenceCode} — {r.title}</option>
-                  ))}
-                </optgroup>
-              )}
+              {options.map((r) => (
+                <option key={r.id} value={r.id}>{r.referenceCode} — {r.title}</option>
+              ))}
             </select>
             <button
               onClick={handleAssign}
@@ -235,9 +263,9 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
               className="w-full text-xs border rounded px-2 py-1.5 mt-2"
             />
           )}
-          {options.suggested.length === 0 && options.rest.length === 0 && (
+          {options.length === 0 && (
             <p className="text-[11px] text-gray-400 mt-1.5">
-              Every active regulation in the library is already assigned to this template.
+              Every active regulation in the library already applies to this template.
             </p>
           )}
         </div>

@@ -519,9 +519,19 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                       {/* "What next" hint — quiet (null) when nothing is actionable. */}
                       {(() => {
                         const hint = nextAction(im);
-                        return hint ? (
-                          <div className="text-[10px] text-gray-400 mt-1 max-w-[220px] truncate" title={hint}>↳ {hint}</div>
-                        ) : null;
+                        const reviewLink = isInReview(im) && im.reviewUrl;
+                        if (!hint && !reviewLink) return null;
+                        return (
+                          <div className="text-[10px] text-gray-400 mt-1 max-w-[220px] flex items-center gap-1.5">
+                            {hint && <span className="truncate" title={hint}>↳ {hint}</span>}
+                            {reviewLink && (
+                              <a href={im.reviewUrl!} target="_blank" rel="noreferrer"
+                                className="shrink-0 underline font-semibold text-sky-600 hover:text-sky-800"
+                                title="Open this manual's Markup.io review"
+                              >Open review</a>
+                            )}
+                          </div>
+                        );
                       })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-400">{fmtDate(im.updatedAt)}</td>
@@ -602,6 +612,12 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                             >What changed?</button>
                           )}
                           {hint && <div className="text-[10px] text-gray-500 mt-1 truncate" title={hint}>↳ {hint}</div>}
+                          {isInReview(im) && im.reviewUrl && (
+                            <a href={im.reviewUrl} target="_blank" rel="noreferrer"
+                              className="inline-block text-[10px] underline font-semibold text-sky-600 hover:text-sky-800 mt-1"
+                              title="Open this manual's Markup.io review"
+                            >Open review</a>
+                          )}
                         </div>
                       );
                     })}

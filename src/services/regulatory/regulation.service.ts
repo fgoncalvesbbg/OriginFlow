@@ -71,14 +71,20 @@ export const summaryByteLength = (md: string): number => new TextEncoder().encod
 export class RegulationInUseError extends Error {
   code = 'REGULATION_IN_USE' as const;
   usageCount: number;
-  constructor(usageCount: number) {
+  /** True when at least part of the usage comes from a category marking, not a row. */
+  viaCategory: boolean;
+  constructor(usageCount: number, viaCategory = false) {
     super(
-      `Cannot delete: this regulation is still assigned to ${usageCount} IM template(s). ` +
-      `Unassign it everywhere first, or mark it superseded to retire it while keeping ` +
-      `existing assignments and past check reports intact.`,
+      `Cannot delete: ${usageCount} IM template(s) currently answer for this regulation. ` +
+      (viaCategory
+        ? `Untick its categories (and unassign it from any template that names it directly), `
+        : `Unassign it everywhere first, `) +
+      `or mark it superseded to retire it while keeping existing assignments and past ` +
+      `check reports intact.`,
     );
     this.name = 'RegulationInUseError';
     this.usageCount = usageCount;
+    this.viaCategory = viaCategory;
   }
 }
 
@@ -220,36 +226,83 @@ export const updateRegulation = async (
   }
 };
 
-/** How many templates cite each regulation, keyed by regulation id. */
+/**
+ * Templates that currently answer for each regulation, keyed by regulation id.
+ *
+ * EFFECTIVE usage, not just explicit rows: a regulation marked for a category applies to
+ * that category's templates automatically, so counting only `im_template_regulations`
+ * would report 0 for a regulation half a dozen templates are being checked against.
+ */
 export const getRegulationUsageCounts = async (): Promise<Record<string, number>> => {
   if (!isLive) return {};
-  const rows = await orEmpty(
-    withDeadline(
-      (signal) => db.select<Row>('im_template_regulations', {
-        columns: 'regulation_id',
-        signal,
-      }),
-      READ_TIMEOUT_MS,
-      'getRegulationUsageCounts',
+
+  const [assignments, templates, library] = await Promise.all([
+    orEmpty(
+      withDeadline(
+        (signal) => db.select<Row>('im_template_regulations', {
+          columns: 'regulation_id,template_id',
+          signal,
+        }),
+        READ_TIMEOUT_MS,
+        'getRegulationUsageCounts:assignments',
+      ),
+      `${TAG} getRegulationUsageCounts`,
     ),
-    `${TAG} getRegulationUsageCounts`,
-  );
+    orEmpty(
+      withDeadline(
+        (signal) => db.select<Row>('im_templates', { columns: 'id,category_id', signal }),
+        READ_TIMEOUT_MS,
+        'getRegulationUsageCounts:templates',
+      ),
+      `${TAG} getRegulationUsageCounts`,
+    ),
+    getRegulations({ status: 'active' }),
+  ]);
+
+  // templateIds per regulation, so a template that is both explicitly assigned and
+  // covered by the category counts once.
+  const perRegulation = new Map<string, Set<string>>();
+  const add = (regulationId: string, templateId: string) => {
+    const set = perRegulation.get(regulationId) ?? new Set<string>();
+    set.add(templateId);
+    perRegulation.set(regulationId, set);
+  };
+
+  for (const a of assignments) add(a.regulation_id, a.template_id);
+
+  const templatesByCategory = new Map<string, string[]>();
+  for (const t of templates) {
+    if (!t.category_id) continue;
+    const list = templatesByCategory.get(t.category_id) ?? [];
+    list.push(t.id);
+    templatesByCategory.set(t.category_id, list);
+  }
+  for (const regulation of library) {
+    for (const cat of regulation.applicableCategories) {
+      for (const templateId of templatesByCategory.get(cat) ?? []) add(regulation.id, templateId);
+    }
+  }
+
   const counts: Record<string, number> = {};
-  for (const r of rows) counts[r.regulation_id] = (counts[r.regulation_id] ?? 0) + 1;
+  for (const [regulationId, set] of perRegulation) counts[regulationId] = set.size;
   return counts;
 };
 
 /**
- * Delete a regulation, refusing while any template still cites it.
+ * Delete a regulation, refusing while any template still answers for it — whether by an
+ * explicit assignment or because one of its categories is ticked.
  *
- * Two layers on purpose: the pre-check produces a useful message, and `ON DELETE
- * RESTRICT` catches the race where an assignment is created between the two calls.
+ * The category half has no foreign key behind it, so this pre-check is the only thing
+ * preventing a silent deletion from emptying what several templates are checked against.
+ * `ON DELETE RESTRICT` still backs the explicit half, including the race where an
+ * assignment appears between the check and the delete.
  */
 export const deleteRegulation = async (id: string): Promise<void> => {
-  const usage = await db.count('im_template_regulations', { where: { regulation_id: id } });
-  if (usage > 0) {
-    console.warn(TAG, `deleteRegulation blocked — ${id} assigned to ${usage} template(s)`);
-    throw new RegulationInUseError(usage);
+  const explicit = await db.count('im_template_regulations', { where: { regulation_id: id } });
+  const effective = (await getRegulationUsageCounts())[id] ?? explicit;
+  if (effective > 0) {
+    console.warn(TAG, `deleteRegulation blocked — ${id} used by ${effective} template(s)`);
+    throw new RegulationInUseError(effective, effective > explicit);
   }
   try {
     await withDeadline(

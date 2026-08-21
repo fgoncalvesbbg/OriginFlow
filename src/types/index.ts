@@ -107,6 +107,7 @@ export type {
   Regulation,
   RegulationInput,
   TemplateRegulation,
+  TemplateRegulationSource,
   RegCheckSeverity,
   RegCheckFindingKind,
   RegCheckStatus,

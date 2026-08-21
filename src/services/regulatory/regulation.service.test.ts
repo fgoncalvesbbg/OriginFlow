@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // The port is mocked, not a driver client — same reasoning as im-tm-write.service.test.ts.
 const { calls, results } = vi.hoisted(() => ({
   calls: [] as Array<{ op: string; table: string; payload?: any; where?: any; columns?: string }>,
-  results: { rows: [] as any[], count: 0, deleteError: null as unknown },
+  results: {
+    rows: [] as any[],
+    // Per-table override; falls back to `rows` so the single-table tests stay terse.
+    byTable: {} as Record<string, any[]>,
+    count: 0,
+    deleteError: null as unknown,
+  },
 }));
 
 vi.mock('../../data', async () => {
@@ -12,7 +18,7 @@ vi.mock('../../data', async () => {
     db: {
       select: vi.fn((table: string, options: any) => {
         calls.push({ op: 'select', table, where: options?.where, columns: options?.columns });
-        return Promise.resolve(results.rows);
+        return Promise.resolve(results.byTable[table] ?? results.rows);
       }),
       selectMaybeOne: vi.fn((table: string, options: any) => {
         calls.push({ op: 'selectMaybeOne', table, where: options?.where, columns: options?.columns });
@@ -58,6 +64,7 @@ import {
 beforeEach(() => {
   calls.length = 0;
   results.rows = [];
+  results.byTable = {};
   results.count = 0;
   results.deleteError = null;
 });
@@ -199,26 +206,72 @@ describe('createRegulation / updateRegulation', () => {
 });
 
 describe('getRegulationUsageCounts', () => {
-  it('tallies assignments client-side from a regulation_id projection', async () => {
-    results.rows = [
-      { regulation_id: 'reg-1' }, { regulation_id: 'reg-1' }, { regulation_id: 'reg-2' },
+  it('counts explicit assignments', async () => {
+    results.byTable.im_template_regulations = [
+      { regulation_id: 'reg-1', template_id: 't1' },
+      { regulation_id: 'reg-1', template_id: 't2' },
+      { regulation_id: 'reg-2', template_id: 't1' },
     ];
+    results.byTable.im_templates = [];
+    results.byTable.regulations = [];
     expect(await getRegulationUsageCounts()).toEqual({ 'reg-1': 2, 'reg-2': 1 });
-    const read = calls.find((c) => c.table === 'im_template_regulations')!;
-    expect(read.columns).toBe('regulation_id');
+  });
+
+  it('counts templates reached through a ticked category, not just explicit rows', async () => {
+    // Under auto-association a regulation marked for a category IS what those templates
+    // are checked against; reporting 0 would be a lie the delete guard then acts on.
+    results.byTable.im_template_regulations = [];
+    results.byTable.im_templates = [
+      { id: 't-hob-im', category_id: 'cat-hob' },
+      { id: 't-hob-leaflet', category_id: 'cat-hob' },
+      { id: 't-blank', category_id: null },
+    ];
+    results.byTable.regulations = [row({ id: 'reg-1', applicable_categories: ['cat-hob'] })];
+    expect(await getRegulationUsageCounts()).toEqual({ 'reg-1': 2 });
+  });
+
+  it('counts a template once when it is both explicitly assigned and category-covered', async () => {
+    results.byTable.im_template_regulations = [{ regulation_id: 'reg-1', template_id: 't1' }];
+    results.byTable.im_templates = [{ id: 't1', category_id: 'cat-hob' }];
+    results.byTable.regulations = [row({ id: 'reg-1', applicable_categories: ['cat-hob'] })];
+    expect(await getRegulationUsageCounts()).toEqual({ 'reg-1': 1 });
   });
 });
 
 describe('deleteRegulation', () => {
-  it('refuses while templates still cite it, and never issues the delete', async () => {
+  it('refuses while templates are explicitly assigned, and never issues the delete', async () => {
     results.count = 3;
+    results.byTable.im_template_regulations = [
+      { regulation_id: 'reg-1', template_id: 't1' },
+      { regulation_id: 'reg-1', template_id: 't2' },
+      { regulation_id: 'reg-1', template_id: 't3' },
+    ];
+    results.byTable.im_templates = [];
+    results.byTable.regulations = [];
     await expect(deleteRegulation('reg-1')).rejects.toThrow(RegulationInUseError);
-    await expect(deleteRegulation('reg-1')).rejects.toThrow(/assigned to 3 IM template/);
+    await expect(deleteRegulation('reg-1')).rejects.toThrow(/currently answer for this regulation/);
     expect(calls.some((c) => c.op === 'delete')).toBe(false);
   });
 
-  it('deletes when nothing cites it', async () => {
+  it('refuses on category-derived usage alone, which no foreign key protects', async () => {
+    // ON DELETE RESTRICT only covers explicit rows, so without this pre-check deleting
+    // here would silently empty what two templates are being checked against.
     results.count = 0;
+    results.byTable.im_template_regulations = [];
+    results.byTable.im_templates = [
+      { id: 't-hob-im', category_id: 'cat-hob' },
+      { id: 't-hob-leaflet', category_id: 'cat-hob' },
+    ];
+    results.byTable.regulations = [row({ id: 'reg-1', applicable_categories: ['cat-hob'] })];
+    await expect(deleteRegulation('reg-1')).rejects.toThrow(/Untick its categories/);
+    expect(calls.some((c) => c.op === 'delete')).toBe(false);
+  });
+
+  it('deletes when nothing answers for it', async () => {
+    results.count = 0;
+    results.byTable.im_template_regulations = [];
+    results.byTable.im_templates = [{ id: 't1', category_id: 'cat-hob' }];
+    results.byTable.regulations = [row({ id: 'reg-1', applicable_categories: [] })];
     await deleteRegulation('reg-1');
     const del = calls.find((c) => c.op === 'delete')!;
     expect(del.table).toBe('regulations');
@@ -227,6 +280,9 @@ describe('deleteRegulation', () => {
 
   it('maps a foreign-key violation from the race back to RegulationInUseError', async () => {
     results.count = 0;
+    results.byTable.im_template_regulations = [];
+    results.byTable.im_templates = [];
+    results.byTable.regulations = [];
     results.deleteError = new Error('violates foreign key constraint (23503)');
     await expect(deleteRegulation('reg-1')).rejects.toThrow(RegulationInUseError);
   });

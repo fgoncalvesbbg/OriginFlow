@@ -12,13 +12,18 @@
  * template plus a 40 kB regulation summary will not reliably finish inside Netlify's
  * ~26 s synchronous ceiling. Same shape as render-print-part being called once per part.
  *
- * THE REGULATION IS READ HERE, NOT SENT BY THE BROWSER. The service-role client looks
- * up the `im_template_regulations` row for (templateId, regulationId) and joins the
- * library row. That keeps a 400 kB summary off the wire on every chunk, gives the
- * summary and the scope note exactly one source of truth, and — the security point —
- * turns "is this regulation actually assigned to this template?" into a server-side
- * authorization check. Unlike translate.ts, this endpoint cannot be handed arbitrary
- * text to send to the model.
+ * THE REGULATION IS READ HERE, NOT SENT BY THE BROWSER. The service-role client loads
+ * the library row and checks that it applies to this template. That keeps a 400 kB
+ * summary off the wire on every chunk, gives the summary and the scope note exactly one
+ * source of truth, and — the security point — turns "does this regulation apply to this
+ * template?" into a server-side authorization check. Unlike translate.ts, this endpoint
+ * cannot be handed arbitrary text to send to the model.
+ *
+ * "Applies" has two forms, and BOTH are accepted, matching the client's effective list
+ * (src/services/regulatory/regulation-assignment.service.ts): an explicit
+ * `im_template_regulations` row, or an ACTIVE regulation whose `applicable_categories`
+ * contains the template's `category_id`. Accepting only the row would 403 every
+ * category-derived regulation.
  *
  * The system prompt is loaded from `ai_prompts` (key = 'im_regulatory_check') so admins
  * can tune the judgement rules without a deploy; a hardcoded fallback covers a missing
@@ -209,25 +214,9 @@ export const handler = async (event: NetlifyEvent) => {
   const index = Number.isFinite(chunkIndex) ? Number(chunkIndex) : 0;
   const count = Number.isFinite(chunkCount) ? Number(chunkCount) : 1;
 
-  // Authorization: the regulation must actually be assigned to this template. This is
-  // also what supplies the summary and the per-template scope note.
-  const { data: assignment, error: assignErr } = await admin
-    .from('im_template_regulations')
-    .select('notes, regulation_id')
-    .eq('template_id', templateId)
-    .eq('regulation_id', regulationId)
-    .maybeSingle();
-  if (assignErr) {
-    console.error('[regulatory-check] assignment lookup failed', assignErr);
-    return json(500, { error: 'Could not verify the regulation assignment.' });
-  }
-  if (!assignment) {
-    return json(403, { error: 'That regulation is not assigned to this template.' });
-  }
-
   const { data: regulation, error: regErr } = await admin
     .from('regulations')
-    .select('title, reference_code, jurisdiction, notes, summary_md')
+    .select('title, reference_code, jurisdiction, notes, summary_md, status, applicable_categories')
     .eq('id', regulationId)
     .maybeSingle();
   if (regErr) {
@@ -235,6 +224,49 @@ export const handler = async (event: NetlifyEvent) => {
     return json(500, { error: 'Could not load the regulation.' });
   }
   if (!regulation) return json(404, { error: 'Regulation not found.' });
+
+  // Authorization: the regulation must apply to this template, EITHER through an
+  // explicit im_template_regulations row OR because it is marked for the template's
+  // category (see src/services/regulatory/regulation-assignment.service.ts — the client
+  // treats both as assigned, so accepting only the row would 403 every category-derived
+  // regulation). The explicit row is still what supplies the per-template scope note.
+  const { data: assignment, error: assignErr } = await admin
+    .from('im_template_regulations')
+    .select('notes')
+    .eq('template_id', templateId)
+    .eq('regulation_id', regulationId)
+    .maybeSingle();
+  if (assignErr) {
+    console.error('[regulatory-check] assignment lookup failed', assignErr);
+    return json(500, { error: 'Could not verify the regulation assignment.' });
+  }
+
+  let appliesByCategory = false;
+  if (!assignment) {
+    const { data: tmpl, error: tmplErr } = await admin
+      .from('im_templates')
+      .select('category_id')
+      .eq('id', templateId)
+      .maybeSingle();
+    if (tmplErr) {
+      console.error('[regulatory-check] template lookup failed', tmplErr);
+      return json(500, { error: 'Could not verify the regulation assignment.' });
+    }
+    // Only an ACTIVE regulation flows in by category — 'superseded' is how one is
+    // retired, and the client filters the same way.
+    appliesByCategory = Boolean(
+      tmpl?.category_id &&
+      regulation.status === 'active' &&
+      Array.isArray(regulation.applicable_categories) &&
+      regulation.applicable_categories.includes(tmpl.category_id),
+    );
+  }
+
+  if (!assignment && !appliesByCategory) {
+    return json(403, {
+      error: 'That regulation is neither assigned to this template nor marked for its category.',
+    });
+  }
 
   // No summary means there is nothing to judge against. Failing loudly is mandatory:
   // returning "no findings" would read as "this template is compliant".

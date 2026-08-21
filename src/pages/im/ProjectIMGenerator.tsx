@@ -4117,8 +4117,15 @@ const ProjectIMGenerator: React.FC = () => {
                !inReview
                  ? {
                      key: 'review', label: 'Review', state: locked ? 'skipped' : 'optional',
-                     detail: locked ? 'not reviewed' : 'optional',
-                     title: 'Optional: send a print PDF to Markup.io from the Print dialog',
+                     // Read as an ACTION, not a state — "send for review" is the click.
+                     detail: locked ? 'not reviewed'
+                       : !isMarkupReviewAvailable() ? 'optional'
+                       : published ? 'send for review →' : 'after publish',
+                     title: !isMarkupReviewAvailable()
+                       ? 'Optional review step (Markup.io is not configured in this environment)'
+                       : published
+                         ? 'Open the Print dialog — the "Supplier review (Markup.io)" panel sends the latest PDF'
+                         : 'Publish first — the review round uploads a rendered print PDF to Markup.io',
                      onClick: published ? () => openPrintForPublished() : undefined,
                    }
                  : reviewDone

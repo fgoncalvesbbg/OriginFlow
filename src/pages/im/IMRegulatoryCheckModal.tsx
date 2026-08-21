@@ -345,7 +345,7 @@ export const RegulatoryCheckModal: React.FC<Props> = ({
 
   const loadContext = useCallback(async () => {
     const [assigned, past, verbatims] = await Promise.all([
-      getTemplateRegulations(template.id),
+      getTemplateRegulations(template.id, template.categoryId),
       getRegulatoryCheckHistory(template.id),
       getTranslationVerbatims(),
     ]);
@@ -508,7 +508,7 @@ export const RegulatoryCheckModal: React.FC<Props> = ({
                     <TemplateRegulationsPanel
                       template={template}
                       onChanged={async () => {
-                        setAssignments(await getTemplateRegulations(template.id));
+                        setAssignments(await getTemplateRegulations(template.id, template.categoryId));
                       }}
                     />
                   </div>

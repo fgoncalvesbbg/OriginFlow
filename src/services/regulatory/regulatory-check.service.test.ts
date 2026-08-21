@@ -106,6 +106,7 @@ const assignment = (id: string, referenceCode: string): TemplateRegulation => ({
   templateId: 'tmpl-1',
   regulationId: id,
   createdAt: '2026-08-01',
+  source: 'explicit',
   regulation: {
     id,
     title: `Regulation ${referenceCode}`,

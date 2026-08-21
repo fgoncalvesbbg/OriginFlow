@@ -329,14 +329,29 @@ const ProjectDetail: React.FC = () => {
                     {r.createdBy && <span className="flex items-center gap-1"><UserIcon size={11} /> {r.createdBy}</span>}
                   </div>
                 </div>
-                <a
-                  href={r.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-light"
-                >
-                  <Download size={13} /> Download
-                </a>
+                <div className="shrink-0 flex items-center gap-2">
+                  {/* This PDF's Markup.io review round (each send creates its own markup,
+                      so the print timeline doubles as the review-round history). */}
+                  {r.markupUrl && (
+                    <a
+                      href={r.markupUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Open this PDF's Markup.io review"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-700 border border-sky-200 bg-sky-50 rounded-lg px-3 py-1.5 hover:bg-sky-100"
+                    >
+                      <ExternalLink size={13} /> Review
+                    </a>
+                  )}
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-light"
+                  >
+                    <Download size={13} /> Download
+                  </a>
+                </div>
               </div>
             </li>
           ))}

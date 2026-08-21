@@ -634,6 +634,57 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </div>
           )}
 
+          {/* Supplier review (Markup.io) — ALWAYS visible when the feature is enabled, so
+              the review round is findable without expanding the history. Acts on the
+              NEWEST rendered PDF; per-row send/links remain in the history below. */}
+          {markupEnabled && !loadingHistory && (() => {
+            const latest = renders[0] ?? null;
+            return (
+              <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Send size={14} className="text-sky-600 shrink-0" />
+                  <span className="text-sm font-semibold text-sky-900">Supplier review (Markup.io)</span>
+                </div>
+                {!latest ? (
+                  <p className="text-xs text-sky-800/80">
+                    Reviews work on a rendered PDF — generate one below, then send it to Markup.io from here.
+                  </p>
+                ) : latest.markupUrl ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-sky-800/80">
+                      The latest PDF{latest.imVersion != null ? <> (<strong>v{latest.imVersion}</strong>)</> : null} is on
+                      Markup.io — share this link with the reviewers:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input readOnly value={latest.markupUrl} className="flex-1 min-w-0 text-xs border border-sky-200 rounded px-2 py-1 bg-white text-gray-700" />
+                      <button onClick={() => copyReviewLink(latest)} className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-100 whitespace-nowrap">
+                        {copiedReviewId === latest.id ? 'Copied!' : 'Copy'}
+                      </button>
+                      <a href={latest.markupUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-100 flex items-center gap-1">
+                        <ExternalLink size={11} /> Open
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-sky-800/80 flex-1">
+                      Upload the latest PDF{latest.imVersion != null ? <> (<strong>v{latest.imVersion}</strong>, {latest.languages.join(', ').toUpperCase()})</> : null} to
+                      Markup.io — reviewers comment directly on the pages, and the manual shows as <strong>In Review</strong>.
+                    </p>
+                    <button
+                      onClick={() => void sendForReview(latest)}
+                      disabled={sendingReviewId !== null}
+                      className="shrink-0 text-sm px-3 py-1.5 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1.5 font-medium"
+                    >
+                      {sendingReviewId === latest.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      Send for review
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Full render history */}
           {!loadingHistory && renders.length > 0 && (
             <details className="border rounded">

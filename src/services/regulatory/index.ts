@@ -22,6 +22,8 @@ export {
   assignRegulationToTemplate,
   updateTemplateRegulationNotes,
   unassignRegulationFromTemplate,
+  derivedAssignmentId,
+  isDerivedAssignmentId,
 } from './regulation-assignment.service';
 
 export {

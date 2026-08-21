@@ -316,6 +316,8 @@ export {
   assignRegulationToTemplate,
   updateTemplateRegulationNotes,
   unassignRegulationFromTemplate,
+  derivedAssignmentId,
+  isDerivedAssignmentId,
   buildRegCheckDocument,
   runRegulatoryCheck,
   getRegulatoryCheckHistory,

@@ -36,8 +36,10 @@ vi.mock('../../config/environment.config', () => ({ isLive: true }));
 
 import {
   assignRegulationToTemplate,
+  derivedAssignmentId,
   getTemplateRegulationCounts,
   getTemplateRegulations,
+  isDerivedAssignmentId,
   unassignRegulationFromTemplate,
   updateTemplateRegulationNotes,
 } from './regulation-assignment.service';
@@ -48,54 +50,158 @@ beforeEach(() => {
   tables.insertError = null;
 });
 
-describe('getTemplateRegulations', () => {
-  it('does two portable reads and stitches, never an embedded join', async () => {
-    // PORTING.md inventories every PostgREST embedded join as debt a non-PostgREST
-    // adapter owes; two reads cost one round trip and add none.
+const reg = (over: Record<string, any> = {}) => ({
+  id: 'r1',
+  title: 'Title',
+  reference_code: 'AAA',
+  summary_bytes: 10,
+  applicable_categories: [],
+  status: 'active',
+  created_at: '1',
+  updated_at: '1',
+  ...over,
+});
+
+describe('getTemplateRegulations — the effective list', () => {
+  it('includes regulations marked for the template category, with source "category"', async () => {
+    // The behaviour this feature turns on: marking "Induction hob" on a regulation makes
+    // it apply to that category's templates, with no explicit assignment step.
+    tables.rows.im_template_regulations = [];
+    tables.rows.regulations = [
+      reg({ id: 'r-hob', reference_code: 'EN 60335-2-6', applicable_categories: ['cat-hob'] }),
+      reg({ id: 'r-other', reference_code: 'EN 60335-2-24', applicable_categories: ['cat-fridge'] }),
+    ];
+
+    const result = await getTemplateRegulations('t1', 'cat-hob');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      regulationId: 'r-hob',
+      templateId: 't1',
+      source: 'category',
+      id: derivedAssignmentId('r-hob'),
+    });
+    // A derived entry has no row, so it carries no scope note.
+    expect(result[0].notes).toBeUndefined();
+  });
+
+  it('unions explicit rows with category-derived ones', async () => {
     tables.rows.im_template_regulations = [
-      { id: 'a1', template_id: 't1', regulation_id: 'r-zulu', notes: 'only Annex IV', assigned_by: 'me', created_at: '1' },
-      { id: 'a2', template_id: 't1', regulation_id: 'r-alpha', notes: null, created_at: '2' },
+      { id: 'a1', template_id: 't1', regulation_id: 'r-explicit', notes: 'only Annex IV', created_at: '1' },
     ];
     tables.rows.regulations = [
-      { id: 'r-alpha', title: 'Alpha', reference_code: 'AAA', summary_bytes: 10, applicable_categories: [], status: 'active', created_at: '1', updated_at: '1' },
-      { id: 'r-zulu', title: 'Zulu', reference_code: 'ZZZ', summary_bytes: 20, applicable_categories: [], status: 'active', created_at: '1', updated_at: '1' },
+      reg({ id: 'r-explicit', reference_code: 'ZZZ' }),
+      reg({ id: 'r-cat', reference_code: 'MMM', applicable_categories: ['cat-hob'] }),
     ];
 
-    const result = await getTemplateRegulations('t1');
+    const result = await getTemplateRegulations('t1', 'cat-hob');
 
-    for (const call of calls) expect(call.columns ?? '').not.toMatch(/[()]/);
-    // Ordered by the library's reference code, so the list reads like the library.
-    expect(result.map((r) => r.regulation?.referenceCode)).toEqual(['AAA', 'ZZZ']);
-    expect(result.find((r) => r.id === 'a1')).toMatchObject({
-      templateId: 't1', regulationId: 'r-zulu', notes: 'only Annex IV', assignedBy: 'me',
+    expect(result.map((r) => r.regulation?.referenceCode)).toEqual(['MMM', 'ZZZ']);
+    expect(result.find((r) => r.regulationId === 'r-explicit')).toMatchObject({
+      source: 'explicit', notes: 'only Annex IV',
     });
-    expect(result.find((r) => r.id === 'a2')!.notes).toBeUndefined();
+    expect(result.find((r) => r.regulationId === 'r-cat')!.source).toBe('category');
   });
 
-  it('skips the library read entirely when nothing is assigned', async () => {
+  it('lets an explicit row win over the derived entry for the same regulation', async () => {
+    // Otherwise the same regulation would appear twice, and the scope note on the
+    // explicit row would be invisible.
+    tables.rows.im_template_regulations = [
+      { id: 'a1', template_id: 't1', regulation_id: 'r-both', notes: 'narrowed', created_at: '1' },
+    ];
+    tables.rows.regulations = [
+      reg({ id: 'r-both', reference_code: 'BOTH', applicable_categories: ['cat-hob'] }),
+    ];
+
+    const result = await getTemplateRegulations('t1', 'cat-hob');
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('explicit');
+    expect(result[0].notes).toBe('narrowed');
+  });
+
+  it('does not pull in a superseded regulation by category', async () => {
+    // 'superseded' is how a regulation is retired; it must stop reaching new templates.
     tables.rows.im_template_regulations = [];
-    expect(await getTemplateRegulations('t1')).toEqual([]);
-    expect(calls.some((c) => c.table === 'regulations')).toBe(false);
+    tables.rows.regulations = [
+      reg({ id: 'r-old', status: 'superseded', applicable_categories: ['cat-hob'] }),
+    ];
+    expect(await getTemplateRegulations('t1', 'cat-hob')).toEqual([]);
   });
 
-  it('survives a library row that vanished between the two reads', async () => {
+  it('keeps an explicit assignment to a superseded regulation — someone chose it', async () => {
+    tables.rows.im_template_regulations = [
+      { id: 'a1', template_id: 't1', regulation_id: 'r-old', created_at: '1' },
+    ];
+    tables.rows.regulations = [reg({ id: 'r-old', status: 'superseded' })];
+    const result = await getTemplateRegulations('t1', 'cat-hob');
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('explicit');
+  });
+
+  it('returns explicit rows only for the category-less blank template', async () => {
+    tables.rows.im_template_regulations = [
+      { id: 'a1', template_id: 't-blank', regulation_id: 'r1', created_at: '1' },
+    ];
+    tables.rows.regulations = [reg({ applicable_categories: ['cat-hob'] })];
+    const result = await getTemplateRegulations('t-blank', null);
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('explicit');
+  });
+
+  it('uses portable projections, never an embedded join', async () => {
+    tables.rows.im_template_regulations = [
+      { id: 'a1', template_id: 't1', regulation_id: 'r1', created_at: '1' },
+    ];
+    tables.rows.regulations = [reg()];
+    await getTemplateRegulations('t1', 'cat-hob');
+    for (const call of calls) expect(call.columns ?? '').not.toMatch(/[()]/);
+  });
+
+  it('survives a library row that vanished between reads', async () => {
     tables.rows.im_template_regulations = [
       { id: 'a1', template_id: 't1', regulation_id: 'gone', created_at: '1' },
     ];
     tables.rows.regulations = [];
-    const [entry] = await getTemplateRegulations('t1');
+    const [entry] = await getTemplateRegulations('t1', 'cat-hob');
     expect(entry.regulationId).toBe('gone');
     expect(entry.regulation).toBeUndefined();
   });
 });
 
 describe('getTemplateRegulationCounts', () => {
-  it('tallies per template from a template_id projection', async () => {
-    tables.rows.im_template_regulations = [
-      { template_id: 't1' }, { template_id: 't1' }, { template_id: 't2' },
+  it('counts category-derived entries, so the badge matches the modal', async () => {
+    tables.rows.im_template_regulations = [];
+    tables.rows.im_templates = [
+      { id: 't-hob-im', category_id: 'cat-hob' },
+      { id: 't-hob-leaflet', category_id: 'cat-hob' },
+      { id: 't-fridge-im', category_id: 'cat-fridge' },
     ];
-    expect(await getTemplateRegulationCounts()).toEqual({ t1: 2, t2: 1 });
-    expect(calls[0].columns).toBe('template_id');
+    tables.rows.regulations = [
+      reg({ id: 'r1', applicable_categories: ['cat-hob'] }),
+      reg({ id: 'r2', applicable_categories: ['cat-hob', 'cat-fridge'] }),
+    ];
+
+    // Both of the category's templates answer for it — the accepted cost of
+    // auto-association is that the IM and the leaflet cannot differ here.
+    expect(await getTemplateRegulationCounts()).toEqual({
+      't-hob-im': 2, 't-hob-leaflet': 2, 't-fridge-im': 1,
+    });
+  });
+
+  it('counts a regulation once when it is both explicitly assigned and category-marked', async () => {
+    tables.rows.im_template_regulations = [
+      { template_id: 't1', regulation_id: 'r1' },
+    ];
+    tables.rows.im_templates = [{ id: 't1', category_id: 'cat-hob' }];
+    tables.rows.regulations = [reg({ id: 'r1', applicable_categories: ['cat-hob'] })];
+    expect(await getTemplateRegulationCounts()).toEqual({ t1: 1 });
+  });
+
+  it('ignores a template with no category', async () => {
+    tables.rows.im_template_regulations = [];
+    tables.rows.im_templates = [{ id: 't-blank', category_id: null }];
+    tables.rows.regulations = [reg({ applicable_categories: ['cat-hob'] })];
+    expect(await getTemplateRegulationCounts()).toEqual({});
   });
 });
 
@@ -122,8 +228,15 @@ describe('assignRegulationToTemplate', () => {
   });
 });
 
-describe('updateTemplateRegulationNotes / unassign', () => {
-  it('updates the note and stamps updated_at', async () => {
+describe('derived ids', () => {
+  it('round-trips and is recognisable', () => {
+    expect(isDerivedAssignmentId(derivedAssignmentId('r1'))).toBe(true);
+    expect(isDerivedAssignmentId('a-real-row-uuid')).toBe(false);
+  });
+});
+
+describe('updateTemplateRegulationNotes', () => {
+  it('updates the row for an explicit assignment', async () => {
     await updateTemplateRegulationNotes('a1', 'new note');
     const update = calls.find((c) => c.op === 'updateWhere')!;
     expect(update.table).toBe('im_template_regulations');
@@ -132,10 +245,37 @@ describe('updateTemplateRegulationNotes / unassign', () => {
     expect(update.payload.updated_at).toBeTruthy();
   });
 
+  it('materializes a derived entry into an explicit row carrying the note', async () => {
+    // A category-derived entry has no row to update — pinning a scope note to one
+    // template is exactly the reason to create the explicit assignment.
+    await updateTemplateRegulationNotes(derivedAssignmentId('r1'), 'only Annex IV', {
+      templateId: 't1', regulationId: 'r1', actor: 'me@example.com',
+    });
+    expect(calls.some((c) => c.op === 'updateWhere')).toBe(false);
+    const insert = calls.find((c) => c.op === 'insertMany')!;
+    expect(insert.payload[0]).toMatchObject({
+      template_id: 't1', regulation_id: 'r1', notes: 'only Annex IV', assigned_by: 'me@example.com',
+    });
+  });
+
+  it('refuses to materialize without the ids it would need', async () => {
+    await expect(updateTemplateRegulationNotes(derivedAssignmentId('r1'), 'note'))
+      .rejects.toThrow(/needs the template and regulation/);
+    expect(calls.some((c) => c.op === 'insertMany')).toBe(false);
+  });
+});
+
+describe('unassignRegulationFromTemplate', () => {
   it('deletes only the assignment row, never the regulation', async () => {
     await unassignRegulationFromTemplate('a1');
     const del = calls.find((c) => c.op === 'delete')!;
     expect(del.table).toBe('im_template_regulations');
     expect(del.where).toEqual({ id: 'a1' });
+  });
+
+  it('refuses on a derived entry instead of silently doing nothing', async () => {
+    await expect(unassignRegulationFromTemplate(derivedAssignmentId('r1')))
+      .rejects.toThrow(/marked for this category/);
+    expect(calls.some((c) => c.op === 'delete')).toBe(false);
   });
 });
