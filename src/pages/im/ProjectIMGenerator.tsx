@@ -28,7 +28,7 @@ import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolv
 import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { translateHtml } from '../../services/ai/translation.service';
 import { markTranslatedFromEn } from '../../services/im/im-translation-marker';
-import { IM_LANGUAGE_NAMES } from '../../config/im-languages';
+import { IM_LANGUAGE_NAMES, IM_LANGUAGE_CODES, IM_TEMPLATE_LANGUAGE_OPTIONS, orderIMLanguages } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 import { uploadIMAsset, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
@@ -176,6 +176,9 @@ const ProjectIMGenerator: React.FC = () => {
   const [checkingChanges, setCheckingChanges] = useState(false);
   // Auto-translation of project-authored content (added/edited sections). English is
   // always the source; template content is translated in the template editor, not here.
+  // Language picker (same modal as the category template editor's "Manual Languages").
+  const [isLangModalOpen, setIsLangModalOpen] = useState(false);
+  const [langDraft, setLangDraft] = useState<string[]>(['en']);
   const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
@@ -382,19 +385,10 @@ const ProjectIMGenerator: React.FC = () => {
       setTemplate(temp || null);
       setSections(secs);
       
-      // Ensure activeLang is valid
-      if (temp && temp.languages && !temp.languages.includes(activeLang)) {
-          // Only switch if current activeLang is NOT valid for this template
-          // This preserves the restored language from loadData if valid
-          const safeData = instance?.placeholderData || {};
-          const savedLang = safeData['__meta_language'];
-          
-          if (savedLang && temp.languages.includes(savedLang)) {
-              // If saved language is valid, keep it (it was set in loadData)
-          } else {
-              setActiveLang(temp.languages[0] || 'en');
-          }
-      }
+      // activeLang is reconciled against the PROJECT's required languages by the effect
+      // below, not against temp.languages: the two differ (a project publishes a subset,
+      // and a project on the blank template picks its own set), and checking the template
+      // here used to pin a blank-template manual to English whatever it had chosen.
   };
 
   // Auto-initialize conditions when sections load
@@ -1069,6 +1063,18 @@ const ProjectIMGenerator: React.FC = () => {
   useEffect(() => () => {
     if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
   }, []);
+
+  // Keep the active language tab on a language this project actually produces. Runs once
+  // the template and placeholder data are both in state, so a restored `__meta_language`
+  // survives as long as it is still required; dropping the active language falls back to
+  // the first required one (English unless the PM reordered).
+  useEffect(() => {
+    if (!template) return;
+    const langs = getProjectRequiredLanguages(template, formData);
+    if (!langs.includes(activeLang)) setActiveLang(langs[0] || 'en');
+    // Only the two keys that can change the answer — not all of formData, which changes
+    // on every keystroke.
+  }, [template, formData['__required_languages'], formData['__language_order'], activeLang]);
 
   // Unsaved-work indicator: current editable state differs from the last-persisted baseline.
   const isDirty = savedSnapshotRef.current !== null && serializeDraft() !== savedSnapshotRef.current;
@@ -2877,17 +2883,45 @@ const ProjectIMGenerator: React.FC = () => {
   const templateLangs = template?.languages || ['en'];
   const requiredLanguages = template ? getProjectRequiredLanguages(template, formData) : ['en'];
 
+  // What this project is ALLOWED to pick from — mirrors getProjectRequiredLanguages,
+  // which is what publish/print/staleness actually enforce.
+  //   • Category template → its own languages. Its section content exists in no others,
+  //     so a project can only narrow the list; widening happens in the template editor.
+  //   • Blank template (category-less, no sections — a project-based import or a manual
+  //     built entirely in the project) → the full canonical list, because every fragment
+  //     is project-authored and can be translated right here.
+  const projectOwnsLanguages = !!template && !template.categoryId;
+  const languagePool = projectOwnsLanguages ? IM_LANGUAGE_CODES : templateLangs;
+  const languageOptions = IM_TEMPLATE_LANGUAGE_OPTIONS.filter(o => languagePool.includes(o.code));
+
+  // Persist a membership + order pair. `next` is the wanted set (any order); membership is
+  // stored canonically (English implicit) and the PM's existing custom order is preserved
+  // for surviving languages, with newly added ones appended ("then others").
+  const setRequiredLanguages = (next: string[]) => {
+    const enabled = orderIMLanguages(next, languagePool);
+    handleInputChange('__required_languages', JSON.stringify(enabled.filter(l => l !== 'en')));
+    const kept = requiredLanguages.filter(l => enabled.includes(l));
+    const order = [...kept, ...enabled.filter(l => !kept.includes(l))];
+    handleInputChange('__language_order', JSON.stringify(order));
+    if (!order.includes(activeLang)) setActiveLang('en');
+  };
+
   const toggleRequiredLanguage = (code: string) => {
     if (code === 'en') return; // English is always required (source/fallback).
-    const next = requiredLanguages.includes(code)
+    setRequiredLanguages(requiredLanguages.includes(code)
       ? requiredLanguages.filter(l => l !== code)
-      : [...requiredLanguages, code];
-    // Store the explicit non-English subset; English stays implicit.
-    handleInputChange('__required_languages', JSON.stringify(templateLangs.filter(l => l !== 'en' && next.includes(l))));
-    // Newly added languages land at the END of the custom order ("then others"); a
-    // removed language is simply dropped from the stored order along with membership.
-    handleInputChange('__language_order', JSON.stringify(next));
-    if (!next.includes(activeLang)) setActiveLang('en');
+      : [...requiredLanguages, code]);
+  };
+
+  const openLangModal = () => {
+    if (locked) return; // manual is FINAL — unlock first
+    setLangDraft(requiredLanguages);
+    setIsLangModalOpen(true);
+  };
+
+  const handleSaveProjectLanguages = () => {
+    setRequiredLanguages(langDraft);
+    setIsLangModalOpen(false);
   };
 
   // Move a required language up/down in the custom display/publish order. Persists
@@ -4022,6 +4056,54 @@ const ProjectIMGenerator: React.FC = () => {
          </div>
        )}
 
+       {/* MANUAL LANGUAGES — same picker as the category template editor's "Manual Languages",
+           scoped to what this project may publish (see languagePool). Membership only; the
+           order lives in the Required Languages list behind it. */}
+       {isLangModalOpen && (
+         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+             <div className="flex justify-between items-center mb-4">
+               <h3 className="font-bold text-lg flex items-center gap-2"><Globe size={18} className="text-indigo-500" /> Manual Languages</h3>
+               <button onClick={() => setIsLangModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+             </div>
+             <p className="text-xs text-muted mb-4">
+               Choose which languages this manual must be published in. Each one gets its own tab on every
+               content row, and Publish/Print produce one manual per language. English is always included.
+               {!projectOwnsLanguages && ' The list comes from this category’s template.'}
+             </p>
+             <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
+               {languageOptions.map(l => {
+                 const checked = l.code === 'en' || langDraft.includes(l.code);
+                 const isEn = l.code === 'en';
+                 return (
+                   <label key={l.code} className={`flex items-center gap-2 text-sm p-2 rounded border transition-colors ${checked ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'} ${isEn ? 'cursor-default' : 'cursor-pointer'}`}>
+                     <input
+                       type="checkbox"
+                       className="rounded accent-indigo-600"
+                       checked={checked}
+                       disabled={isEn}
+                       onChange={e => setLangDraft(prev => e.target.checked ? [...prev, l.code] : prev.filter(c => c !== l.code))}
+                     />
+                     <span className={isEn ? 'text-gray-500' : ''}>{l.label}</span>
+                     {isEn && <span className="ml-auto text-[10px] text-gray-400 uppercase tracking-wide">required</span>}
+                   </label>
+                 );
+               })}
+             </div>
+             {/* A newly added language starts empty: say so here rather than letting the
+                 pre-publish checklist be the first mention. */}
+             <p className="mt-3 text-[11px] leading-relaxed text-gray-400">
+               A language you add starts empty — use <strong className="font-semibold text-gray-500">Translate project content</strong> to fill
+               it from English, or type into its tab. Publish flags anything still missing.
+             </p>
+             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-4">
+               <button onClick={() => setIsLangModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+               <button onClick={handleSaveProjectLanguages} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700">Save Languages</button>
+             </div>
+           </div>
+         </div>
+       )}
+
        {/* TRANSLATIONS */}
        {isTranslateModalOpen && (
          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -4423,7 +4505,7 @@ const ProjectIMGenerator: React.FC = () => {
 
                        {/* REQUIRED LANGUAGES — which template languages this project produces, and in
                            what order (drives the editor tabs, publish, and print-export language list). */}
-                       {templateLangs.length > 1 && (
+                       {languagePool.length > 1 && (
                          <div className="border-b border-gray-100 pb-6">
                            <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-sm">
                              <Globe size={14} className="text-indigo-500" /> Required Languages
@@ -4466,21 +4548,32 @@ const ProjectIMGenerator: React.FC = () => {
                                );
                              })}
                            </div>
-                           {templateLangs.some(c => !requiredLanguages.includes(c)) && (
-                             <>
-                               <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Add a language</p>
-                               <div className="flex flex-wrap gap-1.5">
-                                 {templateLangs.filter(c => !requiredLanguages.includes(c)).map(code => (
-                                   <button
-                                     key={code}
-                                     type="button"
-                                     onClick={() => toggleRequiredLanguage(code)}
-                                     title="Click to include"
-                                     className="px-2.5 py-1 rounded text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 hover:border-gray-400"
-                                   >+ {code.toUpperCase()}</button>
-                                 ))}
-                               </div>
-                             </>
+                           <div className="flex flex-wrap items-center gap-2">
+                             {/* One-click chips only when the pool is a short, curated list (a category
+                                 template's own languages). The canonical 22 would just be alphabetical
+                                 noise — that case goes through the modal. */}
+                             {!projectOwnsLanguages && languagePool.filter(c => !requiredLanguages.includes(c)).map(code => (
+                               <button
+                                 key={code}
+                                 type="button"
+                                 onClick={() => toggleRequiredLanguage(code)}
+                                 title="Click to include"
+                                 className="px-2.5 py-1 rounded text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 hover:border-gray-400"
+                               >+ {code.toUpperCase()}</button>
+                             ))}
+                             <button
+                               type="button"
+                               onClick={openLangModal}
+                               className="flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                             ><Plus size={12} /> Add languages…</button>
+                           </div>
+                           {/* Says WHERE a language that isn't on offer comes from, so the dead end
+                               of "the one I need isn't listed" has an answer on screen. */}
+                           {!projectOwnsLanguages && (
+                             <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+                               This manual follows its category template, so it can only use the {templateLangs.length} language(s)
+                               that template declares. To offer another, add and translate it in the category template first.
+                             </p>
                            )}
                          </div>
                        )}

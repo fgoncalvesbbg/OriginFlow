@@ -58,3 +58,26 @@ export const IM_LANGUAGE_TABS = IM_LANGUAGES.map(l => ({ code: l.code, label: l.
 export const IM_LANGUAGE_NAMES: Record<string, string> = Object.fromEntries(
   IM_LANGUAGES.map(l => [l.code, l.name]),
 );
+
+/** Every language code a manual may be authored in, in canonical order (English first). */
+export const IM_LANGUAGE_CODES: string[] = IM_LANGUAGES.map(l => l.code);
+
+/**
+ * Normalize a language selection to the canonical list: IM_LANGUAGES order, duplicates
+ * and unknown codes dropped, English always included (it is the source/fallback).
+ *
+ * THE one rule for turning a set of picked languages into a stored language list — the
+ * template Languages modal, the post-translate "enable new languages" tails and the
+ * per-project required-language picker all go through here, so a template's and a
+ * project's list can never disagree on membership or order. Unknown codes are dropped
+ * rather than passed through: a code outside IM_LANGUAGES has no print-header entry
+ * (see im-print-html.ts) and would publish a manual nothing can label.
+ *
+ * `pool` narrows the result to a subset — a project bound to a CATEGORY template may
+ * only pick from the languages that template declares, because template section content
+ * exists in no others.
+ */
+export const orderIMLanguages = (codes: string[], pool: string[] = IM_LANGUAGE_CODES): string[] => {
+  const allowed = new Set(pool);
+  return IM_LANGUAGE_CODES.filter(c => c === 'en' || (allowed.has(c) && codes.includes(c)));
+};

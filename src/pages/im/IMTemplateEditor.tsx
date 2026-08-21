@@ -37,7 +37,7 @@ import { RegulatoryCheckModal } from './IMRegulatoryCheckModal';
 import { TemplateChecklistModal, loadTemplateChecklistProgress } from './IMTemplateChecklist';
 import type { ChecklistSummary } from '../../services';
 
-import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
+import { IM_TEMPLATE_LANGUAGE_OPTIONS as ALL_LANGUAGES, orderIMLanguages } from '../../config/im-languages';
 
 const SECTION_LAYOUT_OPTIONS: { value: IMMasterLayoutName; label: string }[] = [
   { value: 'chapter', label: 'Chapter' },
@@ -1161,8 +1161,8 @@ const IMTemplateEditor: React.FC = () => {
 
   const handleSaveLanguages = async () => {
     if (!template) return;
-    // English is always included; keep the canonical ALL_LANGUAGES ordering.
-    const ordered = ALL_LANGUAGES.map(l => l.code).filter(c => c === 'en' || langDraft.includes(c));
+    // English is always included; canonical ordering (shared with the per-project picker).
+    const ordered = orderIMLanguages(langDraft);
     setSaving(true);
     try {
       await updateIMTemplate(template.id, { languages: ordered, lastUpdatedBy: user?.name });
@@ -1380,7 +1380,7 @@ const IMTemplateEditor: React.FC = () => {
       // Enable every newly-translated language on the template in one write.
       const newLangs = targets.filter(t => !templateLanguages.includes(t));
       if (newLangs.length) {
-        const ordered = ALL_LANGUAGES.map(l => l.code).filter(c => c === 'en' || templateLanguages.includes(c) || newLangs.includes(c));
+        const ordered = orderIMLanguages([...templateLanguages, ...newLangs]);
         try {
           await updateIMTemplate(template.id, { languages: ordered, lastUpdatedBy: user?.name });
           setTemplateLanguages(ordered);
@@ -1668,7 +1668,7 @@ const IMTemplateEditor: React.FC = () => {
       // tail behavior handleTranslate already has for the AI path.
       const newLangs = report.targets.filter(t => !templateLanguages.includes(t) && (report.okByLang[t] ?? 0) > 0);
       if (newLangs.length) {
-        const ordered = ALL_LANGUAGES.map(l => l.code).filter(c => c === 'en' || templateLanguages.includes(c) || newLangs.includes(c));
+        const ordered = orderIMLanguages([...templateLanguages, ...newLangs]);
         try {
           await updateIMTemplate(template.id, { languages: ordered, lastUpdatedBy: user?.name });
           setTemplateLanguages(ordered);
@@ -1798,10 +1798,6 @@ const IMTemplateEditor: React.FC = () => {
      );
   };
 
-  if (loading) return <Layout><div>Loading...</div></Layout>;
-  if (!template) return <Layout><div>Template not found.</div></Layout>;
-
-  const currentSection = sections.find(s => s.id === selectedSectionId);
   /**
    * Save one section edited from the regulatory-check report.
    *
@@ -1814,6 +1810,11 @@ const IMTemplateEditor: React.FC = () => {
     setSections(prev => prev.map(s => (s.id === updated.id ? updated : s)));
     return persistSections([updated]);
   }, [persistSections]);
+
+  if (loading) return <Layout><div>Loading...</div></Layout>;
+  if (!template) return <Layout><div>Template not found.</div></Layout>;
+
+  const currentSection = sections.find(s => s.id === selectedSectionId);
 
   const availableLangsForTabs = ALL_LANGUAGES.filter(l => templateLanguages.includes(l.code));
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));

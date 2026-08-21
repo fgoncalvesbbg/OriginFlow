@@ -11,6 +11,7 @@
 
 import { auth, db, storage, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
+import { IM_LANGUAGE_CODES, orderIMLanguages } from '../../config/im-languages';
 import {
   IMTemplate,
   IMSection,
@@ -74,10 +75,25 @@ export const normalizeResolverData = (
 };
 
 /**
- * The languages a project actually produces — a subset of the template's, English
- * always included. Stored per project as `__required_languages`; absent = all
- * template languages, in the template's own order. Shared by publish, the print
- * export, and the staleness check so they all agree.
+ * The languages a project actually produces, English always included. Stored per
+ * project as `__required_languages`; absent = all template languages, in the
+ * template's own order. Shared by publish, the print export, and the staleness
+ * check so they all agree.
+ *
+ * WHO OWNS THE LANGUAGE SET
+ * -------------------------
+ * A project on a CATEGORY template can only NARROW that template's list: the section
+ * content it renders exists solely in the languages the template declares, so adding
+ * one there would publish English prose under a foreign language label. Add it in the
+ * category template (and translate it) first.
+ *
+ * A project on the shared BLANK template (`categoryId` null — no category, no sections;
+ * see getOrCreateBlankTemplate) is the opposite case: every fragment it renders is
+ * project-authored (extraSections/overrides/additions), so the PROJECT owns its language
+ * set and `__required_languages` is authoritative, not a subset. Without this the blank
+ * template's stock `languages: ['en']` clipped every project bound to it to English
+ * alone — including the list a project-based import had just declared — and its editor
+ * offered no language to add.
  *
  * Display/output ORDER is a separate, optional preference — `__language_order`
  * (e.g. "German, English, French, Italian, then others") — so a project can
@@ -91,13 +107,16 @@ export const getProjectRequiredLanguages = (
   placeholderData: Record<string, string>,
 ): string[] => {
   const templateLangs = template.languages?.length ? template.languages : ['en'];
+  // Category-less = the shared blank template: all content is project-authored, so the
+  // project may pick any canonical language, not just the ones the template lists.
+  const pool = template.categoryId ? templateLangs : IM_LANGUAGE_CODES;
 
   let enabled = templateLangs;
   try {
     const raw = placeholderData?.['__required_languages'];
     if (raw) {
       const arr = JSON.parse(raw) as string[];
-      const filtered = templateLangs.filter((l) => l === 'en' || arr.includes(l));
+      const filtered = orderIMLanguages(Array.isArray(arr) ? arr : [], pool);
       if (filtered.length) enabled = filtered;
     }
   } catch { /* fall through to all template languages */ }

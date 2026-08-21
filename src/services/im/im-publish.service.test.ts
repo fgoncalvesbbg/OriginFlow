@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeResolverData, findVerbatimViolations } from './im-publish.service';
+import { normalizeResolverData, findVerbatimViolations, getProjectRequiredLanguages } from './im-publish.service';
 import type { ResolvedManual, TranslationVerbatim } from '../../types';
 
 // normalizeResolverData bridges the generator's persisted key shape (secvis_<sectionId>,
@@ -112,5 +112,70 @@ describe('findVerbatimViolations', () => {
       [verbatim('Keep out of reach of children.', { de: 'Von Kindern fernhalten.' })],
     );
     expect(out).toEqual([]);
+  });
+});
+
+// getProjectRequiredLanguages decides which languages publish, print export and the
+// staleness check all produce. The category/blank split is the load-bearing part: a
+// category-template project may only narrow its template's list (its section content
+// exists in no other language), while a project on the shared BLANK template authors
+// every fragment itself and therefore owns its own language set.
+describe('getProjectRequiredLanguages', () => {
+  const categoryTemplate = (languages: string[]) =>
+    ({ id: 't1', categoryId: 'cat-1', templateType: 'im', name: 'T', languages, isFinalized: false }) as any;
+  const blankTemplate = (languages: string[] = ['en']) =>
+    ({ id: 't0', categoryId: null, templateType: 'im', name: 'Blank Standardized Template', languages, isFinalized: false }) as any;
+
+  it('defaults to every template language, in template order', () => {
+    expect(getProjectRequiredLanguages(categoryTemplate(['en', 'de', 'fr']), {})).toEqual(['en', 'de', 'fr']);
+  });
+
+  it('narrows a category-template project to the stored subset, English implicit', () => {
+    const out = getProjectRequiredLanguages(categoryTemplate(['en', 'de', 'fr', 'it']), {
+      __required_languages: JSON.stringify(['de', 'it']),
+    });
+    expect(out).toEqual(['en', 'de', 'it']);
+  });
+
+  it('refuses a language the category template does not have', () => {
+    // 'pl' has no template content; publishing it would emit English prose under a
+    // Polish label. It must be added to the category template first.
+    const out = getProjectRequiredLanguages(categoryTemplate(['en', 'de']), {
+      __required_languages: JSON.stringify(['de', 'pl']),
+    });
+    expect(out).toEqual(['en', 'de']);
+  });
+
+  it('lets a blank-template project pick languages the template never listed', () => {
+    // The regression this exists for: the shared blank template ships languages:['en'],
+    // which used to clip a project-based import back to English alone.
+    const out = getProjectRequiredLanguages(blankTemplate(), {
+      __required_languages: JSON.stringify(['de', 'fr']),
+    });
+    // Canonical IM_LANGUAGES order (English first, then alphabetical by English name),
+    // not the order they were stored in — that is what __language_order is for.
+    expect(out).toEqual(['en', 'fr', 'de']);
+  });
+
+  it('drops codes outside the canonical language list', () => {
+    // A code with no IM_LANGUAGES entry has no print header and would publish unlabelled.
+    const out = getProjectRequiredLanguages(blankTemplate(), {
+      __required_languages: JSON.stringify(['de', 'klingon']),
+    });
+    expect(out).toEqual(['en', 'de']);
+  });
+
+  it('applies the stored custom order to a blank-template selection', () => {
+    const out = getProjectRequiredLanguages(blankTemplate(), {
+      __required_languages: JSON.stringify(['de', 'fr', 'it']),
+      __language_order: JSON.stringify(['de', 'en', 'fr']),
+    });
+    // Custom order first, remaining enabled languages appended ("then others").
+    expect(out).toEqual(['de', 'en', 'fr', 'it']);
+  });
+
+  it('falls back to all template languages on unparseable stored values', () => {
+    expect(getProjectRequiredLanguages(categoryTemplate(['en', 'de']), { __required_languages: '{oops' }))
+      .toEqual(['en', 'de']);
   });
 });
