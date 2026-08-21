@@ -465,8 +465,13 @@ export const RegulatoryCheckModal: React.FC<Props> = ({
               </div>
               <p className="text-[11px] text-gray-400 mt-2">{progress?.label}</p>
               <p className="text-[11px] text-gray-400 mt-3">
-                Each regulation is reviewed part by part. A part that fails is reported in the
-                result rather than losing the whole run.
+                Each regulation is reviewed part by part on the server, so this takes minutes
+                rather than seconds. A part that fails is reported in the result rather than
+                losing the whole run.
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                Keep this tab open. You can close this dialog — the run carries on and the
+                finished report appears under Past checks.
               </p>
             </div>
           ) : (

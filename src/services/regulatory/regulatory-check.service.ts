@@ -1,5 +1,6 @@
 /**
- * Client for the server-side AI regulatory check (netlify/functions/regulatory-check.ts).
+ * Client for the server-side AI regulatory check
+ * (supabase/functions/regulatory-check/index.ts).
  *
  * One run audits ONE template's English content against every regulation assigned to
  * it, and stores an immutable report in `im_regulatory_checks`. The Anthropic key lives
@@ -26,13 +27,21 @@
  *    `freezeVerbatims` cannot match would create an entry that looks protective while
  *    translation rewrites the text anyway.
  *
- * Like translation, this needs the Netlify Functions runtime: plain `vite` does not
- * serve it, so the first 404 latches and every later call fails fast with a message
- * saying to run `netlify dev`.
+ * The model call runs as a SUPABASE EDGE FUNCTION, not a Netlify function. A synchronous
+ * Netlify invocation is capped at 10 s by default (~26 s at best) and one claude-opus-5
+ * call over a regulation summary does not fit — the first real 8-regulation run failed all
+ * 16 units with bodyless 502s, the gateway killing every invocation. A Supabase Edge
+ * Function has a wall-clock budget in the low hundreds of seconds, and awaiting the
+ * Anthropic API costs almost no CPU time, so plain request/response works and no background
+ * queue or polling is needed.
+ *
+ * Being a deployed edge function, it is reachable from `npm start` as well as from the
+ * built site — unlike the translate proxy, which needs `netlify dev`. A 404 still latches,
+ * because it means the function was never deployed and every later call would 404 too.
  */
 
 import { auth, db, withDeadline, orEmpty, type Row } from '../../data';
-import { isLive } from '../../config/environment.config';
+import { APP_CONFIG, isLive } from '../../config/environment.config';
 import type {
   IMBlock,
   IMSection,
@@ -57,20 +66,38 @@ import {
 } from './regulatory-serialize';
 
 const TAG = '[regulatory]';
-const ENDPOINT = '/.netlify/functions/regulatory-check';
+/**
+ * The deployed edge function. Built from the configured project URL rather than through
+ * the data port: `src/data` deliberately owns table access, and this is an HTTP endpoint
+ * that happens to be hosted alongside the database. Nothing here imports a driver SDK, so
+ * the boundary test in src/data/boundary.test.ts still holds.
+ */
+const ENDPOINT = `${APP_CONFIG.supabaseUrl}/functions/v1/regulatory-check`;
 const READ_TIMEOUT_MS = 15000;
 
 /**
- * Per-call abort. Below Netlify's ~26 s synchronous ceiling on purpose: a straggler
- * becomes a `failures[]` entry with a clear message instead of an opaque gateway error.
+ * Per-call abort, sized for an edge function rather than the old ~26 s Netlify ceiling:
+ * one claude-opus-5 call with extended thinking over a regulation summary routinely takes
+ * a minute. Kept near the platform's own wall-clock limit so a straggler becomes a
+ * `failures[]` entry with a clear message rather than an opaque gateway error.
  */
-const CALL_TIMEOUT_MS = 24_000;
+const CALL_TIMEOUT_MS = 150_000;
 
-/** Concurrent in-flight calls. Two, not more: each is a large-context reasoning
- *  request, and extra parallelism mostly buys 529s. */
+/**
+ * Concurrent in-flight calls. Two, not more: each is a large-context reasoning request
+ * that occupies an edge invocation for a minute or so, and extra parallelism mostly buys
+ * 429/529s from the model API.
+ */
 const CONCURRENCY = 2;
 
 const TRANSIENT_STATUSES = new Set([408, 502, 503, 504, 529]);
+
+/**
+ * Statuses a hosting gateway emits for an invocation it killed or could not run. When one
+ * of these arrives WITHOUT a JSON body it is not our function talking, and retrying it is
+ * pointless — a call that blew the time limit will blow it again.
+ */
+const GATEWAY_STATUSES = new Set([502, 504]);
 const MAX_ATTEMPTS = 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -78,9 +105,9 @@ const SEVERITY_RANK: Record<string, number> = { critical: 0, major: 1, minor: 2,
 
 let endpointMissing = false;
 const ENDPOINT_MISSING_MESSAGE =
-  'Regulatory check service not found (404). It runs as a Netlify function — run the app ' +
-  'with `netlify dev` locally (plain `vite`/`npm run start` does not serve functions), or ' +
-  'use the deployed site.';
+  'Regulatory check service not found (404). It runs as a Supabase Edge Function — deploy ' +
+  'it with `supabase functions deploy regulatory-check`, and set its key with ' +
+  '`supabase secrets set ANTHROPIC_API_KEY=...`.';
 
 /** Reset the 404 latch. Test-only seam; production never needs it. */
 export const __resetRegCheckEndpointLatch = (): void => { endpointMissing = false; };
@@ -175,13 +202,20 @@ const callCheck = async (
   body: Record<string, unknown>,
   token: string,
 ): Promise<RegulatoryCheckResponse> => {
+  const startedAt = Date.now();
   for (let attempt = 1; ; attempt++) {
     if (endpointMissing) throw new Error(ENDPOINT_MISSING_MESSAGE);
     let res: Response;
     try {
       res = await fetch(ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          // The user's session authorizes the call; the anon key identifies the project to
+          // the edge gateway. Both are required.
+          Authorization: `Bearer ${token}`,
+          apikey: APP_CONFIG.supabaseAnonKey,
+        },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
@@ -204,18 +238,35 @@ const callCheck = async (
       endpointMissing = true;
       throw new Error(ENDPOINT_MISSING_MESSAGE);
     }
-    if (TRANSIENT_STATUSES.has(res.status) && attempt < MAX_ATTEMPTS) {
+    // A bodyless gateway 502/504 is a time limit, not a blip: retrying turns one dead
+    // unit into three, and a full run into minutes of waiting for nothing. Peek at the
+    // body to tell the two apart before deciding to retry.
+    const bodyText = await res.text().catch(() => '');
+    const looksLikeGatewayKill = GATEWAY_STATUSES.has(res.status) && !bodyText.includes('"error"');
+    if (TRANSIENT_STATUSES.has(res.status) && attempt < MAX_ATTEMPTS && !looksLikeGatewayKill) {
       const wait = 1000 * 3 ** (attempt - 1); // 1s, 3s
       console.warn(TAG, `transient ${res.status} — retrying in ${wait / 1000}s (attempt ${attempt}/${MAX_ATTEMPTS})`);
       await sleep(wait);
       continue;
     }
+    // The function ALWAYS answers with JSON, so a 502/504 carrying no parseable `error`
+    // did not come from it: that is the hosting platform reporting an invocation it killed
+    // or could not run. Saying "failed (502)" for that sent us hunting through regulation
+    // content for a problem that was a wall-clock limit, so the two are worded differently.
     let message = `Regulatory check failed (${res.status})`;
+    let fromFunction = false;
     try {
-      const err = await res.json();
-      if (err?.error) message = err.error;
+      const err = JSON.parse(bodyText);
+      if (err?.error) { message = err.error; fromFunction = true; }
     } catch {
-      // non-JSON body — keep the status-based message
+      // non-JSON body — a gateway page, not our handler
+    }
+    if (!fromFunction && GATEWAY_STATUSES.has(res.status)) {
+      message =
+        `The server killed this check after about ${Math.round((Date.now() - startedAt) / 1000)}s ` +
+        `(HTTP ${res.status}, no response body). That is the edge function's time limit, not a ` +
+        `problem with the regulation — the template chunk or the regulation summary is too ` +
+        `large for one call.`;
     }
     throw new Error(message);
   }

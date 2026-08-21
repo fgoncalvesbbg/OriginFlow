@@ -37,6 +37,7 @@ import {
   getRegulationUsageCounts,
   updateRegulation,
   summaryByteLength,
+  parseRegulationNotes,
   MAX_SUMMARY_BYTES,
   SUMMARY_WARN_BYTES,
   RegulationInUseError,
@@ -46,6 +47,12 @@ import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
 const kb = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} kB`;
+
+/**
+ * Bullets shown on a card before the rest collapse into a count. The cards sit in a
+ * grid, so an unbounded list would leave one column far taller than its neighbours.
+ */
+const CARD_NOTE_LIMIT = 4;
 
 interface Draft extends RegulationInput {
   id?: string;
@@ -80,6 +87,7 @@ const RegulationEditor: React.FC<EditorProps> = ({
   const [showPreview, setShowPreview] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
+  const noteLines = parseRegulationNotes(draft.notes);
   const summaryBytes = draft.summaryMd ? summaryByteLength(draft.summaryMd) : 0;
   const tooBig = summaryBytes > MAX_SUMMARY_BYTES;
   const large = summaryBytes > SUMMARY_WARN_BYTES && !tooBig;
@@ -172,10 +180,26 @@ const RegulationEditor: React.FC<EditorProps> = ({
             <textarea
               value={draft.notes ?? ''}
               onChange={(e) => onChange({ ...draft, notes: e.target.value })}
-              rows={2}
-              placeholder="Scope, edition, amendments — anything a reviewer should know."
+              rows={4}
+              placeholder={'Scope, edition, amendments — anything a reviewer should know.\n'
+                + 'Applies to built-in models only\n'
+                + 'Annex IV is out of scope for this family'}
               className="w-full text-sm border rounded px-2 py-1.5 mt-1"
             />
+            <p className="text-[11px] text-gray-400 mt-1">
+              One per line — each line becomes a bullet on the card. A pasted
+              &ldquo;-&rdquo; or &ldquo;*&rdquo; list works as-is.
+            </p>
+            {noteLines.length > 1 && (
+              <ul className="mt-2 space-y-0.5 bg-light border rounded p-2">
+                {noteLines.map((line, i) => (
+                  <li key={i} className="text-[11px] text-gray-600 flex gap-1.5">
+                    <span className="text-gray-400 shrink-0">&bull;</span>
+                    <span className="min-w-0 break-words">{line}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Markdown summary */}
@@ -510,7 +534,34 @@ export const RegulationLibraryContent: React.FC = () => {
               </p>
             )}
 
-            {r.notes && <p className="text-[11px] text-gray-400 mt-2 line-clamp-2">{r.notes}</p>}
+            {/* One line stays a plain paragraph — a single-item bullet list reads oddly,
+                and every note written before bullets existed is a single line. */}
+            {(() => {
+              const lines = parseRegulationNotes(r.notes);
+              if (lines.length === 0) return null;
+              if (lines.length === 1) {
+                return <p className="text-[11px] text-gray-400 mt-2 line-clamp-2">{lines[0]}</p>;
+              }
+              const shown = lines.slice(0, CARD_NOTE_LIMIT);
+              const hidden = lines.length - shown.length;
+              return (
+                <div className="mt-2">
+                  <ul className="space-y-0.5">
+                    {shown.map((line, i) => (
+                      <li key={i} className="text-[11px] text-gray-500 flex gap-1.5">
+                        <span className="text-gray-300 shrink-0">&bull;</span>
+                        <span className="min-w-0 break-words line-clamp-2">{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {hidden > 0 && (
+                    <p className="text-[10px] text-gray-400 mt-1 pl-3" title={lines.join('\n')}>
+                      +{hidden} more
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {isAdmin && (
               <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-100">

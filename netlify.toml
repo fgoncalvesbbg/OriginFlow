@@ -11,7 +11,12 @@
   framework = "#custom"
 
 # Server-side functions (PDF render, supplier file signed-URL issuer, IM
-# translation proxy, Markup.io review upload). These read secrets from the
+# translation proxy, Markup.io review upload).
+# NOTE: the AI regulatory check is deliberately NOT here — it lives in
+# supabase/functions/regulatory-check because one claude-opus-5 call over a regulation
+# summary cannot finish inside the synchronous limit these functions run under (10s by
+# default, ~26s at best; see functions/lib/print-render-shared.ts). Moving it back would
+# reintroduce that timeout. These read secrets from the
 # Netlify site environment (server-only — do NOT use a VITE_ prefix):
 #   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  — storage + data access
 #   ANTHROPIC_API_KEY                          — translate.ts (IM AI translation)

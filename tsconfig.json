@@ -26,5 +26,8 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": ["node_modules", "dist", "netlify"]
+  // `netlify` and `supabase` hold server-side code with their own runtimes (Node and
+  // Deno). Deno globals and npm: specifiers are not resolvable here, so they are
+  // typechecked separately, not by the app project.
+  "exclude": ["node_modules", "dist", "netlify", "supabase"]
 }

@@ -22,8 +22,8 @@
 --                  template's category_id. Derived at read time; NO ROW EXISTS.
 --
 -- Resolved in src/services/regulatory/regulation-assignment.service.ts, and enforced
--- again server-side in netlify/functions/regulatory-check.ts, which must accept both
--- forms or it would 403 every category-derived regulation.
+-- again server-side in supabase/functions/regulatory-check/index.ts, which must accept
+-- both forms or it would 403 every category-derived regulation.
 --
 -- ACCEPTED COSTS, recorded so they are not rediscovered as bugs:
 --   * A check can run against a regulation nobody attached to that specific template.
@@ -46,5 +46,23 @@ COMMENT ON COLUMN public.im_template_regulations.regulation_id IS
 
 COMMENT ON TABLE public.im_template_regulations IS
   'EXPLICIT per-template regulation assignments. Not the whole picture since migration 116: a template also answers for every ACTIVE regulation whose applicable_categories contains its category_id, derived at read time with no row here. An explicit row wins over the derived entry for the same regulation, because it is the one that can carry a scope note.';
+
+-- The check moved off Netlify to a Supabase Edge Function (a synchronous Netlify
+-- invocation is capped at 10s by default and one claude-opus-5 call over a regulation
+-- summary does not fit; see supabase/functions/regulatory-check/README.md). Migration 115
+-- baked the old path into ai_prompts.description, which is the text an admin reads in the
+-- Prompts tab, so it is corrected here.
+--
+-- ONLY `description` is touched: `system_prompt`, `model` and `max_tokens` are the
+-- admin-tunable payload and must never be overwritten by a migration. The WHERE clause
+-- also skips a description someone has since rewritten.
+UPDATE public.ai_prompts
+   SET description = replace(
+         description,
+         'netlify/functions/regulatory-check.ts',
+         'supabase/functions/regulatory-check/index.ts'),
+       updated_at = NOW()
+ WHERE key = 'im_regulatory_check'
+   AND description LIKE '%netlify/functions/regulatory-check.ts%';
 
 NOTIFY pgrst, 'reload schema';

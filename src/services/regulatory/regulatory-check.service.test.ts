@@ -52,7 +52,11 @@ vi.mock('../../data', async () => {
   };
 });
 
-vi.mock('../../config/environment.config', () => ({ isLive: true }));
+vi.mock('../../config/environment.config', () => ({
+  isLive: true,
+  // The service builds the edge-function URL from these.
+  APP_CONFIG: { supabaseUrl: 'https://test.supabase.co', supabaseAnonKey: 'anon-key' },
+}));
 
 // The IM barrel pulls in the whole module graph; only these two reads are used.
 vi.mock('../im', () => ({
@@ -144,10 +148,26 @@ const okResponse = (body: Partial<Record<string, unknown>> = {}) => ({
   }),
 });
 
-const errorResponse = (status: number, error = 'boom') => ({
+const errorResponse = (status: number, error = 'boom') => {
+  const body = JSON.stringify({ error });
+  return {
+    ok: false,
+    status,
+    text: () => Promise.resolve(body),
+    json: () => Promise.resolve({ error }),
+  };
+};
+
+/**
+ * A hosting-gateway failure: our function never ran, so there is no JSON body. This is
+ * what a killed invocation actually looks like to the browser, and it is what an entire
+ * 8-regulation run returned before the check moved off Netlify.
+ */
+const gatewayResponse = (status: number, body = '<html>Bad Gateway</html>') => ({
   ok: false,
   status,
-  json: () => Promise.resolve({ error }),
+  text: () => Promise.resolve(body),
+  json: () => Promise.reject(new SyntaxError('Unexpected token <')),
 });
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -184,6 +204,16 @@ describe('runRegulatoryCheck — work units', () => {
       expect(body.chunkCount).toBe(2);
       expect(JSON.stringify(body)).not.toMatch(/summary/i);
     }
+  });
+
+  it('calls the deployed edge function, with both the session token and the anon key', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(okResponse()));
+    await runRegulatoryCheck({ template, sections: [], assignments: [assignment('reg-1', 'X')] });
+    const [url, init] = fetchMock.mock.calls[0] as any;
+    expect(url).toBe('https://test.supabase.co/functions/v1/regulatory-check');
+    expect(init.headers.Authorization).toBe('Bearer test-token');
+    // Without the anon key the edge gateway rejects the request before the handler runs.
+    expect(init.headers.apikey).toBe('anon-key');
   });
 
   it('sends the bearer token on every call', async () => {
@@ -279,19 +309,54 @@ describe('runRegulatoryCheck — partial failure', () => {
     expect(run.status).toBe('complete');
   });
 
-  it('latches on a 404 so a later run fails fast with no further fetches', async () => {
+  it('does not retry a bodyless gateway 502 — a time limit will just recur', async () => {
+    // The whole-run failure that moved this off Netlify: 16 units x 3 doomed attempts is
+    // minutes of waiting to learn nothing, and "failed (502)" pointed at the wrong thing.
+    fetchMock.mockImplementation(() => Promise.resolve(gatewayResponse(502)));
+    const run = await runRegulatoryCheck({
+      template, sections: [], assignments: [assignment('reg-1', 'A')],
+    });
+    expect(run.status).toBe('failed');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(run.report.failures[0].error).toMatch(/time limit/i);
+    expect(run.report.failures[0].error).not.toMatch(/^Regulatory check failed/);
+  });
+
+  it('still retries a 502 that carries a real error body', async () => {
+    let attempts = 0;
+    fetchMock.mockImplementation(() => {
+      attempts++;
+      return Promise.resolve(attempts < 3 ? errorResponse(502, 'upstream hiccup') : okResponse());
+    });
+    const run = await runRegulatoryCheck({
+      template, sections: [], assignments: [assignment('reg-1', 'A')],
+    });
+    expect(attempts).toBe(3);
+    expect(run.status).toBe('complete');
+  });
+
+  it("surfaces the function's own error message when it reports one", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(
+      errorResponse(422, 'has no Markdown summary uploaded')));
+    const run = await runRegulatoryCheck({
+      template, sections: [], assignments: [assignment('reg-1', 'A')],
+    });
+    expect(run.report.failures[0].error).toBe('has no Markdown summary uploaded');
+  });
+
+  it('tells the operator to deploy the function when it 404s, and latches', async () => {
     fetchMock.mockImplementation(() => Promise.resolve(errorResponse(404, 'nope')));
     const first = await runRegulatoryCheck({
       template, sections: [], assignments: [assignment('reg-1', 'A')],
     });
     expect(first.status).toBe('failed');
-    expect(first.report.failures[0].error).toMatch(/netlify dev/);
+    expect(first.report.failures[0].error).toMatch(/supabase functions deploy/);
 
     const callsAfterFirst = fetchMock.mock.calls.length;
     const second = await runRegulatoryCheck({
       template, sections: [], assignments: [assignment('reg-1', 'A')],
     });
-    expect(second.report.failures[0].error).toMatch(/netlify dev/);
+    expect(second.report.failures[0].error).toMatch(/supabase functions deploy/);
     // Nothing further hit the network.
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });

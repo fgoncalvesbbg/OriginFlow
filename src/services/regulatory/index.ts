@@ -26,6 +26,8 @@ export {
   isDerivedAssignmentId,
 } from './regulation-assignment.service';
 
+export { parseRegulationNotes } from './regulation-notes';
+
 export {
   buildRegCheckDocument,
   runRegulatoryCheck,
