@@ -18,7 +18,7 @@ import {
     getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
     checkMarkupReviewStatus, isMarkupReviewAvailable,
     getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
-    getTemplateChecklistState, summarizeChecklist
+    getTemplateChecklistState, summarizeChecklist, groupChecklistByRegulation
 } from '../../services';
 import type { ChecklistItem, ChecklistItemState, ChecklistItemStatus } from '../../services';
 import type { ProjectIMBackup } from '../../services';
@@ -45,13 +45,16 @@ import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
 import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
-import { PREVIEW_SECTION_ATTR, findPreviewSection, previewScrollTopFor } from './project-im-generator/preview-scroll.utils';
+import { PREVIEW_SECTION_ATTR, findPreviewSection, findByDataAttr, previewScrollTopFor } from './project-im-generator/preview-scroll.utils';
+import { FILL_ANCHOR_ATTR, fillAnchors, type PublishIssue } from './project-im-generator/publish-issues';
+import PublishReviewPanel from './project-im-generator/PublishReviewPanel';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { Badge } from '../../components/common/Badge';
 import { OptionalContentPanel, IncludeModeControl, modeOf, type OptionalContentItem } from './project-im-generator/OptionalContentPanel';
 import { BindableField } from './project-im-generator/BindableField';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import PipelineStepper, { type PipelineStep } from './project-im-generator/PipelineStepper';
+import type { TemplateRegulation } from '../../types';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 
 // The full set of editable, persisted state captured in a crash-safe local draft. Mirrors
@@ -167,9 +170,24 @@ const ProjectIMGenerator: React.FC = () => {
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
-  // Pre-publish checklist: populated when the user clicks Publish and something is
-  // missing, so they can review before confirming (or cancel and fix).
-  const [checklist, setChecklist] = useState<{ blocking: string[]; values: string[]; slots: string[]; conditionsNoData: string[]; translations: { lang: string; items: string[] }[] } | null>(null);
+  // Pre-publish review panel (see PublishReviewPanel): docked beside the editor rather than
+  // modal, because every row in it is a pointer into the editor and the list has to survive
+  // being acted on. `armed` = opened by pressing Publish, so the panel carries the go/no-go
+  // footer; opened from the preview toolbar it is a review list with no publish decision.
+  const [reviewPanel, setReviewPanel] = useState<{ armed: boolean } | null>(null);
+  const [reviewCollapsed, setReviewCollapsed] = useState(false);
+  // The row last jumped from, kept marked so a long list doesn't lose the operator's place.
+  const [activeIssueKey, setActiveIssueKey] = useState<string | null>(null);
+  // A requested jump into the "Fill values" form. Held in state rather than done inline: the
+  // click that produced it may also have switched the editor tab or language, so the target
+  // is usually not in the DOM until a later frame (see the retry effect below).
+  const [pendingJump, setPendingJump] = useState<{ anchor: string; tries: number } | null>(null);
+  const [flashAnchor, setFlashAnchor] = useState<string | null>(null);
+  // A translation gap the operator asked to fix: the chapter AND the language, so the inline
+  // rows in that chapter open on that language instead of their own English default.
+  const [translationFocus, setTranslationFocus] = useState<{ sectionId: string; lang: string; token: number } | null>(null);
+  const flashAnchorTimerRef = useRef<number | null>(null);
+  const fillScrollRef = useRef<HTMLDivElement>(null);
   // "Already up to date" guard: set when Publish is clicked but the published output would be
   // identical to what's already live. Carries the prior artifacts to show instead of republishing.
   const [noChangesPrompt, setNoChangesPrompt] = useState<{ manifestUrl: string | null; lastRender: PrintRender | null } | null>(null);
@@ -557,6 +575,9 @@ const ProjectIMGenerator: React.FC = () => {
   // round trip -- and a failure to load leaves the checklist empty rather than standing
   // between a finished manual and its publish.
   const [regChecklist, setRegChecklist] = useState<ChecklistItem[]>([]);
+  // The assignments the items were built from — the review panel groups by regulation, and
+  // only the assignment carries the citation and title to head each group with.
+  const [regAssignments, setRegAssignments] = useState<TemplateRegulation[]>([]);
   const [regChecklistState, setRegChecklistState] = useState<Record<string, ChecklistItemState>>({});
   const [regChecklistBusy, setRegChecklistBusy] = useState<string | null>(null);
   const [regChecklistError, setRegChecklistError] = useState('');
@@ -567,7 +588,7 @@ const ProjectIMGenerator: React.FC = () => {
   const [regTemplateState, setRegTemplateState] = useState<Record<string, ChecklistItemState>>({});
 
   useEffect(() => {
-      if (!template?.id || !projectId) { setRegChecklist([]); setRegChecklistState({}); setRegTemplateState({}); return; }
+      if (!template?.id || !projectId) { setRegChecklist([]); setRegAssignments([]); setRegChecklistState({}); setRegTemplateState({}); return; }
       let alive = true;
       Promise.all([
           getTemplateRegulations(template.id, template.categoryId),
@@ -577,6 +598,7 @@ const ProjectIMGenerator: React.FC = () => {
           .then(([assignments, state, templateState]) => {
               if (!alive) return;
               setRegChecklist(buildTemplateChecklist(assignments));
+              setRegAssignments(assignments);
               setRegChecklistState(state);
               setRegTemplateState(templateState);
           })
@@ -585,6 +607,9 @@ const ProjectIMGenerator: React.FC = () => {
   }, [template?.id, template?.categoryId, projectId, templateType]);
 
   const regChecklistSummary = summarizeChecklist(regChecklist, regChecklistState);
+  // The same items, split by the regulation that imposes them — how a reviewer reads a
+  // checklist. Derived rather than stored: the grouping is a view of `regAssignments`.
+  const regChecklistGroups = groupChecklistByRegulation(regAssignments);
 
   /**
    * Record or clear one item's decision. Written immediately (there is no Save button in
@@ -1059,9 +1084,47 @@ const ProjectIMGenerator: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorMode, selectedContentSectionId]);
 
-  // Never leave the flash timer pending past unmount.
+  /**
+   * Bring the "Fill values" form to a `data-fill-anchor` and flash it — the landing half of a
+   * click in the pre-publish review panel (see PublishReviewPanel, publish-issues.ts).
+   *
+   * Retried across frames rather than scrolled straight away: the same click usually switched
+   * the editor tab, so the target is not mounted yet. And the form renders inputs for the
+   * ACTIVE language only while the review is computed from English, so an anchor that stays
+   * missing is most likely one this language does not produce — hence the single fall back to
+   * English before giving up. Giving up is silent by design: the tab has already changed, which
+   * is most of what the click was for.
+   */
+  useEffect(() => {
+    if (!pendingJump) return;
+    const raf = requestAnimationFrame(() => {
+      const scroller = fillScrollRef.current;
+      const target = scroller ? findByDataAttr(scroller, FILL_ANCHOR_ATTR, pendingJump.anchor) : null;
+      if (scroller && target) {
+        const reduceMotion = typeof window !== 'undefined'
+          && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        scroller.scrollTo({
+          top: previewScrollTopFor(scroller, target),
+          behavior: reduceMotion ? 'auto' : 'smooth',
+        });
+        setFlashAnchor(pendingJump.anchor);
+        if (flashAnchorTimerRef.current) window.clearTimeout(flashAnchorTimerRef.current);
+        flashAnchorTimerRef.current = window.setTimeout(() => setFlashAnchor(null), 1600);
+        setPendingJump(null);
+        return;
+      }
+      if (pendingJump.tries >= 3) { setPendingJump(null); return; }
+      if (pendingJump.tries === 1) setActiveLang('en');
+      setPendingJump({ anchor: pendingJump.anchor, tries: pendingJump.tries + 1 });
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingJump, editorMode, activeLang]);
+
+  // Never leave a flash timer pending past unmount.
   useEffect(() => () => {
     if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    if (flashAnchorTimerRef.current) window.clearTimeout(flashAnchorTimerRef.current);
   }, []);
 
   // Keep the active language tab on a language this project actually produces. Runs once
@@ -2960,21 +3023,36 @@ const ProjectIMGenerator: React.FC = () => {
     });
   };
 
-  // --- Pre-publish checklist ---------------------------------------------------
-  // Surfaces what's missing before publishing: unfilled input values + required
-  // SKU slots (both shared across languages), and per-language content gaps
-  // (sections/rows/blocks that have English content but no translation). Returns
-  // empty arrays when everything is complete.
-  const buildPublishChecklist = () => {
-    const blocking: string[] = [];
-    const values: string[] = [];
-    const slots: string[] = [];
+  // --- Pre-publish issues ------------------------------------------------------
+  // What is missing, as structured issues that each know WHERE they are fixed (see
+  // publish-issues.ts): unfilled input values and required SKU slots (both shared across
+  // languages), conditional chapters the data leaves out, and per-language content gaps.
+  // Rebuilt on every render while the review panel is open, so an item disappears as soon
+  // as it is fixed instead of going stale behind the operator's back.
+  const buildPublishIssues = (): PublishIssue[] => {
+    const issues: PublishIssue[] = [];
     const seen = new Set<string>();
 
     // Hard requirement: an IM must be bound to at least one SKU (and the project must have one).
     const boundCount = boundSkuIds.length ? projectSkus.filter(s => boundSkuIds.includes(s.id)).length : projectSkus.length;
-    if (projectSkus.length === 0) blocking.push('This project has no SKUs. Add at least one SKU, then bind it to this manual.');
-    else if (boundCount === 0) blocking.push('No SKU is bound to this manual. Select at least one in “Bound SKUs”.');
+    if (projectSkus.length === 0) {
+      issues.push({
+        key: 'blocking:no-project-sku',
+        kind: 'blocking',
+        label: 'This project has no SKUs.',
+        detail: 'Add at least one SKU to the project, then bind it to this manual.',
+        // Fixed on the project page, not in this editor — the panel renders it as plain text.
+        target: null,
+      });
+    } else if (boundCount === 0) {
+      issues.push({
+        key: 'blocking:no-bound-sku',
+        kind: 'blocking',
+        label: 'No SKU is bound to this manual.',
+        detail: 'Select at least one under “Bound SKUs”.',
+        target: { pane: 'fill', anchor: fillAnchors.skuBinding },
+      });
+    }
 
     for (const section of orderedSections) {
       if (!isSectionEffectivelyVisible(section)) continue;
@@ -2985,20 +3063,40 @@ const ProjectIMGenerator: React.FC = () => {
         if (it.kind === 'condition' && !it.always) continue; // visibility toggles, not required values
         if (seen.has(it.id)) continue;
         seen.add(it.id);
-        if (!(formData[it.id] || submittedAttrValues[it.id])) values.push(`${it.label} — ${secTitle}`);
+        if (!(formData[it.id] || submittedAttrValues[it.id])) {
+          issues.push({
+            key: `value:${it.id}`,
+            kind: 'value',
+            label: it.label || it.id,
+            sectionTitle: secTitle,
+            target: { pane: 'fill', anchor: fillAnchors.value(it.id) },
+          });
+        }
       }
       for (const tok of attrTokens) {
         if (seen.has(tok)) continue;
         seen.add(tok);
         if (!(formData[tok] || submittedAttrValues[tok])) {
           const attr = allAttributes.find(a => a.id === tok);
-          values.push(`${attr?.name ?? tok} — ${secTitle}`);
+          issues.push({
+            key: `value:${tok}`,
+            kind: 'value',
+            label: attr?.name ?? tok,
+            sectionTitle: secTitle,
+            target: { pane: 'fill', anchor: fillAnchors.value(tok) },
+          });
         }
       }
       // Required SKU slots.
       for (const ref of (section.blockRefs ?? [])) {
         if (ref.kind === 'sku_slot' && ref.required && !skuContent[ref.slot]) {
-          slots.push(`${ref.label?.en ?? ref.slot} — ${secTitle}`);
+          issues.push({
+            key: `slot:${section.id}:${ref.slot}`,
+            kind: 'slot',
+            label: ref.label?.en ?? ref.slot,
+            sectionTitle: secTitle,
+            target: { pane: 'fill', anchor: fillAnchors.slot(ref.slot) },
+          });
         }
       }
     }
@@ -3006,46 +3104,103 @@ const ProjectIMGenerator: React.FC = () => {
     // Conditional chapters whose attribute has no value and no explicit Include/Exclude
     // choice: they are LEFT OUT of the published output (resolver rule). Listed here so a
     // missing supplier value can never silently drop a chapter the operator expected.
-    const conditionsNoData: string[] = [];
     for (const section of orderedSections) {
       if (!section.conditionFeatureId || section.conditionFeatureId === 'manual' || !section.conditionLabel) continue;
       if (sectionVisibility[section.id] !== undefined) continue; // explicit choice made
       const v = formData[section.conditionFeatureId] ?? submittedAttrValues[section.conditionFeatureId];
       if (v === undefined) {
         const attr = allAttributes.find(a => a.id === section.conditionFeatureId);
-        conditionsNoData.push(`${localizedSectionTitle(section, 'en')} — “${attr?.name ?? section.conditionFeatureId}” has no value yet (chapter left out)`);
+        issues.push({
+          key: `cond:${section.id}`,
+          kind: 'condition',
+          label: localizedSectionTitle(section, 'en'),
+          detail: `“${attr?.name ?? section.conditionFeatureId}” has no value yet — the chapter is left out`,
+          target: { pane: 'fill', anchor: fillAnchors.condition(section.id) },
+        });
       }
     }
 
     // Per-language content gaps: anything authored in English but blank in another
     // REQUIRED language (non-required languages aren't part of this project's manual).
-    const otherLangs = requiredLanguages.filter(l => l !== 'en');
-    const translations: { lang: string; items: string[] }[] = [];
-    for (const lang of otherLangs) {
+    // Keyed by chapter rather than by title, so each row can open THAT chapter in THAT
+    // language — which is the only place the gap can be closed.
+    for (const lang of requiredLanguages.filter(l => l !== 'en')) {
       const missing = new Set<string>();
       for (const section of orderedSections) {
         if (!isSectionEffectivelyVisible(section)) continue;
-        const secTitle = localizedSectionTitle(section, 'en');
         const refs = sectionOverrides[section.id] ?? section.blockRefs ?? [];
         const hasInlineRef = refs.some(r => r.kind === 'inline');
         if (!hasInlineRef && section.content['en']?.trim() && !section.content[lang]?.trim()) {
-          missing.add(secTitle);
+          missing.add(section.id);
         }
         refs.forEach((ref, i) => {
           if ((ref.kind === 'inline' || ref.kind === 'block') && !isRefVisible(section.id, i, ref)) return;
           if (ref.kind === 'inline') {
-            if ((ref as any).content?.['en']?.trim() && !(ref as any).content?.[lang]?.trim()) missing.add(secTitle);
+            if ((ref as any).content?.['en']?.trim() && !(ref as any).content?.[lang]?.trim()) missing.add(section.id);
           } else if (ref.kind === 'block') {
             const blk = availableBlocks[(ref as any).block_id];
-            if (blk?.content['en']?.trim() && !blk.content[lang]?.trim()) missing.add(secTitle);
+            if (blk?.content['en']?.trim() && !blk.content[lang]?.trim()) missing.add(section.id);
           }
         });
       }
-      if (missing.size) translations.push({ lang, items: [...missing] });
+      for (const sectionId of missing) {
+        const section = orderedSections.find(s => s.id === sectionId);
+        issues.push({
+          key: `tr:${lang}:${sectionId}`,
+          kind: 'translation',
+          lang,
+          label: section ? localizedSectionTitle(section, 'en') : sectionId,
+          target: { pane: 'content', sectionId, lang },
+        });
+      }
     }
 
-    return { blocking, values, slots, conditionsNoData, translations };
+    return issues;
   };
+
+  /**
+   * Act on a click in the review panel: put the editor on the thing the issue is about.
+   *
+   * A translation gap goes to the "Add content" tab with that chapter selected AND that
+   * language active — both, because editing the chapter in English would not close the gap.
+   * Everything else lives in the "Fill values" form and is reached by its anchor (see the
+   * retry effect up with the hooks).
+   */
+  const jumpToIssue = (issue: PublishIssue) => {
+    setActiveIssueKey(issue.key);
+    const target = issue.target;
+    if (!target) return;
+    if (target.pane === 'content') {
+      setActiveLang(target.lang);
+      setEditorMode('content');
+      setSelectedContentSectionId(target.sectionId);
+      setTranslationFocus(prev => ({
+        sectionId: target.sectionId,
+        lang: target.lang,
+        token: (prev?.token ?? 0) + 1,
+      }));
+      return;
+    }
+    setEditorMode('fill');
+    setPendingJump({ anchor: target.anchor, tries: 0 });
+  };
+
+  /**
+   * Language the inline rows of the chapter on screen should open on, when the review panel
+   * sent the operator here to fill it. Undefined for any other chapter, so a row's own
+   * language tab keeps working the way it always has.
+   */
+  const focusRowLang = translationFocus && translationFocus.sectionId === selectedContentSectionId
+    ? translationFocus.lang
+    : undefined;
+
+  /** Marks an element in the "Fill values" form as a jump target for the review panel. */
+  const fillAnchorProps = (anchor: string) => ({ [FILL_ANCHOR_ATTR]: anchor });
+
+  /** Classes that flash a jump target briefly after landing on it, so the eye finds it. */
+  const fillFlashCls = (anchor: string) =>
+    flashAnchor === anchor ? ' rounded-lg ring-2 ring-indigo-400 ring-offset-2 transition-shadow' : '';
+
 
   // Publish entry point. If the manual is already published and nothing changed since
   // (no unsaved edits + the published content hashes still match a re-resolve), don't
@@ -3076,18 +3231,19 @@ const ProjectIMGenerator: React.FC = () => {
     proceedToChecklist();
   };
 
-  // Checklist step (2nd stage of Publish): if anything's missing (or blocked), show it
-  // for review; otherwise publish straight away.
+  // Review step (2nd stage of Publish): if anything's missing (or blocked), hand the publish
+  // over to the docked review panel; otherwise publish straight away.
   //
-  // An undecided regulatory checklist item opens the dialog too -- that IS the pre-publish
+  // An undecided regulatory checklist item opens the panel too -- that IS the pre-publish
   // review, and it would be pointless to add a checklist nobody is ever shown. Once every
-  // item is decided the dialog stops appearing for that reason, so re-publishing a manual
-  // whose checklist is settled is still one click.
+  // item is decided the panel stops opening for that reason, so re-publishing a manual whose
+  // checklist is settled is still one click.
   const proceedToChecklist = () => {
-    const result = buildPublishChecklist();
+    const issues = buildPublishIssues();
     const regOpen = summarizeChecklist(regChecklist, regChecklistState).open;
-    if (result.blocking.length || result.values.length || result.slots.length || result.conditionsNoData.length || result.translations.length || regOpen > 0) {
-      setChecklist(result);
+    if (issues.length || regOpen > 0) {
+      setReviewPanel({ armed: true });
+      setReviewCollapsed(false);
     } else {
       handleGenerate();
     }
@@ -3213,6 +3369,8 @@ const ProjectIMGenerator: React.FC = () => {
         onChange={opts.onChange}
         onVariantChange={opts.onVariant}
         enableTranslate
+        focusLang={focusRowLang}
+        focusToken={translationFocus?.token}
       />
     </div>
   );
@@ -3452,6 +3610,8 @@ const ProjectIMGenerator: React.FC = () => {
                         onChange={(lang, html) => updateBlockOverride(section.id, blockOverrideKeyInUse(section.id, i, ref), lang, html)}
                         onVariantChange={(v) => setBlockOverrideVariant(section.id, blockOverrideKeyInUse(section.id, i, ref), v)}
                         enableTranslate
+                        focusLang={focusRowLang}
+                        focusToken={translationFocus?.token}
                       />
                     </div>
                   ) : (
@@ -3622,6 +3782,9 @@ const ProjectIMGenerator: React.FC = () => {
   const previewVersion = (instance?.version ?? 0) + 1;
 
   const completion = calculateCompletion(activeLang);
+  // Live pre-publish issues. Computed once per render and shared, so the count on the
+  // pipeline's "Content" step and the rows in the review panel can never disagree.
+  const publishIssues = buildPublishIssues();
 
   return (
     <Layout>
@@ -3838,177 +4001,6 @@ const ProjectIMGenerator: React.FC = () => {
        )}
 
        {/* PRE-PUBLISH CHECKLIST */}
-       {checklist && (
-         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] flex flex-col">
-             <h3 className="font-bold text-lg mb-1 flex items-center gap-2"><AlertCircle size={18} className="text-amber-500" /> Before you publish</h3>
-             <p className="text-sm text-muted mb-4">
-               {checklist.blocking.length > 0
-                 ? 'This manual can’t be published yet — resolve the blocking items below.'
-                 : checklist.values.length + checklist.slots.length + checklist.conditionsNoData.length + checklist.translations.length === 0
-                   ? 'Everything looks complete. Confirm the regulatory checklist below — ticking is optional, and you can publish either way.'
-                   : 'Some items look incomplete. Review them below — you can fix them first or publish anyway.'}
-             </p>
-             <div className="overflow-y-auto space-y-4 pr-1">
-               {checklist.blocking.length > 0 && (
-                 <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                   <div className="text-xs font-bold uppercase tracking-wide text-rose-700 mb-1.5">Must fix before publishing</div>
-                   <ul className="space-y-1">
-                     {checklist.blocking.map((v, i) => (
-                       <li key={i} className="text-sm text-rose-800 flex items-start gap-2"><AlertCircle size={14} className="text-rose-500 mt-0.5 shrink-0" /> {v}</li>
-                     ))}
-                   </ul>
-                 </div>
-               )}
-               {/* REGULATORY CHECKLIST (migration 119) — the items every regulation applying to
-                   this template obliges a person to verify by hand. Advisory by design: an
-                   unticked box records that nobody confirmed it, and never blocks the publish,
-                   because a checklist that blocks only teaches people to tick everything. */}
-               {regChecklist.length > 0 && (
-                 <div className="border border-emerald-200 rounded-lg overflow-hidden">
-                   <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border-b border-emerald-200">
-                     <div className="text-xs font-bold uppercase tracking-wide text-emerald-800 flex items-center gap-1.5">
-                       <CheckSquare size={13} /> Regulatory checklist
-                     </div>
-                     <div className="text-[10px] font-semibold text-emerald-700">
-                       {regChecklistSummary.done} confirmed
-                       {regChecklistSummary.na > 0 && <> · {regChecklistSummary.na} n/a</>}
-                       {regChecklistSummary.open > 0
-                         ? <> · {regChecklistSummary.open} to review</>
-                         : <> · all {regChecklistSummary.total} decided</>}
-                     </div>
-                   </div>
-                   <p className="text-[11px] text-muted px-3 pt-2">
-                     From the regulations that apply to this template. Optional — an unticked item
-                     just records that nobody confirmed it.
-                   </p>
-                   <ul className="divide-y divide-gray-100 mt-1">
-                     {regChecklist.map(item => {
-                       const decided = regChecklistState[item.key];
-                       const busy = regChecklistBusy === item.key;
-                       const done = decided?.status === 'done';
-                       const na = decided?.status === 'na';
-                       return (
-                         <li key={item.key} className="flex items-start gap-2 px-3 py-2">
-                           <button
-                             onClick={() => setChecklistDecision(item.key, done ? null : 'done')}
-                             disabled={busy}
-                             title={done ? 'Clear this confirmation' : 'Mark as taken into account'}
-                             className="shrink-0 mt-0.5 disabled:opacity-40"
-                           >
-                             {busy
-                               ? <Loader2 size={15} className="animate-spin text-gray-400" />
-                               : done
-                                 ? <CheckSquare size={15} className="text-emerald-600" />
-                                 : <Square size={15} className={na ? 'text-gray-300' : 'text-gray-400'} />}
-                           </button>
-                           <div className="min-w-0 flex-1">
-                             <p className={`text-sm ${na ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                               {item.text}
-                             </p>
-                             <p className="text-[10px] text-gray-400 mt-0.5">
-                               <span className="font-mono">{item.regulationReferences.join(' · ')}</span>
-                               {decided && (
-                                 <>
-                                   {' — '}
-                                   {done ? 'confirmed' : 'not applicable'}
-                                   {decided.updatedBy ? ` by ${decided.updatedBy}` : ''}
-                                 </>
-                               )}
-                             </p>
-                             {/* Provenance, not inheritance: the template author's decision
-                                 is shown, never applied. */}
-                             {regTemplateState[item.key] && (
-                               <p className="text-[10px] text-gray-400 italic">
-                                 Template: {regTemplateState[item.key].status === 'done'
-                                   ? 'covered'
-                                   : 'not applicable'}
-                                 {regTemplateState[item.key].updatedBy
-                                   ? ` — ${regTemplateState[item.key].updatedBy}`
-                                   : ''}
-                               </p>
-                             )}
-                           </div>
-                           <button
-                             onClick={() => setChecklistDecision(item.key, na ? null : 'na')}
-                             disabled={busy}
-                             title={na ? 'This item applies after all' : 'Not applicable to this manual'}
-                             className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border disabled:opacity-40 ${
-                               na
-                                 ? 'bg-gray-100 text-gray-600 border-gray-300'
-                                 : 'text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300'
-                             }`}
-                           >
-                             N/A
-                           </button>
-                         </li>
-                       );
-                     })}
-                   </ul>
-                   {regChecklistError && (
-                     <p className="text-[11px] text-rose-700 bg-rose-50 border-t border-rose-200 px-3 py-1.5">
-                       {regChecklistError}
-                     </p>
-                   )}
-                 </div>
-               )}
-               {checklist.values.length > 0 && (
-                 <div>
-                   <div className="text-xs font-bold uppercase tracking-wide text-rose-600 mb-1.5">Missing values ({checklist.values.length})</div>
-                   <ul className="space-y-1">
-                     {checklist.values.map((v, i) => (
-                       <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><Square size={14} className="text-rose-400 mt-0.5 shrink-0" /> {v}</li>
-                     ))}
-                   </ul>
-                 </div>
-               )}
-               {checklist.slots.length > 0 && (
-                 <div>
-                   <div className="text-xs font-bold uppercase tracking-wide text-violet-600 mb-1.5">Required SKU content ({checklist.slots.length})</div>
-                   <ul className="space-y-1">
-                     {checklist.slots.map((v, i) => (
-                       <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><Square size={14} className="text-violet-400 mt-0.5 shrink-0" /> {v}</li>
-                     ))}
-                   </ul>
-                 </div>
-               )}
-               {checklist.conditionsNoData.length > 0 && (
-                 <div>
-                   <div className="text-xs font-bold uppercase tracking-wide text-orange-600 mb-1.5">Chapters left out — condition has no data ({checklist.conditionsNoData.length})</div>
-                   <p className="text-xs text-muted mb-1.5">These chapters will NOT be in the published manual. Fill the attribute value, or force-include them under Chapter Conditions.</p>
-                   <ul className="space-y-1">
-                     {checklist.conditionsNoData.map((v, i) => (
-                       <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><EyeOff size={14} className="text-orange-400 mt-0.5 shrink-0" /> {v}</li>
-                     ))}
-                   </ul>
-                 </div>
-               )}
-               {checklist.translations.map(t => (
-                 <div key={t.lang}>
-                   <div className="text-xs font-bold uppercase tracking-wide text-amber-600 mb-1.5">Missing {t.lang.toUpperCase()} translation ({t.items.length})</div>
-                   <ul className="space-y-1">
-                     {t.items.map((v, i) => (
-                       <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><Globe size={14} className="text-amber-400 mt-0.5 shrink-0" /> {v}</li>
-                     ))}
-                   </ul>
-                 </div>
-               ))}
-             </div>
-             <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-gray-100">
-               <button onClick={() => setChecklist(null)} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel & fix</button>
-               <button
-                 onClick={() => { setChecklist(null); handleGenerate(); }}
-                 disabled={checklist.blocking.length > 0}
-                 title={checklist.blocking.length > 0 ? 'Resolve the blocking items first' : undefined}
-                 className="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-               >{checklist.values.length + checklist.slots.length + checklist.conditionsNoData.length + checklist.translations.length + checklist.blocking.length === 0
-                   ? 'Publish'
-                   : 'Publish anyway'}</button>
-             </div>
-           </div>
-         </div>
-       )}
-
        {/* DAILY BACKUPS — one snapshot per day, last 3 days, restored into the editor. */}
        {showBackups && (
          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -4337,8 +4329,8 @@ const ProjectIMGenerator: React.FC = () => {
                clickable to its action. Derivations use only data this page already has
                (plus the three async pipeline signals fetched above). */}
            {(() => {
-             const checklist = buildPublishChecklist();
-             const contentIssues = checklist.blocking.length + checklist.values.length + checklist.slots.length + checklist.conditionsNoData.length;
+             // Translations have their own step below, so "Content" counts everything else.
+             const contentIssues = publishIssues.filter(i => i.kind !== 'translation').length;
              const published = instance?.status === 'generated';
              const inReview = !!instance && isInReview(instance);
              const reviewDone = inReview && instance?.reviewDone === true;
@@ -4349,8 +4341,10 @@ const ProjectIMGenerator: React.FC = () => {
                  key: 'content', label: 'Content',
                  state: contentIssues === 0 ? 'done' : 'todo',
                  detail: contentIssues > 0 ? `${contentIssues} open item${contentIssues === 1 ? '' : 's'}` : undefined,
-                 title: contentIssues > 0 ? 'Open the checklist of missing values / slots / conditions' : 'All values, slots and conditions are filled',
-                 onClick: contentIssues > 0 ? () => setChecklist(checklist) : undefined,
+                 title: contentIssues > 0 ? 'Open the review panel — missing values, SKU content and dropped chapters' : 'All values, slots and conditions are filled',
+                 onClick: contentIssues > 0
+                   ? () => { setReviewPanel(prev => prev ?? { armed: false }); setReviewCollapsed(false); }
+                   : undefined,
                },
                otherRequiredLangs.length === 0
                  ? { key: 'translation', label: 'Translation', state: 'skipped', detail: 'EN only', title: 'This manual only produces English' }
@@ -4448,7 +4442,7 @@ const ProjectIMGenerator: React.FC = () => {
                        </div>
                    </div>
                    {editorMode === 'fill' && (
-                   <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                   <div ref={fillScrollRef} className="flex-1 overflow-y-auto p-6 space-y-8">
 
                        {/* COVER PAGE CONFIG */}
                        <div className="border-b border-gray-100 pb-6">
@@ -4468,7 +4462,7 @@ const ProjectIMGenerator: React.FC = () => {
                        </div>
 
                        {/* BOUND SKUs — the project SKUs this manual covers (drives attribute resolution) */}
-                       <div className="border-b border-gray-100 pb-6">
+                       <div {...fillAnchorProps(fillAnchors.skuBinding)} className={`border-b border-gray-100 pb-6${fillFlashCls(fillAnchors.skuBinding)}`}>
                          <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-sm">
                            <Boxes size={14} className="text-indigo-500" /> Bound SKUs
                          </h4>
@@ -4615,7 +4609,7 @@ const ProjectIMGenerator: React.FC = () => {
                                const autoVisible = autoResult === null ? false : autoResult;
                                const contrary = override !== undefined && override !== autoVisible;
                                return (
-                                 <div key={s.id} className={`px-3 py-2.5 ${visible ? '' : 'bg-gray-50/60'}`}>
+                                 <div key={s.id} {...fillAnchorProps(fillAnchors.condition(s.id))} className={`px-3 py-2.5 ${visible ? '' : 'bg-gray-50/60'}${fillFlashCls(fillAnchors.condition(s.id))}`}>
                                    <div className="flex items-start gap-2">
                                      <div className="min-w-0 flex-1">
                                        <div className={`truncate text-xs font-semibold ${visible ? 'text-gray-800' : 'text-gray-500'}`}>
@@ -4721,7 +4715,7 @@ const ProjectIMGenerator: React.FC = () => {
                            if (items.length === 0 && attrTokens.length === 0 && !section.isPlaceholder && slotRefs.length === 0) return null;
 
                            return (
-                               <div key={section.id} className="border-b border-gray-100 pb-6 last:border-0">
+                               <div key={section.id} {...fillAnchorProps(fillAnchors.section(section.id))} className={`border-b border-gray-100 pb-6 last:border-0${fillFlashCls(fillAnchors.section(section.id))}`}>
                                    <div className="mb-4 flex items-center justify-between gap-2">
                                        <h4 className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-800">
                                            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-muted">Sec {section.order}</span>
@@ -4734,7 +4728,11 @@ const ProjectIMGenerator: React.FC = () => {
 
                                    <div className="space-y-5">
                                        {/* SKU slot forms */}
-                                       {slotRefs.map(ref => renderSkuSlotForm(ref))}
+                                       {slotRefs.map(ref => (
+                                         <div key={`slot-${ref.slot}`} {...fillAnchorProps(fillAnchors.slot(ref.slot))} className={fillFlashCls(fillAnchors.slot(ref.slot)).trim()}>
+                                           {renderSkuSlotForm(ref)}
+                                         </div>
+                                       ))}
 
                                        {/* Bound spec values ({{attribute}} tokens) — e.g. SKU, power.
                                            Auto-filled from supplier data; editable so PMs can verify/correct. */}
@@ -4742,8 +4740,8 @@ const ProjectIMGenerator: React.FC = () => {
                                            const attr = allAttributes.find(a => a.id === tok);
                                            const unit = attr?.validationRules?.unit ? ` ${attr.validationRules.unit}` : '';
                                            return (
+                                             <div key={`tok-${tok}`} {...fillAnchorProps(fillAnchors.value(tok))} className={fillFlashCls(fillAnchors.value(tok)).trim()}>
                                                <BindableField
-                                                   key={`tok-${tok}`}
                                                    label={attr?.name ?? tok}
                                                    badge={{ text: 'SPEC', className: 'bg-sky-100 text-sky-700' }}
                                                    unit={unit}
@@ -4757,6 +4755,7 @@ const ProjectIMGenerator: React.FC = () => {
                                                    onSetMode={(m) => setFieldMode(tok, m)}
                                                    onToggleAttr={(aid) => toggleFieldAttr(tok, aid)}
                                                />
+                                             </div>
                                            );
                                        })}
 
@@ -4764,7 +4763,7 @@ const ProjectIMGenerator: React.FC = () => {
                                            const isFilled = !!formData[item.id];
                                            const featName = item.featureId !== 'manual' ? (allAttributes.find(f => f.id === item.featureId)?.name || 'Unknown Attribute') : null;
                                            return (
-                                               <div key={`${item.id}-${idx}`} className="group">
+                                               <div key={`${item.id}-${idx}`} {...fillAnchorProps(fillAnchors.value(item.id))} className={`group${fillFlashCls(fillAnchors.value(item.id))}`}>
                                                    {item.kind === 'condition' && item.always ? (
                                                        <BindableField
                                                            label={featName || item.label}
@@ -4856,6 +4855,20 @@ const ProjectIMGenerator: React.FC = () => {
                              </button>
                            )}
 
+                           {/* PRE-PUBLISH REVIEW — the panel Publish opens, on demand: the gaps it
+                               lists are worth fixing while editing, not only at the gate. */}
+                           <button
+                             onClick={() => { setReviewPanel(prev => prev ?? { armed: false }); setReviewCollapsed(false); }}
+                             className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 font-medium transition-colors ${
+                               reviewPanel && !reviewCollapsed
+                                 ? 'bg-slate-100 text-gray-700 border-gray-300'
+                                 : 'bg-white text-gray-500 border-gray-200 hover:bg-light'
+                             }`}
+                             title="Open the pre-publish review — missing values, untranslated chapters and the regulatory checklist"
+                           >
+                             <CheckSquare size={12} /> Publish review
+                           </button>
+
                            {/* Language Selector */}
                            <div className="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs shadow">
                                <Globe size={12} className="text-gray-400"/>
@@ -4942,6 +4955,34 @@ const ProjectIMGenerator: React.FC = () => {
                        </div>
                    </div>
                </div>
+
+               {/* PRE-PUBLISH REVIEW — docked beside the editor, not over it: every row is a
+                   jump into the editor, so the list has to stay put while it is acted on.
+                   Issues are rebuilt on each render, so a fixed item leaves the list at once. */}
+               {reviewPanel && (
+                   <PublishReviewPanel
+                     typeLabel={typeLabel}
+                     issues={publishIssues}
+                     languageName={(code) => IM_LANGUAGE_NAMES[code] ?? code.toUpperCase()}
+                     collapsed={reviewCollapsed}
+                     onToggleCollapsed={() => setReviewCollapsed(c => !c)}
+                     onClose={() => setReviewPanel(null)}
+                     onJump={jumpToIssue}
+                     activeIssueKey={activeIssueKey}
+                     regulationGroups={regChecklistGroups}
+                     checklistState={regChecklistState}
+                     templateChecklistState={regTemplateState}
+                     checklistSummary={regChecklistSummary}
+                     checklistBusyKey={regChecklistBusy}
+                     checklistError={regChecklistError}
+                     onDecide={setChecklistDecision}
+                     armed={reviewPanel.armed}
+                     onPublish={() => { setReviewPanel(null); handleGenerate(); }}
+                     // Disarmed rather than closed: "not yet" means "let me fix these first",
+                     // and the list is what they need in order to do that.
+                     onCancelPublish={() => setReviewPanel({ armed: false })}
+                   />
+               )}
            </div>
 
            {/* Text Edit Modal */}

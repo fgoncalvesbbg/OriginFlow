@@ -32,6 +32,7 @@ export {
   parseRegulationChecklist,
   checklistItemKey,
   buildTemplateChecklist,
+  groupChecklistByRegulation,
   getChecklistState,
   setChecklistItemState,
   getTemplateChecklistState,
@@ -42,6 +43,7 @@ export type {
   ChecklistItem,
   ChecklistItemState,
   ChecklistItemStatus,
+  ChecklistRegulationGroup,
   ChecklistSummary,
 } from './regulation-checklist';
 

@@ -1539,6 +1539,18 @@ interface InlineHtmlRowProps {
    * chips (the edit modals need the attribute list). Absent = chips stay inert.
    */
   attributes?: CategoryAttribute[];
+  /**
+   * Language this row should open on because the operator was SENT here to fill it (a
+   * missing-translation row in the pre-publish review panel). Rows otherwise keep their own
+   * tab independently of the section-level language — see the note above — so this is applied
+   * only when a jump asks for it, never on every section-language change.
+   */
+  focusLang?: string;
+  /**
+   * Bumped by the caller on each jump, so asking for the SAME language twice re-points a row
+   * the operator has since tabbed away from.
+   */
+  focusToken?: number;
 }
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1546,8 +1558,8 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const placeholderChipRe = (id: string) =>
   new RegExp(`<span[^>]*class="[^"]*im-placeholder[^"]*"[^>]*data-id="${escapeRegExp(id)}"[^>]*>[^<]*</span>`, 'g');
 
-export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes }) => {
-  const [rowLang, setRowLang] = useState('en');
+export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes, focusLang, focusToken }) => {
+  const [rowLang, setRowLang] = useState(focusLang ?? 'en');
   const [translating, setTranslating] = useState(false);
   const [translateErr, setTranslateErr] = useState<string | null>(null);
   // English reference pane (shown while editing a translation). Open/closed is a
@@ -1560,6 +1572,10 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     try { localStorage.setItem('im-en-ref-open', next ? '1' : '0'); } catch { /* ignore */ }
     return next;
   });
+  // A jump that named a language (see focusLang) re-points this row at it.
+  useEffect(() => {
+    if (focusLang) setRowLang(focusLang);
+  }, [focusLang, focusToken]);
   // Click-to-edit modal state for existing chips (data + in-place replace callback).
   const [editPlaceholder, setEditPlaceholder] = useState<{ data: PlaceholderChipData; replace: (html: string) => void } | null>(null);
   const [editCondition, setEditCondition] = useState<{ data: ConditionChipData; replace: (html: string) => void } | null>(null);
@@ -2155,9 +2171,13 @@ interface InlineBlockEditorProps {
   onVariantChange: (variant: CalloutVariant | undefined) => void;
   /** Per-box AI translation: "Translate from EN" on non-English tabs, "Translate to all" on EN. */
   enableTranslate?: boolean;
+  /** Open the row on this language — see InlineHtmlRowProps.focusLang. */
+  focusLang?: string;
+  /** Bumped per jump, so the same language can be requested twice. */
+  focusToken?: number;
 }
 
-export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange, enableTranslate }) => {
+export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange, enableTranslate, focusLang, focusToken }) => {
   const [placeholderType, setPlaceholderType] = useState<'text' | 'image' | null>(null);
   const [conditionOpen, setConditionOpen] = useState(false);
 
@@ -2173,6 +2193,8 @@ export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, v
         onVariantChange={onVariantChange}
         enableTranslate={enableTranslate}
         attributes={attributes}
+        focusLang={focusLang}
+        focusToken={focusToken}
         onInsertPlaceholder={(type) => setPlaceholderType(type)}
         onInsertCondition={() => setConditionOpen(true)}
       />

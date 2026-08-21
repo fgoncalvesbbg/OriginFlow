@@ -5,9 +5,9 @@
  * The items are the combined checklist of every regulation that applies to the template
  * (see buildTemplateChecklist); ticking one here says "the template covers this". That is a
  * different claim from the per-manual confirmation the publisher makes in the generator's
- * publish dialog (migration 119), and neither is derived from the other — see
+ * pre-publish review panel (migration 119), and neither is derived from the other — see
  * src/services/regulatory/regulation-checklist.ts for why a tick must not cross that
- * boundary. The publish dialog shows this decision beside its own as context.
+ * boundary. The review panel shows this decision beside its own as context.
  *
  * ADVISORY, NEVER A GATE. Nothing here blocks finalizing a template. A checklist that
  * blocks release only teaches people to tick everything, at which point it records nothing.

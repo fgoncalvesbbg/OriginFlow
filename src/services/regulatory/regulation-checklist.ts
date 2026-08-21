@@ -3,7 +3,7 @@
  *
  * A regulation carries `checklist`: obligations a PERSON has to verify by hand, one per
  * line. Every regulation that applies to a template contributes its items to one combined
- * list, shown before a manual is published, where each item can be marked 'done' (taken
+ * list, shown in the pre-publish review panel, where each item can be marked 'done' (taken
  * into account) or 'na' (not applicable to this manual). Nothing here blocks a publish —
  * an unconfirmed item is information, and a checklist that blocks only teaches people to
  * tick everything.
@@ -124,6 +124,52 @@ export const buildTemplateChecklist = (assignments: TemplateRegulation[]): Check
   return [...byKey.values()];
 };
 
+/** One regulation and the checklist items it states, for a per-regulation rendering. */
+export interface ChecklistRegulationGroup {
+  regulationId: string;
+  /** Official citation, e.g. "(EU) 2019/2016" — the group heading. */
+  referenceCode: string;
+  title: string;
+  items: ChecklistItem[];
+}
+
+/**
+ * The same combined checklist as `buildTemplateChecklist`, but split by the regulation each
+ * item comes from — the shape a reviewer works in, because an obligation only means something
+ * next to the regulation that imposes it ("is the DoC enclosed?" is a different question under
+ * the Machinery Regulation than under RoHS).
+ *
+ * ITEM KEYS ARE UNCHANGED, and deliberately still merged across regulations: an item stated by
+ * two regulations appears in BOTH groups and shares one confirmation, so ticking it under one
+ * heading ticks it under the other. That is the point of content keying (see `checklistItemKey`)
+ * — the obligation is confirmed once, not once per citation — and the panel says so rather than
+ * letting the same row look independently unconfirmed.
+ *
+ * Regulations with no checklist items are omitted; a duplicated assignment (an explicit row plus
+ * the category-derived entry for the same regulation) collapses to one group.
+ */
+export const groupChecklistByRegulation = (
+  assignments: TemplateRegulation[],
+): ChecklistRegulationGroup[] => {
+  const items = buildTemplateChecklist(assignments);
+  const groups: ChecklistRegulationGroup[] = [];
+  const seen = new Set<string>();
+  for (const a of assignments) {
+    const reg = a.regulation;
+    if (!reg || seen.has(reg.id)) continue;
+    seen.add(reg.id);
+    const mine = items.filter(i => i.regulationIds.includes(reg.id));
+    if (!mine.length) continue;
+    groups.push({
+      regulationId: reg.id,
+      referenceCode: reg.referenceCode,
+      title: reg.title,
+      items: mine,
+    });
+  }
+  return groups;
+};
+
 const mapRow = (r: any): ChecklistItemState => ({
   status: r.status as ChecklistItemStatus,
   note: r.note ?? undefined,
@@ -195,7 +241,7 @@ export interface ChecklistSummary {
   complete: boolean;
 }
 
-/** Counts for the badge and the publish dialog. Pure. */
+/** Counts for the badge and the pre-publish review panel. Pure. */
 export const summarizeChecklist = (
   items: ChecklistItem[],
   state: Record<string, ChecklistItemState>,

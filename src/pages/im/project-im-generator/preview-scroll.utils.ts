@@ -1,5 +1,7 @@
 /**
- * Helpers for jumping the Live Preview pane to a specific chapter.
+ * Helpers for jumping a scrolling pane to a specific element — the Live Preview to a chapter,
+ * and (via `findByDataAttr` + `previewScrollTopFor`) the "Fill values" form to a field the
+ * pre-publish review panel points at.
  *
  * The preview marks every chapter it renders with `data-preview-section="<sectionId>"`. Only
  * chapters that survive their condition and SKU scope are rendered, so a lookup miss is
@@ -13,21 +15,29 @@ export const PREVIEW_SECTION_ATTR = 'data-preview-section';
 export const PREVIEW_SCROLL_MARGIN_PX = 24;
 
 /**
- * Find a rendered chapter inside the preview scroller.
+ * Find the first descendant of `scroller` whose `attr` equals `value`.
  *
- * Matches the attribute in JS rather than building an attribute selector: section ids come
- * from data and would otherwise need CSS escaping to be safe in a selector string.
+ * Matches the attribute in JS rather than building an attribute selector: the values are
+ * section ids, attribute ids and slot names straight from data, which would otherwise need
+ * CSS escaping to be safe inside a selector string.
  */
-export const findPreviewSection = (
+export const findByDataAttr = (
   scroller: HTMLElement,
-  sectionId: string,
+  attr: string,
+  value: string,
 ): HTMLElement | null => {
-  const candidates = scroller.querySelectorAll<HTMLElement>(`[${PREVIEW_SECTION_ATTR}]`);
+  const candidates = scroller.querySelectorAll<HTMLElement>(`[${attr}]`);
   for (const el of candidates) {
-    if (el.getAttribute(PREVIEW_SECTION_ATTR) === sectionId) return el;
+    if (el.getAttribute(attr) === value) return el;
   }
   return null;
 };
+
+/** Find a rendered chapter inside the preview scroller. */
+export const findPreviewSection = (
+  scroller: HTMLElement,
+  sectionId: string,
+): HTMLElement | null => findByDataAttr(scroller, PREVIEW_SECTION_ATTR, sectionId);
 
 /**
  * Scroll offset within `scroller` that brings `target` to the top, minus a small margin.

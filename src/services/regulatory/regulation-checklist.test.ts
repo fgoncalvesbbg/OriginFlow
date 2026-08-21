@@ -33,6 +33,7 @@ import {
   parseRegulationChecklist,
   checklistItemKey,
   buildTemplateChecklist,
+  groupChecklistByRegulation,
   getChecklistState,
   setChecklistItemState,
   getTemplateChecklistState,
@@ -149,6 +150,42 @@ describe('buildTemplateChecklist', () => {
       assignment(regulation({ id: 'r2', checklist: '   ' })),
       { ...assignment(regulation({ id: 'r3' })), regulation: undefined },
     ])).toEqual([]);
+  });
+});
+
+describe('groupChecklistByRegulation', () => {
+  it('heads each group with the regulation that imposes the items, in assignment order', () => {
+    const groups = groupChecklistByRegulation([
+      assignment(regulation({ id: 'r1', title: 'Ecodesign', referenceCode: 'A', checklist: 'First\nSecond' })),
+      assignment(regulation({ id: 'r2', title: 'RoHS', referenceCode: 'B', checklist: 'Third' })),
+    ]);
+    expect(groups.map((g) => [g.referenceCode, g.title, g.items.map((i) => i.text)])).toEqual([
+      ['A', 'Ecodesign', ['First', 'Second']],
+      ['B', 'RoHS', ['Third']],
+    ]);
+  });
+
+  it('lists a shared obligation under BOTH regulations, keeping the one shared item key', () => {
+    const groups = groupChecklistByRegulation([
+      assignment(regulation({ id: 'r1', referenceCode: 'A', checklist: 'WEEE symbol on the rating plate' })),
+      assignment(regulation({ id: 'r2', referenceCode: 'B', checklist: '- weee symbol on the rating plate.' })),
+    ]);
+    expect(groups).toHaveLength(2);
+    // One confirmation, shown twice — ticking it under A ticks it under B.
+    expect(groups[0].items[0].key).toBe(groups[1].items[0].key);
+    expect(groups[1].items[0].regulationReferences).toEqual(['A', 'B']);
+  });
+
+  it('omits regulations with nothing to confirm, and collapses a duplicated assignment', () => {
+    const shared = regulation({ id: 'r1', referenceCode: 'A', checklist: 'Only item' });
+    const groups = groupChecklistByRegulation([
+      assignment(shared),
+      assignment(shared, { id: 'derived:r1', source: 'category' }),
+      assignment(regulation({ id: 'r2', referenceCode: 'B', checklist: undefined })),
+      { ...assignment(regulation({ id: 'r3', referenceCode: 'C' })), regulation: undefined },
+    ]);
+    expect(groups.map((g) => g.referenceCode)).toEqual(['A']);
+    expect(groups[0].items).toHaveLength(1);
   });
 });
 
