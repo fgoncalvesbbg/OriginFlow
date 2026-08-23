@@ -22,7 +22,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, Check, ChevronRight, GitBranch, Minus, RotateCcw } from 'lucide-react';
+import { AlertCircle, Check, ChevronRight, EyeOff, GitBranch, Minus, RotateCcw } from 'lucide-react';
 import { Badge, type BadgeTone } from '../../../components/common/Badge';
 import { sanitizeHtml } from '../../../utils';
 // The preview renders authored IM markup, so it needs the IM content styles (lists, paragraph
@@ -47,9 +47,12 @@ export interface OptionalContentItem {
   /**
    * `placeholder` = opt-in content the PM must decide about (Auto leaves it out).
    * `conditional` = gated on attribute data (Auto follows the data).
+   * `manual` = an ordinary block with no template rule at all, listed only because this
+   *   project explicitly left it out. Without it, a block excluded from the Content tab
+   *   would be missing from the manual with nothing in Setup to show it or undo it.
    */
-  kind: 'placeholder' | 'conditional';
-  /** Human-readable condition, e.g. "Handle type ∈ fixed". Null for placeholders. */
+  kind: 'placeholder' | 'conditional' | 'manual';
+  /** Human-readable condition, e.g. "Handle type ∈ fixed". Null for placeholders/manual. */
   conditionText: string | null;
   /** What Auto resolves to right now. */
   autoVisible: boolean;
@@ -86,13 +89,19 @@ export const IncludeModeControl: React.FC<{
   /** Announced to screen readers, e.g. "Inclusion for Safety Instructions". */
   ariaLabel: string;
   className?: string;
-}> = ({ value, onChange, ariaLabel, className = '' }) => (
+  /**
+   * Which modes to offer; defaults to all three. Pass `['include', 'exclude']` for an item
+   * with no template condition — there, Auto and Include resolve to the same thing, and
+   * offering both asks the operator to choose between two identical outcomes.
+   */
+  modes?: ReadonlyArray<IncludeMode>;
+}> = ({ value, onChange, ariaLabel, className = '', modes }) => (
   <div
     role="group"
     aria-label={ariaLabel}
     className={`inline-flex shrink-0 rounded-md border border-gray-300 bg-white p-px ${className}`}
   >
-    {MODES.map(({ mode, label, title }) => {
+    {MODES.filter(m => !modes || modes.includes(m.mode)).map(({ mode, label, title }) => {
       const active = value === mode;
       return (
         <button
@@ -137,6 +146,8 @@ const outcomeFor = (item: OptionalContentItem): { tone: BadgeTone; icon: React.R
  * the old list unreadable.
  */
 const ruleText = (item: OptionalContentItem): string => {
+  // No template rule to state — say what the default is, so "Include" reads as "back to normal".
+  if (item.kind === 'manual') return 'No condition: part of every manual unless you leave it out';
   if (item.kind === 'placeholder') return item.conditionText || 'Optional: include it if it applies';
   const condition = item.conditionText ?? 'Condition';
   if (item.noData) return `${condition}: no value entered yet`;
@@ -148,7 +159,9 @@ const ruleText = (item: OptionalContentItem): string => {
  * genuinely needs flagged — an explicit choice that agrees with Auto changes nothing.
  */
 const isContraryOverride = (item: OptionalContentItem): boolean =>
-  item.override !== undefined && item.override !== item.autoVisible;
+  // A `manual` row IS the choice — flagging it as contrary to "part of every manual" would
+  // label every row in that group, which is noise, not a warning.
+  item.kind !== 'manual' && item.override !== undefined && item.override !== item.autoVisible;
 
 // ---------------------------------------------------------------------------
 // Row
@@ -187,7 +200,9 @@ const ItemRow: React.FC<{
         />
         {item.kind === 'placeholder'
           ? <AlertCircle size={12} aria-hidden="true" className="mt-[2px] shrink-0 text-amber-500" />
-          : <GitBranch size={12} aria-hidden="true" className="mt-[2px] shrink-0 text-gray-400" />}
+          : item.kind === 'manual'
+            ? <EyeOff size={12} aria-hidden="true" className="mt-[2px] shrink-0 text-gray-400" />
+            : <GitBranch size={12} aria-hidden="true" className="mt-[2px] shrink-0 text-gray-400" />}
         <span className={`min-w-0 flex-1 text-xs font-semibold leading-snug ${item.visible ? 'text-gray-800' : 'text-gray-500'}`}>
           <span className="line-clamp-2">{item.label}</span>
         </span>
@@ -211,7 +226,10 @@ const ItemRow: React.FC<{
           <span className="text-[11px] leading-snug text-gray-500">{ruleText(item)}</span>
         </div>
         <IncludeModeControl
-          value={mode}
+          // A manual exclusion has no Auto to return to: Include clears the override, which
+          // is the same state as Auto for a block with no condition.
+          value={item.kind === 'manual' ? (item.override === false ? 'exclude' : 'include') : mode}
+          modes={item.kind === 'manual' ? ['include', 'exclude'] : undefined}
           onChange={onModeChange}
           ariaLabel={`Inclusion for ${item.label}`}
         />
@@ -275,6 +293,9 @@ export const OptionalContentPanel: React.FC<OptionalContentPanelProps> = ({
   // PM owns, "waiting on data" is blocked on a supplier value and isn't theirs to resolve.
   const reviewCount = items.filter(i => outcomeFor(i).text === 'Needs review').length;
   const waitingCount = items.filter(i => outcomeFor(i).text === 'Waiting on data').length;
+  // Blocks with no rule that this project excluded by hand — worth its own count, because it
+  // is the only thing in this panel nobody can explain from the template alone.
+  const manualCount = items.filter(i => i.kind === 'manual').length;
 
   const toggleExpanded = (key: string) =>
     setExpandedKeys(prev => {
@@ -283,8 +304,11 @@ export const OptionalContentPanel: React.FC<OptionalContentPanelProps> = ({
       return next;
     });
 
-  const applyMode = (key: string, mode: IncludeMode) =>
-    onSetOverride(key, mode === 'auto' ? undefined : mode === 'include');
+  // `include` on a manual row clears the override rather than storing `true`: an
+  // unconditional block is in the manual by default, and a stored `true` would pin it in
+  // even if the template later gives it a condition.
+  const applyMode = (key: string, mode: IncludeMode, kind: OptionalContentItem['kind']) =>
+    onSetOverride(key, mode === 'auto' || (mode === 'include' && kind === 'manual') ? undefined : mode === 'include');
 
   return (
     <div className="border-b border-gray-100 pb-6">
@@ -297,10 +321,12 @@ export const OptionalContentPanel: React.FC<OptionalContentPanelProps> = ({
           {includedCount} of {items.length} in the manual
           {reviewCount > 0 && <span className="text-amber-700"> · {reviewCount} to review</span>}
           {waitingCount > 0 && <span className="text-amber-700"> · {waitingCount} waiting on data</span>}
+          {manualCount > 0 && <span> · {manualCount} you left out</span>}
         </span>
       </div>
       <p className="mb-3 max-w-[70ch] text-[11px] leading-relaxed text-gray-500">
-        These blocks are not part of every manual. Leave one on <strong className="font-semibold text-gray-600">Auto</strong> to
+        Blocks that are not in every manual: conditional and optional ones, plus any block you
+        excluded from this project by hand. Leave one on <strong className="font-semibold text-gray-600">Auto</strong> to
         follow its template condition, or force it in or out. Click a row to read it.
       </p>
 
@@ -337,7 +363,7 @@ export const OptionalContentPanel: React.FC<OptionalContentPanelProps> = ({
                     item={item}
                     expanded={expandedKeys.has(item.key)}
                     onToggleExpanded={() => toggleExpanded(item.key)}
-                    onModeChange={mode => applyMode(item.key, mode)}
+                    onModeChange={mode => applyMode(item.key, mode, item.kind)}
                   />
                 ))}
               </div>

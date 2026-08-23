@@ -19,6 +19,7 @@ import {
   buildParts,
   renderPartPdf,
   marginFor,
+  resolveTypography,
   tempPartPath,
   BUCKET,
   AuthError,
@@ -63,13 +64,14 @@ export const handler = async (event: NetlifyEvent) => {
     if (authErr) throw new AuthError('Invalid or expired session.');
 
     const { manuals } = await fetchManifestAndManuals(supabaseUrl, req);
-    const { parts, compact } = buildParts(manuals, req);
+    const { parts } = buildParts(manuals, req);
     if (req.partIndex >= parts.length) {
       return json(400, { error: `partIndex ${req.partIndex} out of range (0..${parts.length - 1}).` });
     }
 
     const format = req.pageSize.toUpperCase();
-    const pdfBytes = await renderPartPdf(parts[req.partIndex].html, format, apiKey, marginFor(compact));
+    // Margins come from the global print settings (Admin → IM Print), range-checked here.
+    const pdfBytes = await renderPartPdf(parts[req.partIndex].html, format, apiKey, marginFor(resolveTypography(req)));
 
     const path = tempPartPath(req.projectId, req.templateType, req.jobId, req.partIndex);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, Buffer.from(pdfBytes), {

@@ -2433,6 +2433,10 @@ const IMTemplateEditor: React.FC = () => {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Body Font</label>
+                            {/* On-screen preview only. The exported PDF uses the GLOBAL print font
+                                (Admin console → IM Print) — this select is per template, and a template
+                                belongs to a category, so letting it set the printed font meant the same
+                                booklet program printed in a different font per category. */}
                             <select className="w-full border rounded p-2 text-sm" value={metaSettings.fontFamily || 'Inter'} onChange={(e) => setMetaSettings({...metaSettings, fontFamily: e.target.value})}>
                                 <option value="Inter">Inter (Default)</option>
                                 <option value="Roboto">Roboto</option>
@@ -2442,6 +2446,7 @@ const IMTemplateEditor: React.FC = () => {
                                 <option value="Source Serif 4">Source Serif 4</option>
                                 <option value="Noto Sans">Noto Sans</option>
                             </select>
+                            <p className="text-[11px] text-gray-400 mt-1">Preview only — exported PDFs use the global print font (Admin → IM Print).</p>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Page Size</label>

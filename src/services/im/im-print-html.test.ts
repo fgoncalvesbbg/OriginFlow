@@ -3,11 +3,10 @@ import {
   buildPrintHtml,
   buildPrintPartsHtml,
   buildCoverPartHtml,
-  DEFAULT_LEAFLET_TEXT_PT,
-  DEFAULT_LEAFLET_HEADING_PT,
   PrintManual,
   PrintHtmlOptions,
 } from './im-print-html';
+import { defaultTypographyFor } from './im-print-typography';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
 import { IM_LANGUAGES } from '../../config/im-languages';
 
@@ -109,22 +108,45 @@ describe('buildPrintPartsHtml — Warning Leaflet compact layout', () => {
     expect(part.html).toContain('break-before: auto');
   });
 
-  it('compact: custom font sizes are applied to all text + all headings', () => {
+  it('compact: the global typography profile is applied to all text + all headings', () => {
     const [part] = buildPrintPartsHtml([manual], {
       ...opts,
       compact: true,
-      leafletTextPt: 8,
-      leafletHeadingPt: 11,
+      typography: { ...defaultTypographyFor('warning_leaflet', 'a4'), bodyPt: 8, headingPt: 11, lineHeight: 1.45 },
     });
-    // Universal body-text rule and the heading rule carry the chosen pt sizes.
-    expect(part.html).toContain('.im-page-content * { font-size: 8pt');
+    // Universal body-text rule and the heading rule carry the configured pt sizes,
+    // and the line spacing is the configured one (not the old hardcoded 1.3).
+    expect(part.html).toContain('.im-page-content * { font-size: 8pt; line-height: 1.45;');
     expect(part.html).toContain('font-size: 11pt');
   });
 
-  it('compact: font sizes fall back to the defaults when not provided', () => {
+  it('compact: falls back to the leaflet default profile when no typography is passed', () => {
     const [part] = buildPrintPartsHtml([manual], { ...opts, compact: true });
-    expect(part.html).toContain(`font-size: ${DEFAULT_LEAFLET_TEXT_PT}pt`);
-    expect(part.html).toContain(`font-size: ${DEFAULT_LEAFLET_HEADING_PT}pt`);
+    const leaflet = defaultTypographyFor('warning_leaflet', 'a4');
+    expect(part.html).toContain(`font-size: ${leaflet.bodyPt}pt`);
+    expect(part.html).toContain(`font-size: ${leaflet.headingPt}pt`);
+  });
+
+  it('non-compact ignores the manual metadata font family — typography is global', () => {
+    // Regression guard for the reason this setting exists: the font used to come from the
+    // template's metadata, and a template belongs to a product category, so the same
+    // booklet program printed in a different font per category.
+    const branded: PrintManual = { ...manual, metadata: { ...manual.metadata, fontFamily: 'Montserrat' } };
+    const html = buildPrintHtml([branded], {
+      ...opts,
+      typography: { ...defaultTypographyFor('im', 'a4'), fontFamily: 'Lato' },
+    });
+    expect(html).toContain('Lato');
+    expect(html).not.toContain('Montserrat');
+  });
+
+  it('non-compact: body, heading and line spacing come from the profile', () => {
+    const html = buildPrintHtml([manual], {
+      ...opts,
+      typography: { ...defaultTypographyFor('im', 'a4'), bodyPt: 12, headingPt: 20, lineHeight: 1.8 },
+    });
+    expect(html).toContain('.im-section-content { font-size: 12pt; line-height: 1.8;');
+    expect(html).toContain('font-size: 20pt');
   });
 
   it('regression: non-compact still emits cover + TOC + back parts', () => {
@@ -184,5 +206,40 @@ describe('cover language directory — every supported language has a translated
     for (const { code, name } of rows) {
       expect(name).not.toBe(code);
     }
+  });
+});
+
+// The global print settings (Admin → IM Print) were seeded from the values this builder used
+// to hardcode, so applying the feature must not change a single existing booklet. These pin
+// the built-in defaults to the exact CSS the old mm-based rules produced — if a default is
+// ever "tidied up", this is what catches the silently re-flowed back catalogue.
+describe('built-in typography defaults reproduce the previous hardcoded output', () => {
+  const styles = (pageSize: 'a4' | 'a5', compact: boolean) => {
+    const parts = buildPrintPartsHtml([manual], { ...opts, pageSize, compact });
+    return parts[compact ? 0 : 1].html;
+  };
+
+  it('A4 full manual: body 3.8mm → 10.77pt, section title 6.2mm → 17.58pt', () => {
+    const html = styles('a4', false);
+    expect(html).toContain('.im-section-content { font-size: 10.77pt; line-height: 1.6;');
+    expect(html).toContain('font-size: 17.58pt;');
+    expect(html).toContain('.im-section-content h1 { font-size: 15.59pt; }');
+    // Cover/divider fill height is now derived from the margins; 297 − 16 − 18 − 8 = the
+    // 255mm that used to be a literal in PAGE_DIMS.
+    expect(html).toContain('.im-page-cover { min-height: 255mm;');
+    expect(html).toContain('font-family: Inter, Arial, sans-serif');
+  });
+
+  it('A5 full manual: the old 0.82 type scale, and the old 168mm fill height', () => {
+    const html = styles('a5', false);
+    expect(html).toContain('.im-section-content { font-size: 8.83pt;');
+    expect(html).toContain('font-size: 14.41pt;');
+    expect(html).toContain('.im-page-cover { min-height: 168mm;');
+  });
+
+  it('leaflet: the old 6pt / 8pt / 1.3 compact setting', () => {
+    const html = styles('a5', true);
+    expect(html).toContain('.im-page-content, .im-page-content * { font-size: 6pt; line-height: 1.3; }');
+    expect(html).toContain('font-size: 8pt;');
   });
 });

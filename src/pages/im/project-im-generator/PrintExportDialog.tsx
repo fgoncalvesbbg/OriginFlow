@@ -11,12 +11,12 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History, Send, ExternalLink } from 'lucide-react';
+import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History, Send, ExternalLink, Type } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, getIMMarkets, checkPrintImageWeights, sendRenderToMarkup, isMarkupReviewAvailable, PrintPdfResult, PrintRender, IMMarket, PrintImageReport, MarkupReviewResult } from '../../../services';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
-import { DEFAULT_LEAFLET_TEXT_PT, DEFAULT_LEAFLET_HEADING_PT } from '../../../services/im/im-print-html';
+import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '../../../services/im/im-print-settings.service';
 
 interface PrintExportDialogProps {
   projectId: string;
@@ -48,6 +48,48 @@ interface PrintExportDialogProps {
   onReviewSent?: (result: MarkupReviewResult) => void;
   onClose: () => void;
 }
+
+/**
+ * Read-only view of the global print typography this export will use.
+ *
+ * Deliberately not editable here. Typography used to vary by product category (the font
+ * family came from the category's IM template) and the leaflet's point sizes were typed in
+ * per export, so two booklets from the same program could be set differently. It is now one
+ * admin-owned setting per page size, and this panel exists so the operator can see what they
+ * are about to get — and where to change it — without being able to diverge from it.
+ */
+const TypographySummary: React.FC<{ typography: PrintTypography; pageSize: 'a4' | 'a5' }> = ({
+  typography,
+  pageSize,
+}) => {
+  const { fontFamily, bodyPt, headingPt, lineHeight, margins } = typography;
+  const row = (label: string, value: string) => (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-[11px] uppercase tracking-wide text-gray-400">{label}</span>
+      <span className="text-xs font-medium text-gray-700 tabular-nums">{value}</span>
+    </div>
+  );
+  return (
+    <div className="border rounded-lg p-4 space-y-2 bg-gray-50/60">
+      <div className="flex items-center gap-2">
+        <Type size={14} className="text-gray-400" />
+        <span className="text-sm font-semibold text-gray-700">Typography ({pageSize.toUpperCase()})</span>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 pt-1">
+        {row('Font', fontFamily)}
+        {row('Body', `${bodyPt} pt`)}
+        {row('Headings', `${headingPt} pt`)}
+        {row('Line spacing', `${lineHeight}×`)}
+        {row('Margins T/B', `${margins.top} / ${margins.bottom} mm`)}
+        {row('Margins L/R', `${margins.left} / ${margins.right} mm`)}
+      </div>
+      <p className="text-[11px] text-gray-400">
+        One global house style per page size — the same for every product category. Admins change
+        it in the Admin console → IM Print.
+      </p>
+    </div>
+  );
+};
 
 const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   projectId,
@@ -113,9 +155,14 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     formData['__custom_cover_image'] ?? meta?.coverImageUrl ?? '',
   );
 
-  // Leaflet typography — applied to ALL body text / headings in the compact PDF (leaflets only).
-  const [leafletTextPt, setLeafletTextPt] = useState<number>(DEFAULT_LEAFLET_TEXT_PT);
-  const [leafletHeadingPt, setLeafletHeadingPt] = useState<number>(DEFAULT_LEAFLET_HEADING_PT);
+  /**
+   * Print typography for this template type + page size. It is a GLOBAL, admin-owned setting
+   * (Admin console → IM Print), not something chosen per export and not derived from the
+   * product category's template — so the booklet program reads the same house style whichever
+   * category or project it was generated from. Shown read-only below; re-read when the page
+   * size changes because A4 and A5 have their own profiles.
+   */
+  const [typography, setTypography] = useState<PrintTypography>(() => defaultTypographyFor(templateType, pageSize));
 
   // Required change note for this generation — every new PDF must say what changed. Shown
   // (per render) in the export history so the render log doubles as a changelog.
@@ -148,6 +195,17 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     // languages is stable for a dialog instance (published set) — run once per open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, templateType]);
+
+  // Load the active global typography profile for the current template type + page size.
+  // Never blocks the dialog: the service falls back to the built-in defaults when the
+  // settings table is unreachable, which is what the renderer used before it existed.
+  useEffect(() => {
+    let alive = true;
+    getPrintTypography(templateType, pageSize)
+      .then((t) => { if (alive) setTypography(t); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [templateType, pageSize]);
 
   // Render history (for "already exists" + version comparison + credit guard).
   const [renders, setRenders] = useState<PrintRender[]>([]);
@@ -296,7 +354,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         comment: comment.trim(),
         market: marketCode || undefined,
         onProgress: (label, done, total) => setProgress({ label, done, total }),
-        ...(isLeaflet ? { leafletTextPt, leafletHeadingPt } : {}),
+        typography,
         cover: {
           title,
           // Subtitle is never configured here — always left empty so the builder
@@ -477,35 +535,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                 contents, or back page — content is rendered compactly.
               </p>
               <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Body text size (pt)</label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={24}
-                    step={0.5}
-                    value={leafletTextPt}
-                    onChange={(e) => setLeafletTextPt(Number(e.target.value) || DEFAULT_LEAFLET_TEXT_PT)}
-                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Heading size (pt)</label>
-                  <input
-                    type="number"
-                    min={6}
-                    max={32}
-                    step={0.5}
-                    value={leafletHeadingPt}
-                    onChange={(e) => setLeafletHeadingPt(Number(e.target.value) || DEFAULT_LEAFLET_HEADING_PT)}
-                    className="w-full text-sm border rounded px-2 py-1.5 mt-1"
-                  />
-                </div>
-              </div>
-              <p className="text-[11px] text-gray-400">
-                Applied uniformly to all text and all headings in the leaflet — no per-element exceptions.
-              </p>
+              <TypographySummary typography={typography} pageSize={pageSize} />
             </div>
           ) : (
             <>
@@ -540,6 +570,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                   />
                 </div>
               </div>
+              <TypographySummary typography={typography} pageSize={pageSize} />
             </>
           )}
 

@@ -44,8 +44,10 @@ import { ProjectSupplierDiffImportDialog } from './ProjectSupplierDiffImportDial
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
-import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
+import { decodePlaceholderLabel, escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
+import { blockTypeToVariant, isExtraSection, isInlineBlockEmpty, newInlineBlock, sectionToInlineBlocks, seedPlaceholderBlocks } from './project-im-generator/im-blocks.utils';
 import { PREVIEW_SECTION_ATTR, findPreviewSection, findByDataAttr, previewScrollTopFor } from './project-im-generator/preview-scroll.utils';
+import { buildSectionOutline, findExcludedAncestor, METADATA_SECTION_TITLE } from './project-im-generator/section-outline.utils';
 import { FILL_ANCHOR_ATTR, fillAnchors, type PublishIssue } from './project-im-generator/publish-issues';
 import PublishReviewPanel from './project-im-generator/PublishReviewPanel';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
@@ -1324,7 +1326,6 @@ const ProjectIMGenerator: React.FC = () => {
   // All edits below mutate project-only state (sectionAdditions / extraSections);
   // the template (sections / blocks) is never touched.
 
-  const newInlineBlock = (): InlineBlockRef => ({ kind: 'inline', content: {} });
 
   // --- Additions inside existing template sections ---
   const addBlockToSection = (sectionId: string, position: number) => {
@@ -1444,33 +1445,6 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // Map a shared block's type to its callout variant so a flattened copy keeps its look.
-  const blockTypeToVariant = (blockType?: string): CalloutVariant | undefined => {
-      const map: Record<string, CalloutVariant> = { warning: 'warning', danger: 'danger', caution: 'caution', electric: 'electric', flammable: 'flammable', hot_surface: 'hot_surface', info: 'info' };
-      return blockType ? map[blockType] : undefined;
-  };
-
-  // Copy a section's content into standalone inline blocks for a duplicated project
-  // chapter: inline refs are copied as-is; shared blocks are flattened to inline
-  // (keeping their callout look); a legacy content-only section becomes one block;
-  // sku_slot refs are dropped (per-SKU typed content is out of scope for duplication).
-  const sectionToInlineBlocks = (section: IMSection): InlineBlockRef[] => {
-      const refs = sectionOverrides[section.id] ?? (section.blockRefs ?? []);
-      const out: InlineBlockRef[] = [];
-      if (refs.length === 0) {
-          if (Object.values(section.content || {}).some(v => v)) out.push({ kind: 'inline', content: { ...section.content } });
-      } else {
-          for (const ref of refs) {
-              if (ref.kind === 'inline') {
-                  out.push({ kind: 'inline', content: { ...(ref as InlineBlockRef).content }, variant: (ref as InlineBlockRef).variant });
-              } else if (ref.kind === 'block') {
-                  const blk = availableBlocks[(ref as SharedBlockRef).block_id];
-                  if (blk) out.push({ kind: 'inline', content: { ...blk.content }, variant: blockTypeToVariant(blk.blockType) });
-              }
-              // sku_slot: intentionally skipped.
-          }
-      }
-      return out.length ? out : [{ kind: 'inline', content: {} }];
-  };
 
   // Duplicate a chapter (single section, not its subsections) into an editable
   // project-only chapter placed right after the source at the same level. The PM then
@@ -1488,7 +1462,7 @@ const ProjectIMGenerator: React.FC = () => {
           parentId,
           title: localizedSectionTitle(section, activeLang),
           order: newOrder,
-          blocks: sectionToInlineBlocks(section),
+          blocks: sectionToInlineBlocks(section, sectionOverrides, availableBlocks),
       }]);
   };
 
@@ -1577,12 +1551,6 @@ const ProjectIMGenerator: React.FC = () => {
   // --- Placeholder section overrides (full project content for is_placeholder sections) ---
   // Derive the initial editable blocks for a placeholder section from the template:
   // its inline refs, else its legacy content as one block, else one empty block.
-  const seedPlaceholderBlocks = (section: IMSection): InlineBlockRef[] => {
-      const inlineRefs = (section.blockRefs ?? []).filter(r => r.kind === 'inline') as InlineBlockRef[];
-      if (inlineRefs.length) return inlineRefs.map(r => ({ kind: 'inline', content: { ...r.content }, variant: r.variant }));
-      if (Object.values(section.content || {}).some(v => v)) return [{ kind: 'inline', content: { ...section.content } }];
-      return [{ kind: 'inline', content: {} }];
-  };
 
   // The blocks currently shown for a placeholder section: the saved override if the
   // PM has started editing, otherwise the template-derived seed (not yet persisted).
@@ -1707,8 +1675,6 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // --- Delete confirmation (#7): confirm only when there's content to lose ---
-  const isInlineBlockEmpty = (block: InlineBlockRef): boolean =>
-      Object.values(block.content || {}).every(v => !String(v || '').replace(/<[^>]*>/g, '').trim());
   const requestDeleteBlock = (isEmpty: boolean, onConfirm: () => void) => {
       if (isEmpty) { onConfirm(); return; }
       setPendingConfirm({
@@ -1719,7 +1685,6 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // --- Block clipboard (#11): copy any block ref, paste a clone into a section ---
-  const isExtraSection = (section: IMSection): boolean => (section as any).__projectExtra === true;
   const appendBlockToSection = (section: IMSection, ref: InlineBlockRef | SharedBlockRef) => {
       const clone = structuredClone(ref);
       if (isExtraSection(section)) {
@@ -1917,13 +1882,7 @@ const ProjectIMGenerator: React.FC = () => {
                  wrapper.className += " relative group";
                  wrapper.innerHTML = `<img src="${val}" class="max-w-full h-auto" /><div class="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold text-xs">Change Image</div>`;
              } else {
-                 let label = 'Image';
-                 const labelAttr = el.getAttribute('data-label');
-                 if (labelAttr) try { label = decodeURIComponent(labelAttr); } catch(e) {}
-                 else {
-                      const text = el.textContent?.trim() || '';
-                      if (text.startsWith('[') && text.endsWith(']')) label = text.substring(1, text.length-1);
-                 }
+                 const label = decodePlaceholderLabel(el.getAttribute('data-label'), el.textContent ?? '', 'Image');
 
                  wrapper.className += " bg-indigo-50 text-indigo-600 px-3 py-2 text-xs font-bold border border-dashed border-indigo-300 hover:bg-indigo-100";
                  wrapper.innerHTML = `<span style="display:flex;align-items:center;gap:4px">🖼️ ${label}</span>`;
@@ -1933,13 +1892,7 @@ const ProjectIMGenerator: React.FC = () => {
                  wrapper.className += " border-b-2 border-indigo-100 hover:border-indigo-400 px-1 hover:bg-indigo-50";
                  wrapper.textContent = val;
              } else {
-                 let label = 'Text';
-                 const labelAttr = el.getAttribute('data-label');
-                 if (labelAttr) try { label = decodeURIComponent(labelAttr); } catch(e) {}
-                 else {
-                      const text = el.textContent?.trim() || '';
-                      if (text.startsWith('[') && text.endsWith(']')) label = text.substring(1, text.length-1);
-                 }
+                 const label = decodePlaceholderLabel(el.getAttribute('data-label'), el.textContent ?? '', 'Text');
 
                  wrapper.className += " bg-amber-50 text-yellow-700 px-2 py-0.5 text-xs font-bold border border-dashed border-yellow-300 hover:bg-amber-100 mx-1";
                  wrapper.textContent = `[ ${label} ]`;
@@ -1960,20 +1913,7 @@ const ProjectIMGenerator: React.FC = () => {
       placeholders.forEach((el) => {
           const id = el.getAttribute('data-id');
           const type = el.getAttribute('data-type');
-          let label = type === 'text' ? 'Text Input' : 'Image Upload';
-          
-          const labelAttr = el.getAttribute('data-label');
-          if (labelAttr) {
-              try {
-                  label = decodeURIComponent(labelAttr);
-              } catch(e) {}
-          } else {
-              // Fallback to text content
-              const text = el.textContent?.trim() || '';
-              if (text.startsWith('[') && text.endsWith(']')) {
-                  label = text.substring(1, text.length - 1);
-              }
-          }
+          const label = decodePlaceholderLabel(el.getAttribute('data-label'), el.textContent ?? '', type === 'text' ? 'Text Input' : 'Image Upload');
 
           if (id && type) items.push({ id, kind: 'placeholder', type: type as 'text'|'image', label });
       });
@@ -2264,6 +2204,22 @@ const ProjectIMGenerator: React.FC = () => {
     return true;
   };
 
+  // Which excluded ancestor is keeping a section out, if any. The resolver returns early on a
+  // hidden section and never walks its children, so a sub-section left on its default can
+  // still be absent because a chapter above it was switched off — the Sections list names
+  // that chapter instead of showing an unexplained "Left out".
+  const excludedAncestorOf = (section: IMSection): IMSection | undefined => {
+    const byId = new Map<string, IMSection & { __projectExtra?: true }>(
+      [...sections, ...extraAsSections].map(s => [s.id, s]),
+    );
+    const ancestorId = findExcludedAncestor(
+      section.id,
+      id => byId.get(id)?.parentId ?? null,
+      id => { const s = byId.get(id); return !!s && !isSectionVisible(s); },
+    );
+    return ancestorId ? byId.get(ancestorId) : undefined;
+  };
+
   /**
    * Whether a chapter is actually rendered in the Live Preview right now. The preview is
    * WYSIWYG, so a chapter excluded by its condition or outside the bound SKU scope is omitted
@@ -2385,6 +2341,39 @@ const ProjectIMGenerator: React.FC = () => {
     const override = refVisibility[refVisKey(sectionId, index, ref)] ?? refVisibility[`${sectionId}:${index}`];
     if (override !== undefined) return override;
     return refAutoVisible(ref);
+  };
+
+  // Has this project explicitly excluded a block? Checks both keyings (stable id first, then
+  // the legacy positional key) so a pre-id override still reads as excluded.
+  const isRefExcluded = (sectionId: string, index: number, ref: BlockRef): boolean =>
+    (refVisibility[refVisKey(sectionId, index, ref)] ?? refVisibility[`${sectionId}:${index}`]) === false;
+
+  /**
+   * Exclude / put back a single template block — a dedicated Inline HTML row or a shared
+   * library block — for THIS project only.
+   *
+   * Writes the same `refvis_` override the Optional & Conditional panel writes, which the
+   * resolver already honors for ANY ref (im-resolver: `if (override === false) return null`),
+   * so leaving out an unconditional block needed no engine change — only a way to say it.
+   * This exists because a template block CANNOT be deleted from a project: it belongs to the
+   * shared template, and removing it there would change every other manual. Project-authored
+   * blocks are deleted instead, which is why they don't get this control.
+   *
+   * Putting a block back CLEARS the override instead of storing `true`, so a condition added
+   * to the template later still applies rather than being pinned open by this project.
+   */
+  const toggleRefExcluded = (sectionId: string, index: number, ref: BlockRef) => {
+    const key = refVisKey(sectionId, index, ref);
+    const legacyKey = `${sectionId}:${index}`;
+    const excluded = isRefExcluded(sectionId, index, ref);
+    setRefVisibility(prev => {
+      const next = { ...prev };
+      // Clear both keyings before writing, so a legacy entry can't survive and win later.
+      delete next[key];
+      delete next[legacyKey];
+      if (!excluded) next[key] = false;
+      return next;
+    });
   };
 
   // Human-readable description of a ref's condition (mirrors IMTemplateEditor).
@@ -2745,6 +2734,10 @@ const ProjectIMGenerator: React.FC = () => {
     walk(null);
     return out;
   })();
+
+  // Hierarchical numbering + depth for every section, so the Setup tab's Sections list and
+  // the Content tab's section tree name a section the same way ("2.3.").
+  const sectionOutline = buildSectionOutline([...sections, ...extraAsSections]);
 
   // --- Project-content translation ---------------------------------------------
   // Only project-AUTHORED content is translated here (added/edited sections):
@@ -3447,6 +3440,80 @@ const ProjectIMGenerator: React.FC = () => {
     </div>
   );
 
+  /**
+   * Per-block inclusion control for ONE template block ref (a dedicated Inline HTML row, a
+   * shared library block, or a table).
+   *
+   * Template blocks can't be deleted from a project, so "leave this one out" was previously
+   * only expressible for blocks the template author had marked conditional or optional —
+   * anything else was all-or-nothing at the chapter level. The override written here is the
+   * same `refvis_` key the Optional & Conditional panel writes, and the resolver already
+   * honors it for every ref kind, so the preview, the published JSON and the print export
+   * all follow immediately.
+   *
+   * Two shapes, because they are two different decisions:
+   *  • no template rule → a plain Exclude / Put back toggle, quiet until hovered so a chapter
+   *    of thirty blocks isn't thirty competing buttons;
+   *  • conditional or optional → the full Auto/Include/Exclude control, always visible, since
+   *    a decision is genuinely owed and Auto is a real third state here.
+   */
+  const renderRefIncludeControl = (section: IMSection, ref: BlockRef, index: number): React.ReactNode => {
+    // A SKU slot renders per-SKU content and has no visibility override in the resolver;
+    // offering one here would be a control that does nothing.
+    if (ref.kind === 'sku_slot') return null;
+    const excluded = isRefExcluded(section.id, index, ref);
+    const optional = ref.kind === 'inline' && !!(ref as InlineBlockRef).isPlaceholder;
+    const conditional = refHasCondition(ref);
+    const label = refHasTable(ref) ? 'table' : ref.kind === 'block' ? 'standardized block' : 'block';
+
+    if (conditional || optional) {
+      const key = refVisKey(section.id, index, ref);
+      const override = refVisibility[key] ?? refVisibility[`${section.id}:${index}`];
+      return (
+        <div className="mb-0.5 flex items-center justify-end gap-2">
+          <span className="mr-auto text-[10px] font-medium uppercase tracking-wide text-gray-400">
+            {optional ? 'Optional block' : 'Conditional block'}
+          </span>
+          <IncludeModeControl
+            value={modeOf(override)}
+            ariaLabel={`Inclusion for this ${label} in ${localizedSectionTitle(section, activeLang)}`}
+            onChange={mode => setRefVisibility(prev => {
+              const next = { ...prev };
+              delete next[key];
+              delete next[`${section.id}:${index}`];
+              if (mode !== 'auto') next[key] = mode === 'include';
+              return next;
+            })}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-0.5 flex items-center justify-end gap-2">
+        {excluded && (
+          <span className="mr-auto inline-flex items-center gap-1 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">
+            <EyeOff size={10} /> Left out of this manual
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => toggleRefExcluded(section.id, index, ref)}
+          title={excluded
+            ? `Put this ${label} back into this manual`
+            : `Leave this ${label} out of this manual — the shared template keeps it`}
+          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-opacity motion-reduce:transition-none ${
+            excluded
+              ? 'text-indigo-600 hover:bg-indigo-50'
+              : 'text-gray-400 opacity-0 hover:bg-gray-100 hover:text-gray-700 group-hover/ref:opacity-100 focus-visible:opacity-100'
+          }`}
+        >
+          {excluded ? <><Eye size={11} /> Put back</> : <><EyeOff size={11} /> Exclude</>}
+        </button>
+      </div>
+    );
+  };
+
   // three kinds — project/extra, placeholder, and locked template — plus a hidden banner.
   const renderSectionContentEditor = (section: IMSection & { __projectExtra?: true }) => {
     const isExtra = (section as any).__projectExtra === true;
@@ -3585,7 +3652,11 @@ const ProjectIMGenerator: React.FC = () => {
               <React.Fragment key={i}>
                 {/* A template block. Inline ones can be edited for this project only (stored as
                     a project override, never written back to the template); shared blocks and
-                    SKU slots stay locked — see refIsOverridable. */}
+                    SKU slots stay locked — see refIsOverridable. Any of them can be left out of
+                    THIS manual without touching the template — see renderRefIncludeControl. */}
+                <div className="group/ref">
+                {renderRefIncludeControl(section, ref, i)}
+                <div className={isRefExcluded(section.id, i, ref) ? 'opacity-50' : ''}>
                 {ref.kind === 'sku_slot' ? (
                   <div className="flex items-center gap-2 text-xs text-gray-400 italic border border-gray-100 rounded px-2 py-1.5 bg-gray-50">
                     <Lock size={11} /> SKU slot: {(ref as SKUSlotRef).label?.[activeLang] || (ref as SKUSlotRef).slot}
@@ -3639,6 +3710,8 @@ const ProjectIMGenerator: React.FC = () => {
                     <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                   </div>
                 )}
+                </div>{/* dimmed body of an excluded block */}
+                </div>{/* group/ref — reveals the Exclude control on hover */}
                 {renderInsertButton(section.id, i + 1)}
                 {additions.filter(a => a.position === i + 1).map((a, idx, arr) => (
                   <div key={a.id}>{renderAdditionEditor(a.block, {
@@ -3750,7 +3823,7 @@ const ProjectIMGenerator: React.FC = () => {
         <div className="flex-1 min-w-0 overflow-y-auto">
           <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2 mb-4">
             <FilePlus2 size={14} className="mt-0.5 shrink-0" />
-            <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section that doesn't apply — it (and its subsections) won't appear in the generated IM. Standardized text and tables can be tweaked with <strong>Edit for this project</strong>, and reset back to the template at any time — nothing here changes the shared template or any other manual. Shared library blocks stay locked.</span>
+            <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section — or any sub-section inside it — that doesn't apply; it (and everything nested under it) won't appear in the generated IM. A single standardized block can be left out on its own with <strong>Exclude</strong> above it. Standardized text and tables can be tweaked with <strong>Edit for this project</strong>, and reset back to the template at any time — nothing here changes the shared template or any other manual. Shared library blocks stay locked, but can still be excluded.</span>
           </div>
           {selectedSection && (
             <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
@@ -4572,70 +4645,138 @@ const ProjectIMGenerator: React.FC = () => {
                          </div>
                        )}
 
-                       {/* CHAPTER CONDITIONS — whole chapters gated on an attribute value. Uses the
-                           same Auto/Include/Exclude control as the Optional & Conditional panel
-                           below: the decision is identical, so the affordance must be too. */}
-                       {orderedSections.some(s => s.conditionFeatureId) && (() => {
-                         const conditional = orderedSections.filter(s => s.conditionFeatureId);
-                         const includedCount = conditional.filter(isSectionVisible).length;
+                       {/* CHAPTERS & SECTIONS — the manual's outline, with inclusion per section.
+                           Supersedes the old "Chapter Conditions" panel, which listed ONLY
+                           attribute-conditioned chapters: an ordinary sub-section that doesn't
+                           apply to this product was then excludable only from the Content tab's
+                           tree, which is not where the other inclusion decisions live. Every
+                           section is listed here at its real depth, and excluding one leaves out
+                           everything nested inside it (the resolver skips a hidden subtree).
+                           Same Auto/Include/Exclude control as the Optional & Conditional panel
+                           below — the decision is identical, so the affordance must be too; a
+                           section with no condition gets the two-state variant, because there
+                           Auto and Include are the same outcome. */}
+                       {(() => {
+                         const rows = orderedSections.filter(s => s.title !== METADATA_SECTION_TITLE);
+                         if (!rows.length) return null;
+                         const inManual = rows.filter(s => isSectionEffectivelyVisible(s)).length;
+                         const excludedByHand = rows.filter(s => sectionVisibility[s.id] === false).length;
+                         const overridden = rows.filter(s => sectionVisibility[s.id] !== undefined);
                          return (
                          <div className="border-b border-gray-100 pb-6">
                            <div className="mb-1 flex flex-wrap items-center gap-2">
                              <h4 className="flex items-center gap-2 text-sm font-bold text-gray-800">
-                               <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-bold text-violet-700">COND</span> Chapter Conditions
+                               <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-bold text-violet-700">SEC</span> Chapters &amp; Sections
                              </h4>
-                             <span className="text-[11px] font-medium text-gray-500">{includedCount} of {conditional.length} in the manual</span>
+                             <span className="text-[11px] font-medium text-gray-500">
+                               {inManual} of {rows.length} in the manual
+                               {excludedByHand > 0 && <span> · {excludedByHand} you left out</span>}
+                             </span>
+                             {overridden.length > 0 && (
+                               <button
+                                 type="button"
+                                 onClick={() => setSectionVisibility(prev => {
+                                   const next = { ...prev };
+                                   overridden.forEach(s => delete next[s.id]);
+                                   return next;
+                                 })}
+                                 title="Return every section to its default (its template condition, or in the manual)"
+                                 className="flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-indigo-700"
+                               ><RotateCcw size={11} /> Reset all</button>
+                             )}
                            </div>
                            <p className="mb-3 max-w-[70ch] text-[11px] leading-relaxed text-gray-500">
-                             Whole chapters that only apply to some products. <strong className="font-semibold text-gray-600">Auto</strong> follows the chapter's condition.
+                             Anything that doesn't apply to this product can be left out — a whole chapter or a
+                             single sub-section inside one. Leaving out a section also leaves out everything nested
+                             under it. Nothing here changes the shared template. To leave out one block instead of a
+                             whole section, use <strong className="font-semibold text-gray-600">Exclude</strong> on that
+                             block in the <strong className="font-semibold text-gray-600">Add content</strong> tab.
                            </p>
                            <div className="overflow-hidden rounded-lg border border-gray-200 divide-y divide-gray-100">
-                             {conditional.map(s => {
-                               const attr = allAttributes.find(a => a.id === s.conditionFeatureId);
-                               const visible = isSectionVisible(s);
+                             {rows.map(s => {
+                               const outline = sectionOutline[s.id] ?? { prefix: '', level: 0 };
+                               const isExtra = (s as any).__projectExtra === true;
                                const override = sectionVisibility[s.id];
+                               // 'manual' is the template's own "in unless hidden" marker, not an
+                               // attribute condition — it has no rule text to show.
+                               const conditional = !!s.conditionFeatureId && s.conditionFeatureId !== 'manual';
+                               const attr = conditional ? allAttributes.find(a => a.id === s.conditionFeatureId) : undefined;
                                const autoResult = (() => {
-                                 if (!s.conditionFeatureId || !s.conditionLabel) return true;
-                                 const val = formData[s.conditionFeatureId] ?? submittedAttrValues[s.conditionFeatureId];
+                                 if (!conditional || !s.conditionLabel) return true;
+                                 const val = formData[s.conditionFeatureId!] ?? submittedAttrValues[s.conditionFeatureId!];
                                  if (val === undefined) return null; // no data
                                  return attr ? matchesConditionValue(val, s.conditionLabel, attr) : true;
                                })();
-                               const outcome = visible
-                                 ? { tone: 'emerald' as const, icon: <Check size={11} />, text: 'In the manual' }
-                                 : { tone: 'gray' as const, icon: <Minus size={11} />, text: 'Left out' };
                                // Mirror isSectionVisible (and the resolver): a chapter whose
                                // condition has no data is LEFT OUT until the value arrives, so
                                // the preview always matches the published output.
                                const autoVisible = autoResult === null ? false : autoResult;
-                               const contrary = override !== undefined && override !== autoVisible;
+                               const own = isSectionVisible(s);
+                               // Only worth naming an ancestor when this section is otherwise in:
+                               // a section excluded on its own account is its own explanation.
+                               const blocker = own ? excludedAncestorOf(s) : undefined;
+                               const visible = own && !blocker;
+                               const contrary = conditional && override !== undefined && override !== autoVisible;
                                return (
-                                 <div key={s.id} {...fillAnchorProps(fillAnchors.condition(s.id))} className={`px-3 py-2.5 ${visible ? '' : 'bg-gray-50/60'}${fillFlashCls(fillAnchors.condition(s.id))}`}>
+                                 <div
+                                   key={s.id}
+                                   {...fillAnchorProps(fillAnchors.condition(s.id))}
+                                   className={`py-2 pr-3 ${visible ? '' : 'bg-gray-50/60'}${fillFlashCls(fillAnchors.condition(s.id))}`}
+                                   style={{ paddingLeft: `${(outline.level * 14) + 12}px` }}
+                                 >
                                    <div className="flex items-start gap-2">
                                      <div className="min-w-0 flex-1">
-                                       <div className={`truncate text-xs font-semibold ${visible ? 'text-gray-800' : 'text-gray-500'}`}>
-                                         {localizedSectionTitle(s, activeLang)}
-                                       </div>
-                                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                                         <Badge tone={outcome.tone} icon={outcome.icon} className="rounded px-1.5 py-0 text-[10px]">{outcome.text}</Badge>
-                                         <span className="text-[11px] text-gray-500">
-                                           {attr?.name ?? '?'} = {s.conditionLabel}
-                                           {autoResult === null
-                                             ? ': no value entered yet — left out until the value arrives'
-                                             : autoResult ? ': matches' : ': no match'}
+                                       <div className="flex items-center gap-1.5">
+                                         <span className="shrink-0 font-mono text-[10px] text-gray-400">{outline.prefix}</span>
+                                         <span className={`truncate text-xs font-semibold ${visible ? 'text-gray-800' : 'text-gray-500'}`}>
+                                           {localizedSectionTitle(s, activeLang)}
                                          </span>
-                                         {contrary && (
-                                           <span className="rounded bg-amber-50 px-1.5 py-0 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
-                                             Your choice overrides this rule
-                                           </span>
-                                         )}
+                                         {isExtra
+                                           ? <FilePlus2 size={11} className="shrink-0 text-emerald-400" aria-label="Project section" />
+                                           : s.isPlaceholder
+                                             ? <LayoutTemplate size={11} className="shrink-0 text-amber-400" aria-label="Placeholder section" />
+                                             : <Lock size={11} className="shrink-0 text-gray-300" aria-label="Template section" />}
                                        </div>
+                                       {/* Second line only when there is something to explain: a plain
+                                           included section needs no badge to say so. */}
+                                       {(!visible || conditional) && (
+                                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                           <Badge
+                                             tone={visible ? 'emerald' : 'gray'}
+                                             icon={visible ? <Check size={11} /> : <Minus size={11} />}
+                                             className="rounded px-1.5 py-0 text-[10px]"
+                                           >{visible ? 'In the manual' : 'Left out'}</Badge>
+                                           {blocker && (
+                                             <span className="text-[11px] text-gray-500">
+                                               “{localizedSectionTitle(blocker, activeLang)}” is left out, so this goes with it
+                                             </span>
+                                           )}
+                                           {conditional && (
+                                             <span className="text-[11px] text-gray-500">
+                                               {attr?.name ?? '?'} = {s.conditionLabel}
+                                               {autoResult === null
+                                                 ? ': no value entered yet — left out until the value arrives'
+                                                 : autoResult ? ': matches' : ': no match'}
+                                             </span>
+                                           )}
+                                           {contrary && (
+                                             <span className="rounded bg-amber-50 px-1.5 py-0 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                                               Your choice overrides this rule
+                                             </span>
+                                           )}
+                                         </div>
+                                       )}
                                      </div>
                                      <IncludeModeControl
-                                       value={modeOf(override)}
-                                       ariaLabel={`Inclusion for chapter ${localizedSectionTitle(s, activeLang)}`}
+                                       // No condition means no Auto to distinguish from Include, so
+                                       // that section gets two states and Include clears the override.
+                                       value={conditional ? modeOf(override) : (override === false ? 'exclude' : 'include')}
+                                       modes={conditional ? undefined : ['include', 'exclude']}
+                                       ariaLabel={`Inclusion for section ${localizedSectionTitle(s, activeLang)}`}
                                        onChange={mode => setSectionVisibility(prev => {
                                          const next = { ...prev };
-                                         if (mode === 'auto') delete next[s.id]; else next[s.id] = mode === 'include';
+                                         if (mode === 'auto' || (mode === 'include' && !conditional)) delete next[s.id];
+                                         else next[s.id] = mode === 'include';
                                          return next;
                                        })}
                                      />
@@ -4657,9 +4798,20 @@ const ProjectIMGenerator: React.FC = () => {
                          const items: OptionalContentItem[] = orderedSections.flatMap(section =>
                            (section.blockRefs ?? [])
                              .map((ref, index) => ({ ref, index }))
-                             .filter(x => refHasCondition(x.ref) || (x.ref.kind === 'inline' && (x.ref as InlineBlockRef).isPlaceholder))
+                             // Conditional and optional blocks, PLUS any ordinary block this
+                             // project explicitly left out from the Content tab: an exclusion
+                             // nobody can see in Setup is an exclusion nobody remembers making.
+                             // SKU slots never appear — the resolver has no override for them.
+                             .filter(x => x.ref.kind !== 'sku_slot' && (
+                               refHasCondition(x.ref)
+                               || (x.ref.kind === 'inline' && (x.ref as InlineBlockRef).isPlaceholder)
+                               || (refVisibility[refVisKey(section.id, x.index, x.ref)] ?? refVisibility[`${section.id}:${x.index}`]) !== undefined
+                             ))
                              .map(({ ref, index }) => {
                                const isPlaceholder = ref.kind === 'inline' && !!(ref as InlineBlockRef).isPlaceholder;
+                               // A block with no template rule at all is here only because of an
+                               // explicit choice — see OptionalContentItem.kind 'manual'.
+                               const isManual = !isPlaceholder && !refHasCondition(ref);
                                const condAttrId = (ref as FeatureConditionFields).requires_feature ?? undefined;
                                // Show the project's version when this block has been edited for
                                // this project, matching what the manual will actually contain.
@@ -4680,10 +4832,12 @@ const ProjectIMGenerator: React.FC = () => {
                                  sectionTitle: localizedSectionTitle(section, activeLang),
                                  label: snippet || (ref.kind === 'block' ? 'Shared block' : 'Inline content'),
                                  previewHtml: templateRefPreviewHtml(shownRef),
-                                 kind: isPlaceholder ? 'placeholder' : 'conditional',
-                                 conditionText: isPlaceholder
-                                   ? ((ref as InlineBlockRef).note || null)
-                                   : describeRefCondition(ref as FeatureConditionFields),
+                                 kind: isManual ? 'manual' : isPlaceholder ? 'placeholder' : 'conditional',
+                                 conditionText: isManual
+                                   ? null
+                                   : isPlaceholder
+                                     ? ((ref as InlineBlockRef).note || null)
+                                     : describeRefCondition(ref as FeatureConditionFields),
                                  autoVisible: refAutoVisible(ref),
                                  visible: isRefVisible(section.id, index, ref),
                                  override: refVisibility[refVisKey(section.id, index, ref)] ?? refVisibility[`${section.id}:${index}`],

@@ -28,6 +28,7 @@ import {
   buildParts,
   renderPartPdf,
   marginFor,
+  resolveTypography,
   tempPartPath,
   BUCKET,
   AuthError,
@@ -238,6 +239,9 @@ const mergeAndStamp = async (
   pageSize: 'a4' | 'a5',
   compact: boolean,
   copyrightText: string,
+  /** Page margins (mm) the parts were rendered with — the stamped footer has to land
+   *  inside that band and align with the text block, not at a hardcoded 14/9mm. */
+  margins: { top: number; bottom: number; left: number; right: number },
 ): Promise<Buffer> => {
   const merged = await PDFDocument.create();
   const font = await merged.embedFont(StandardFonts.Helvetica);
@@ -272,7 +276,12 @@ const mergeAndStamp = async (
   const size = 8;
   const footColor = rgb(0.39, 0.45, 0.55);
   const tabTextColor = rgb(0.2, 0.25, 0.32);
-  const footY = 9 * MM_TO_PT;
+  // Vertically centered in the bottom margin band, and aligned with the text block's
+  // left/right edges — both derived from the configured margins, so widening or
+  // tightening them in Admin → IM Print moves the footer with the text.
+  const footY = (margins.bottom / 2) * MM_TO_PT;
+  const footLeft = margins.left * MM_TO_PT;
+  const footRight = margins.right * MM_TO_PT;
   const copyright = encodeForFont(font, copyrightText);
 
   merged.getPages().forEach((page, i) => {
@@ -285,14 +294,14 @@ const mergeAndStamp = async (
       // copyright/version line is stamped, centered, at the bottom of the LAST page only.
       if (copyright && pageNum === total) {
         const cw = font.widthOfTextAtSize(copyright, 7);
-        page.drawText(copyright, { x: (width - cw) / 2, y: 5 * MM_TO_PT, size: 7, font, color: footColor });
+        page.drawText(copyright, { x: (width - cw) / 2, y: margins.bottom * 0.625 * MM_TO_PT, size: 7, font, color: footColor });
       }
     } else if (pageNum >= 2) {
       // Full IM: footer + page number (cover stays clean).
-      if (running) page.drawText(running, { x: 14 * MM_TO_PT, y: footY, size, font, color: footColor });
+      if (running) page.drawText(running, { x: footLeft, y: footY, size, font, color: footColor });
       const right = `${pageNum} / ${total}`;
       const rw = font.widthOfTextAtSize(right, size);
-      page.drawText(right, { x: width - 14 * MM_TO_PT - rw, y: footY, size, font, color: footColor });
+      page.drawText(right, { x: width - footRight - rw, y: footY, size, font, color: footColor });
     }
 
     // Edge thumb-tab (language bodies only).
@@ -353,6 +362,9 @@ export const handler = async (event: NetlifyEvent) => {
 
     const { manuals, ordered } = await fetchManifestAndManuals(supabaseUrl, req);
     const { parts, compact } = buildParts(manuals, req);
+    // Range-checked global print typography — drives the cover re-render below and where
+    // the footer / page numbers are stamped.
+    const typography = resolveTypography(req);
 
     // Download every part rendered by render-print-part. A missing part means the client
     // called merge before every part-render call finished/succeeded — a client-side bug,
@@ -378,11 +390,13 @@ export const handler = async (event: NetlifyEvent) => {
         acc += counts[i + 1];
       }
       const coverHtml = buildCoverPartHtml(
+        // Same typography as the first cover render — omitting it here would re-render the
+        // cover in the default font/scale and silently diverge from the rest of the book.
         manuals,
-        { pageSize: req.pageSize, cover: req.cover, back: req.back, version: req.version },
+        { pageSize: req.pageSize, cover: req.cover, back: req.back, version: req.version, typography },
         langStart,
       );
-      partPdfs[0] = await renderPartPdf(coverHtml, req.pageSize.toUpperCase(), apiKey, marginFor(compact));
+      partPdfs[0] = await renderPartPdf(coverHtml, req.pageSize.toUpperCase(), apiKey, marginFor(typography));
     }
 
     // Merge + stamp (footer/page numbers for IMs; a single last-page copyright line for leaflets) + edge tabs.
@@ -392,7 +406,7 @@ export const handler = async (event: NetlifyEvent) => {
     const companyName = req.cover.companyName ?? '';
     const versionLabel = req.version ? ` · v${req.version}` : '';
     const copyrightText = `© ${year} ${companyName}. All rights reserved.${versionLabel}`;
-    const pdf = await mergeAndStamp(partPdfs, parts, running, req.pageSize, compact, copyrightText);
+    const pdf = await mergeAndStamp(partPdfs, parts, running, req.pageSize, compact, copyrightText, typography.margins);
 
     // Upload to im-print under a UNIQUE path — keyed on the client-generated jobId, NOT a
     // timestamp, so the merge is IDEMPOTENT per job: when the client's 25s timeout fires

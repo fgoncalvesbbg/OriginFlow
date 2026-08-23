@@ -22,15 +22,9 @@
 
 import { getCalloutTitle, getContentsLabel } from './callout-titles.i18n';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
+import { defaultTypographyFor, type PrintTypography } from './im-print-typography';
 
 export type PrintPageSize = 'a4' | 'a5';
-
-/**
- * Default compact-leaflet typography (points). Body text and headings are user-configurable
- * before rendering; these are the pre-filled starting values (≈ the previous 3.4mm / 4.6mm).
- */
-export const DEFAULT_LEAFLET_TEXT_PT = 6;
-export const DEFAULT_LEAFLET_HEADING_PT = 8;
 
 // ---------------------------------------------------------------------------
 // Render contract — a deliberately local, minimal shape of the published
@@ -78,6 +72,12 @@ interface PrintManualMetadata {
   companyName?: string;
   backPageContent?: string;
   footerText?: string;
+  /**
+   * Per-template (therefore per-CATEGORY) font family. No longer read by the print path —
+   * print typography is one global, admin-owned setting (see ./im-print-typography), so the
+   * same booklet program can't print in a different font per product category. Still used by
+   * the on-screen viewer/preview theme; kept here only so published manifests round-trip.
+   */
   fontFamily?: string;
 }
 
@@ -158,15 +158,13 @@ export interface PrintHtmlOptions {
    */
   compact?: boolean;
   /**
-   * Compact-leaflet body-text size in points, applied to ALL body text with no per-element
-   * exceptions. Falls back to DEFAULT_LEAFLET_TEXT_PT. Only used when `compact`.
+   * The global print typography (font family, body/heading point sizes, line spacing, page
+   * margins) for this template type and page size — one admin-owned setting, NOT per product
+   * category. Omit to fall back to the built-in defaults, which reproduce the sizes this
+   * builder used to hardcode. Margins are consumed by the render functions (they belong to
+   * the PDF engine, not to CSS); the rest is consumed here.
    */
-  leafletTextPt?: number;
-  /**
-   * Compact-leaflet heading size in points, applied to ALL headings (section titles, in-content
-   * h1–h3, callout titles). Falls back to DEFAULT_LEAFLET_HEADING_PT. Only used when `compact`.
-   */
-  leafletHeadingPt?: number;
+  typography?: PrintTypography;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,11 +239,20 @@ const multilingualSubtitle = (languages: string[]): string => {
   return parts.join(' · ');
 };
 
-// Page content height (mm) minus the ~36mm of @page margins — used so cover/divider fill the page.
-const PAGE_DIMS: Record<PrintPageSize, { w: number; h: number; css: string; fillH: number }> = {
-  a4: { w: 210, h: 297, css: 'A4', fillH: 255 },
-  a5: { w: 148, h: 210, css: 'A5', fillH: 168 },
+const PAGE_DIMS: Record<PrintPageSize, { h: number; css: string }> = {
+  a4: { h: 297, css: 'A4' },
+  a5: { h: 210, css: 'A5' },
 };
+
+/**
+ * Height (mm) a full-bleed page block (cover / language divider / back page) must claim to
+ * fill its page. Derived from the configured margins rather than hardcoded, so changing the
+ * page margins in the admin settings can't leave the cover short or overflowing onto a second
+ * page. The 8mm slack is what the old hardcoded values (A4 255, A5 168 against 16+18mm
+ * margins) carried, and keeps a rounding-up renderer from spilling one line over.
+ */
+const fillHeightMm = (pageSize: PrintPageSize, typography: PrintTypography): number =>
+  Math.max(40, PAGE_DIMS[pageSize].h - typography.margins.top - typography.margins.bottom - 8);
 
 // ---------------------------------------------------------------------------
 // ISO 7010 callout icons (ported from src/modules/im-viewer/html.ts).
@@ -504,8 +511,12 @@ export const getTabLayout = (index: number, total: number, pageSize: PrintPageSi
  * Compact-leaflet CSS overrides, appended AFTER the shared rules (so the full-IM path stays
  * byte-identical). Removes filler heights and tightens spacing to squeeze the leaflet into as
  * few pages as possible while staying readable, and styles the logo-only header.
+ *
+ * Sizes come from the leaflet's own global profile (Admin → IM Print), which is why leaflets
+ * and full manuals can share one settings table without one of them becoming unreadable: a
+ * leaflet must fit a few pages at ~6pt, a manual is set at ~10.8pt.
  */
-const compactOverrides = (primaryColor: string, textPt: number, headingPt: number): string => `
+const compactOverrides = (primaryColor: string, textPt: number, headingPt: number, lineHeight: number): string => `
     /* --- Warning Leaflet compact overrides --- */
     .im-leaflet-header { display: flex; align-items: center; margin: 0 0 3mm; padding-bottom: 1.5mm; border-bottom: 0.5mm solid ${primaryColor}; }
     .im-leaflet-logo { height: 8mm; width: auto; object-fit: contain; }
@@ -516,7 +527,7 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
     /* Uniform typography: EVERY element in the leaflet content uses the chosen body size, and
        every heading the chosen heading size — no per-element exceptions. Numeric badges use em
        units below so they scale with the text instead of overflowing their circles. */
-    .im-page-content, .im-page-content * { font-size: ${textPt}pt; line-height: 1.3; }
+    .im-page-content, .im-page-content * { font-size: ${textPt}pt; line-height: ${lineHeight}; }
     .im-section-title,
     .im-section-content h1, .im-section-content h2, .im-section-content h3,
     .imv-block-title { font-size: ${headingPt}pt; line-height: 1.2; }
@@ -543,24 +554,39 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
     .imv-step-num { width: 2.1em; height: 2.1em; }
 `;
 
+/**
+ * The shared stylesheet.
+ *
+ * Two distinct scales are at work here, on purpose:
+ *   - RUNNING TEXT (body copy, section titles, TOC rows, the back page's content) is sized in
+ *     POINTS from the global typography profile, because that is the thing an operator sets in
+ *     Admin → IM Print and expects to hold for every manual regardless of category.
+ *   - PAGE FURNITURE (cover title, the language-divider display type, cover logo/mark sizes)
+ *     stays on the mm-based `mm()` scale below, which shrinks by 0.82 on A5. That type is
+ *     laid out against the sheet, not read as prose, so it must track the paper rather than
+ *     the reader's font-size setting.
+ * Everything derived from `headingPt` uses the ratios the old hardcoded mm values had
+ * (title 6.2 : h1 5.5 : h2 5.0 : h3 4.5), so one heading number still yields the same
+ * hierarchy.
+ */
 const buildStyles = (
   pageSize: PrintPageSize,
   primaryColor: string,
-  fontImport: string,
-  fontStack: string,
+  typography: PrintTypography,
   compact = false,
-  textPt: number = DEFAULT_LEAFLET_TEXT_PT,
-  headingPt: number = DEFAULT_LEAFLET_HEADING_PT,
 ): string => {
   const dims = PAGE_DIMS[pageSize];
-  const s = pageSize === 'a5' ? 0.82 : 1; // A5 type scale
+  const s = pageSize === 'a5' ? 0.82 : 1; // A5 scale for page furniture only (see above)
   const mm = (base: number) => `${(base * s).toFixed(2)}mm`;
+  const fillH = fillHeightMm(pageSize, typography);
+  const { bodyPt, headingPt, lineHeight } = typography;
+  const pt = (value: number) => `${Number(value.toFixed(2))}pt`;
   return `
-    ${fontImport}
+    ${getFontImport(typography.fontFamily)}
     :root { color-scheme: light only; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; }
-    body { font-family: ${fontStack}; color: #1f2937; }
+    body { font-family: ${getFontStack(typography.fontFamily)}; color: #1f2937; }
 
     /* Page size only — the engine owns margins (so its footer/page-numbers sit in the bottom
        margin). No bleed/crop marks (Chromium engine = screen-grade output). */
@@ -572,7 +598,7 @@ const buildStyles = (
     .im-break { break-before: page; page-break-before: always; }
 
     /* Cover (shared) */
-    .im-page-cover { min-height: ${dims.fillH}mm; display: flex; flex-direction: column; }
+    .im-page-cover { min-height: ${fillH}mm; display: flex; flex-direction: column; }
     .im-cover-body { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
     /* Cover image: centered in the page's middle band, scaled to FIT (never cropped or
        stretched), capped so it can't crowd the title above or the footer below. */
@@ -596,7 +622,7 @@ const buildStyles = (
     .im-mark { height: ${mm(12)}; width: auto; object-fit: contain; }
 
     /* Language divider */
-    .im-page-divider { min-height: ${dims.fillH}mm; display: flex; align-items: center; justify-content: center; text-align: center; }
+    .im-page-divider { min-height: ${fillH}mm; display: flex; align-items: center; justify-content: center; text-align: center; }
     .im-divider-bar { width: ${mm(40)}; height: ${mm(2)}; margin: 0 auto ${mm(8)}; border-radius: 2px; }
     .im-divider-title { color: ${primaryColor}; font-size: ${mm(14)}; margin: 0; }
     .im-divider-code { color: #64748b; letter-spacing: 0.3em; margin: ${mm(2)} 0 0; }
@@ -606,21 +632,23 @@ const buildStyles = (
        title must not run under the stamped number. */
     .im-page-toc .im-toc-title { color: ${primaryColor}; font-size: ${mm(7)}; border-bottom: 0.6mm solid ${primaryColor}; margin: 0 0 ${mm(6)}; padding-bottom: ${mm(2)}; }
     .im-toc { display: block; }
-    .im-toc-row { display: block; text-decoration: none; color: #1f2937; padding: ${mm(1.6)} ${mm(10)} ${mm(1.6)} 0; border-bottom: 1px solid #f1f5f9; font-size: ${mm(3.8)}; }
-    .im-toc-row.im-toc-sub { padding-left: ${mm(6)}; color: #475569; font-size: ${mm(3.5)}; }
+    .im-toc-row { display: block; text-decoration: none; color: #1f2937; padding: ${mm(1.6)} ${mm(10)} ${mm(1.6)} 0; border-bottom: 1px solid #f1f5f9; font-size: ${pt(bodyPt)}; }
+    .im-toc-row.im-toc-sub { padding-left: ${mm(6)}; color: #475569; font-size: ${pt(bodyPt * 0.92)}; }
 
     /* Section content — sections flow continuously (like the preview); the whole content block
        is the only forced page. A title never sits orphaned at the foot of a page. */
     .im-section { margin: 0 0 ${mm(8)}; }
-    .im-section-title { margin: 0 0 ${mm(5)}; padding-bottom: ${mm(2)}; border-bottom: 0.6mm solid ${primaryColor}; color: ${primaryColor}; font-size: ${mm(6.2)}; break-after: avoid; }
-    .im-section-content { font-size: ${mm(3.8)}; line-height: 1.6; color: #1f2937; }
+    .im-section-title { margin: 0 0 ${mm(5)}; padding-bottom: ${mm(2)}; border-bottom: 0.6mm solid ${primaryColor}; color: ${primaryColor}; font-size: ${pt(headingPt)}; break-after: avoid; }
+    .im-section-content { font-size: ${pt(bodyPt)}; line-height: ${lineHeight}; color: #1f2937; }
     .im-section-content h1, .im-section-content h2, .im-section-content h3 { color: ${primaryColor}; margin: ${mm(4)} 0 ${mm(2)}; break-after: avoid; }
-    .im-section-content h1 { font-size: ${mm(5.5)}; }
-    .im-section-content h2 { font-size: ${mm(5)}; }
-    .im-section-content h3 { font-size: ${mm(4.5)}; }
+    /* h1/h2/h3 keep the ratios the old hardcoded mm sizes had (5.5/5.0/4.5 against a 6.2
+       section title), so one heading setting still yields the same hierarchy. */
+    .im-section-content h1 { font-size: ${pt(headingPt * 0.887)}; }
+    .im-section-content h2 { font-size: ${pt(headingPt * 0.806)}; }
+    .im-section-content h3 { font-size: ${pt(headingPt * 0.726)}; }
 
     /* Rich content (ported from im-viewer.css) */
-    .imv-content { line-height: 1.65; color: #374151; }
+    .imv-content { line-height: ${lineHeight}; color: #374151; }
     .imv-content ul { list-style: disc; padding-left: 1.5em; margin: 0 0 1em; }
     .imv-content ol { list-style: decimal; padding-left: 1.5em; margin: 0 0 1em; }
     .imv-content li { display: list-item; margin-bottom: 0.25em; }
@@ -639,7 +667,9 @@ const buildStyles = (
     .imv-block-icon { flex-shrink: 0; width: 48px; height: 48px; }
     .imv-block-content { flex: 1; min-width: 0; }
     .imv-block-content p:last-child { margin-bottom: 0; }
-    .imv-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 0.5rem; letter-spacing: 0.05em; }
+    /* Callout titles are headings too — 0.62 of the section title matches the 0.9rem this
+       rule used to hardcode at the default heading size. */
+    .imv-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: ${pt(headingPt * 0.62)}; margin-bottom: 0.5rem; letter-spacing: 0.05em; }
     .imv-block-warning { background: #fff7ed; border-left-color: #f97316; } .imv-block-warning .imv-block-title { color: #c2410c; }
     .imv-block-danger { background: #fee2e2; border-left-color: #b91c1c; } .imv-block-danger .imv-block-title { color: #7f1d1d; }
     .imv-block-caution { background: #fefce8; border-left-color: #eab308; } .imv-block-caution .imv-block-title { color: #854d0e; }
@@ -654,7 +684,7 @@ const buildStyles = (
     .imv-annotated-frame { position: relative; display: inline-block; max-width: 100%; }
     .imv-annotated-frame img { max-width: 100%; height: auto; display: block; border-radius: 4px; }
     .imv-marker { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; }
-    .imv-caption { font-size: 11pt; color: #6b7280; margin-top: 6px; font-style: italic; }
+    .imv-caption { font-size: ${pt(bodyPt * 0.92)}; color: #6b7280; margin-top: 6px; font-style: italic; }
     .imv-legend { list-style: none; padding: 0; margin: 10px 0 0; }
     .imv-legend li { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
     .imv-legend-num { flex-shrink: 0; min-width: 20px; height: 20px; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
@@ -673,17 +703,27 @@ const buildStyles = (
     .imv-step-img { max-width: 60mm; height: auto; margin-top: 8px; border-radius: 4px; }
 
     /* Back page */
-    .im-page-end { min-height: ${dims.fillH}mm; background: #f8fafc; padding: ${mm(8)}; }
+    .im-page-end { min-height: ${fillH}mm; background: #f8fafc; padding: ${mm(8)}; }
     .im-end-logo { height: ${mm(16)}; object-fit: contain; margin-bottom: ${mm(8)}; }
-    .im-end-content { font-size: ${mm(3.5)}; color: #1e293b; }
-    .im-end-copyright { margin-top: ${mm(10)}; font-size: ${mm(3.2)}; color: #64748b; text-align: center; }
-    ${compact ? compactOverrides(primaryColor, textPt, headingPt) : ''}
+    .im-end-content { font-size: ${pt(bodyPt)}; color: #1e293b; }
+    .im-end-copyright { margin-top: ${mm(10)}; font-size: ${pt(bodyPt * 0.85)}; color: #64748b; text-align: center; }
+    ${compact ? compactOverrides(primaryColor, bodyPt, headingPt, lineHeight) : ''}
   `;
 };
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
+
+/**
+ * The typography this render must use: the global profile the caller passed in, or the
+ * built-in default for this template type and page size. Note what is NOT consulted here —
+ * the manual's own metadata. Font family used to come from there, and template metadata is
+ * per product category, so the same booklet program printed in a different font per
+ * category; typography is now one house-wide setting (Admin → IM Print).
+ */
+const resolveTypography = (opts: PrintHtmlOptions): PrintTypography =>
+  opts.typography ?? defaultTypographyFor(opts.compact ? 'warning_leaflet' : 'im', opts.pageSize);
 
 /** Resolve the cover options (explicit values win, else template metadata defaults). */
 const resolveCoverOpts = (opts: PrintHtmlOptions, base: PrintManual['metadata']): PrintCoverOptions => ({
@@ -719,9 +759,6 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
 
   const base = manuals[0].metadata;
   const primaryColor = base?.primaryColor || '#0f172a';
-  const fontFamily = base?.fontFamily;
-  const fontImport = getFontImport(fontFamily);
-  const fontStack = getFontStack(fontFamily);
   const multi = manuals.length > 1;
   const versionLabel = opts.version ? `v${opts.version}` : '';
   const languages = manuals.map((m) => m.language);
@@ -746,7 +783,7 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <style>${buildStyles(opts.pageSize, primaryColor, fontImport, fontStack)}</style>
+    <style>${buildStyles(opts.pageSize, primaryColor, resolveTypography(opts))}</style>
   </head>
   <body>
     ${cover}
@@ -786,7 +823,7 @@ const wrapStandalone = (inner: string, styles: string): string => `<!doctype htm
 
 const partStyles = (manuals: PrintManual[], opts: PrintHtmlOptions): string => {
   const base = manuals[0].metadata;
-  return buildStyles(opts.pageSize, base?.primaryColor || '#0f172a', getFontImport(base?.fontFamily), getFontStack(base?.fontFamily), opts.compact, opts.leafletTextPt, opts.leafletHeadingPt);
+  return buildStyles(opts.pageSize, base?.primaryColor || '#0f172a', resolveTypography(opts), opts.compact);
 };
 
 /**

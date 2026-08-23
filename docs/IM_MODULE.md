@@ -92,11 +92,18 @@ interface IMTemplateMetadata {
   companyName?: string;               // Used in copyright and cover footer
   backPageContent?: string;           // Free HTML for the end page
   footerText?: string;                // Default running footer
-  fontFamily?: string;                // e.g. "Roboto", "Inter"
+  fontFamily?: string;                // On-screen preview only — see note below
   masterPages?: Partial<Record<IMMasterLayoutName, IMMasterPageOverride>>;
   sectionLayoutMap?: Record<string, IMMasterLayoutName>;
 }
 ```
+
+`fontFamily` applies to the on-screen viewer/preview only. Print typography (font family, body
+and heading point sizes, line spacing and page margins) is a single GLOBAL setting per page
+size, held in `im_print_settings` and edited in Admin console → IM Print — see
+[src/services/im/im-print-settings.service.ts](../src/services/im/im-print-settings.service.ts).
+It was moved out of template metadata because a template is tied to one product category, so
+the same booklet program printed in a different font depending on the category it came from.
 
 The `sectionLayoutMap` maps section IDs (or type aliases like `type:section`, `type:subsection`, `default`) to a `IMMasterLayoutName`.
 

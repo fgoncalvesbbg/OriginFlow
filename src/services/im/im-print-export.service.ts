@@ -29,6 +29,7 @@ import { auth, db, orEmpty, storage, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { generateUUID } from '../../utils';
 import type { IMTemplateType } from '../../types';
+import type { PrintTypography } from './im-print-typography';
 
 const BUCKET = 'im-print';
 const FN_BASE = '/.netlify/functions';
@@ -94,9 +95,14 @@ export interface RequestPrintPdfParams {
   comment: string;
   /** im_markets.code this booklet is produced for (from the dialog's market preset). */
   market?: string;
-  /** Compact-leaflet typography (points), applied to ALL body text / headings. Leaflets only. */
-  leafletTextPt?: number;
-  leafletHeadingPt?: number;
+  /**
+   * The global print typography for this template type and page size (Admin → IM Print):
+   * font family, body/heading point sizes, line spacing, page margins. Resolved by the
+   * caller and passed through to every step of the pipeline so the cover, each language
+   * body and the merged footer are all set identically. Omit to let the render functions
+   * fall back to the built-in default for the combination.
+   */
+  typography?: PrintTypography;
   /** Progress reporter — called as each part finishes, e.g. "Rendering DE (3/12)…". */
   onProgress?: (label: string, done: number, total: number) => void;
 }
@@ -284,8 +290,7 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     version: params.version,
     comment: params.comment,
     market: params.market,
-    leafletTextPt: params.leafletTextPt,
-    leafletHeadingPt: params.leafletHeadingPt,
+    typography: params.typography,
   };
 
   const jobId = generateUUID();

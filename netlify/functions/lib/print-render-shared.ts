@@ -26,6 +26,11 @@ import {
   PrintHtmlOptions,
   PrintPart,
 } from '../../../src/services/im/im-print-html';
+import {
+  defaultTypographyFor,
+  normalizePrintTypography,
+  type PrintTypography,
+} from '../../../src/services/im/im-print-typography';
 
 export interface NetlifyEvent {
   httpMethod: string;
@@ -46,9 +51,16 @@ export interface RenderRequestBase {
   comment?: string;
   /** im_markets.code this booklet is produced for (from the dialog's market preset). */
   market?: string;
-  /** Compact-leaflet typography (points), applied to ALL text / headings. Optional. */
-  leafletTextPt?: number;
-  leafletHeadingPt?: number;
+  /**
+   * The global print typography (Admin → IM Print) the browser resolved for this template
+   * type and page size: font family, body/heading point sizes, line spacing, page margins.
+   * Optional — an absent or invalid set falls back to the built-in default for the
+   * combination, which is what the renderer hardcoded before migration 122.
+   *
+   * NOT trusted as sent: it arrives from the browser, so every field is range-checked by
+   * `resolveTypography` below before it reaches PDFShift.
+   */
+  typography?: PrintTypography;
 }
 
 export const BUCKET = 'im-print';
@@ -77,8 +89,7 @@ export const isValidBase = (b: unknown): b is RenderRequestBase => {
     (r.pageSize === 'a4' || r.pageSize === 'a5') &&
     typeof r.cover === 'object' &&
     typeof r.back === 'object' &&
-    (r.leafletTextPt === undefined || typeof r.leafletTextPt === 'number') &&
-    (r.leafletHeadingPt === undefined || typeof r.leafletHeadingPt === 'number')
+    (r.typography === undefined || (typeof r.typography === 'object' && r.typography !== null))
   );
 };
 
@@ -106,13 +117,31 @@ export class AuthError extends Error {}
  */
 export class PermanentError extends Error {}
 
+/**
+ * The typography this request renders with — the browser-supplied global profile, every
+ * field range-checked against the built-in default for the template type and page size.
+ * Call this instead of reading `req.typography`: the request body is untrusted, and an
+ * out-of-range point size or margin would otherwise reach PDFShift verbatim.
+ */
+export const resolveTypography = (req: RenderRequestBase): PrintTypography =>
+  normalizePrintTypography(req.typography, defaultTypographyFor(req.templateType, req.pageSize));
+
 export interface PageMargin { top: string; bottom: string; left: string; right: string; }
-/** Full-IM margins (footer + page numbers sit in the generous bottom band). */
-export const IM_MARGIN: PageMargin = { top: '16mm', bottom: '18mm', left: '14mm', right: '14mm' };
-/** Compact Warning Leaflet margins — narrower, but left/right ≥ the ~8mm edge tab so content
- *  never runs under the stamped thumb-tab (which alternates left/right per recto/verso). */
-export const LEAFLET_MARGIN: PageMargin = { top: '8mm', bottom: '8mm', left: '10mm', right: '10mm' };
-export const marginFor = (compact: boolean): PageMargin => (compact ? LEAFLET_MARGIN : IM_MARGIN);
+
+/**
+ * Page margins for the PDF engine, in mm, from the resolved global typography.
+ *
+ * The bottom band has to stay generous enough to hold the stamped running footer and page
+ * number (see render-print-merge.ts), and left/right should stay ≥ the ~7–8mm language edge
+ * tab so content never runs under the stamped thumb-tab — both are enforced as ranges on the
+ * setting itself (PRINT_SETTING_LIMITS) rather than re-derived here.
+ */
+export const marginFor = (typography: PrintTypography): PageMargin => ({
+  top: `${typography.margins.top}mm`,
+  bottom: `${typography.margins.bottom}mm`,
+  left: `${typography.margins.left}mm`,
+  right: `${typography.margins.right}mm`,
+});
 
 /** Fetch the published manifest + each requested language's ResolvedManual JSON. */
 export const fetchManifestAndManuals = async (
@@ -145,8 +174,7 @@ export const buildParts = (
     back: req.back,
     version: req.version,
     compact,
-    leafletTextPt: req.leafletTextPt,
-    leafletHeadingPt: req.leafletHeadingPt,
+    typography: resolveTypography(req),
   });
   return { parts, compact };
 };

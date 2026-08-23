@@ -1,8 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './im-content.utils';
+import { decodePlaceholderLabel, escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './im-content.utils';
 import type { CategoryAttribute, BlockRef } from '../../../types';
 
 const attr = (dataType: CategoryAttribute['dataType']): CategoryAttribute => ({ dataType } as CategoryAttribute);
+
+describe('decodePlaceholderLabel', () => {
+  it('prefers a decoded data-label', () => {
+    expect(decodePlaceholderLabel('Rated%20power', '[ignored]', 'Text')).toBe('Rated power');
+  });
+
+  it('falls back rather than showing percent-escapes when data-label is malformed', () => {
+    expect(decodePlaceholderLabel('%E0%A4%A', 'whatever', 'Image')).toBe('Image');
+  });
+
+  it('unwraps a legacy [Bracketed] body when there is no data-label', () => {
+    expect(decodePlaceholderLabel(null, '  [Model number]  ', 'Text')).toBe('Model number');
+    expect(decodePlaceholderLabel('', '[Model number]', 'Text')).toBe('Model number');
+  });
+
+  it('uses the fallback for an unbracketed or empty body', () => {
+    expect(decodePlaceholderLabel(null, 'Model number', 'Text Input')).toBe('Text Input');
+    expect(decodePlaceholderLabel(null, '', 'Image Upload')).toBe('Image Upload');
+    expect(decodePlaceholderLabel(null, '[half', 'Text')).toBe('Text');
+  });
+
+  it('yields an empty label for empty brackets, as the template wrote them', () => {
+    expect(decodePlaceholderLabel(null, '[]', 'Text')).toBe('');
+  });
+});
 
 describe('escapeXml', () => {
   it('escapes the five XML special characters', () => {

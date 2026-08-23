@@ -1,0 +1,10 @@
+# Keeps ripgrep (and so Claude Code's Grep/Glob) out of graphify's bulk output.
+# These files are machine artifacts: a match in them is never the answer, but
+# scanning them pollutes every repo-wide search. Query them instead:
+#   node scripts/graph-query.mjs help
+#
+# Not a .gitignore — git still tracks all of this.
+graph.json
+graph.html
+manifest.json
+cache/

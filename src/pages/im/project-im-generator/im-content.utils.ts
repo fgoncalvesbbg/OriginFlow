@@ -36,6 +36,29 @@ export const getTokensInFragment = (html: string): string[] => {
   return out;
 };
 
+/**
+ * The human label for a placeholder or condition node.
+ *
+ * `data-label` wins when present and decodable; a node that failed to encode falls back rather
+ * than showing percent-escapes to the PM. With no attribute at all, a `[Bracketed]` body is the
+ * legacy way templates carried the label, so it is unwrapped.
+ *
+ * Takes the two strings rather than the element: the generator's callers run in the browser, but
+ * this logic is the part worth pinning in tests, and the suite has no DOM (`environment: 'node'`).
+ */
+export const decodePlaceholderLabel = (labelAttr: string | null, text: string, fallback: string): string => {
+  if (labelAttr) {
+    try {
+      return decodeURIComponent(labelAttr);
+    } catch {
+      return fallback;
+    }
+  }
+  const trimmed = (text || '').trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) return trimmed.substring(1, trimmed.length - 1);
+  return fallback;
+};
+
 /** A ref carries a condition when it requires (or requires the absence of) an attribute. */
 export const refHasCondition = (ref: BlockRef): boolean =>
   ref.kind !== 'sku_slot' && !!((ref as FeatureConditionFields).requires_feature || (ref as FeatureConditionFields).requires_feature_absent);

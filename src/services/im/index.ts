@@ -60,6 +60,15 @@ export { checkPrintImageWeights, HEAVY_IMAGE_BYTES } from './im-print-preflight.
 export type { PrintImageReport, PrintImageInfo } from './im-print-preflight.service';
 export { getIMMarkets, saveIMMarket, deleteIMMarket } from './im-market.service';
 export type { IMMarket } from './im-market.service';
+export {
+  getPrintSettings,
+  getPrintTypography,
+  savePrintSettingsProfile,
+  defaultTypographyFor,
+  PRINT_FONT_FAMILIES,
+  PRINT_SETTING_LIMITS,
+} from './im-print-settings.service';
+export type { PrintSettingsProfile, PrintTypography, PrintPageSizeKey } from './im-print-settings.service';
 export type { PublishResult, PublishHistoryEvent } from './im-publish.service';
 export {
   getStaleProjectIMDetails,

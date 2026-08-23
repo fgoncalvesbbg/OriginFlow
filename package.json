@@ -8,7 +8,8 @@
     "build": "vite build",
     "serve": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "graph": "node scripts/graph-query.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",
