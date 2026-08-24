@@ -123,6 +123,17 @@ const ProjectIMGenerator: React.FC = () => {
   const [blockOverrides, setBlockOverrides] = useState<Record<string, Record<string, InlineBlockRef>>>({});
   // Left panel mode: fill placeholder values, or author project-specific content.
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
+  // Editor/preview split. Both panes had widths fixed in the markup, so filling in a long form
+  // meant scrolling a narrow column beside a preview that could not be narrowed or dismissed.
+  // The default follows the old fractions: the inputs took half the row in "Add content" mode
+  // and a third otherwise.
+  // Must be called before any early return below (loading/error/no-template) — a hook called
+  // only on some renders breaks React's hook-order invariant (error #310).
+  const previewPane = useResizablePane(
+    'im.project.preview',
+    'right',
+    editorMode === 'content' ? 50 : 67,
+  );
   // Chapter briefly outlined in the preview after a "Show in preview" jump, so the eye can
   // find the landing spot in a page of body text. Cleared on a timer.
   const [flashSectionId, setFlashSectionId] = useState<string | null>(null);
@@ -2208,15 +2219,6 @@ const ProjectIMGenerator: React.FC = () => {
   const metadata = normalizeIMTemplateMetadata(template?.metadata);
   // Profile the editors model so image sizes on screen match the exported PDF.
   const printPageSize = metadata.pageSize === 'a5' ? 'a5' : 'a4';
-  // Editor/preview split. Both panes had widths fixed in the markup, so filling in a long form
-  // meant scrolling a narrow column beside a preview that could not be narrowed or dismissed.
-  // The default follows the old fractions: the inputs took half the row in "Add content" mode
-  // and a third otherwise.
-  const previewPane = useResizablePane(
-    'im.project.preview',
-    'right',
-    editorMode === 'content' ? 50 : 67,
-  );
   const pageBackground = metadata.assets?.backgroundAssetUrl
     ? `url(${metadata.assets.backgroundAssetUrl}) center/cover no-repeat`
     : undefined;
