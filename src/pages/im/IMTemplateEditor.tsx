@@ -28,6 +28,8 @@ import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.ut
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { usePrintColumn } from './editor/usePrintColumn';
+import { imContentPrintScale } from './editor/im-content-style';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { AttributePicker } from './editor/AttributePicker';
 import { useListDnd } from './editor/useListDnd';
@@ -241,8 +243,11 @@ const IMTemplateEditor: React.FC = () => {
 
   const [metaSettings, setMetaSettings] = useState<IMTemplateMetadata>(normalizeIMTemplateMetadata());
   // Profile the editors model. Taken from the live form value, so switching page size
-  // re-scales the canvas immediately rather than after a save.
-  const printPageSize = metaSettings.pageSize === 'a5' ? 'a5' : 'a4';
+  // re-scales the canvas immediately rather than after a save. A5 is the house default.
+  const printPageSize = metaSettings.pageSize === 'a4' ? 'a4' : 'a5';
+  // The same profile's geometry for the READ-ONLY previews (the preview drawer and
+  // focus-mode preview), so their density/sizes match the PDF, not the web fallbacks.
+  const printGeometry = usePrintColumn(templateType, printPageSize);
 
   useEffect(() => {
     if (!categoryId) return;
@@ -994,7 +999,7 @@ const IMTemplateEditor: React.FC = () => {
           {s.isPlaceholder
             ? <p className="text-xs text-gray-400 italic border border-dashed border-gray-300 rounded p-3">Placeholder — content is filled per project.</p>
             : html
-              ? <div className="im-content text-sm text-gray-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
+              ? <div className="im-content text-gray-700" style={printGeometry ? imContentPrintScale(printGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
               : <p className="text-xs text-gray-300 italic">No content for {activeLang.toUpperCase()}.</p>}
           {children.map((c, i) => renderSec(c, `${prefix}${i + 1}.`, level + 1))}
         </div>

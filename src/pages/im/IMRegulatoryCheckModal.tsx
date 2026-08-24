@@ -163,10 +163,13 @@ interface FixPanelProps {
   locked: boolean;
   onSave: (section: IMSection) => Promise<boolean>;
   onClose: () => void;
+  /** Print profile for the inline editor's WYSIWYG column (matches the template editor). */
+  printTemplateType?: IMTemplate['templateType'];
+  printPageSize?: 'a4' | 'a5';
 }
 
 const FixPanel: React.FC<FixPanelProps> = ({
-  location, languages, attributes, locked, onSave, onClose,
+  location, languages, attributes, locked, onSave, onClose, printTemplateType, printPageSize,
 }) => {
   const original = location.ref;
   const inlineOriginal = original && original.kind === 'inline' ? original : null;
@@ -249,6 +252,8 @@ const FixPanel: React.FC<FixPanelProps> = ({
         <>
           <div className="bg-white rounded border">
             <InlineBlockEditor
+              printTemplateType={printTemplateType}
+              printPageSize={printPageSize}
               content={draft.content}
               variant={draft.variant}
               languages={languages}
@@ -311,11 +316,13 @@ interface FindingRowProps {
   locked: boolean;
   onSaveSection: (section: IMSection) => Promise<boolean>;
   onGoToSection?: (sectionId: string) => void;
+  printTemplateType?: IMTemplate['templateType'];
+  printPageSize?: 'a4' | 'a5';
 }
 
 const FindingRow: React.FC<FindingRowProps> = ({
   finding, status, statusBusy, onSetStatus, location, isEditing, onToggleEdit,
-  languages, attributes, locked, onSaveSection, onGoToSection,
+  languages, attributes, locked, onSaveSection, onGoToSection, printTemplateType, printPageSize,
 }) => {
   // A decided finding stays visible but recedes, so the undecided ones read first.
   const decided = Boolean(status);
@@ -398,6 +405,8 @@ const FindingRow: React.FC<FindingRowProps> = ({
           locked={locked}
           onSave={onSaveSection}
           onClose={onToggleEdit}
+          printTemplateType={printTemplateType}
+          printPageSize={printPageSize}
         />
       )}
     </div>
@@ -920,6 +929,8 @@ export const RegulatoryCheckModal: React.FC<Props> = ({
                               locked={Boolean(locked)}
                               onSaveSection={onSaveSection ?? (async () => false)}
                               onGoToSection={onGoToSection}
+                              printTemplateType={template.templateType}
+                              printPageSize={template.metadata?.pageSize === 'a4' ? 'a4' : 'a5'}
                             />
                           ))}
                         </div>

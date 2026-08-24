@@ -172,7 +172,8 @@ const ItemRow: React.FC<{
   expanded: boolean;
   onToggleExpanded: () => void;
   onModeChange: (mode: IncludeMode) => void;
-}> = ({ item, expanded, onToggleExpanded, onModeChange }) => {
+  previewStyle?: React.CSSProperties;
+}> = ({ item, expanded, onToggleExpanded, onModeChange, previewStyle }) => {
   const outcome = outcomeFor(item);
   const mode = modeOf(item.override);
   const panelId = `optional-preview-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -240,7 +241,8 @@ const ItemRow: React.FC<{
           {item.previewHtml
             ? (
               <div
-                className="im-content pointer-events-none text-xs leading-relaxed text-gray-700"
+                className="im-content pointer-events-none text-xs text-gray-700"
+                style={previewStyle}
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.previewHtml) }}
               />
             )
@@ -261,12 +263,19 @@ export interface OptionalContentPanelProps {
   sectionOrder: string[];
   /** Apply a choice. `undefined` clears the override back to Auto. */
   onSetOverride: (key: string, override: boolean | undefined) => void;
+  /**
+   * Style for each expanded preview's `.im-content` container — the print profile's
+   * density vars (imContentVars), so previews here match the PDF's proportions instead
+   * of the stylesheet's web fallbacks.
+   */
+  previewStyle?: React.CSSProperties;
 }
 
 export const OptionalContentPanel: React.FC<OptionalContentPanelProps> = ({
   items,
   sectionOrder,
   onSetOverride,
+  previewStyle,
 }) => {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
@@ -364,6 +373,7 @@ export const OptionalContentPanel: React.FC<OptionalContentPanelProps> = ({
                     expanded={expandedKeys.has(item.key)}
                     onToggleExpanded={() => toggleExpanded(item.key)}
                     onModeChange={mode => applyMode(item.key, mode, item.kind)}
+                    previewStyle={previewStyle}
                   />
                 ))}
               </div>

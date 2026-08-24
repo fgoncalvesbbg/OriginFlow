@@ -13,6 +13,11 @@ import {
 } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { AssetLibraryPanel } from './editor/AssetLibraryPanel';
+// Shared blocks are edited outside any one template, so model the HOUSE DEFAULT
+// profile (full IM, A5) — the size most blocks will actually print at.
+import { usePrintColumn } from './editor/usePrintColumn';
+import { imContentVars } from './editor/im-content-style';
+import './styles/im-content.css';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -84,6 +89,7 @@ interface BlockModalProps {
 const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, allAttributes, onSave, onClose, saving, saveError }) => {
   const isNew = !initial.id;
 
+  const printGeometry = usePrintColumn('im', 'a5');
   const [draft, setDraft] = useState<Partial<IMBlock>>(initial);
   const [activeLang, setActiveLang] = useState('en');
   const [uploadingImg, setUploadingImg] = useState(false);
@@ -589,6 +595,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                 onKeyUp={saveSelection}
                 onBlur={saveSelection}
                 className="im-content w-full border rounded-lg p-3 text-sm min-h-[12rem] max-h-[24rem] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                style={printGeometry ? imContentVars(printGeometry) : undefined}
               />
             )}
             <p className="text-[10px] text-gray-400 mt-1">
@@ -649,6 +656,7 @@ interface BlockCardProps {
 
 const BlockCard: React.FC<BlockCardProps> = ({ block, onEdit, onDelete, categories, usageCount }) => {
   const [expanded, setExpanded] = useState(false);
+  const cardGeometry = usePrintColumn('im', 'a5');
   const catNames = (block.applicableCategories ?? [])
     .map(id => categories.find(c => c.id === id)?.name ?? id);
 
@@ -725,6 +733,7 @@ const BlockCard: React.FC<BlockCardProps> = ({ block, onEdit, onDelete, categori
           <div className="px-4 pb-4">
             <div
               className="text-sm text-gray-600 border rounded-lg p-3 bg-light/30 max-h-40 overflow-y-auto im-content"
+              style={cardGeometry ? imContentVars(cardGeometry) : undefined}
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content['en'] ?? '<em class="text-gray-400">No English content</em>') }}
             />
           </div>

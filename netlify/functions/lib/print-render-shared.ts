@@ -62,6 +62,14 @@ export interface RenderRequestBase {
    * `resolveTypography` below before it reaches PDFShift.
    */
   typography?: PrintTypography;
+  /**
+   * Continue the first content section on the TOC page (saves a page per language).
+   * Chosen per export in the print dialog; the IM_PRINT_MERGE_TOC env flag still
+   * forces it on server-wide. MUST be identical across the prepare/part/merge calls
+   * of one job (the client sends one shared base), or the parts would disagree on
+   * page counts.
+   */
+  mergeToc?: boolean;
 }
 
 export const BUCKET = 'im-print';
@@ -90,7 +98,8 @@ export const isValidBase = (b: unknown): b is RenderRequestBase => {
     (r.pageSize === 'a4' || r.pageSize === 'a5') &&
     typeof r.cover === 'object' &&
     typeof r.back === 'object' &&
-    (r.typography === undefined || (typeof r.typography === 'object' && r.typography !== null))
+    (r.typography === undefined || (typeof r.typography === 'object' && r.typography !== null)) &&
+    (r.mergeToc === undefined || typeof r.mergeToc === 'boolean')
   );
 };
 
@@ -176,10 +185,10 @@ export const buildParts = (
     version: req.version,
     compact,
     typography: resolveTypography(req),
-    // Server-side flag (IM_PRINT_MERGE_TOC): saves a page per language by letting content
-    // continue on the TOC page. Opt-in, because it trades away the clean "contents, then the
-    // manual" separation — a judgement call about the printed artefact, not a free win.
-    mergeTocIntoContent: flagEnabled(process.env.IM_PRINT_MERGE_TOC),
+    // Per-export choice from the print dialog; the server-side IM_PRINT_MERGE_TOC flag
+    // still forces it on fleet-wide. Saves a page per language by letting content continue
+    // on the TOC page, at the cost of the clean "contents, then the manual" separation.
+    mergeTocIntoContent: req.mergeToc === true || flagEnabled(process.env.IM_PRINT_MERGE_TOC),
   });
   return { parts, compact };
 };

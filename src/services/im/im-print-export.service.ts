@@ -112,6 +112,12 @@ export interface RequestPrintPdfParams {
    * fall back to the built-in default for the combination.
    */
   typography?: PrintTypography;
+  /**
+   * Let the first content section continue on the table-of-contents page instead of
+   * forcing a fresh sheet — saves one page per language (see im-print-html.ts,
+   * mergeTocIntoContent). Off = the classic "contents, then the manual" separation.
+   */
+  mergeToc?: boolean;
   /** Progress reporter — called as each part finishes, e.g. "Rendering DE (3/12)…". */
   onProgress?: (label: string, done: number, total: number) => void;
 }
@@ -323,6 +329,7 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     comment: params.comment,
     market: params.market,
     typography: params.typography,
+    mergeToc: params.mergeToc,
   };
 
   const jobId = generateUUID();

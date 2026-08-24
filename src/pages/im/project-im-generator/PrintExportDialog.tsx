@@ -147,9 +147,16 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   };
 
   const [pageSize, setPageSize] = useState<'a4' | 'a5'>(
-    // Leaflets default to A5 (compact); full manuals honor the template's page size.
-    isLeaflet ? 'a5' : meta?.pageSize === 'a5' ? 'a5' : 'a4',
+    // A5 is the house default for every document type; only a template that explicitly
+    // chose A4 defaults to the larger sheet.
+    isLeaflet ? 'a5' : meta?.pageSize === 'a4' ? 'a4' : 'a5',
   );
+
+  // Save a page per language by letting the first section continue on the TOC page.
+  // Default ON: the operator's standing goal is fewer printed pages; unticking restores
+  // the classic "contents, then the manual on a fresh page" separation. Leaflets have
+  // no TOC, so the choice is only shown (and only sent) for full manuals.
+  const [mergeToc, setMergeToc] = useState(true);
 
   // Shared cover, prefilled from existing override hooks + template metadata. Subtitle and
   // the cover-footer manual name are intentionally NOT configurable — the subtitle always
@@ -376,6 +383,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         market: marketCode || undefined,
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         typography,
+        mergeToc: isLeaflet ? undefined : mergeToc,
         cover: {
           title,
           // Subtitle is never configured here — always left empty so the builder
@@ -639,6 +647,24 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
               ))}
             </div>
           </div>
+
+          {/* Page economy — full manuals only (leaflets have no TOC). */}
+          {!isLeaflet && (
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={mergeToc}
+                onChange={(e) => setMergeToc(e.target.checked)}
+                className="mt-0.5 accent-indigo-600"
+              />
+              <span className="text-sm text-gray-700">
+                Start content on the contents page
+                <span className="block text-[11px] text-gray-400">
+                  Saves one page per language. Untick to keep the manual starting on a fresh page after the table of contents.
+                </span>
+              </span>
+            </label>
+          )}
 
           {/* Front cover — leaflets have no cover, so only the header logo is shown. */}
           {isLeaflet ? (

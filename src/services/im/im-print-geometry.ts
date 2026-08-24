@@ -17,7 +17,7 @@
  * where it will in print, because `zoom` scales all lengths uniformly.
  */
 
-import { effectiveTablePt, type PrintTypography, type PrintPageSizeKey } from './im-print-typography';
+import { effectiveTablePt, type PrintTypography, type PrintPageSizeKey, type PrintMarginsMm } from './im-print-typography';
 
 /** CSS reference pixel: 1px is 1/96 inch, which is what makes px absolute in print. */
 export const CSS_PX_PER_MM = 96 / 25.4;
@@ -33,8 +33,19 @@ export const A5_FURNITURE_SCALE = 0.82;
 const CALLOUT_ICON_MM = 8;
 const PT_PER_INCH = 72;
 
-/** Trim width of each page size, in mm. Heights live in PAGE_DIMS in im-print-html.ts. */
+/** Trim width of each page size, in mm. Mirrored by PAGE_DIMS in im-print-html.ts. */
 export const PAGE_WIDTH_MM: Record<PrintPageSizeKey, number> = { a4: 210, a5: 148 };
+
+/** Trim height of each page size, in mm — for previews that model the whole sheet. */
+export const PAGE_HEIGHT_MM: Record<PrintPageSizeKey, number> = { a4: 297, a5: 210 };
+
+/**
+ * In-content heading sizes as ratios of the section-title size. MUST mirror the print
+ * stylesheet (im-print-html.ts h1/h2/h3), which keeps the ratios the old hardcoded mm
+ * values had — the editor previously set no heading sizes at all, so h1 showed at the
+ * browser's 2em while print set it from headingPt.
+ */
+export const HEADING_RATIOS = { h1: 0.887, h2: 0.806, h3: 0.726 } as const;
 
 export interface PrintColumnGeometry {
   /** Text column between the left and right margins, in mm. */
@@ -80,6 +91,22 @@ export interface PrintColumnGeometry {
   lineHeight: number;
   /** Callout icon box in em, furniture scale included. The editor had a fixed 64px (16.9mm). */
   calloutIconEm: number;
+  /** Full sheet, for previews that model the page rather than just the column. */
+  pageWidthMm: number;
+  pageHeightMm: number;
+  /** The profile's page margins, so a page preview can inset its content exactly. */
+  marginsMm: PrintMarginsMm;
+  /** In-content heading sizes in em of body — mirrors the print h1/h2/h3 ratios. */
+  h1Em: number;
+  h2Em: number;
+  h3Em: number;
+  /** Heading block margins (print's mm(4)/mm(2), furniture-scaled) in em of body. */
+  headingMarginTopEm: number;
+  headingMarginBottomEm: number;
+  /** Section-title size in CSS px (print sets it at headingPt). */
+  headingPx: number;
+  /** The profile's font family, so previews type in the printed face. */
+  fontFamily: string;
 }
 
 export const printColumnGeometry = (
@@ -89,6 +116,10 @@ export const printColumnGeometry = (
   const columnMm = PAGE_WIDTH_MM[pageSize] - typography.margins.left - typography.margins.right;
   const columnPx = columnMm * CSS_PX_PER_MM;
   const bodyPx = (typography.bodyPt / PT_PER_INCH) * 96;
+  const furniture = pageSize === 'a5' ? A5_FURNITURE_SCALE : 1;
+  // Heading em ratios relative to BODY: (headingPt × print ratio) / bodyPt.
+  const headEm = (ratio: number) =>
+    typography.bodyPt > 0 ? (typography.headingPt * ratio) / typography.bodyPt : 0;
   return {
     columnMm,
     columnPx,
@@ -110,6 +141,17 @@ export const printColumnGeometry = (
       bodyPx > 0
         ? (CALLOUT_ICON_MM * (pageSize === 'a5' ? A5_FURNITURE_SCALE : 1) * CSS_PX_PER_MM) / bodyPx
         : 0,
+    pageWidthMm: PAGE_WIDTH_MM[pageSize],
+    pageHeightMm: PAGE_HEIGHT_MM[pageSize],
+    marginsMm: { ...typography.margins },
+    h1Em: headEm(HEADING_RATIOS.h1),
+    h2Em: headEm(HEADING_RATIOS.h2),
+    h3Em: headEm(HEADING_RATIOS.h3),
+    // Print spaces in-content headings at mm(4) top / mm(2) bottom (furniture-scaled).
+    headingMarginTopEm: bodyPx > 0 ? (4 * furniture * CSS_PX_PER_MM) / bodyPx : 0,
+    headingMarginBottomEm: bodyPx > 0 ? (2 * furniture * CSS_PX_PER_MM) / bodyPx : 0,
+    headingPx: (typography.headingPt / PT_PER_INCH) * 96,
+    fontFamily: typography.fontFamily,
   };
 };
 

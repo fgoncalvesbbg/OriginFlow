@@ -343,7 +343,9 @@ describe('icon cells: row height must come from the icon, not its surroundings',
   it('zeroes image vertical margins inside cells', () => {
     // The block-align margin (5mm at the current setting) spaces images in flowing text. Between
     // a cell wall and an icon it is meaningless, and it was the single largest contributor.
-    expect(out()).toContain('.imv-content td img, .imv-content th img { margin-top: 0; margin-bottom: 0; }');
+    // Matched on the attribute so the reset OUTRANKS the placement rules. A plain `td img` is
+    // (0,1,2) against their (0,2,1) and loses, which made an earlier version of this a no-op.
+    expect(out()).toContain('.imv-content td img[data-print-align], .imv-content th img[data-print-align] { margin-top: 0; margin-bottom: 0; }');
   });
 
   it('kills the line-height strut in a cell holding only an image', () => {
@@ -368,5 +370,53 @@ describe('icon cells: row height must come from the icon, not its surroundings',
 
   it('still caps a genuinely tall cell image', () => {
     expect(out()).toContain(`max-height: ${a5.cellImageMaxHeightMm}mm`);
+  });
+});
+
+describe('author table width mode and column widths', () => {
+  it('shrinks a data-table-fit="content" table to its content instead of the full column', () => {
+    const out = bodyHtmlFor('a5', textNode);
+    expect(out).toContain('.imv-content table[data-table-fit="content"] { width: auto; }');
+  });
+
+  it('honours author column widths exactly via fixed layout — but only on full-width tables', () => {
+    // Under width:auto a fixed layout would collapse the table to the columns' sum,
+    // so the fixed rule must exclude fit-content tables.
+    const out = bodyHtmlFor('a5', textNode);
+    expect(out).toContain('.imv-content table[data-col-widths]:not([data-table-fit="content"]) { table-layout: fixed; }');
+  });
+
+  it('passes the fit attribute and the colgroup through to the print HTML untouched', () => {
+    const out = bodyHtmlFor('a5', html(
+      '<table class="im-table" data-table-fit="content" data-col-widths="1"><colgroup><col style="width:20%;" /><col /></colgroup><thead><tr><th style="border:0.1mm solid #cbd5e1">A</th><th style="border:0.1mm solid #cbd5e1">B</th></tr></thead><tbody><tr><td style="border:0.1mm solid #cbd5e1">1</td><td style="border:0.1mm solid #cbd5e1">2</td></tr></tbody></table>',
+    ));
+    expect(out).toContain('data-table-fit="content"');
+    expect(out).toContain('data-col-widths="1"');
+    expect(out).toContain('<col style="width:20%;" />');
+  });
+});
+
+describe('inline image vertical seat', () => {
+  it('keeps an author vertical-align on an inline image (inline style survives the repair)', () => {
+    // The Seat control bakes vertical-align into the inline style, which beats the
+    // stylesheet's own `vertical-align: middle` — the repair strips only margins.
+    const out = bodyHtmlFor('a5', html(
+      '<p>Turn the <img src="x.png" alt="" data-align="inline" data-valign="top" style="width:24px;display:inline;vertical-align:top;max-width:100%;height:auto;" /> knob</p>',
+    ));
+    expect(out).toContain('vertical-align:top');
+    expect(out).toContain('data-valign="top"');
+  });
+});
+
+describe('the cell margin reset must actually win', () => {
+  it('outranks the placement rules it has to override', () => {
+    // Specificity, not correctness of intent, was the bug: (0,2,2) vs their (0,2,1).
+    const out = bodyHtmlFor('a5', textNode);
+    const reset = out.split('\n').find((l) => l.includes('td img[data-print-align]'));
+    expect(reset).toBeTruthy();
+    const attrsInReset = (reset!.match(/\[[^\]]+\]/g) ?? []).length;
+    const placement = out.split('\n').find((l) => l.includes('img[data-print-align="center"]'));
+    const attrsInPlacement = (placement!.match(/\[[^\]]+\]/g) ?? []).length;
+    expect(attrsInReset).toBeGreaterThanOrEqual(attrsInPlacement);
   });
 });

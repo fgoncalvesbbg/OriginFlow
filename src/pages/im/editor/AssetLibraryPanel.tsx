@@ -19,6 +19,7 @@ import {
   getAssetFolders, createAssetFolder, renameAssetFolder, deleteAssetFolder,
   getAssets, createAsset, updateAsset, deleteAsset, backfillAssetsFromStorage,
 } from '../../../services/im/im-asset-library.service';
+import { imgTag } from './im-image-markup';
 
 interface AssetLibraryPanelProps {
   /** Called with the ready-to-insert `<img>` HTML when the user picks an asset. */
@@ -26,12 +27,13 @@ interface AssetLibraryPanelProps {
 }
 
 // Inserted assets default to 50% width (matches the resize toolbar's own 50% option
-// in SimpleRichTextEditor) rather than filling the full available width.
-const IMG_STYLE = 'width: 50%; max-width: 100%; height: auto; border-radius: 0.375rem; margin: 1rem 0;';
-
+// in SimpleRichTextEditor) rather than filling the full available width. Built by the
+// shared imgTag so the markup is identical to every other insert path — this panel
+// used to bake `margin: 1rem 0` inline (beating both stylesheets, so no spacing
+// setting could reach these images) and omitted data-align.
 const buildImgHtml = (asset: IMAsset): string => {
-  const alt = (asset.altText ?? '').replace(/"/g, '&quot;');
-  return `<img src="${asset.url}" alt="${alt}" style="${IMG_STYLE}" /><p></p>`;
+  const alt = (asset.altText ?? '').replace(/"/g, "'");
+  return `${imgTag(asset.url, alt, '50%')}<p></p>`;
 };
 
 export function AssetLibraryPanel({ onInsert }: AssetLibraryPanelProps) {

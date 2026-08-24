@@ -60,6 +60,9 @@ import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import PipelineStepper, { type PipelineStep } from './project-im-generator/PipelineStepper';
 import type { TemplateRegulation } from '../../types';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
+import { usePrintColumn } from './editor/usePrintColumn';
+import { imContentPrintScale, imContentVars } from './editor/im-content-style';
+import { previewZoomFor, CSS_PX_PER_MM, PAGE_WIDTH_MM, PAGE_HEIGHT_MM } from '../../services/im/im-print-geometry';
 
 // The full set of editable, persisted state captured in a crash-safe local draft. Mirrors
 // exactly what saveProjectIM writes, so a restored draft reproduces the unsaved session.
@@ -253,6 +256,35 @@ const ProjectIMGenerator: React.FC = () => {
 
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Print-faithful page preview -----------------------------------------
+  // The preview used to be a HARDCODED A4 sheet with 20mm margins and the brand's web
+  // font sizes, whatever the manual's real page size and print profile — so an A5
+  // manual previewed on a 170mm column that prints at 128mm, and every image and table
+  // read ~33% smaller than its printed self. The real geometry comes from the same
+  // profile the exporter uses; a fit-to-pane zoom keeps the sheet visible (CSS `zoom`
+  // scales mm/px/% uniformly, so proportions stay exact at any pane width).
+  const previewPageSize: 'a4' | 'a5' = template?.metadata?.pageSize === 'a4' ? 'a4' : 'a5';
+  const previewGeometry = usePrintColumn(templateType, previewPageSize);
+  const [previewPaneWidth, setPreviewPaneWidth] = useState(0);
+  useEffect(() => {
+    const el = previewScrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => setPreviewPaneWidth(entry.contentRect.width));
+    observer.observe(el);
+    return () => observer.disconnect();
+    // The pane only exists once loading settles and a template is present (the early
+    // returns above it render neither), so re-attach when those flip.
+  }, [loading, template]);
+  const previewPageWidthMm = previewGeometry?.pageWidthMm ?? PAGE_WIDTH_MM[previewPageSize];
+  const previewPageHeightMm = previewGeometry?.pageHeightMm ?? PAGE_HEIGHT_MM[previewPageSize];
+  const previewMargins = previewGeometry?.marginsMm ?? { top: 14, bottom: 15, left: 12, right: 12 };
+  // The pane has p-8 (32px) padding each side; capped at 1.5 so a wide monitor doesn't
+  // blow an A5 sheet up into a poster.
+  const pagePreviewZoom = Math.min(
+    1.5,
+    previewZoomFor(previewPageWidthMm * CSS_PX_PER_MM, Math.max(0, previewPaneWidth - 64)),
+  );
   const [showImport, setShowImport] = useState(false);
   const [showDiffImport, setShowDiffImport] = useState(false);
 
@@ -2218,7 +2250,8 @@ const ProjectIMGenerator: React.FC = () => {
 
   const metadata = normalizeIMTemplateMetadata(template?.metadata);
   // Profile the editors model so image sizes on screen match the exported PDF.
-  const printPageSize = metadata.pageSize === 'a5' ? 'a5' : 'a4';
+  // A5 is the house default — only an explicit 'a4' models the larger sheet.
+  const printPageSize = metadata.pageSize === 'a4' ? 'a4' : 'a5';
   const pageBackground = metadata.assets?.backgroundAssetUrl
     ? `url(${metadata.assets.backgroundAssetUrl}) center/cover no-repeat`
     : undefined;
@@ -3468,7 +3501,7 @@ const ProjectIMGenerator: React.FC = () => {
           </div>
         </div>
         {html
-          ? <div className="im-content p-3 text-sm pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
+          ? <div className="im-content p-3 text-sm pointer-events-none" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
           : <div className="p-3 text-xs text-gray-400 italic">No content for {activeLang.toUpperCase()} (or the block was removed from the library).</div>}
       </div>
     );
@@ -3765,7 +3798,7 @@ const ProjectIMGenerator: React.FC = () => {
                     // template itself is untouched; the edit is stored on this manual.
                     <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
                       <span className="absolute top-1 right-1 text-gray-300" title="Template content — edit it for this project below"><Lock size={11} /></span>
-                      <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
+                      <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                       <button
                         onClick={() => editBlockForProject(section.id, blockOvKey(i, ref), ref as InlineBlockRef)}
                         title={refHasTable(ref)
@@ -3782,7 +3815,7 @@ const ProjectIMGenerator: React.FC = () => {
                   // the Block Library (which updates every manual that uses it).
                   <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
                     <span className="absolute top-1 right-1 text-gray-300" title="Shared block (locked) — edit it in the Block Library"><Lock size={11} /></span>
-                    <div className="im-content text-xs text-gray-600 pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
+                    <div className="im-content text-xs text-gray-600 pointer-events-none" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                   </div>
                 )}
                 </div>{/* dimmed body of an excluded block */}
@@ -4923,6 +4956,7 @@ const ProjectIMGenerator: React.FC = () => {
                                if (override === undefined) delete next[key]; else next[key] = override;
                                return next;
                              })}
+                             previewStyle={previewGeometry ? imContentVars(previewGeometry) : undefined}
                            />
                          );
                        })()}
@@ -5118,11 +5152,20 @@ const ProjectIMGenerator: React.FC = () => {
                        </div>
                    </div>
                    <div ref={previewScrollRef} className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center scroll-smooth motion-reduce:scroll-auto" onClick={handlePreviewClick}>
-                       <div ref={previewRef} className="bg-white shadow-lg w-[210mm] min-h-[297mm] origin-top" data-icon-set={metadata.assets?.iconSet}>
+                       {/* The REAL sheet: page size and margins from the print profile, fitted to
+                           the pane with CSS zoom (which scales mm/px/% uniformly, so proportions
+                           stay exact). This replaced a hardcoded A4 + 20mm-margin sheet that made
+                           every A5 manual preview ~33% smaller relative to the page than the PDF. */}
+                       <div
+                         ref={previewRef}
+                         className="bg-white shadow-lg self-start"
+                         style={{ width: `${previewPageWidthMm}mm`, minHeight: `${previewPageHeightMm}mm`, zoom: pagePreviewZoom }}
+                         data-icon-set={metadata.assets?.iconSet}
+                       >
                           {/* COVER PAGE */}
-                          <div className="min-h-[297mm] flex flex-col relative bg-white mb-4 break-after-page" style={{ ...(getBackgroundStyle(masterPages.cover) || {}), ...(pageBackground ? { background: pageBackground } : {}) }} data-page-template={metadata.pages?.coverTemplate}>
-                             {displayCoverImage && <div className="h-[400px] bg-cover bg-center" style={{ backgroundImage: `url(${displayCoverImage})` }} />}
-                             <div className="flex-1 p-[20mm] flex flex-col justify-between">
+                          <div className="flex flex-col relative bg-white mb-4 break-after-page" style={{ minHeight: `${previewPageHeightMm}mm`, ...(getBackgroundStyle(masterPages.cover) || {}), ...(pageBackground ? { background: pageBackground } : {}) }} data-page-template={metadata.pages?.coverTemplate}>
+                             {displayCoverImage && <div className="bg-contain bg-no-repeat bg-center" style={{ height: `${Math.round(previewPageHeightMm * 0.38)}mm`, backgroundImage: `url(${displayCoverImage})` }} />}
+                             <div className="flex-1 flex flex-col justify-between" style={{ padding: `${previewMargins.top}mm ${previewMargins.right}mm ${previewMargins.bottom}mm ${previewMargins.left}mm` }}>
                                 <div>
                                    {displayLogo && <img src={displayLogo} alt="Logo" className="h-12 object-contain mb-10" />}
                                    <h1 className="text-4xl font-bold text-primary mb-4" style={{ color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{displayTitle}</h1>
@@ -5134,10 +5177,10 @@ const ProjectIMGenerator: React.FC = () => {
                                 </div>
                              </div>
                           </div>
-                          {/* CONTENT */}
-                          <div className="p-[20mm] pb-[30mm] min-h-[297mm] bg-white relative" style={{ background: pageBackground }} data-page-template={metadata.pages?.bodyTemplate}>
+                          {/* CONTENT — inset by the profile's real page margins. */}
+                          <div className="bg-white relative" style={{ minHeight: `${previewPageHeightMm}mm`, padding: `${previewMargins.top}mm ${previewMargins.right}mm ${previewMargins.bottom + 8}mm ${previewMargins.left}mm`, background: pageBackground }} data-page-template={metadata.pages?.bodyTemplate}>
                               {watermark && <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ background: watermark }} />}
-                              <div className="space-y-6 text-gray-800 text-sm leading-relaxed">
+                              <div className="space-y-6 text-gray-800">
                                   {orderedSections.map(section => {
                                       // WYSIWYG: the preview mirrors the generated output, so a chapter
                                       // excluded by its condition (or because none of its SKUs are bound)
@@ -5156,8 +5199,10 @@ const ProjectIMGenerator: React.FC = () => {
                                               : 'ring-0'
                                           }`}
                                         >
-                                          <h3 className="text-lg font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, fontFamily: metadata.brand?.fontFamilies.heading }}>{localizedSectionTitle(section, activeLang)}</h3>
-                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
+                                          {/* Title + body at the PRINT profile's sizes (the exporter's own scale),
+                                              not the brand's web font sizes — the brand keeps its colors only. */}
+                                          <h3 className="font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, ...(previewGeometry ? { fontSize: `${previewGeometry.headingPx}px`, fontFamily: `'${previewGeometry.fontFamily}', Arial, sans-serif` } : { fontFamily: metadata.brand?.fontFamilies.heading }) }}>{localizedSectionTitle(section, activeLang)}</h3>
+                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, ...(previewGeometry ? imContentPrintScale(previewGeometry) : { fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }) }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
                                         </div>
                                       );
                                   })}
@@ -5173,7 +5218,7 @@ const ProjectIMGenerator: React.FC = () => {
 
                           {/* BACK PAGE */}
                           {metadata.backPageContent && (
-                              <div className="min-h-[297mm] bg-light p-[20mm] flex flex-col justify-end mt-4 break-before-page" style={pageBackground ? { background: pageBackground } : undefined} data-page-template={metadata.pages?.endPageVariants?.[0] || 'standard-end'}>
+                              <div className="bg-light flex flex-col justify-end mt-4 break-before-page" style={{ minHeight: `${previewPageHeightMm}mm`, padding: `${previewMargins.top}mm ${previewMargins.right}mm ${previewMargins.bottom}mm ${previewMargins.left}mm`, ...(pageBackground ? { background: pageBackground } : {}) }} data-page-template={metadata.pages?.endPageVariants?.[0] || 'standard-end'}>
                                   <div className="border-t pt-8" style={{ borderColor: 'var(--im-primary-color)' }}>
                                       <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(metadata.backPageContent) }} />
                                       <div className="mt-10 text-xs text-gray-400 text-center">

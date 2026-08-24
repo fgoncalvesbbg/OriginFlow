@@ -9,6 +9,8 @@ import { BookOpen, Globe, LayoutTemplate } from 'lucide-react';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
+import { usePrintColumn } from './editor/usePrintColumn';
+import { imContentPrintScale } from './editor/im-content-style';
 
 import { IM_PREVIEW_LANGUAGE_OPTIONS as ALL_LANGUAGES } from '../../config/im-languages';
 
@@ -49,6 +51,13 @@ const IMPreview: React.FC = () => {
   const [activeLang, setActiveLang] = useState('en');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Model the print profile so content density/sizes here match the exported PDF
+  // (A5 is the house default page size). Null until the template loads — the body
+  // then falls back to the brand's web sizing, exactly the old behaviour.
+  const printGeometry = usePrintColumn(
+    template?.templateType,
+    template?.metadata?.pageSize === 'a4' ? 'a4' : 'a5',
+  );
 
   useEffect(() => {
     if (!templateId) {
@@ -160,7 +169,7 @@ const IMPreview: React.FC = () => {
                   <p className="text-xs mt-1">Content for this section is project-specific and will be added during production.</p>
                </div>
             ) : (
-               <div className="text-gray-700 leading-relaxed pl-8 font-sans im-content" style={{ color: metadata.brand?.textColors.body, fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }}>
+               <div className="text-gray-700 pl-8 font-sans im-content" style={{ color: metadata.brand?.textColors.body, ...(printGeometry ? imContentPrintScale(printGeometry) : { fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }) }}>
                   {html ? (
                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
                   ) : (

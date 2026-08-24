@@ -790,6 +790,13 @@ const buildStyles = (
        flow-based, so an uncleared float would shift pagination downstream. */
     .imv-node.imv-content::after { content: ""; display: table; clear: both; }
     .imv-content table { width: 100%; border-collapse: collapse; margin: ${gap} 0; font-size: ${tablePt}; }
+    /* Author-chosen width mode: data-table-fit="content" shrinks the table to its content
+       instead of stretching across the column — for icon/label pairs and narrow specs that
+       full-width layout was padding with empty space. Mirrors im-content.css exactly. */
+    .imv-content table[data-table-fit="content"] { width: auto; }
+    /* Author column widths (a <colgroup> of % widths). \`fixed\` makes the engine honour the
+       percentages exactly; only for full-width tables, where \`fixed\` has a width to fix to. */
+    .imv-content table[data-col-widths]:not([data-table-fit="content"]) { table-layout: fixed; }
     .imv-content th, .imv-content td { border: ${tableRule}; padding: ${absMm(tableCellPaddingMm)}; vertical-align: top; }
     /* A paragraph is often used just to hold a cell's text; its trailing margin then adds to the
        cell padding and inflates the row. The callout body already did this for the same reason. */
@@ -802,7 +809,12 @@ const buildStyles = (
        beside it. Together those came to ~7.6mm on A5 — nearly three body lines — on every row,
        which is why a small icon still produced a tall row. What remains is the cell padding,
        which is a deliberate setting. */
-    .imv-content td img, .imv-content th img { margin-top: 0; margin-bottom: 0; }
+    /* Matched on the attribute deliberately. The placement rules above are (0,2,1) — one class
+       plus one attribute — so a plain \`td img\` at (0,1,2) LOSES to them, and an earlier version
+       of this reset was silently ineffective: every image in a cell kept its 5mm of block margin,
+       which on a small icon is more row height than the icon itself. Every image the renderer
+       emits carries data-print-align, so this one selector at (0,2,2) covers all of them. */
+    .imv-content td img[data-print-align], .imv-content th img[data-print-align] { margin-top: 0; margin-bottom: 0; }
     .imv-content td:has(> img:only-child), .imv-content th:has(> img:only-child),
     .imv-content td:has(> p:only-child > img:only-child) { line-height: 0; vertical-align: middle; }
     /* display:block removes the baseline strut entirely; auto side margins keep the icon centred
@@ -952,8 +964,9 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
  * language within one combined document). Returned order is the merge order:
  *   [ front cover, language₁ body, language₂ body, …, back cover ].
  *
- * Each language part is rendered with 0 right page margin (see render-print-pdf) so the
- * tab sits flush to the paper edge; the shared styles restore the text inset via padding.
+ * Every part is rendered with the profile's full page margins (render-print-part passes
+ * marginFor(typography) to PDFShift); the edge tabs are DRAWN onto the merged PDF within
+ * the margin band by render-print-merge, so no per-part margin tricks are needed.
  * Page numbers are stamped onto the MERGED pdf afterwards (not per part).
  */
 export interface PrintPart {

@@ -12,10 +12,12 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { inferImageAlign, isFloatAlign, IMAGE_ALIGNS, FLOAT_MAX_WIDTH_PCT, type ImageAlign } from '../../../services/im/im-image-align';
+import { IMAGE_ALIGNS, type ImageAlign } from '../../../services/im/im-image-align';
 import { sanitizeAuthorHtml } from '../../../services/im/im-author-html';
 import { usePrintColumn } from './usePrintColumn';
-import { previewZoomFor, widthAsColumnPercent } from '../../../services/im/im-print-geometry';
+import { previewZoomFor, widthAsColumnPercent, CRAMPED_PREVIEW_ZOOM } from '../../../services/im/im-print-geometry';
+import { imgStyleFor, imgTag, readImgAlign, readImgBorder, readImgValign, IMG_VALIGNS, type ImgVAlign } from './im-image-markup';
+import { imContentVars } from './im-content-style';
 import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { markTranslatedFromEn, translationStaleAgainstEn } from '../../../services/im/im-translation-marker';
@@ -116,8 +118,8 @@ type InlineNode =
   // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
   // `width` is the optional CSS width set via the resize control (e.g. "50%");
   // `align` is the chosen inline/left/right/center placement; `border` draws a
-  // thin frame around the image.
-  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean };
+  // thin frame around the image; `valign` seats an INLINE image against its text line.
+  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign };
 
 // A table cell's content plus its own horizontal alignment (independent of any
 // per-image align/float set inside it — this centers/aligns whatever the cell
@@ -133,9 +135,12 @@ type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
-  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean }
+  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign }
   | { id: string; type: 'list'; ordered: boolean; items: ListItemData[] }
-  | { id: string; type: 'table'; rows: TableCellData[][] }
+  // `fit` — 'content' shrinks the table to its content instead of the full column (the
+  // default house style). `colWidths` — author-set column widths in % of the table,
+  // null for auto columns; serialized as a <colgroup> so print honours them too.
+  | { id: string; type: 'table'; rows: TableCellData[][]; fit?: 'content'; colWidths?: (number | null)[] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
   | { id: string; type: 'legacy_html'; html: string };
 
@@ -188,56 +193,11 @@ const createId = () => Math.random().toString(36).slice(2, 11);
 // truth read back on every parse) AND baked into the inline `style` so it renders
 // identically in the editor, the print PDF, and the viewer. Because the
 // serializers rebuild the <img> style from scratch, anything not captured on the
-// node is lost on round-trip — hence align lives on the node, like width.
+// node is lost on round-trip — hence align lives on the node, like width. The
+// builders/readers live in im-image-markup.ts so the asset library inserts the
+// exact same markup this editor round-trips.
 export type ImgAlign = ImageAlign;
 const IMG_ALIGNS: readonly ImgAlign[] = IMAGE_ALIGNS;
-
-
-/**
- * Inline style for an editor image. Width caps to the container (max-width:100%).
- * center → block with auto side-margins; left/right → float so text wraps beside it;
- * inline → sits within the text run; unset → legacy block with vertical margin.
- * `border` adds a thin frame (with a little inner padding so it doesn't hug the pixels).
- */
-const imgStyleFor = (width?: string, align?: ImgAlign, border?: boolean): string => {
-  const w = width ? `width:${width};` : '';
-  // A float with no author width would take the full column and leave nothing to wrap.
-  const floatCap = width || !align || !isFloatAlign(align) ? '' : `max-width:${FLOAT_MAX_WIDTH_PCT}%;`;
-  const b = border ? 'border:1px solid #d1d5db;padding:0.25rem;background:#fff;' : '';
-  const base = `${w}${floatCap}${b}max-width:100%;height:auto;border-radius:0.375rem;`;
-  // Deliberately no margins here. They used to be baked in as `1rem` (8.47mm in print, on
-  // neither of the renderer's scales), and an inline style beats both stylesheets — so the
-  // editor showed a gap the PDF did not have, and no setting could change either. Spacing now
-  // comes from im-content.css, driven by the same blockSpacingMm the print stylesheet uses.
-  switch (align) {
-    case 'center': return `${base}display:block;`;
-    case 'left':   return `${base}float:left;`;
-    case 'right':  return `${base}float:right;`;
-    case 'inline': return `${base}display:inline;vertical-align:middle;`;
-    default:       return `${base}display:block;`;
-  }
-};
-
-/** Full <img> tag with size + alignment + border (align/border mirrored to data-* for re-parse). */
-const imgTag = (src: string, alt: string, width?: string, align?: ImgAlign, border?: boolean): string => {
-  const alignAttr = align ? ` data-align="${align}"` : '';
-  const borderAttr = border ? ' data-border="1"' : '';
-  return `<img src="${src}" alt="${alt}"${alignAttr}${borderAttr} style="${imgStyleFor(width, align, border)}" />`;
-};
-
-/** Read the placement off an <img>, or undefined when it expresses none. */
-const readImgAlign = (el: Element): ImgAlign | undefined => {
-  const style = (el as HTMLElement).style;
-  return inferImageAlign(el.getAttribute('data-align'), {
-    cssFloat: style.cssFloat,
-    display: style.display,
-    // The shorthand is empty when the margin was set per side, so check both.
-    margin: style.margin || style.marginLeft,
-  });
-};
-
-/** Read the border flag off an <img> element (persisted as data-border). */
-const readImgBorder = (el: Element): boolean => el.getAttribute('data-border') === '1';
 
 /** A table cell holding a single plain-text run (used for defaults/fallbacks). */
 const textCell = (text: string): TableCellData => ({ content: [{ type: 'text', text }] });
@@ -424,9 +384,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [imgWidth, setImgWidth] = useState<string>('');
   const [imgAlign, setImgAlign] = useState<ImgAlign | undefined>(undefined);
   const [imgBorder, setImgBorder] = useState(false);
+  const [imgValign, setImgValign] = useState<ImgVAlign | undefined>(undefined);
   // Editable alt text of the selected image — previously settable only once, at upload.
   const [imgAlt, setImgAlt] = useState<string>('');
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
+  // Drag-resize handle over the selected image: its position (relative to the editor's
+  // positioned scroll container) and the drag-in-progress bookkeeping.
+  const [imgHandle, setImgHandle] = useState<{ left: number; top: number } | null>(null);
+  const dragStateRef = useRef<{ startX: number; startWidth: number; contentWidth: number } | null>(null);
+  const editorShellRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -668,7 +634,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       // are silently dropped on the deserialize→serialize round-trip — i.e. they
       // render but never save. `width` carries any resize the user applied.
       if (el.tagName === 'IMG') {
-        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined });
+        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined, valign: readImgValign(el) });
         return;
       }
 
@@ -707,7 +673,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
 
     if (inline.type === 'image') {
-      return imgTag(inline.src, inline.alt || '', inline.width, inline.align, inline.border);
+      return imgTag(inline.src, inline.alt || '', inline.width, inline.align, inline.border, inline.valign);
     }
 
     let textHtml = inline.text
@@ -780,7 +746,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
       if (el.tagName === 'IMG') {
-        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined });
+        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined, valign: readImgValign(el) });
         return;
       }
       if (el.tagName === 'UL' || el.tagName === 'OL') {
@@ -815,7 +781,24 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           align: readCellAlign(cell),
           content: normalizeCellInlines(parseInlineNodes(cell as HTMLElement)),
         })));
-        parsed.push({ id: createId(), type: 'table', rows: rows.length ? rows : [[textCell('Header 1'), textCell('Header 2')], [textCell('Value 1'), textCell('Value 2')]] });
+        // Width mode + author column widths (a <colgroup> of % widths) must round-trip:
+        // the serializer rebuilds the whole tag, so anything not on the node is destroyed
+        // on the next keystroke — exactly how pasted Word/Excel column widths were lost.
+        const fit = el.getAttribute('data-table-fit') === 'content' ? ('content' as const) : undefined;
+        const cols = Array.from(el.querySelectorAll('col'));
+        const colWidths = cols.length
+          ? cols.map((c) => {
+              const m = ((c as HTMLElement).style.width || '').match(/^(\d+(?:\.\d+)?)%$/);
+              return m ? Number(m[1]) : null;
+            })
+          : undefined;
+        parsed.push({
+          id: createId(),
+          type: 'table',
+          rows: rows.length ? rows : [[textCell('Header 1'), textCell('Header 2')], [textCell('Value 1'), textCell('Value 2')]],
+          fit,
+          colWidths: colWidths?.some((w) => w != null) ? colWidths : undefined,
+        });
         return;
       }
       if (el.classList.contains('im-condition') && !el.closest('p, h1, h2, h3, .im-block-wrapper')) {
@@ -875,7 +858,16 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         const [headerRow, ...body] = block.rows;
         const th = (headerRow || []).map((cell) => cellHtml(cell, 'th')).join('');
         const tr = body.map((row) => `<tr>${row.map((cell) => cellHtml(cell, 'td')).join('')}</tr>`).join('');
-        return `<table class="im-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+        // Width mode + column widths. data-table-fit switches the table to shrink-to-content
+        // (both stylesheets); the <colgroup> carries author column widths in %, flagged with
+        // data-col-widths so full-width tables get table-layout:fixed and honour them exactly.
+        const fitAttr = block.fit === 'content' ? ' data-table-fit="content"' : '';
+        const hasWidths = !!block.colWidths?.some((w) => w != null);
+        const widthsAttr = hasWidths ? ' data-col-widths="1"' : '';
+        const colgroup = hasWidths
+          ? `<colgroup>${(block.colWidths ?? []).map((w) => (w != null ? `<col style="width:${w}%;" />` : '<col />')).join('')}</colgroup>`
+          : '';
+        return `<table class="im-table"${fitAttr}${widthsAttr}>${colgroup}<thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
       }
       if (block.type === 'conditional') {
         return `<p>${serializeInline([{ type: 'condition', id: block.condition.id, featureId: block.condition.featureId, featureName: block.condition.featureName, content: block.content.map((x) => x.type === 'text' ? x.text : '').join(' ').trim() || 'Conditional content' }])}</p>`;
@@ -1026,6 +1018,10 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Mirrors the caret cell's current alignment so the toolbar can highlight it,
   // the same way imgAlign mirrors the selected image's alignment.
   const [caretCellAlign, setCaretCellAlign] = useState<CellAlign | undefined>(undefined);
+  // Mirrors of the caret table's width mode and the caret COLUMN's set width (%),
+  // so the table context row can show the current values.
+  const [caretTableFit, setCaretTableFit] = useState<'content' | undefined>(undefined);
+  const [caretColWidth, setCaretColWidth] = useState<string>('');
   // Which block the caret sits in, so the style group can SHOW the current block
   // instead of only offering conversions. Same refresh path as caretInTable.
   const [caretBlockTag, setCaretBlockTag] = useState<'h1' | 'h2' | 'h3' | 'p' | null>(null);
@@ -1040,14 +1036,22 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setCaretBlockTag(blockEl ? (blockEl.tagName.toLowerCase() as 'h1' | 'h2' | 'h3' | 'p') : null);
     const ctx = getTableContext();
     setCaretInTable(!!ctx);
-    if (!ctx) { setCaretCellAlign(undefined); return; }
+    if (!ctx) { setCaretCellAlign(undefined); setCaretTableFit(undefined); setCaretColWidth(''); return; }
     let seen = -1;
     for (const b of blocks) {
       if (b.type !== 'table') continue;
       seen++;
-      if (seen === ctx.tableIdx) { setCaretCellAlign(b.rows[ctx.row]?.[ctx.col]?.align); return; }
+      if (seen === ctx.tableIdx) {
+        setCaretCellAlign(b.rows[ctx.row]?.[ctx.col]?.align);
+        setCaretTableFit(b.fit);
+        const w = b.colWidths?.[ctx.col];
+        setCaretColWidth(w != null ? String(w) : '');
+        return;
+      }
     }
     setCaretCellAlign(undefined);
+    setCaretTableFit(undefined);
+    setCaretColWidth('');
   }, [blocks]);
 
   const handleChange = useCallback((event: React.FormEvent<HTMLDivElement>) => {
@@ -1114,6 +1118,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       setImgWidth(img.style.width || '');
       setImgAlign(readImgAlign(img));
       setImgBorder(readImgBorder(img));
+      setImgValign(readImgValign(img));
       setImgAlt(img.getAttribute('alt') || '');
     } else {
       selectedImgRef.current = null;
@@ -1122,18 +1127,49 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     refreshCaretTable();
   }, [refreshCaretTable, verbatims, onEditPlaceholder, onEditCondition, deserializeHtmlToBlocks]);
 
+  /**
+   * Keep the drag-resize handle glued to the selected image's bottom-right corner.
+   * Coordinates are relative to the editor's positioned scroll shell; both rects are
+   * measured in visual (post-`zoom`) space, so the handle lands correctly at any
+   * preview zoom. Recomputed on selection, size changes, zoom changes and scroll.
+   */
+  const syncImgHandle = useCallback(() => {
+    const img = selectedImgRef.current;
+    const shell = editorShellRef.current;
+    if (!img || !shell || !img.isConnected) { setImgHandle(null); return; }
+    const imgRect = img.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    setImgHandle({
+      left: imgRect.right - shellRect.left + shell.scrollLeft - 7,
+      top: imgRect.bottom - shellRect.top + shell.scrollTop - 7,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!imgSelected) { setImgHandle(null); return; }
+    syncImgHandle();
+    const shell = editorShellRef.current;
+    shell?.addEventListener('scroll', syncImgHandle);
+    window.addEventListener('resize', syncImgHandle);
+    return () => {
+      shell?.removeEventListener('scroll', syncImgHandle);
+      window.removeEventListener('resize', syncImgHandle);
+    };
+  }, [imgSelected, imgWidth, imgAlign, imgBorder, previewZoom, canvasWidth, syncImgHandle]);
+
   // Resize / re-align / re-border the selected image. All rebuild the whole inline
   // style (via imgStyleFor) so a previous float/margin/border is fully cleared,
   // preserve the OTHER dimensions (each control keeps the current values of the
   // rest), re-add the selection outline the rebuild wiped, then re-parse so the
   // change persists into blocks + emitted HTML while the live node stays in place.
-  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign, border?: boolean) => {
+  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign, border?: boolean, valign?: ImgVAlign) => {
     const img = selectedImgRef.current;
     const el = contentRef.current;
     if (!img || !el) return;
     if (align) img.setAttribute('data-align', align);
     if (border) img.setAttribute('data-border', '1'); else img.removeAttribute('data-border');
-    img.style.cssText = imgStyleFor(width, align, border);
+    if (align === 'inline' && valign) img.setAttribute('data-valign', valign); else img.removeAttribute('data-valign');
+    img.style.cssText = imgStyleFor(width, align, border, valign);
     img.style.outline = '2px solid #6366f1'; // rebuild wiped it — keep the selection visible
     isUserEditingRef.current = true; // keep the DOM node; just sync blocks + emit
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
@@ -1144,22 +1180,70 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const img = selectedImgRef.current;
     if (!img) return;
     setImgWidth(width);
-    restyleSelectedImg(width || undefined, readImgAlign(img), readImgBorder(img));
+    restyleSelectedImg(width || undefined, readImgAlign(img), readImgBorder(img), readImgValign(img));
   }, [restyleSelectedImg]);
 
   const applyImgAlign = useCallback((align: ImgAlign) => {
     const img = selectedImgRef.current;
     if (!img) return;
     setImgAlign(align);
-    restyleSelectedImg(img.style.width || undefined, align, readImgBorder(img));
+    restyleSelectedImg(img.style.width || undefined, align, readImgBorder(img), readImgValign(img));
   }, [restyleSelectedImg]);
 
   const applyImgBorder = useCallback((border: boolean) => {
     const img = selectedImgRef.current;
     if (!img) return;
     setImgBorder(border);
-    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), border);
+    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), border, readImgValign(img));
   }, [restyleSelectedImg]);
+
+  const applyImgValign = useCallback((valign: ImgVAlign) => {
+    const img = selectedImgRef.current;
+    if (!img) return;
+    setImgValign(valign);
+    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), readImgBorder(img), valign);
+  }, [restyleSelectedImg]);
+
+  /**
+   * Drag-resize: the corner handle writes the width as a PERCENT of the text column, so
+   * the size means the same thing on every page size and in the PDF. Both rects come from
+   * getBoundingClientRect — visual, post-`zoom` space — so the ratio is zoom-proof. During
+   * the drag only the live style moves (cheap); the model is committed once on release.
+   */
+  const handleResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const img = selectedImgRef.current;
+    const content = contentRef.current;
+    if (!img || !content) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragStateRef.current = {
+      startX: e.clientX,
+      startWidth: img.getBoundingClientRect().width,
+      contentWidth: content.getBoundingClientRect().width,
+    };
+    const onMove = (ev: PointerEvent) => {
+      const st = dragStateRef.current;
+      const im = selectedImgRef.current;
+      if (!st || !im || !(st.contentWidth > 0)) return;
+      const pct = Math.round(Math.min(100, Math.max(5, ((st.startWidth + ev.clientX - st.startX) / st.contentWidth) * 100)));
+      im.style.width = `${pct}%`;
+      setImgWidth(`${pct}%`);
+      syncImgHandle();
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const st = dragStateRef.current;
+      dragStateRef.current = null;
+      const im = selectedImgRef.current;
+      if (!st || !im) return;
+      // Commit through the normal restyle path so the width persists into blocks + HTML.
+      const w = im.style.width || undefined;
+      restyleSelectedImg(w, readImgAlign(im), readImgBorder(im), readImgValign(im));
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [restyleSelectedImg, syncImgHandle]);
 
   // Apply the typed alt text to the selected image (accessibility of the generated
   // manual). Alt used to be settable only once, in the upload prompt — pasted/dropped
@@ -1356,11 +1440,13 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     setCaretInTable(false);
   };
 
-  // Apply a structural change to the table the caret is in. Reads the live DOM first
-  // (like switchToHtml) so in-progress typing isn't lost, mutates the matching table
-  // block's `rows`, then lets the render effect rewrite the DOM + emit onChange.
-  const mutateCaretTable = (
-    fn: (rows: TableCellData[][], ctx: { row: number; col: number }) => TableCellData[][],
+  type TableBlock = Extract<EditorBlock, { type: 'table' }>;
+
+  // Apply a change to the table BLOCK the caret is in. Reads the live DOM first
+  // (like switchToHtml) so in-progress typing isn't lost, maps the matching block,
+  // then lets the render effect rewrite the DOM + emit onChange.
+  const mutateCaretTableBlock = (
+    fn: (block: TableBlock, ctx: { row: number; col: number }) => TableBlock,
   ) => {
     const el = contentRef.current;
     if (!el) return;
@@ -1375,12 +1461,16 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const next = fresh.map((b) => {
       if (b.id !== targetId || b.type !== 'table') return b;
       const cols = b.rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
-      return { ...b, rows: fn(b.rows, { row: ctx?.row ?? b.rows.length - 1, col: ctx?.col ?? cols - 1 }) };
+      return fn(b, { row: ctx?.row ?? b.rows.length - 1, col: ctx?.col ?? cols - 1 });
     });
     isUserEditingRef.current = false; // force the render effect to rewrite the DOM
     if (ctx) pendingCaretCellRef.current = ctx; // restore the caret to this cell after the rewrite
     setBlocks(next);
   };
+
+  const mutateCaretTable = (
+    fn: (rows: TableCellData[][], ctx: { row: number; col: number }) => TableCellData[][],
+  ) => mutateCaretTableBlock((b, ctx) => ({ ...b, rows: fn(b.rows, ctx) }));
 
   const tableColCount = (rows: TableCellData[][]) => rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
   const addTableRow = () => mutateCaretTable((rows, { row }) => {
@@ -1389,17 +1479,57 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const at = Math.min(row + 1, rows.length);
     return [...rows.slice(0, at), newRow, ...rows.slice(at)];
   });
-  const addTableColumn = () => mutateCaretTable((rows, { col }) => rows.map((r) => {
-    const at = Math.min(col + 1, r.length);
-    return [...r.slice(0, at), textCell(''), ...r.slice(at)];
-  }));
+  // Column edits keep colWidths index-aligned — a stale width on the wrong column is
+  // worse than no width at all.
+  const addTableColumn = () => mutateCaretTableBlock((b, { col }) => {
+    const rows = b.rows.map((r) => {
+      const at = Math.min(col + 1, r.length);
+      return [...r.slice(0, at), textCell(''), ...r.slice(at)];
+    });
+    const colWidths = b.colWidths
+      ? [...b.colWidths.slice(0, col + 1), null, ...b.colWidths.slice(col + 1)]
+      : undefined;
+    return { ...b, rows, colWidths };
+  });
   // Never remove the header row (index 0) or the last remaining row.
   const removeTableRow = () => mutateCaretTable((rows, { row }) => (rows.length <= 1 || row === 0 ? rows : rows.filter((_, i) => i !== row)));
-  const removeTableColumn = () => mutateCaretTable((rows, { col }) => (tableColCount(rows) <= 1 ? rows : rows.map((r) => r.filter((_, i) => i !== col))));
+  const removeTableColumn = () => mutateCaretTableBlock((b, { col }) => {
+    if (tableColCount(b.rows) <= 1) return b;
+    const colWidths = b.colWidths?.filter((_, i) => i !== col);
+    return {
+      ...b,
+      rows: b.rows.map((r) => r.filter((_, i) => i !== col)),
+      colWidths: colWidths?.some((w) => w != null) ? colWidths : undefined,
+    };
+  });
   // Align the caret's cell only — this editor has no multi-cell selection, so a
   // toolbar click always targets the one cell the caret is in.
   const setCellAlign = (align: CellAlign) => mutateCaretTable((rows, { row, col }) =>
     rows.map((r, ri) => (ri !== row ? r : r.map((cell, ci) => (ci === col ? { ...cell, align } : cell)))));
+
+  // Width mode of the whole table: full column (default) or shrink-to-content.
+  const setTableFit = (fit: 'content' | undefined) => {
+    setCaretTableFit(fit);
+    mutateCaretTableBlock((b) => ({ ...b, fit }));
+  };
+
+  // Set/clear the caret COLUMN's width as % of the table. Stored index-aligned with
+  // the widest row; the serializer emits it as a <colgroup>.
+  const setCaretColumnWidth = (pct: number | null) => {
+    mutateCaretTableBlock((b, { col }) => {
+      const cols = tableColCount(b.rows);
+      const widths: (number | null)[] = Array.from({ length: cols }, (_, i) => b.colWidths?.[i] ?? null);
+      widths[Math.min(col, cols - 1)] = pct;
+      return { ...b, colWidths: widths.some((w) => w != null) ? widths : undefined };
+    });
+  };
+
+  const commitCaretColWidth = () => {
+    const v = caretColWidth.trim().replace('%', '');
+    if (v === '') { setCaretColumnWidth(null); return; }
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 3 && n <= 97) setCaretColumnWidth(Math.round(n));
+  };
 
   // Mode switching. Going to HTML seeds the textarea from the current blocks;
   // returning to rich re-parses whatever HTML the user typed back into blocks.
@@ -1577,6 +1707,22 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               <TbPill tone="rose" onPress={removeTableColumn} title="Delete the current column">− Col</TbPill>
               <TbPill tone="rose" onPress={removeCaretTable} title="Delete this entire table">− Table</TbPill>
             </TbGroup>
+            <TbCaption title="How wide the table is on the page">Width</TbCaption>
+            <TbGroup>
+              <TbPill active={caretTableFit !== 'content'} onPress={() => setTableFit(undefined)} title="Stretch the table across the full text column (the house style for data tables)">Fit page</TbPill>
+              <TbPill active={caretTableFit === 'content'} onPress={() => setTableFit('content')} title="Shrink the table to what its content needs — no stretched columns">Fit content</TbPill>
+            </TbGroup>
+            <TbCaption title="Width of the current column, as % of the table — leave empty for automatic">Col</TbCaption>
+            <input
+              value={caretColWidth}
+              onChange={(e) => setCaretColWidth(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitCaretColWidth(); } }}
+              onBlur={commitCaretColWidth}
+              placeholder="auto"
+              className="w-14 px-1.5 h-7 text-[11px] border border-gray-200 rounded-md bg-white"
+              title="Current column's width as % of the table (3–97). Empty = automatic."
+            />
             <TbCaption title="Align the current cell's content (text or image)">Cell</TbCaption>
             <TbGroup>
               {([
@@ -1630,6 +1776,22 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                 <TbIcon key={value} active={imgAlign === value} onPress={() => applyImgAlign(value)} title={title}><Icon size={14} /></TbIcon>
               ))}
             </TbGroup>
+            {/* Vertical seat of an INLINE image against its text line — meaningless for
+                floats/blocks, so the group only appears when the image is inline. */}
+            {imgAlign === 'inline' && (
+              <>
+                <TbCaption title="Where the image sits against the text line beside it">Seat</TbCaption>
+                <TbGroup>
+                  {([
+                    { value: 'top' as const,      label: 'Top',    title: 'Top of the image level with the top of the text line' },
+                    { value: 'middle' as const,   label: 'Middle', title: 'Image centered on the text line (default)' },
+                    { value: 'baseline' as const, label: 'Base',   title: 'Bottom of the image on the text baseline' },
+                  ]).map(({ value, label, title }) => (
+                    <TbPill key={value} active={(imgValign ?? 'middle') === value} onPress={() => applyImgValign(value)} title={title}>{label}</TbPill>
+                  ))}
+                </TbGroup>
+              </>
+            )}
             <TbGroup>
               <TbPill
                 active={imgBorder}
@@ -1652,7 +1814,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         )}
       </div>
 
-      <div className="flex-1 min-h-0 relative bg-white cursor-text overflow-y-auto" onClick={() => { if (mode === 'rich') contentRef.current?.focus(); }}>
+      <div ref={editorShellRef} className="flex-1 min-h-0 relative bg-white cursor-text overflow-y-auto" onClick={() => { if (mode === 'rich') contentRef.current?.focus(); }}>
         {mode === 'html' ? (
           <textarea
             ref={htmlTextareaRef}
@@ -1677,19 +1839,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               style={
                 printColumn
                   ? {
-                      // The cap is in em, so it stays proportional to the text whether or not
-                      // the print-width canvas is on.
-                      ['--im-img-max-h' as string]: `${printColumn.imageMaxHeightEm}em`,
-                      ['--im-block-gap' as string]: `${printColumn.blockSpacingEm}em`,
-                      // The rest of the print profile, so a table and its spacing here match the
-                      // page. The stylesheet had its own hardcoded copies of every one of these.
-                      ['--im-para-gap' as string]: `${printColumn.paragraphSpacingEm}em`,
-                      ['--im-item-gap' as string]: `${printColumn.listItemSpacingEm}em`,
-                      ['--im-cell-pad' as string]: `${printColumn.cellPaddingEm}em`,
-                      ['--im-cell-border' as string]: `${printColumn.cellBorderEm}em`,
-                      ['--im-table-scale' as string]: `${printColumn.tableFontRatio}em`,
-                      ['--im-callout-icon' as string]: `${printColumn.calloutIconEm}em`,
-                      lineHeight: printColumn.lineHeight,
+                      // Every density var in em (shared with all preview surfaces), so it stays
+                      // proportional to the text whether or not the print-width canvas is on.
+                      ...imContentVars(printColumn),
                       // Exact print geometry, then zoomed for legibility. zoom scales every
                       // length uniformly — %, px and mm — which is the whole point: a pixel
                       // width finally means the same here as it does on the page.
@@ -1717,6 +1869,24 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onKeyUp={() => { saveSelection(); refreshCaretTable(); }}
             />
             </div>
+            {/* Drag-resize handle on the selected image's corner. Lives OUTSIDE the zoomed
+                canvas (in the scroll shell), positioned in visual space, so it stays a
+                constant, grabbable size at any preview zoom. */}
+            {imgSelected && imgHandle && (
+              <div
+                onPointerDown={handleResizeStart}
+                className="absolute z-30 w-3.5 h-3.5 rounded-sm bg-indigo-600 border-2 border-white shadow cursor-nwse-resize touch-none"
+                style={{ left: imgHandle.left, top: imgHandle.top }}
+                title="Drag to resize — the width is stored as % of the printed text column"
+              />
+            )}
+            {/* The modelled column is squeezed below legibility — say so rather than letting
+                the tiny text read as a rendering bug. Proportions are still exact. */}
+            {printPreview && previewZoom < CRAMPED_PREVIEW_ZOOM && (
+              <div className="sticky bottom-0 px-3 py-1 text-[10px] text-amber-700 bg-amber-50 border-t border-amber-200">
+                Print-width preview at {Math.round(previewZoom * 100)}% — sizes are still exact, but widen the pane (or collapse a sidebar) for a legible view.
+              </div>
+            )}
           </>
         )}
       </div>
@@ -1845,6 +2015,8 @@ const placeholderChipRe = (id: string) =>
 
 export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes, focusLang, focusToken, printTemplateType, printPageSize }) => {
   const [rowLang, setRowLang] = useState(focusLang ?? 'en');
+  // Print density vars for the row's read-only English-reference pane (cached per profile).
+  const rowGeometry = usePrintColumn(printTemplateType, printPageSize);
   const [translating, setTranslating] = useState(false);
   const [translateErr, setTranslateErr] = useState<string | null>(null);
   // English reference pane (shown while editing a translation). Open/closed is a
@@ -2100,7 +2272,8 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
           </button>
           {showEnRef && (
             <div
-              className="im-content text-xs text-gray-700 leading-relaxed px-3 py-2 border-t border-gray-200 bg-white max-h-48 overflow-y-auto"
+              className="im-content text-xs text-gray-700 px-3 py-2 border-t border-gray-200 bg-white max-h-48 overflow-y-auto"
+              style={rowGeometry ? imContentVars(rowGeometry) : undefined}
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(enSource) }}
             />
           )}
