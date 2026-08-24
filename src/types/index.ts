@@ -101,6 +101,9 @@ export type { Toast, ToastType, ToastContextType } from './toast.types';
 // AI types
 export type { AIPrompt, PromptLibraryEntry, TranslationVerbatim } from './ai.types';
 
+// Feedback types
+export type { FeedbackReport, FeedbackReportType, FeedbackReportStatus } from './feedback.types';
+
 // Regulatory types
 export type {
   RegulationStatus,

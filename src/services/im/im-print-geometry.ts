@@ -17,10 +17,20 @@
  * where it will in print, because `zoom` scales all lengths uniformly.
  */
 
-import type { PrintTypography, PrintPageSizeKey } from './im-print-typography';
+import { effectiveTablePt, type PrintTypography, type PrintPageSizeKey } from './im-print-typography';
 
 /** CSS reference pixel: 1px is 1/96 inch, which is what makes px absolute in print. */
 export const CSS_PX_PER_MM = 96 / 25.4;
+
+/**
+ * Page furniture on A5 is drawn at this fraction of its A4 size — icons, rules, tab widths and
+ * the like. Type and the density settings deliberately do NOT go through it. Shared with the
+ * renderer so the editor cannot drift from it.
+ */
+export const A5_FURNITURE_SCALE = 0.82;
+
+/** Callout icon box in mm at A4, before the furniture scale. Mirrors the renderer's mm(8). */
+const CALLOUT_ICON_MM = 8;
 const PT_PER_INCH = 72;
 
 /** Trim width of each page size, in mm. Heights live in PAGE_DIMS in im-print-html.ts. */
@@ -53,6 +63,23 @@ export interface PrintColumnGeometry {
   blockSpacingEm: number;
   /** Column width measured in body ems — the ratio that was drifting with window size. */
   columnEm: number;
+  /**
+   * The remaining profile values the editor needs to look like the page.
+   *
+   * All expressed relative to the text (em) or as plain ratios, so they are proportionally right
+   * on the fluid canvas and exact in the print-width preview. The editor stylesheet had its own
+   * hardcoded copies of every one of these — `padding: 0.5rem`, `border: 1px`, `margin: 1em` —
+   * which is why a table looked nothing like its printed self.
+   */
+  paragraphSpacingEm: number;
+  listItemSpacingEm: number;
+  cellPaddingEm: number;
+  cellBorderEm: number;
+  /** Table font size as a fraction of body, with the MIN_TABLE_PT floor already applied. */
+  tableFontRatio: number;
+  lineHeight: number;
+  /** Callout icon box in em, furniture scale included. The editor had a fixed 64px (16.9mm). */
+  calloutIconEm: number;
 }
 
 export const printColumnGeometry = (
@@ -70,6 +97,19 @@ export const printColumnGeometry = (
     imageMaxHeightEm: bodyPx > 0 ? (typography.cellImageMaxHeightMm * CSS_PX_PER_MM) / bodyPx : 0,
     blockSpacingEm: bodyPx > 0 ? (typography.blockSpacingMm * CSS_PX_PER_MM) / bodyPx : 0,
     columnEm: bodyPx > 0 ? columnPx / bodyPx : 0,
+    paragraphSpacingEm: typography.paragraphSpacingEm,
+    // Matches the renderer, which derives list items from the same setting rather than a second
+    // knob that could contradict it.
+    listItemSpacingEm: typography.paragraphSpacingEm * 0.3,
+    cellPaddingEm: bodyPx > 0 ? (typography.tableCellPaddingMm * CSS_PX_PER_MM) / bodyPx : 0,
+    cellBorderEm: bodyPx > 0 ? (typography.tableBorderMm * CSS_PX_PER_MM) / bodyPx : 0,
+    tableFontRatio:
+      typography.bodyPt > 0 ? effectiveTablePt(typography.bodyPt, typography.tableFontScale) / typography.bodyPt : 1,
+    lineHeight: typography.lineHeight,
+    calloutIconEm:
+      bodyPx > 0
+        ? (CALLOUT_ICON_MM * (pageSize === 'a5' ? A5_FURNITURE_SCALE : 1) * CSS_PX_PER_MM) / bodyPx
+        : 0,
   };
 };
 
@@ -80,7 +120,16 @@ export const printColumnGeometry = (
  * avoids a horizontal scrollbar. The clamp stops the extremes: a narrow pane must not shrink
  * 7pt text to something unreadable, and a very wide one must not blow it up absurdly.
  */
-export const MIN_PREVIEW_ZOOM = 0.9;
+/**
+ * Fitting beats legibility. The canvas is a FIXED pixel width, so a floor high enough to keep
+ * 7pt text comfortable made the column overflow its pane and clip text mid-word in any editor
+ * pane narrower than ~436px — much more likely now that the preview pane is resizable. Small
+ * text can be read by widening the pane; clipped text is simply wrong.
+ */
+export const MIN_PREVIEW_ZOOM = 0.5;
+
+/** Below this the modelled column is too small to work in; the UI says so rather than pretending. */
+export const CRAMPED_PREVIEW_ZOOM = 0.8;
 export const MAX_PREVIEW_ZOOM = 2.4;
 
 /**

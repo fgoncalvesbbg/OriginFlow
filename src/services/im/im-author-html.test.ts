@@ -32,12 +32,21 @@ describe('table cells', () => {
     expect(sanitizeAuthorHtml('<td style="border: 0px;">x</td>')).toContain('border: 0px');
   });
 
-  it('drops a pinned px column width', () => {
-    expect(sanitizeAuthorHtml('<th style="width: 40px; padding: 5px;">x</th>')).not.toContain('width: 40px');
+  it('drops a pinned px column width in a DATA cell', () => {
+    const out = sanitizeAuthorHtml('<th style="width: 40px; padding: 5px; border: 1px solid #ccc;">x</th>');
+    expect(out).not.toContain('width: 40px');
   });
 
-  it('drops the presentational width attribute on a cell', () => {
-    expect(sanitizeAuthorHtml('<td width="120">x</td>')).not.toContain('width="120"');
+  it('leaves a LAYOUT cell entirely alone, geometry included', () => {
+    // The disposal block sets an icon beside its text this way. Every declaration is deliberate:
+    // stripping them collapsed the icon column and removed the gutter between icon and text.
+    const layout = '<td style="width:120px;vertical-align:top;padding:0 12px 0 0;border:none;">x</td>';
+    expect(sanitizeAuthorHtml(layout)).toBe(layout);
+  });
+
+  it('treats a cell with no border declaration as layout, so nothing is guessed away', () => {
+    const bare = '<td width="120">x</td>';
+    expect(sanitizeAuthorHtml(bare)).toBe(bare);
   });
 
   it('leaves non-cell elements alone', () => {
@@ -52,9 +61,11 @@ describe('images', () => {
     expect(out).toContain('max-width:100%');
   });
 
-  it('drops a px width inside a table, which pinned the column on every row', () => {
+  it('PRESERVES an image width inside a table — a column must fit the widest image it holds', () => {
+    // An earlier version stripped this, on the theory that it caused the phantom image column.
+    // It does not: the phantom column is one holding NO images, which no width can explain.
     const out = sanitizeAuthorHtml('<table><tr><td><img src="a.png" style="width:160px;max-width:100%;" /></td></tr></table>');
-    expect(out).not.toContain('width:160px');
+    expect(out).toContain('width:160px');
   });
 
   it('preserves a px width outside a table — there it is a deliberate choice', () => {

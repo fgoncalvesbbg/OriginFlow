@@ -319,6 +319,9 @@ export {
 // AI module
 export { getAIPrompts, updateAIPrompt, getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry, getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim } from './ai';
 
+// Feedback module — bug reports / feature requests filed from the floating widget
+export { createFeedbackReport, getFeedbackReports, setFeedbackReportStatus } from './feedback';
+
 // Regulatory module — regulation library, per-template assignment, AI regulatory check
 export {
   getRegulations,

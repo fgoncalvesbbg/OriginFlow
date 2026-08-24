@@ -126,6 +126,23 @@ export const defaultTypographyFor = (
  * would print them over the body text. Left/right have no such floor, but the language edge
  * tabs are ~7–8mm wide, so a leaflet set below that will have content run under its tab.
  */
+/**
+ * Floor for table text, in points.
+ *
+ * tableFontScale exists so tabular matter can run a step below running text, as print manuals
+ * conventionally set it. But this is safety content that has to stay readable at arm's length, so
+ * the scale is clamped rather than trusted: at the 6pt leaflet body size a 0.6 scale would
+ * otherwise produce 3.6pt. 6pt matches the smallest body size any profile ships with.
+ *
+ * Lives here rather than in the renderer because the editor needs the same floor to show tables
+ * at the size they will print.
+ */
+export const MIN_TABLE_PT = 6;
+
+/** Effective table point size for a profile, i.e. the scale with the floor applied. */
+export const effectiveTablePt = (bodyPt: number, tableFontScale: number): number =>
+  Math.max(MIN_TABLE_PT, bodyPt * tableFontScale);
+
 export const PRINT_SETTING_LIMITS = {
   bodyPt: { min: 4, max: 32, step: 0.25 },
   headingPt: { min: 4, max: 48, step: 0.25 },

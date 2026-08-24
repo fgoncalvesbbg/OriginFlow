@@ -7,6 +7,7 @@ import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock,
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
 import { Logo } from './Logo';
+import { FeedbackWidget } from './feedback/FeedbackWidget';
 import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
 
 interface LayoutProps {
@@ -281,6 +282,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {children}
         </div>
       </main>
+
+      <FeedbackWidget />
     </div>
   );
 };

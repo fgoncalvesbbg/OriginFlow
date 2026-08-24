@@ -14,6 +14,8 @@ import {
   CSS_PX_PER_MM,
   MIN_PREVIEW_ZOOM,
   MAX_PREVIEW_ZOOM,
+  CRAMPED_PREVIEW_ZOOM,
+  A5_FURNITURE_SCALE,
 } from './im-print-geometry';
 import { defaultTypographyFor } from './im-print-typography';
 
@@ -119,5 +121,62 @@ describe('blockSpacingEm', () => {
 
   it('does not divide by a zero body size', () => {
     expect(printColumnGeometry('a5', { ...defaultTypographyFor('im', 'a5'), bodyPt: 0 }).blockSpacingEm).toBe(0);
+  });
+});
+
+describe('the rest of the profile the editor needs', () => {
+  const t = {
+    ...defaultTypographyFor('im', 'a5'),
+    bodyPt: 7,
+    lineHeight: 1.1,
+    paragraphSpacingEm: 0.5,
+    tableCellPaddingMm: 1.2,
+    tableBorderMm: 0.1,
+    tableFontScale: 0.95,
+  };
+
+  it('carries paragraph and list spacing straight through', () => {
+    const g = printColumnGeometry('a5', t);
+    expect(g.paragraphSpacingEm).toBe(0.5);
+    // Derived from the same setting, exactly as the renderer derives it.
+    expect(g.listItemSpacingEm).toBeCloseTo(0.15, 5);
+  });
+
+  it('converts cell padding and border weight into text-relative units', () => {
+    const g = printColumnGeometry('a5', t);
+    expect(g.cellPaddingEm * g.bodyPx).toBeCloseTo(1.2 * CSS_PX_PER_MM, 3);
+    expect(g.cellBorderEm * g.bodyPx).toBeCloseTo(0.1 * CSS_PX_PER_MM, 3);
+  });
+
+  it('applies the table font floor, so the editor shows what will print', () => {
+    expect(printColumnGeometry('a5', t).tableFontRatio).toBeCloseTo(0.95, 5);
+    // A 6pt leaflet body at a 0.6 scale would be 3.6pt; the floor lifts it back to 6pt, i.e. 1.0.
+    const leaflet = { ...defaultTypographyFor('warning_leaflet', 'a5'), bodyPt: 6, tableFontScale: 0.6 };
+    expect(printColumnGeometry('a5', leaflet).tableFontRatio).toBeCloseTo(1, 5);
+  });
+
+  it('scales the callout icon like page furniture, A5 included', () => {
+    const a5 = printColumnGeometry('a5', t).calloutIconEm * printColumnGeometry('a5', t).bodyPx;
+    const a4 = printColumnGeometry('a4', t).calloutIconEm * printColumnGeometry('a4', t).bodyPx;
+    expect(a5).toBeCloseTo(8 * A5_FURNITURE_SCALE * CSS_PX_PER_MM, 3);
+    expect(a4).toBeCloseTo(8 * CSS_PX_PER_MM, 3);
+    expect(a5).toBeLessThan(a4);
+  });
+
+  it('passes line height through unchanged', () => {
+    expect(printColumnGeometry('a5', t).lineHeight).toBe(1.1);
+  });
+});
+
+describe('the zoom floor no longer clips', () => {
+  it('fits a column into a pane too narrow for the old 0.9 floor', () => {
+    // 484px column in a 380px pane: the old floor rendered 435px and clipped text mid-word.
+    const zoom = previewZoomFor(484, 380);
+    expect(484 * zoom).toBeLessThanOrEqual(380 + 0.5);
+  });
+
+  it('still refuses to go absurdly small', () => {
+    expect(previewZoomFor(484, 10)).toBe(MIN_PREVIEW_ZOOM);
+    expect(MIN_PREVIEW_ZOOM).toBeLessThan(CRAMPED_PREVIEW_ZOOM);
   });
 });

@@ -1,24 +1,24 @@
 .im-content ul {
   list-style-type: disc !important;
   padding-left: 1.5em !important;
-  margin-bottom: 1em !important;
+  margin-bottom: var(--im-para-gap, 1em);
   display: block !important;
 }
 
 .im-content ol {
   list-style-type: decimal !important;
   padding-left: 1.5em !important;
-  margin-bottom: 1em !important;
+  margin-bottom: var(--im-para-gap, 1em);
   display: block !important;
 }
 
 .im-content li {
   display: list-item !important;
-  margin-bottom: 0.25em !important;
+  margin-bottom: var(--im-item-gap, 0.25em);
 }
 
 .im-content p {
-  margin-bottom: 1em !important;
+  margin-bottom: var(--im-para-gap, 1em);
   display: block !important;
 }
 
@@ -77,12 +77,14 @@
   user-select: none;
 }
 
+/* Callout box spacing from the print settings: the renderer uses blockSpacingMm for the gap,
+   padding and margin alike, where this had its own 1.5rem (6.35mm) against 2.5mm. */
 .im-block-wrapper {
   display: flex;
   align-items: flex-start;
-  gap: 1.5rem;
-  padding: 1.5rem;
-  margin: 1.5rem 0;
+  gap: var(--im-block-gap, 1.5rem);
+  padding: var(--im-block-gap, 1.5rem);
+  margin: var(--im-block-gap, 1.5rem) 0;
   border-radius: 6px;
   border-left: 6px solid;
   background-color: #fff;
@@ -91,8 +93,9 @@
 
 .im-block-icon {
   flex-shrink: 0;
-  width: 64px;
-  height: 64px;
+  /* 64px is 16.9mm; the renderer draws this at 8mm scaled for the page size. */
+  width: var(--im-callout-icon, 64px);
+  height: var(--im-callout-icon, 64px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -108,7 +111,7 @@
   font-weight: 800;
   text-transform: uppercase;
   font-size: 0.9rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: calc(var(--im-block-gap, 1rem) / 2);
   letter-spacing: 0.05em;
 }
 
@@ -176,24 +179,46 @@
   color: #1d4ed8;
 }
 
+/*
+ * Tables, from the same print settings the renderer uses.
+ *
+ * These rules previously carried their own hardcoded copies — `margin: 1rem`, `padding: 0.5rem`,
+ * `border: 1px` — against the renderer's 2.5mm / 1.2mm / 0.1mm. A table therefore looked nothing
+ * like its printed self: cells 1.8x too padded, rules 7.5x too heavy, and text at full body size
+ * where print sets it a step smaller. Selectors cover BOTH the editor's own `.im-table` and any
+ * table pasted in without a class, which previously got no styling whatsoever.
+ */
+.im-content table,
 .im-table {
   width: 100%;
   border-collapse: collapse;
-  margin: 1rem 0;
+  margin: var(--im-block-gap, 1rem) 0;
   table-layout: auto;
+  font-size: var(--im-table-scale, 1em);
 }
 
+.im-content th,
+.im-content td,
 .im-table th,
 .im-table td {
-  border: 1px solid #cbd5e1;
-  padding: 0.5rem;
+  /* max() keeps the grid visible on screen: the printed hairline is well under one device pixel,
+     and a border that rounds to nothing would make the editor look structureless. */
+  border: max(0.5px, var(--im-cell-border, 1px)) solid #cbd5e1;
+  padding: var(--im-cell-pad, 0.5rem);
   vertical-align: top;
 }
 
+.im-content th,
 .im-table th {
   background-color: #f1f5f9;
   font-weight: bold;
   text-align: left;
+}
+
+/* A paragraph used to hold a cell's text must not add its margin to the cell padding. */
+.im-content td > p:first-child,
+.im-content th > p:first-child {
+  margin-top: 0;
 }
 
 /*
@@ -255,4 +280,39 @@
 .im-content td > p:last-child,
 .im-content th > p:last-child {
   margin-bottom: 0;
+}
+
+/*
+ * Image cells, mirroring the print stylesheet so a tight row in the PDF is a tight row here.
+ *
+ * A cell holding nothing but an icon was getting its height from two things unrelated to the
+ * icon: the block margins that space images in flowing text (meaningless between a cell wall and
+ * an icon), and the cell's line-height, which reserves a whole text line under an inline image
+ * even when no text sits beside it. That was ~7.6mm on A5 — nearly three body lines — on every
+ * row, which is why a small icon still produced a tall row. Cell padding is left alone: it is a
+ * deliberate setting.
+ */
+.im-content td img,
+.im-content th img {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.im-content td:has(> img:only-child),
+.im-content th:has(> img:only-child),
+.im-content td:has(> p:only-child > img:only-child) {
+  line-height: 0;
+  /* Cells default to top alignment, which is right for text but leaves an icon stranded at the
+     top of a row made tall by a multi-line neighbour. */
+  vertical-align: middle;
+}
+
+/* inline-block plus the line-height:0 above removes the baseline strut while leaving the cell's
+   own text-align in charge of where the icon sits — forcing a centred block would override the
+   author's layout. */
+.im-content td:has(> img:only-child) > img,
+.im-content th:has(> img:only-child) > img,
+.im-content td:has(> p:only-child > img:only-child) > p > img {
+  display: inline-block;
+  vertical-align: middle;
 }

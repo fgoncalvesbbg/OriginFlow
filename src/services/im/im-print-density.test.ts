@@ -114,18 +114,13 @@ describe('author-chosen image placement', () => {
 });
 
 describe('pinned image widths', () => {
-  it('drops a px width inside a table, which pinned a ~42mm column on every row', () => {
+  it('preserves an image width inside a table, so an icon column keeps its size', () => {
+    // The disposal block pairs a 70px icon with its text in a two-column table; stripping the
+    // width collapsed the icon.
     const out = bodyHtmlFor('a5', html(
-      '<table><tr><td><img src="a.png" style="width:160px;max-width:100%;height:auto;" /></td><td>One line</td></tr></table>',
+      '<table><tr><td><img src="a.png" style="width:70px;height:auto;" /></td><td>One line</td></tr></table>',
     ));
-    expect(out).not.toContain('width:160px');
-    expect(out).toContain('max-width:100%');
-  });
-
-  it('drops the presentational width attribute inside a table too', () => {
-    const out = bodyHtmlFor('a5', html('<table><tr><td><img src="a.png" width="160" height="90" /></td></tr></table>'));
-    expect(out).not.toContain('width="160"');
-    expect(out).not.toContain('height="90"');
+    expect(out).toContain('width:70px');
   });
 
   it('PRESERVES a px width outside a table — there it is a deliberate editorial choice', () => {
@@ -292,9 +287,15 @@ describe('author cell styles that were overriding the settings', () => {
     expect(cell('border: none;')).toContain('border: none');
   });
 
-  it('drops a pinned px column width but keeps a percentage', () => {
-    expect(cell('width: 40px; padding: 5px;')).not.toContain('width: 40px');
-    expect(cell('width: 48%; padding: 8px;')).toContain('width: 48%');
+  it('drops a pinned px column width in a data cell but keeps a percentage', () => {
+    expect(cell('width: 40px; padding: 5px; border: 1px solid #ccc;')).not.toContain('width: 40px');
+    expect(cell('width: 48%; padding: 8px; border: 1px solid #ccc;')).toContain('width: 48%');
+  });
+
+  it('leaves a borderless layout cell untouched', () => {
+    const out = cell('width:120px;padding:0 12px 0 0;border:none;');
+    expect(out).toContain('width:120px');
+    expect(out).toContain('padding:0 12px 0 0');
   });
 
   it('preserves alignment and other author formatting', () => {
@@ -333,5 +334,39 @@ describe('data-align is authoritative on the print path', () => {
 
   it('detects an inline width declaration, not just the attribute', () => {
     expect(bodyHtmlFor('a5', html('<p><img src="a.png" style="float:left;width:60%;" /></p>'))).toContain('data-print-width="set"');
+  });
+});
+
+describe('icon cells: row height must come from the icon, not its surroundings', () => {
+  const out = () => bodyHtmlFor('a5', textNode);
+
+  it('zeroes image vertical margins inside cells', () => {
+    // The block-align margin (5mm at the current setting) spaces images in flowing text. Between
+    // a cell wall and an icon it is meaningless, and it was the single largest contributor.
+    expect(out()).toContain('.imv-content td img, .imv-content th img { margin-top: 0; margin-bottom: 0; }');
+  });
+
+  it('kills the line-height strut in a cell holding only an image', () => {
+    // Without this the cell reserves a full text line under the icon that nothing sits on.
+    expect(out()).toContain('.imv-content td:has(> img:only-child)');
+    expect(out()).toContain('line-height: 0;');
+  });
+
+  it('covers a paragraph-wrapped image, which is how the editor often emits one', () => {
+    expect(out()).toContain('.imv-content td:has(> p:only-child > img:only-child)');
+  });
+
+  it('uses inline-block so the cell decides where the icon sits', () => {
+    // A forced centred block would override the author's own text-align.
+    expect(out()).toContain('display: inline-block; vertical-align: middle;');
+  });
+
+  it('leaves cell padding to the setting rather than zeroing it', () => {
+    // Padding is a deliberate decision with its own admin field; only the accidental space goes.
+    expect(out()).toContain(`padding: ${a5.tableCellPaddingMm}mm`);
+  });
+
+  it('still caps a genuinely tall cell image', () => {
+    expect(out()).toContain(`max-height: ${a5.cellImageMaxHeightMm}mm`);
   });
 });

@@ -17,6 +17,7 @@ import { translateHtml } from '../../services/ai/translation.service';
 import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
 import { parseTranslationXliff, applyTranslationImport, countTranslationOverwrites, countChangedPrefills, saveTranslationImportReport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
 import { collectTranslationFragments, refFragmentId, sectionFragmentId } from '../../services/im/im-translation-fragments';
+import { markTranslatedFromEn } from '../../services/im/im-translation-marker';
 import { planTmTranslation, translateFragmentWithMemory, recordImportedTranslations, getProtectedPhrases, reuseEventsOf, planKey, type TmPlanResult, type TmPlanContext } from '../../services/im/im-tm-translate';
 import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../services/im/im-tm-write.service';
 import { generateUUID } from '../../utils/uuid.utils';
@@ -1328,7 +1329,10 @@ const IMTemplateEditor: React.FC = () => {
             const fid = refFragmentId(s.id, 'inline', idx, ref.id);
             tasks.push(async () => {
               try {
-                const out = await translateFragment(fid, src, target);
+                // Marked so the row's language dot goes stale (amber) if EN is edited later
+                // (see im-translation-marker.ts) — the per-row "Translate from EN" button
+                // already does this; this bulk path was the one write site missing it.
+                const out = markTranslatedFromEn(await translateFragment(fid, src, target), src);
                 (s.blockRefs![idx] as InlineBlockRef).content = { ...(s.blockRefs![idx] as InlineBlockRef).content, [target]: out };
                 // Mirror the first inline row into section.content for the legacy renderer path.
                 if (mirror) s.content = { ...s.content, [target]: out };
@@ -1348,8 +1352,12 @@ const IMTemplateEditor: React.FC = () => {
         // Section with legacy content but no inline rows (rare after normalization).
         if (refs.length === 0 && needs(s.content, s.content?.[source], target)) {
           const fid = sectionFragmentId(s.id, 'legacy');
+          const legacySrc = s.content[source];
           tasks.push(async () => {
-            try { s.content = { ...s.content, [target]: await translateFragment(fid, s.content[source], target) }; changed.add(s.id); logOk(target); }
+            try {
+              const out = markTranslatedFromEn(await translateFragment(fid, legacySrc, target), legacySrc);
+              s.content = { ...s.content, [target]: out }; changed.add(s.id); logOk(target);
+            }
             catch (e) { failures.push({ lang: target, label: `section “${s.title}”`, error: errMsg(e) }); }
           });
         }

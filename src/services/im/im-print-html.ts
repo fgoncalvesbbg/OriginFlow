@@ -22,9 +22,10 @@
 
 import { getCalloutTitle, getContentsLabel } from './callout-titles.i18n';
 import { sanitizeAuthorHtml, styleOf, IMG_TAG_RE, TAG_END_RE } from './im-author-html';
+import { A5_FURNITURE_SCALE } from './im-print-geometry';
 import { inferImageAlign, FLOAT_MAX_WIDTH_PCT, type ImageAlign } from './im-image-align';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
-import { defaultTypographyFor, type PrintTypography } from './im-print-typography';
+import { defaultTypographyFor, type PrintTypography , effectiveTablePt } from './im-print-typography';
 import { interFontFaceCss } from './fonts/inter-webfont';
 
 export type PrintPageSize = 'a4' | 'a5';
@@ -663,16 +664,6 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
  * (title 6.2 : h1 5.5 : h2 5.0 : h3 4.5), so one heading number still yields the same
  * hierarchy.
  */
-/**
- * Floor for table text, in points.
- *
- * tableFontScale exists so tabular matter can run a step below running text, as print
- * manuals conventionally set it. But this is safety content that has to stay readable at
- * arm length, so the scale is clamped rather than trusted: at the 6pt leaflet body size a
- * 0.6 scale would otherwise produce 3.6pt. 6pt matches the smallest body size any profile
- * ships with.
- */
-const MIN_TABLE_PT = 6;
 const buildStyles = (
   pageSize: PrintPageSize,
   primaryColor: string,
@@ -681,7 +672,7 @@ const buildStyles = (
   fontCss = '',
 ): string => {
   const dims = PAGE_DIMS[pageSize];
-  const s = pageSize === 'a5' ? 0.82 : 1; // A5 scale for page furniture only (see above)
+  const s = pageSize === 'a5' ? A5_FURNITURE_SCALE : 1; // page furniture only (see above)
   const mm = (base: number) => `${(base * s).toFixed(2)}mm`;
   const fillH = fillHeightMm(pageSize, typography);
   const { bodyPt, headingPt, lineHeight, tableCellPaddingMm, cellImageMaxHeightMm, blockSpacingMm, paragraphSpacingEm, tableFontScale, tableBorderMm } = typography;
@@ -700,7 +691,7 @@ const buildStyles = (
   const pt = (value: number) => `${Number(value.toFixed(2))}pt`;
   // Tabular text runs a step below body by convention, but this is safety content: the scale
   // is floored so no setting can shrink it without limit.
-  const tablePt = pt(Math.max(MIN_TABLE_PT, bodyPt * tableFontScale));
+  const tablePt = pt(effectiveTablePt(bodyPt, tableFontScale));
   // A table rule is furniture supporting the text, not a box around it: 1px (0.75pt) read as
   // heavy against 6.65pt cell text. Absolute mm, so it does not pick up the A5 furniture scale
   // and quietly become a different weight per page size.
@@ -804,6 +795,23 @@ const buildStyles = (
        cell padding and inflates the row. The callout body already did this for the same reason. */
     .imv-content td > p:last-child, .imv-content th > p:last-child { margin-bottom: 0; }
     .imv-content td > p:first-child, .imv-content th > p:first-child { margin-top: 0; }
+    /* Image cells. An icon column's row height was set almost entirely by things that have
+       nothing to do with the icon: the block margins that space images in FLOWING TEXT (5mm at
+       the current setting, and meaningless between a cell wall and an icon), plus the cell's
+       line-height, which reserves a whole text line under an inline image even when no text sits
+       beside it. Together those came to ~7.6mm on A5 — nearly three body lines — on every row,
+       which is why a small icon still produced a tall row. What remains is the cell padding,
+       which is a deliberate setting. */
+    .imv-content td img, .imv-content th img { margin-top: 0; margin-bottom: 0; }
+    .imv-content td:has(> img:only-child), .imv-content th:has(> img:only-child),
+    .imv-content td:has(> p:only-child > img:only-child) { line-height: 0; vertical-align: middle; }
+    /* display:block removes the baseline strut entirely; auto side margins keep the icon centred
+       now that the cell's own text-align no longer applies to a block. */
+    .imv-content td:has(> img:only-child) > img,
+    .imv-content th:has(> img:only-child) > img,
+    .imv-content td:has(> p:only-child > img:only-child) > p > img {
+      display: inline-block; vertical-align: middle;
+    }
     .imv-content th { background: #f1f5f9; font-weight: 700; text-align: left; }
 
     /* Callouts */

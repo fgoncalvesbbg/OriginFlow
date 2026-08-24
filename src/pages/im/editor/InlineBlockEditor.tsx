@@ -1681,6 +1681,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                       // the print-width canvas is on.
                       ['--im-img-max-h' as string]: `${printColumn.imageMaxHeightEm}em`,
                       ['--im-block-gap' as string]: `${printColumn.blockSpacingEm}em`,
+                      // The rest of the print profile, so a table and its spacing here match the
+                      // page. The stylesheet had its own hardcoded copies of every one of these.
+                      ['--im-para-gap' as string]: `${printColumn.paragraphSpacingEm}em`,
+                      ['--im-item-gap' as string]: `${printColumn.listItemSpacingEm}em`,
+                      ['--im-cell-pad' as string]: `${printColumn.cellPaddingEm}em`,
+                      ['--im-cell-border' as string]: `${printColumn.cellBorderEm}em`,
+                      ['--im-table-scale' as string]: `${printColumn.tableFontRatio}em`,
+                      ['--im-callout-icon' as string]: `${printColumn.calloutIconEm}em`,
+                      lineHeight: printColumn.lineHeight,
                       // Exact print geometry, then zoomed for legibility. zoom scales every
                       // length uniformly — %, px and mm — which is the whole point: a pixel
                       // width finally means the same here as it does on the page.

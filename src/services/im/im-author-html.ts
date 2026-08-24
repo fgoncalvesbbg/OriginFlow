@@ -58,46 +58,49 @@ export const withoutDeclarations = (
   });
 
 /**
- * Strip the inline margins the editor used to bake onto images, and px sizes pinned inside a
- * table.
+ * Strip the inline margins the editor used to bake onto images.
  *
- * The px strip is scoped to tables on purpose. In a cell a pinned width fixes that column on
- * EVERY row, including rows whose image cell is empty — the phantom image column in the
- * exports. Outside a table the width is a deliberate editorial choice (a floated logo sized to
- * 150px), and removing it would let the image grow to the full column.
+ * Only margins. An author's WIDTH is left alone wherever it appears, including inside a table.
+ * An earlier version stripped pixel widths from images in cells, on the theory that a pinned
+ * width was behind the phantom image column in the exports. That was wrong twice over: a
+ * column has to be wide enough for the widest image it holds, so the width was doing its job;
+ * and the actual phantom column is a table whose image column holds NO images at all, which no
+ * image width causes. Meanwhile the strip destroyed real layouts — the disposal block pairs a
+ * 70px icon with its text in a two-column table, and without the width the icon collapsed.
  *
- * Nested tables would end the first pass at the inner `</table>`; manuals do not use them, and
- * the cost of missing one is a phantom column, not broken markup.
+ * The genuinely empty column is a separate feature (suppress a column no row fills) and is not
+ * something markup repair can infer.
  */
-const repairImages = (html: string): string => {
-  const insideTables = html.replace(TABLE_BLOCK_RE, (block) =>
-    block.replace(IMG_TAG_RE, (tag) =>
-      withoutDeclarations(tag, (d) => PX_SIZE_DECL_RE.test(d)).replace(PX_SIZE_ATTR_RE, ''),
-    ),
-  );
-  return insideTables.replace(IMG_TAG_RE, (tag) =>
-    withoutDeclarations(tag, (d) => MARGIN_DECL_RE.test(d)),
-  );
-};
+const repairImages = (html: string): string =>
+  html.replace(IMG_TAG_RE, (tag) => withoutDeclarations(tag, (d) => MARGIN_DECL_RE.test(d)));
 
 /**
- * Strip the cell styles that compete with the print settings: padding, pinned px widths, and
- * borders with a visible weight.
+ * Strip the cell styles that compete with the print settings — but only in DATA tables.
  *
- * A border the author set to ZERO is kept, because that is a real decision — some tables are
- * used for layout and are meant to be invisible. Only a visible weight is dropped, since that is
- * the one fighting the setting. Percentage widths are kept: they are relative to the table and
- * behave correctly at any page size. Alignment and every other declaration is left alone.
+ * A cell that declares no border, or explicitly none, is part of a table being used for LAYOUT:
+ * the disposal block, for instance, sets an icon beside its text with
+ * `width:120px; padding:0 12px 0 0; border:none`. Every one of those declarations is deliberate
+ * geometry, and an earlier version of this stripped all three — collapsing the icon column and
+ * removing the gutter between icon and text. A layout table has no house style to conform to,
+ * so it is left exactly as written.
+ *
+ * A bordered cell is a data table, which is what the density settings exist for: there, pasted
+ * `padding: 12px` (3.18mm a side) and `border: 1px solid #ccc` (0.75pt) are overriding the
+ * admin's padding and hairline, and go. Percentage widths are always kept — they are relative
+ * to the table and behave correctly at any page size — as are alignment and everything else.
  */
 const repairTableCells = (html: string): string =>
-  html.replace(CELL_TAG_RE, (tag) =>
-    withoutDeclarations(tag, (declaration) => {
+  html.replace(CELL_TAG_RE, (tag) => {
+    const border = styleOf(tag).match(/(?:^|;)\s*border(?:-(?:top|right|bottom|left))?\s*:\s*([^;]*)/i);
+    const isLayoutCell = !border || !VISIBLE_LENGTH_RE.test(border[1]);
+    if (isLayoutCell) return tag;
+    return withoutDeclarations(tag, (declaration) => {
       if (PADDING_DECL_RE.test(declaration)) return true;
       if (PX_SIZE_DECL_RE.test(declaration)) return true;
-      const border = declaration.match(BORDER_DECL_RE);
-      return !!border && VISIBLE_LENGTH_RE.test(border[1]);
-    }).replace(PX_SIZE_ATTR_RE, ''),
-  );
+      const decl = declaration.match(BORDER_DECL_RE);
+      return !!decl && VISIBLE_LENGTH_RE.test(decl[1]);
+    }).replace(PX_SIZE_ATTR_RE, '');
+  });
 
 /**
  * Everything author HTML needs before it is stored or printed.
