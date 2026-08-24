@@ -12,7 +12,11 @@
  * category attributes; the heavy editor + modal plumbing lives here.
  */
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react';
+import { inferImageAlign, isFloatAlign, IMAGE_ALIGNS, FLOAT_MAX_WIDTH_PCT, type ImageAlign } from '../../../services/im/im-image-align';
+import { sanitizeAuthorHtml } from '../../../services/im/im-author-html';
+import { usePrintColumn } from './usePrintColumn';
+import { previewZoomFor, widthAsColumnPercent } from '../../../services/im/im-print-geometry';
+import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { markTranslatedFromEn, translationStaleAgainstEn } from '../../../services/im/im-translation-marker';
 import { getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim } from '../../../services/ai/translation-verbatim.service';
@@ -20,10 +24,13 @@ import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { TEMP_HIGHLIGHT_CLASS } from '../../../services/im/im-resolver';
 import { CalloutVariant, CategoryAttribute, TranslationVerbatim } from '../../../types';
+import type { IMTemplateType } from '../../../types';
+import type { PrintPageSizeKey } from '../../../services/im/im-print-typography';
 import { sanitizeHtml } from '../../../utils';
 import { useAuth } from '../../../context/AuthContext';
 import { AttributePicker } from './AttributePicker';
 import { AssetLibraryPanel } from './AssetLibraryPanel';
+import EditorToolbarMenu from './EditorToolbarMenu';
 import { setInsertTarget, clearInsertTarget, insertToActiveEditor, setCommitPlaceholderTarget, clearCommitPlaceholderTarget, commitPlaceholder as commitPlaceholderToTarget } from './insertTarget';
 
 // --- Verbatim phrase badges (EN tab only) ------------------------------------
@@ -165,6 +172,12 @@ interface EditorProps {
    * either everything squiggles or real typos pass silently.
    */
   lang?: string;
+  /**
+   * Which print profile this content will be set in. Given both, the editor models the real
+   * printed column so image sizes match the PDF; omitted, it keeps its fluid canvas.
+   */
+  printTemplateType?: IMTemplateType;
+  printPageSize?: PrintPageSizeKey;
 }
 
 const createId = () => Math.random().toString(36).slice(2, 11);
@@ -176,8 +189,9 @@ const createId = () => Math.random().toString(36).slice(2, 11);
 // identically in the editor, the print PDF, and the viewer. Because the
 // serializers rebuild the <img> style from scratch, anything not captured on the
 // node is lost on round-trip — hence align lives on the node, like width.
-export type ImgAlign = 'inline' | 'left' | 'right' | 'center';
-const IMG_ALIGNS: ImgAlign[] = ['inline', 'left', 'right', 'center'];
+export type ImgAlign = ImageAlign;
+const IMG_ALIGNS: readonly ImgAlign[] = IMAGE_ALIGNS;
+
 
 /**
  * Inline style for an editor image. Width caps to the container (max-width:100%).
@@ -187,14 +201,20 @@ const IMG_ALIGNS: ImgAlign[] = ['inline', 'left', 'right', 'center'];
  */
 const imgStyleFor = (width?: string, align?: ImgAlign, border?: boolean): string => {
   const w = width ? `width:${width};` : '';
+  // A float with no author width would take the full column and leave nothing to wrap.
+  const floatCap = width || !align || !isFloatAlign(align) ? '' : `max-width:${FLOAT_MAX_WIDTH_PCT}%;`;
   const b = border ? 'border:1px solid #d1d5db;padding:0.25rem;background:#fff;' : '';
-  const base = `${w}${b}max-width:100%;height:auto;border-radius:0.375rem;`;
+  const base = `${w}${floatCap}${b}max-width:100%;height:auto;border-radius:0.375rem;`;
+  // Deliberately no margins here. They used to be baked in as `1rem` (8.47mm in print, on
+  // neither of the renderer's scales), and an inline style beats both stylesheets — so the
+  // editor showed a gap the PDF did not have, and no setting could change either. Spacing now
+  // comes from im-content.css, driven by the same blockSpacingMm the print stylesheet uses.
   switch (align) {
-    case 'center': return `${base}display:block;margin:1rem auto;`;
-    case 'left':   return `${base}float:left;margin:0.25rem 1rem 0.5rem 0;`;
-    case 'right':  return `${base}float:right;margin:0.25rem 0 0.5rem 1rem;`;
-    case 'inline': return `${base}display:inline;vertical-align:middle;margin:0 0.35rem;`;
-    default:       return `${base}margin:1rem 0;`;
+    case 'center': return `${base}display:block;`;
+    case 'left':   return `${base}float:left;`;
+    case 'right':  return `${base}float:right;`;
+    case 'inline': return `${base}display:inline;vertical-align:middle;`;
+    default:       return `${base}display:block;`;
   }
 };
 
@@ -205,10 +225,15 @@ const imgTag = (src: string, alt: string, width?: string, align?: ImgAlign, bord
   return `<img src="${src}" alt="${alt}"${alignAttr}${borderAttr} style="${imgStyleFor(width, align, border)}" />`;
 };
 
-/** Read a valid alignment off an <img> element, or undefined. */
+/** Read the placement off an <img>, or undefined when it expresses none. */
 const readImgAlign = (el: Element): ImgAlign | undefined => {
-  const a = el.getAttribute('data-align') as ImgAlign | null;
-  return a && IMG_ALIGNS.includes(a) ? a : undefined;
+  const style = (el as HTMLElement).style;
+  return inferImageAlign(el.getAttribute('data-align'), {
+    cssFloat: style.cssFloat,
+    display: style.display,
+    // The shorthand is empty when the margin was set per side, so check both.
+    margin: style.margin || style.marginLeft,
+  });
 };
 
 /** Read the border flag off an <img> element (persisted as data-border). */
@@ -242,7 +267,117 @@ const normalizeCellInlines = (nodes: InlineNode[]): InlineNode[] => {
   return collapsed.filter((n) => !(n.type === 'text' && n.text === ''));
 };
 
-const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, onEditPlaceholder, onEditCondition, minimal, verbatimLanguages, lang }) => {
+/* ---------------------------------------------------------------------------
+ * Toolbar primitives
+ *
+ * The editor bar carries ~30 controls (block styles, marks, lists, six kinds of
+ * insert, plus contextual table and image controls). Flat, they were one wrapping
+ * row of mixed shapes and six pastel colours where nothing said what belonged to
+ * what. These four primitives give the bar ONE vocabulary:
+ *
+ *   TbGroup   — a segmented shell: "these act on the same thing" (replaces the
+ *               old bare `w-px` dividers, which grouped by proximity only)
+ *   TbIcon    — every icon control, one shape, one active state
+ *   TbPill    — every labelled control (H1, +Row, 50%)
+ *   TbCaption — names a contextual group (TABLE / CELL / IMAGE / SIZE …)
+ *
+ * All of them fire on mousedown with preventDefault: the whole bar operates on
+ * the contentEditable's live selection, and letting a button take focus would
+ * collapse it before the command runs. That was repeated on ~30 buttons; it now
+ * lives in one place. Enter/Space are wired too, so the bar stays keyboard-usable
+ * (the caret's selection is saved on keyup/blur, so commands still land).
+ * ------------------------------------------------------------------------- */
+
+const TB_TONES = {
+  default: 'text-gray-600 hover:bg-gray-100',
+  amber: 'text-amber-600 hover:bg-amber-50',
+  purple: 'text-purple-600 hover:bg-purple-50',
+  rose: 'text-rose-600 hover:bg-rose-50',
+} as const;
+
+type TbTone = keyof typeof TB_TONES;
+
+/**
+ * A boolean the author sets once and keeps, across sessions and across every editor box.
+ *
+ * The print-width preview is a working preference, not document data: switching it per box, or
+ * having it reset on reload, would be worse than not remembering it at all. Storage failures
+ * (private windows, blocked site data) fall back to the default rather than throwing.
+ */
+const usePersistedFlag = (key: string, fallback: boolean): [boolean, (next: boolean) => void] => {
+  const [value, setValue] = useState<boolean>(() => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      return raw === null ? fallback : raw === '1';
+    } catch {
+      return fallback;
+    }
+  });
+  const set = useCallback((next: boolean) => {
+    setValue(next);
+    try {
+      window.localStorage.setItem(key, next ? '1' : '0');
+    } catch {
+      /* preference simply will not persist */
+    }
+  }, [key]);
+  return [value, set];
+};
+
+const MATCH_PRINT_WIDTH_KEY = 'im.editor.matchPrintWidth';
+
+const TbGroup: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
+  <div className={`flex items-center gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5 ${className}`}>{children}</div>
+);
+
+const TbCaption: React.FC<{ children: React.ReactNode; title?: string }> = ({ children, title }) => (
+  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-0.5" title={title}>{children}</span>
+);
+
+interface TbButtonProps {
+  /** Runs on mousedown (selection-preserving) and on Enter/Space. */
+  onPress: () => void;
+  title: string;
+  active?: boolean;
+  disabled?: boolean;
+  tone?: TbTone;
+  children: React.ReactNode;
+}
+
+const tbPressProps = (onPress: () => void, disabled?: boolean) => ({
+  type: 'button' as const,
+  disabled,
+  onMouseDown: (e: React.MouseEvent) => { e.preventDefault(); if (!disabled) onPress(); },
+  onKeyDown: (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    if (!disabled) onPress();
+  },
+});
+
+const TbIcon: React.FC<TbButtonProps> = ({ onPress, title, active, disabled, tone = 'default', children }) => (
+  <button
+    {...tbPressProps(onPress, disabled)}
+    title={title}
+    aria-label={title}
+    aria-pressed={active}
+    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+      active ? 'bg-indigo-600 text-white hover:bg-indigo-700' : TB_TONES[tone]
+    }`}
+  >{children}</button>
+);
+
+const TbPill: React.FC<TbButtonProps & { bold?: boolean }> = ({ onPress, title, active, disabled, tone = 'default', bold, children }) => (
+  <button
+    {...tbPressProps(onPress, disabled)}
+    title={title}
+    aria-pressed={active}
+    className={`px-1.5 h-7 rounded-md text-[11px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${bold ? 'font-semibold' : 'font-medium'} ${
+      active ? 'bg-indigo-600 text-white hover:bg-indigo-700' : TB_TONES[tone]
+    }`}
+  >{children}</button>
+);
+const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange, placeholder, onInsertPlaceholder, onInsertCondition, onEditPlaceholder, onEditCondition, minimal, verbatimLanguages, lang, printTemplateType, printPageSize }) => {
   const { user } = useAuth();
   const verbatimEnabled = !!verbatimLanguages?.length;
   const [verbatims, setVerbatims] = useState<TranslationVerbatim[]>(() => verbatimsCache ?? []);
@@ -262,6 +397,30 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [imgSelected, setImgSelected] = useState(false);
   // Mirror of the selected image's current width + alignment, so the toolbar can
   // highlight the active choice. Kept in sync on selection and on every apply.
+  // The printed column this content will be set in, when the screen knows it. Drives both the
+  // image height cap and the optional true-to-print canvas.
+  const printColumn = usePrintColumn(printTemplateType, printPageSize);
+  const [matchPrintWidth, setMatchPrintWidth] = usePersistedFlag(MATCH_PRINT_WIDTH_KEY, true);
+  // The compact/minimal surface is a single-line control, so modelling a page column there
+  // would be meaningless.
+  const printPreview = !!printColumn && matchPrintWidth && !minimal;
+  // Measured so the modelled column can be scaled to fill the pane exactly, which keeps the
+  // proportions true without ever producing a horizontal scrollbar.
+  const canvasWrapRef = useRef<HTMLDivElement | null>(null);
+  const [canvasWidth, setCanvasWidth] = useState(0);
+
+  useEffect(() => {
+    const el = canvasWrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCanvasWidth(entry.contentRect.width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const previewZoom = printColumn ? previewZoomFor(printColumn.columnPx, canvasWidth) : 1;
+
   const [imgWidth, setImgWidth] = useState<string>('');
   const [imgAlign, setImgAlign] = useState<ImgAlign | undefined>(undefined);
   const [imgBorder, setImgBorder] = useState(false);
@@ -565,7 +724,13 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     return textHtml;
   }).join(''), []);
 
-  const deserializeHtmlToBlocks = useCallback((html: string): EditorBlock[] => {
+  const deserializeHtmlToBlocks = useCallback((rawHtml: string): EditorBlock[] => {
+    // Every route HTML takes into the editor passes through here: the initial load, an
+    // Excel/Word/Sheets table paste, and the HTML-mode source box. Repairing it at this single
+    // point means inline styles that override the print settings are corrected at the source and
+    // never stored, instead of being re-fixed on every export. It matters most for markup that
+    // becomes a legacy_html block, which otherwise round-trips its outerHTML verbatim.
+    const html = sanitizeAuthorHtml(rawHtml);
     if (!html.trim()) return [{ id: createId(), type: 'paragraph', content: [] }];
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
@@ -861,7 +1026,18 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Mirrors the caret cell's current alignment so the toolbar can highlight it,
   // the same way imgAlign mirrors the selected image's alignment.
   const [caretCellAlign, setCaretCellAlign] = useState<CellAlign | undefined>(undefined);
+  // Which block the caret sits in, so the style group can SHOW the current block
+  // instead of only offering conversions. Same refresh path as caretInTable.
+  const [caretBlockTag, setCaretBlockTag] = useState<'h1' | 'h2' | 'h3' | 'p' | null>(null);
   const refreshCaretTable = useCallback(() => {
+    const el = contentRef.current;
+    const sel = window.getSelection();
+    const startNode = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).startContainer : null;
+    const startEl = startNode
+      ? (startNode.nodeType === Node.ELEMENT_NODE ? (startNode as HTMLElement) : startNode.parentElement)
+      : null;
+    const blockEl = el && startEl && el.contains(startEl) ? startEl.closest('h1, h2, h3, p') : null;
+    setCaretBlockTag(blockEl ? (blockEl.tagName.toLowerCase() as 'h1' | 'h2' | 'h3' | 'p') : null);
     const ctx = getTableContext();
     setCaretInTable(!!ctx);
     if (!ctx) { setCaretCellAlign(undefined); return; }
@@ -1044,6 +1220,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const inUnconvertible = !!containerEl?.closest('td, th, .im-block-wrapper');
     if (caretInside && !inUnconvertible) {
       execCmd('formatBlock', `<${tag}>`);
+      refreshCaretTable();
       return;
     }
     setBlocks((prev) => [
@@ -1052,7 +1229,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         ? { id: createId(), type: 'paragraph', content: [] }
         : { id: createId(), type: 'heading', level: Number(tag[1]) as 1 | 2 | 3, content: [{ type: 'text', text: `Heading ${tag[1]}` }] },
     ]);
-  }, [execCmd]);
+  }, [execCmd, refreshCaretTable]);
 
   // Tab / Shift+Tab inside a list item: indent/outdent (creates or unwinds a nested
   // list, which the parser now round-trips). Outside lists, Tab keeps its browser
@@ -1267,83 +1444,170 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
 
       {/* Sticky within the surrounding scroll pane so formatting stays reachable in long rows.
           `overflow-hidden` is intentionally NOT on the container above — it would clip sticky. */}
-      <div className="flex-none sticky top-0 flex items-center gap-1 p-2 bg-light border-b border-gray-200 rounded-t-xl select-none z-20 flex-wrap">
-        {mode === 'rich' && (
-          <>
-            {/* Convert the caret's block (appends a new one only when the caret isn't in the editor). */}
-            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('h1'); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a Heading 1">H1</button>
-            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('h2'); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a Heading 2">H2</button>
-            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('h3'); }} className="px-2 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a Heading 3">H3</button>
-            <button onMouseDown={(e) => { e.preventDefault(); applyBlockType('p'); }} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded" title="Make the current block a plain paragraph">Paragraph</button>
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            {/* Inline formatting — applies to the current selection; execCmd re-parses the marks from the DOM */}
-            <button onMouseDown={(e) => { e.preventDefault(); execCmd('bold'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bold (Ctrl+B)"><Bold size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); execCmd('italic'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Italic (Ctrl+I)"><Italic size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); execCmd('underline'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Underline (Ctrl+U)"><Underline size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); toggleHighlight(); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Mark as temporary — select text not yet final; publish is blocked while any remains"><Highlighter size={16} /></button>
-            {verbatimEnabled && (
-              <button onMouseDown={(e) => { e.preventDefault(); handleSaveSelectionAsVerbatim(); }} className="p-1.5 hover:bg-gray-200 rounded text-purple-600" title="Save the selected text as an official Verbatim phrase — future translations use the stored per-language wording instead of the AI's own translation"><ShieldPlus size={16} /></button>
-            )}
-            {/* Lists — execCmd toggles the current line(s) and re-parses into a list block (numbers/bullets persist) */}
-            <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertUnorderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Bulleted list"><List size={16} /></button>
-            <button onMouseDown={(e) => { e.preventDefault(); execCmd('insertOrderedList'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Numbered list"><ListOrdered size={16} /></button>
-          </>
-        )}
-        {mode === 'rich' && !minimal && (
-          <>
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            {/* Callout boxes are now applied to the whole row via the row's Box selector. */}
-            <button onMouseDown={(e) => { e.preventDefault(); insertBlock('table'); }} className="p-1.5 hover:bg-gray-200 rounded text-gray-600" title="Insert Table"><TableIcon size={16} /></button>
-            {caretInTable && (
-              <>
-                <button onMouseDown={(e) => { e.preventDefault(); addTableRow(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded" title="Add a row below the current one">+ Row</button>
-                <button onMouseDown={(e) => { e.preventDefault(); addTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded" title="Add a column after the current one">+ Col</button>
-                <button onMouseDown={(e) => { e.preventDefault(); removeTableRow(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current row (header can't be removed)">− Row</button>
-                <button onMouseDown={(e) => { e.preventDefault(); removeTableColumn(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete the current column">− Col</button>
-                <button onMouseDown={(e) => { e.preventDefault(); removeCaretTable(); }} className="px-1.5 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 rounded text-rose-600" title="Delete this entire table">− Table</button>
-                <div className="w-px h-4 bg-gray-300 mx-0.5"></div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Align the current cell's content (text or image)">Cell</span>
+      {/* Toolbar. Sticky within the surrounding scroll pane so formatting stays reachable
+          in long rows (`overflow-hidden` is intentionally NOT on the container above — it
+          would clip sticky).
+
+          Organised by WHAT A CONTROL ACTS ON, in a fixed order:
+            row 1  block style · lists · character marks · review marks · Insert ▾   [HTML]
+            row 2  the table the caret is in        (only while it is)
+            row 3  the selected image               (only while one is)
+          Row 1 never reorders, so no button ever moves under the pointer when a table
+          or image comes into play — that reflow was the bar's real usability problem.
+          Groups are segmented shells rather than bare dividers, and every control uses
+          the same two shapes (TbIcon / TbPill), so shape and colour finally mean
+          something: colour is reserved for the chip families and for destructive edits. */}
+      <div className="flex-none sticky top-0 bg-light border-b border-gray-200 rounded-t-xl select-none z-20">
+        <div className="flex items-center gap-1.5 p-2 flex-wrap">
+          {mode === 'rich' ? (
+            <>
+              {/* BLOCK STYLE — converts the caret's block; the active pill also SHOWS
+                  which block you are in, which the old flat row never did. */}
+              <TbGroup>
                 {([
-                  { value: 'left' as const,   Icon: AlignLeft,   title: 'Align cell content left' },
-                  { value: 'center' as const, Icon: AlignCenter, title: 'Center cell content — also centers an image inside it' },
-                  { value: 'right' as const,  Icon: AlignRight,  title: 'Align cell content right' },
-                ]).map(({ value, Icon, title }) => (
-                  <button
-                    key={value}
-                    onMouseDown={(e) => { e.preventDefault(); setCellAlign(value); }}
-                    className={`p-1.5 rounded ${caretCellAlign === value ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}
-                    title={title}
-                  ><Icon size={14} /></button>
+                  { tag: 'h1' as const, label: 'H1', name: 'Heading 1' },
+                  { tag: 'h2' as const, label: 'H2', name: 'Heading 2' },
+                  { tag: 'h3' as const, label: 'H3', name: 'Heading 3' },
+                ]).map(({ tag, label, name }) => (
+                  <TbPill key={tag} bold active={caretBlockTag === tag} onPress={() => applyBlockType(tag)} title={`Make the current block a ${name}`}>{label}</TbPill>
                 ))}
-              </>
-            )}
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('text'); }} className="flex items-center gap-1 px-2 py-1 bg-amber-50 text-yellow-700 hover:bg-amber-100 rounded text-xs font-medium border border-amber-200" title="Insert User Input Field"><Type size={14} /> Text</button>
-            <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('image'); }} className="flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-xs font-medium border border-indigo-200" title="Insert Image Upload Field"><ImageIcon size={14} /> Img</button>
-            <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); imgInputRef.current?.click(); }} disabled={uploadingImg} className="flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded text-xs font-medium border border-emerald-200 disabled:opacity-50" title="Upload image to Supabase">
-              {uploadingImg ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploadingImg ? 'Uploading…' : 'Upload'}
-            </button>
-            <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setShowAssetPicker(true); }} className="flex items-center gap-1 px-2 py-1 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded text-xs font-medium border border-sky-200" title="Search &amp; insert from the asset library"><Images size={14} /> Assets</button>
-            <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); registerAsInsertTarget(); onInsertCondition?.(); }} className="flex items-center gap-1 px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-xs font-medium border border-purple-200" title="Insert Optional/Conditional Text"><GitBranch size={14} /> Cond</button>
-            <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImgUpload} />
-          </>
-        )}
-        {mode === 'rich' && imgSelected && (
-          <>
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Size of the selected image">Size</span>
-            {['25%', '50%', '75%', '100%'].map((w) => (
-              <button
-                key={w}
-                onMouseDown={(e) => { e.preventDefault(); applyImgWidth(w); }}
-                className={`px-1.5 py-1 text-[11px] rounded ${imgWidth === w ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
-              >{w}</button>
-            ))}
+                <TbPill active={caretBlockTag === 'p'} onPress={() => applyBlockType('p')} title="Make the current block a plain paragraph">Paragraph</TbPill>
+              </TbGroup>
+
+              {/* LISTS — block-level too, but a separate decision. execCmd toggles the
+                  current line(s) and re-parses into a list block. */}
+              <TbGroup>
+                <TbIcon onPress={() => execCmd('insertUnorderedList')} title="Bulleted list"><List size={15} /></TbIcon>
+                <TbIcon onPress={() => execCmd('insertOrderedList')} title="Numbered list"><ListOrdered size={15} /></TbIcon>
+              </TbGroup>
+
+              {/* CHARACTER FORMATTING — applies to the current selection; execCmd
+                  re-parses the marks from the DOM. */}
+              <TbGroup>
+                <TbIcon onPress={() => execCmd('bold')} title="Bold (Ctrl+B)"><Bold size={15} /></TbIcon>
+                <TbIcon onPress={() => execCmd('italic')} title="Italic (Ctrl+I)"><Italic size={15} /></TbIcon>
+                <TbIcon onPress={() => execCmd('underline')} title="Underline (Ctrl+U)"><Underline size={15} /></TbIcon>
+              </TbGroup>
+
+              {/* REVIEW MARKS — not formatting: these change what happens at publish
+                  (temporary text blocks it) and at translation time (verbatim wording
+                  wins over the AI), so they get their own group and keep their colour. */}
+              <TbGroup>
+                <TbIcon tone="amber" onPress={toggleHighlight} title="Mark as temporary — select text not yet final; publish is blocked while any remains"><Highlighter size={15} /></TbIcon>
+                {verbatimEnabled && (
+                  <TbIcon tone="purple" onPress={handleSaveSelectionAsVerbatim} title="Save the selected text as an official Verbatim phrase — future translations use the stored per-language wording instead of the AI's own translation"><ShieldPlus size={15} /></TbIcon>
+                )}
+              </TbGroup>
+
+              {/* INSERT — one place for "add something at the cursor". Six buttons in six
+                  pastel colours became one trigger; the icons keep the chip colours so the
+                  amber/blue/purple mapping an author already knows still holds. */}
+              {!minimal && (
+                <>
+                  <EditorToolbarMenu
+                    variant="toolbar"
+                    preserveSelection
+                    align="left"
+                    panelWidth="w-72"
+                    icon={uploadingImg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                    label={uploadingImg ? 'Uploading…' : 'Insert'}
+                    title="Insert a field, an image or a table at the cursor"
+                    groups={[
+                      { label: 'Fields the project fills in', items: [
+                        { key: 'ph-text', icon: <Type size={15} className="text-amber-600" />, label: 'Text field', hint: 'Amber chip — the project types the value', onClick: () => { saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('text'); } },
+                        { key: 'ph-image', icon: <ImageIcon size={15} className="text-indigo-600" />, label: 'Image field', hint: 'Blue chip — the project uploads the picture', onClick: () => { saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('image'); } },
+                        { key: 'condition', icon: <GitBranch size={15} className="text-purple-600" />, label: 'Conditional text', hint: 'Purple chip — text that only appears for certain feature values', onClick: () => { saveSelection(); registerAsInsertTarget(); onInsertCondition?.(); } },
+                      ] },
+                      { label: 'Image', items: [
+                        { key: 'upload', icon: uploadingImg ? <Loader2 size={15} className="animate-spin text-emerald-600" /> : <Upload size={15} className="text-emerald-600" />, label: uploadingImg ? 'Uploading…' : 'Upload an image', hint: 'From this computer — stored with the manual', disabled: uploadingImg, onClick: () => { saveSelection(); registerAsInsertTarget(); imgInputRef.current?.click(); } },
+                        { key: 'assets', icon: <Images size={15} className="text-sky-600" />, label: 'Asset library', hint: 'Search and insert an image already uploaded', onClick: () => { saveSelection(); setShowAssetPicker(true); } },
+                      ] },
+                      { label: 'Block', items: [
+                        { key: 'table', icon: <TableIcon size={15} className="text-gray-500" />, label: 'Table', hint: 'A 2-column table after the current block', onClick: () => insertBlock('table') },
+                      ] },
+                    ]}
+                  />
+                  <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImgUpload} />
+                </>
+              )}
+            </>
+          ) : (
+            <TbCaption>Raw HTML source</TbCaption>
+          )}
+
+          {/* Print-width preview — like the mode toggle, about the editor rather than the
+              content. Pinned right so it never shifts the editing groups. */}
+          {printColumn && !minimal && (
             <button
-              onMouseDown={(e) => { e.preventDefault(); applyImgWidth(''); }}
-              className={`px-1.5 py-1 text-[11px] rounded ${imgWidth === '' ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
-              title="Reset to original size"
-            >Auto</button>
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); setMatchPrintWidth(!matchPrintWidth); }}
+              className={`ml-auto flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium border transition-colors ${matchPrintWidth ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+              title={
+                matchPrintWidth
+                  ? `Showing the real ${Math.round(printColumn.columnMm)}mm printed column at the printed text size, so image sizes match the PDF. Click for the full-width canvas.`
+                  : `Full-width canvas: image sizes here will not match the PDF. Click to model the ${Math.round(printColumn.columnMm)}mm printed column.`
+              }
+            >
+              <Columns size={13} /> {Math.round(printColumn.columnMm)}mm
+            </button>
+          )}
+
+          {/* Mode toggle — the one control that is about the editor, not the content, so
+              it stays pinned right and out of the groups. */}
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); mode === 'rich' ? switchToHtml() : switchToRich(); }}
+            className={`${printColumn && !minimal ? '' : 'ml-auto '}flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium border transition-colors ${mode === 'html' ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+            title={mode === 'rich' ? 'Edit raw HTML source' : 'Back to visual editor'}
+          >
+            <Code size={13} /> {mode === 'rich' ? 'HTML' : 'Visual'}
+          </button>
+        </div>
+
+        {/* CONTEXT ROW — the table the caret is in. Its own row so row 1 never moves. */}
+        {mode === 'rich' && !minimal && caretInTable && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 flex-wrap border-t border-gray-200 bg-white/60">
+            <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide pr-0.5" title="Applies to the table the cursor is in">Table</span>
+            <TbGroup>
+              <TbPill onPress={addTableRow} title="Add a row below the current one">+ Row</TbPill>
+              <TbPill onPress={addTableColumn} title="Add a column after the current one">+ Col</TbPill>
+            </TbGroup>
+            <TbGroup>
+              <TbPill tone="rose" onPress={removeTableRow} title="Delete the current row (header can't be removed)">− Row</TbPill>
+              <TbPill tone="rose" onPress={removeTableColumn} title="Delete the current column">− Col</TbPill>
+              <TbPill tone="rose" onPress={removeCaretTable} title="Delete this entire table">− Table</TbPill>
+            </TbGroup>
+            <TbCaption title="Align the current cell's content (text or image)">Cell</TbCaption>
+            <TbGroup>
+              {([
+                { value: 'left' as const,   Icon: AlignLeft,   title: 'Align cell content left' },
+                { value: 'center' as const, Icon: AlignCenter, title: 'Center cell content — also centers an image inside it' },
+                { value: 'right' as const,  Icon: AlignRight,  title: 'Align cell content right' },
+              ]).map(({ value, Icon, title }) => (
+                <TbIcon key={value} active={caretCellAlign === value} onPress={() => setCellAlign(value)} title={title}><Icon size={14} /></TbIcon>
+              ))}
+            </TbGroup>
+          </div>
+        )}
+
+        {/* CONTEXT ROW — the selected image. */}
+        {mode === 'rich' && imgSelected && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 flex-wrap border-t border-gray-200 bg-white/60">
+            <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide pr-0.5" title="Applies to the selected image">Image</span>
+            <TbCaption title="Size of the selected image">Size</TbCaption>
+            <TbGroup>
+              {/* What a pixel width actually comes to on the page — the relationship that was
+                  invisible, and the reason a 150px image read as small here and printed large. */}
+              {printColumn && widthAsColumnPercent(imgWidth, printColumn.columnPx) !== null && (
+                <TbCaption title={`${imgWidth} is ${widthAsColumnPercent(imgWidth, printColumn.columnPx)}% of the ${Math.round(printColumn.columnMm)}mm printed column`}>
+                  ≈{widthAsColumnPercent(imgWidth, printColumn.columnPx)}% of column
+                </TbCaption>
+              )}
+              {['25%', '50%', '75%', '100%'].map((w) => (
+                <TbPill key={w} active={imgWidth === w} onPress={() => applyImgWidth(w)} title={`Scale the image to ${w} of the text width`}>{w}</TbPill>
+              ))}
+              <TbPill active={imgWidth === ''} onPress={() => applyImgWidth('')} title="Reset to original size">Auto</TbPill>
+            </TbGroup>
             {/* Free-typed exact size, e.g. 320px or 60% */}
             <input
               value={imgWidth}
@@ -1352,32 +1616,28 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitCustomWidth(); } }}
               onBlur={commitCustomWidth}
               placeholder="e.g. 320px"
-              className="w-20 px-1.5 py-1 text-[11px] border border-gray-300 rounded"
+              className="w-20 px-1.5 h-7 text-[11px] border border-gray-200 rounded-md bg-white"
               title="Exact width — a number (px) or a CSS length like 60%"
             />
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Placement of the selected image">Align</span>
-            {([
-              { value: 'inline', Icon: WrapText,    title: 'Inline — sits within the text line' },
-              { value: 'left',   Icon: AlignLeft,   title: 'Left — text wraps to the right' },
-              { value: 'center', Icon: AlignCenter, title: 'Centered on its own line' },
-              { value: 'right',  Icon: AlignRight,  title: 'Right — text wraps to the left' },
-            ] as const).map(({ value, Icon, title }) => (
-              <button
-                key={value}
-                onMouseDown={(e) => { e.preventDefault(); applyImgAlign(value); }}
-                className={`p-1.5 rounded ${imgAlign === value ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}
-                title={title}
-              ><Icon size={16} /></button>
-            ))}
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <button
-              onMouseDown={(e) => { e.preventDefault(); applyImgBorder(!imgBorder); }}
-              className={`flex items-center gap-1 px-1.5 py-1 text-[11px] rounded ${imgBorder ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}`}
-              title={imgBorder ? 'Remove the border from the selected image' : 'Add a border around the selected image'}
-            ><Square size={14} /> Border</button>
-            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Alt text of the selected image (read by screen readers; part of the published manual)">Alt</span>
+            <TbCaption title="Placement of the selected image">Align</TbCaption>
+            <TbGroup>
+              {([
+                { value: 'inline', Icon: WrapText,    title: 'Inline — sits on a single text line, which grows to the image height' },
+                { value: 'left',   Icon: AlignLeft,   title: 'Left — text wraps down the right side, over as many lines as the image is tall' },
+                { value: 'center', Icon: AlignCenter, title: 'Centered on its own line' },
+                { value: 'right',  Icon: AlignRight,  title: 'Right — text wraps down the left side, over as many lines as the image is tall' },
+              ] as const).map(({ value, Icon, title }) => (
+                <TbIcon key={value} active={imgAlign === value} onPress={() => applyImgAlign(value)} title={title}><Icon size={14} /></TbIcon>
+              ))}
+            </TbGroup>
+            <TbGroup>
+              <TbPill
+                active={imgBorder}
+                onPress={() => applyImgBorder(!imgBorder)}
+                title={imgBorder ? 'Remove the border from the selected image' : 'Add a border around the selected image'}
+              ><span className="flex items-center gap-1"><Square size={13} /> Border</span></TbPill>
+            </TbGroup>
+            <TbCaption title="Alt text of the selected image (read by screen readers; part of the published manual)">Alt</TbCaption>
             <input
               value={imgAlt}
               onChange={(e) => setImgAlt(e.target.value)}
@@ -1385,23 +1645,11 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitImgAlt(); } }}
               onBlur={commitImgAlt}
               placeholder="Describe the image…"
-              className="w-36 px-1.5 py-1 text-[11px] border border-gray-300 rounded"
+              className="w-36 px-1.5 h-7 text-[11px] border border-gray-200 rounded-md bg-white"
               title="Accessibility description of the selected image — press Enter to apply"
             />
-          </>
+          </div>
         )}
-        {mode === 'html' && (
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-1">Raw HTML source</span>
-        )}
-        {/* Mode toggle — always available, pinned right */}
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); mode === 'rich' ? switchToHtml() : switchToRich(); }}
-          className={`ml-auto flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${mode === 'html' ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-100'}`}
-          title={mode === 'rich' ? 'Edit raw HTML source' : 'Back to visual editor'}
-        >
-          <Code size={14} /> {mode === 'rich' ? 'HTML' : 'Visual'}
-        </button>
       </div>
 
       <div className="flex-1 min-h-0 relative bg-white cursor-text overflow-y-auto" onClick={() => { if (mode === 'rich') contentRef.current?.focus(); }}>
@@ -1422,9 +1670,30 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
             {!initialContent && !isFocused && placeholder && (
                <div className="absolute top-4 left-4 text-gray-400 pointer-events-none select-none z-10">{placeholder}</div>
             )}
+            <div ref={canvasWrapRef} className={printPreview ? 'p-4 overflow-x-auto' : ''}>
             <div
               ref={contentRef}
-              className="min-h-[160px] p-4 outline-none im-content max-w-none font-sans"
+              className={`min-h-[160px] outline-none im-content max-w-none font-sans ${printPreview ? '' : 'p-4'}`}
+              style={
+                printColumn
+                  ? {
+                      // The cap is in em, so it stays proportional to the text whether or not
+                      // the print-width canvas is on.
+                      ['--im-img-max-h' as string]: `${printColumn.imageMaxHeightEm}em`,
+                      ['--im-block-gap' as string]: `${printColumn.blockSpacingEm}em`,
+                      // Exact print geometry, then zoomed for legibility. zoom scales every
+                      // length uniformly — %, px and mm — which is the whole point: a pixel
+                      // width finally means the same here as it does on the page.
+                      ...(printPreview
+                        ? {
+                            width: `${printColumn.columnPx}px`,
+                            fontSize: `${printColumn.bodyPx}px`,
+                            zoom: previewZoom,
+                          }
+                        : {}),
+                    }
+                  : undefined
+              }
               contentEditable
               lang={lang}
               spellCheck={true}
@@ -1438,6 +1707,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onMouseUp={() => { saveSelection(); refreshCaretTable(); }}
               onKeyUp={() => { saveSelection(); refreshCaretTable(); }}
             />
+            </div>
           </>
         )}
       </div>
@@ -1551,6 +1821,12 @@ interface InlineHtmlRowProps {
    * the operator has since tabbed away from.
    */
   focusToken?: number;
+  /**
+   * Which print profile this content will be set in. Given both, the editor models the real
+   * printed column so image sizes match the PDF; omitted, it keeps its fluid canvas.
+   */
+  printTemplateType?: IMTemplateType;
+  printPageSize?: PrintPageSizeKey;
 }
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1558,7 +1834,7 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const placeholderChipRe = (id: string) =>
   new RegExp(`<span[^>]*class="[^"]*im-placeholder[^"]*"[^>]*data-id="${escapeRegExp(id)}"[^>]*>[^<]*</span>`, 'g');
 
-export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes, focusLang, focusToken }) => {
+export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes, focusLang, focusToken, printTemplateType, printPageSize }) => {
   const [rowLang, setRowLang] = useState(focusLang ?? 'en');
   const [translating, setTranslating] = useState(false);
   const [translateErr, setTranslateErr] = useState<string | null>(null);
@@ -1832,7 +2108,7 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
           </div>
         )}
         <div className="flex-1 min-h-0 flex flex-col">
-          <SimpleRichTextEditor
+          <SimpleRichTextEditor printTemplateType={printTemplateType} printPageSize={printPageSize}
             key={`${sectionId}-inline-${index}-${activeCode}`}
             initialContent={content[activeCode] || ''}
             onChange={(html) => onChange(activeCode, html)}
@@ -2175,15 +2451,21 @@ interface InlineBlockEditorProps {
   focusLang?: string;
   /** Bumped per jump, so the same language can be requested twice. */
   focusToken?: number;
+  /**
+   * Which print profile this content will be set in. Given both, the editor models the real
+   * printed column so image sizes match the PDF; omitted, it keeps its fluid canvas.
+   */
+  printTemplateType?: IMTemplateType;
+  printPageSize?: PrintPageSizeKey;
 }
 
-export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange, enableTranslate, focusLang, focusToken }) => {
+export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange, enableTranslate, focusLang, focusToken, printTemplateType, printPageSize }) => {
   const [placeholderType, setPlaceholderType] = useState<'text' | 'image' | null>(null);
   const [conditionOpen, setConditionOpen] = useState(false);
 
   return (
     <>
-      <InlineHtmlRow
+      <InlineHtmlRow printTemplateType={printTemplateType} printPageSize={printPageSize}
         content={content}
         variant={variant}
         languages={languages}

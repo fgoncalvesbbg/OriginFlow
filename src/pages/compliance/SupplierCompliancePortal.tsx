@@ -39,10 +39,10 @@ const evidenceSpec = (
   const labReportRequired = r.selfDeclarationAccepted === false;
   return labReportRequired
     ? {
-        label: 'Lab report reference',
+        label: 'Lab report reference (optional)',
         placeholder: 'Testing laboratory, report number and date (e.g. SGS, GZHL2409123, 2024-09-14)',
-        hint: 'This requirement needs a qualified lab report — please identify it here',
-        required: true,
+        hint: '',
+        required: false,
       }
     : {
         label: 'Evidence reference (optional)',
@@ -145,18 +145,19 @@ const SupplierCompliancePortal: React.FC = () => {
           setCategory(cat || null);
 
           const condAttrs = requestData.conditionAttributes ?? {};
-          const applicableReqs = allReqs.filter(requirement => {
-            // Global requirements (categoryId null) apply to every category.
-            if (requirement.categoryId != null && requirement.categoryId !== requestData.categoryId) return false;
-
+          const requirementApplies = (requirement: ComplianceRequirement) => {
             const cond = requirement.condition;
             const hasCond = !!cond && (!!cond.requires_feature || !!cond.requires_feature_absent);
             if (!hasCond) return requirement.appliesByDefault;
-
             return passesFeatureGate(cond!, condAttrs, {});
-          });
+          };
 
-          setRequirements(applicableReqs);
+          // Global requirements first, then this category's own — same grouping order
+          // as the admin Requirements list (ComplianceLibrary), so the supplier sees
+          // items in the order they were set up, not whatever order the DB returned.
+          const globalReqs = allReqs.filter(r => r.categoryId == null && requirementApplies(r));
+          const categoryReqs = allReqs.filter(r => r.categoryId === requestData.categoryId && requirementApplies(r));
+          setRequirements([...globalReqs, ...categoryReqs]);
 
           const initialAnswers: Record<string, ComplianceResponseStatus> = {};
           const initialComments: Record<string, string> = {};
@@ -223,9 +224,9 @@ const SupplierCompliancePortal: React.FC = () => {
           return;
       }
 
-      // Every answer that owes a comment must have one: an explanation for
-      // "Cannot Confirm", and a lab report reference for a "Confirm" on an item
-      // that cannot be self-declared.
+      // Every answer that owes a comment must have one. Currently that's just
+      // an explanation for "Cannot Confirm" — a lab report reference on a
+      // "Confirm" is requested but never blocks submission.
       const missingEvidence = requirements.filter(r => {
           const spec = answers[r.id] ? evidenceSpec(r, answers[r.id]) : null;
           return spec?.required && !comments[r.id]?.trim();
@@ -843,10 +844,10 @@ const SupplierCompliancePortal: React.FC = () => {
                                                 </div>
 
                                                 {/* Comment / evidence section.
-                                                    A bare green tick on a "Lab Report Req" item is a compliance
-                                                    record with nothing behind it, so a Confirm on such an item
-                                                    must name the report. Self-declarable items take an optional
-                                                    reference; Cannot Confirm still requires an explanation. */}
+                                                    All evidence references (lab report or self-declaration) are
+                                                    optional on a Confirm — the supplier can tick compliance and
+                                                    add the reference later. Cannot Confirm still requires an
+                                                    explanation. */}
                                                 {answer && (() => {
                                                     const spec = evidenceSpec(r, answer);
                                                     if (!spec) return null;

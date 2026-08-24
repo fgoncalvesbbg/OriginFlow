@@ -12,7 +12,7 @@ import { sanitizeHtml } from '../../utils';
 import { mapWithConcurrency } from '../../services/core/save-retry';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, CategoryL3, CategoryAttribute, IMTemplateMetadata, IMMasterLayoutName, IMBlock, BlockRef, SharedBlockRef, InlineBlockRef, SKUSlotRef, CalloutVariant, FeatureConditionFields, localizedSectionTitle, ResolvedSection } from '../../types';
-import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark, Replace, Maximize2, Minimize2, Scale } from 'lucide-react';
+import { Plus, Save, Trash2, ArrowLeft, LayoutTemplate, X, CheckCircle, Clock, User, ChevronUp, ChevronDown, Settings, List, Loader2, Type, Image as ImageIcon, GitBranch, Info, Grid, Layers, Globe, Languages as LanguagesIcon, AlertTriangle, RotateCcw, Lock, Unlock, FileDown, Download, FileUp, Copy, GripVertical, Undo2, Redo2, Eye, Search, ClipboardCopy, ClipboardPaste, Bookmark, Replace, Maximize2, Minimize2, Scale, PanelRightClose } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
 import { buildTranslationXliff, downloadTranslationXliff } from '../../services/im/im-translation-export.service';
 import { parseTranslationXliff, applyTranslationImport, countTranslationOverwrites, countChangedPrefills, saveTranslationImportReport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
@@ -27,9 +27,11 @@ import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.ut
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { AttributePicker } from './editor/AttributePicker';
 import { useListDnd } from './editor/useListDnd';
 import { useUndoRedo } from './editor/useUndoRedo';
+import EditorToolbarMenu, { type ToolbarMenuItem } from './editor/EditorToolbarMenu';
 import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } from './editor/insertTarget';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { findInTemplate, applyReplacements, matchKey, type FindReplaceMatch } from '../../services/im/im-find-replace';
@@ -237,6 +239,9 @@ const IMTemplateEditor: React.FC = () => {
   const [blockCondTextValue, setBlockCondTextValue] = useState('');
 
   const [metaSettings, setMetaSettings] = useState<IMTemplateMetadata>(normalizeIMTemplateMetadata());
+  // Profile the editors model. Taken from the live form value, so switching page size
+  // re-scales the canvas immediately rather than after a save.
+  const printPageSize = metaSettings.pageSize === 'a5' ? 'a5' : 'a4';
 
   useEffect(() => {
     if (!categoryId) return;
@@ -840,6 +845,10 @@ const IMTemplateEditor: React.FC = () => {
   // Inline preview drawer (#2): resolves the whole document for the active language and
   // renders it read-only, so authors don't have to leave for the standalone /im/preview route.
   const [showPreview, setShowPreview] = useState(false);
+  // Focus-mode split. The preview was pinned at 44% in the markup, so an author working on a wide
+  // table could not give the editor more room, and one who only wanted to type could not reclaim
+  // the preview's share of the screen.
+  const previewPane = useResizablePane('im.template.focusPreview', 'right', 44);
   // Focus mode: the section editor takes the whole screen with a LIVE preview of just
   // that section beside it. The preview resolves on every state change, so it renders
   // from a DEFERRED snapshot of sections — typing stays responsive, the preview follows.
@@ -1868,46 +1877,96 @@ const IMTemplateEditor: React.FC = () => {
                </div>
             </div>
 
+            {/* Header actions — clustered BY FUNCTION, same grammar as the project IM
+                editor: history first, then the content actions, then the primary save,
+                then the gear. Only what is used on every pass stays a flat button; the
+                rest lives behind a labelled menu that keeps its state on the trigger
+                badge, so clustering hides the click, never the status. */}
             <div className="flex gap-3 items-center">
-               <button onClick={openLangModal} disabled={locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Globe size={16} /> Languages <span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span></button>
-               <button onClick={() => setIsSettingsModalOpen(true)} disabled={locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Settings size={16} /> Settings</button>
-               <button onClick={openTranslateModal} disabled={translating || locked} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed">{translating ? <Loader2 size={16} className="animate-spin" /> : <LanguagesIcon size={16} />} Translate</button>
-               <button onClick={openExportModal} disabled={locked} title="Export English content as an XLIFF file for an external translator or TMS (e.g. XTM)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><Download size={16} /> Export for Translation</button>
-               <button onClick={openImportModal} disabled={locked} title="Import a translated XLIFF file back into a specific language" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed"><FileUp size={16} /> Import Translation</button>
-               <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Eye size={16} /> Preview</button>
-               <button onClick={() => { setShowFindReplace(true); setFrMatches(null); setFrDone(null); }} title="Find & replace a phrase across every section and language (placeholder/condition chips are never touched)" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Replace size={16} /> Find &amp; replace</button>
-               {/* Deliberately NOT disabled when locked: the check is read-only, and a
-                   template marked FINAL is exactly the one you most want to audit. */}
-               <button onClick={() => setShowRegCheck(true)} title="Audit this template against its assigned regulations with AI — read-only, produces a report of required changes and mandated verbatim wording" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Scale size={16} /> Regulatory check</button>
-               {/* The human half of the same job: the obligations the AI check structurally
-                   cannot see (symbol on the rating plate, DoC in the box). Shown only once
-                   the applying regulations actually define items, and never disabled when
-                   locked — re-reviewing a released template is the point. */}
-               {checklistSummary && checklistSummary.total > 0 && (
-                 <button
-                   onClick={() => setShowChecklist(true)}
-                   title="Confirm what this template covers of the checklist its regulations require a person to verify"
-                   className={`flex items-center gap-2 bg-white border px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow ${
-                     checklistSummary.open > 0
-                       ? 'border-amber-300 text-amber-700'
-                       : 'border-emerald-300 text-emerald-700'
-                   }`}
-                 >
-                   <CheckCircle size={16} /> Checklist {checklistSummary.done + checklistSummary.na}/{checklistSummary.total}
-                 </button>
-               )}
                {!locked && (
-                 <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow ml-2">
+                 <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow">
                    <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
                    <div className="w-px h-5 bg-gray-200" />
                    <button onClick={undoRedo.redo} disabled={!undoRedo.canRedo} title="Redo (Ctrl/Cmd+Shift+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
                  </div>
                )}
+
+               <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Eye size={16} /> Preview</button>
+
+               {/* LANGUAGES — every language-shaped action in one place: which languages the
+                   template carries, AI translation, and the XLIFF round-trip to a TMS. The
+                   badge is the old "Languages 22" chip, unchanged. */}
+               <EditorToolbarMenu
+                 icon={translating ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />}
+                 label="Languages"
+                 title="Languages, AI translation and the XLIFF round-trip"
+                 panelWidth="w-72"
+                 badge={<span className="text-xs font-bold bg-indigo-100 text-indigo-700 rounded-full px-1.5">{templateLanguages.length}</span>}
+                 groups={[
+                   { items: [
+                     { key: 'manage', icon: <Globe size={15} />, label: 'Manage languages', hint: 'Add or remove the languages this template carries', badge: <span className="text-[11px] font-bold text-gray-500">{templateLanguages.length}</span>, onClick: openLangModal, disabled: locked },
+                   ] },
+                   { label: 'Translation', items: [
+                     { key: 'ai', icon: <LanguagesIcon size={15} />, label: translating ? 'Translating…' : 'Translate with AI', hint: 'Fill the other languages from the English source', onClick: openTranslateModal, disabled: translating || locked },
+                     { key: 'export', icon: <Download size={15} />, label: 'Export for translation', hint: 'XLIFF file for an external translator or TMS (e.g. XTM)', onClick: openExportModal, disabled: locked },
+                     { key: 'import', icon: <FileUp size={15} />, label: 'Import translation', hint: 'Bring a translated XLIFF file back into one language', onClick: openImportModal, disabled: locked },
+                   ] },
+                 ]}
+               />
+
+               {/* COMPLIANCE — the AI audit and the human checklist are two halves of one
+                   question ("may we release this?"), so they share a trigger. Neither is
+                   disabled when locked: both are read-only, and a template marked FINAL is
+                   exactly the one you most want to audit. The trigger badge carries the
+                   checklist progress that used to be its own button. */}
+               <EditorToolbarMenu
+                 icon={<Scale size={16} />}
+                 label="Compliance"
+                 title="Regulatory audit and the hand-verify release checklist"
+                 panelWidth="w-72"
+                 badge={checklistSummary && checklistSummary.total > 0 ? (
+                   <span className={`text-xs font-bold rounded-full px-1.5 ${checklistSummary.open > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                     {checklistSummary.done + checklistSummary.na}/{checklistSummary.total}
+                   </span>
+                 ) : undefined}
+                 groups={[
+                   { items: [
+                     { key: 'regcheck', icon: <Scale size={15} />, label: 'Regulatory check', hint: 'AI audit against the assigned regulations — read-only report of required changes and mandated verbatim wording', onClick: () => setShowRegCheck(true) },
+                     ...(checklistSummary && checklistSummary.total > 0 ? ([{
+                       key: 'checklist',
+                       icon: <CheckCircle size={15} />,
+                       label: 'Release checklist',
+                       hint: 'What the regulations require a person to verify (symbol on the rating plate, DoC in the box)',
+                       badge: (
+                         <span className={`text-[11px] font-bold ${checklistSummary.open > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                           {checklistSummary.done + checklistSummary.na}/{checklistSummary.total}
+                         </span>
+                       ),
+                       onClick: () => setShowChecklist(true),
+                     }] as ToolbarMenuItem[]) : []),
+                   ] },
+                 ]}
+               />
+
                {locked ? (
-                 <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-amber-600 shadow ml-2"><Unlock size={16} /> Unlock to edit</button>
+                 <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-amber-600 shadow"><Unlock size={16} /> Unlock to edit</button>
                ) : (
-                 <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow ml-2"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
+                 <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
                )}
+
+               {/* Gear — template-wide setup and tools, the same last-slot role it has in
+                   the project IM editor. Nothing here is needed on a normal editing pass. */}
+               <EditorToolbarMenu
+                 icon={<Settings size={16} />}
+                 title="Template settings & tools"
+                 panelWidth="w-72"
+                 groups={[
+                   { label: 'Template', items: [
+                     { key: 'settings', icon: <Settings size={15} />, label: 'Template settings', hint: 'Branding, cover image, colours and fonts', onClick: () => setIsSettingsModalOpen(true), disabled: locked },
+                     { key: 'find', icon: <Replace size={15} />, label: 'Find & replace', hint: 'Across every section and language — placeholder and condition chips are never touched', onClick: () => { setShowFindReplace(true); setFrMatches(null); setFrDone(null); } },
+                   ] },
+                 ]}
+               />
             </div>
           </div>
 
@@ -1935,7 +1994,7 @@ const IMTemplateEditor: React.FC = () => {
             </div>
           )}
 
-          <div className="flex flex-1 gap-6 overflow-hidden">
+          <div className="flex flex-1 gap-6 overflow-hidden" {...previewPane.containerProps}>
              {/* Sidebar */}
              <div style={{ width: sidebarWidth }} className="shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
                 <div className="p-3 border-b border-gray-100 bg-light flex justify-between items-center">
@@ -2157,7 +2216,7 @@ const IMTemplateEditor: React.FC = () => {
                                  {/* Card body */}
                                  {ref.kind === 'inline' && (
                                    <>
-                                     <InlineHtmlRow
+                                     <InlineHtmlRow printTemplateType={templateType} printPageSize={printPageSize}
                                        content={ref.content}
                                        variant={ref.variant}
                                        languages={availableLangsForTabs}
@@ -2379,21 +2438,40 @@ const IMTemplateEditor: React.FC = () => {
 
              {/* Focus-mode live preview — resolves the DEFERRED sections snapshot so the
                  editor keeps up with typing while the preview follows a beat behind. */}
-             {focusMode && currentSection && (
-               <div className="w-[44%] min-w-0 shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden" style={getIMThemeVariables(metaSettings)}>
-                 <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 shrink-0">
-                   <span className="text-sm font-bold text-gray-700 flex items-center gap-2"><Eye size={15} /> Live preview — {activeLang.toUpperCase()}</span>
-                   <span className="text-[11px] text-gray-400">updates as you type · Esc to exit</span>
+             {focusMode && currentSection && previewPane.collapsed && (
+               <CollapsedPaneRail onExpand={() => previewPane.setCollapsed(false)} label="Live preview" side="right" />
+             )}
+             {focusMode && currentSection && !previewPane.collapsed && (
+               <>
+                 <previewPane.Divider label="Resize the live preview" />
+                 <div
+                   className="min-w-0 shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden"
+                   style={{ ...getIMThemeVariables(metaSettings), width: previewPane.width }}
+                 >
+                   <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 shrink-0">
+                     <span className="text-sm font-bold text-gray-700 flex items-center gap-2"><Eye size={15} /> Live preview — {activeLang.toUpperCase()}</span>
+                     <div className="flex items-center gap-2 shrink-0">
+                       <span className="text-[11px] text-gray-400 hidden xl:inline">updates as you type · Esc to exit</span>
+                       <button
+                         type="button"
+                         onClick={() => previewPane.setCollapsed(true)}
+                         title="Collapse the live preview and give the editor the full width"
+                         className="p-1 text-gray-400 hover:text-indigo-600"
+                       >
+                         <PanelRightClose size={15} />
+                       </button>
+                     </div>
+                   </div>
+                   <div className="flex-1 overflow-y-auto px-6 py-2 pb-6">
+                     {(() => {
+                       const renderSec = makeSectionPreviewRenderer(deferredSections);
+                       const root = deferredSections.find(s => s.id === currentSection.id);
+                       if (!renderSec || !root) return null;
+                       return renderSec(root, '', 0);
+                     })()}
+                   </div>
                  </div>
-                 <div className="flex-1 overflow-y-auto px-6 py-2 pb-6">
-                   {(() => {
-                     const renderSec = makeSectionPreviewRenderer(deferredSections);
-                     const root = deferredSections.find(s => s.id === currentSection.id);
-                     if (!renderSec || !root) return null;
-                     return renderSec(root, '', 0);
-                   })()}
-                 </div>
-               </div>
+               </>
              )}
              </div>
           </div>

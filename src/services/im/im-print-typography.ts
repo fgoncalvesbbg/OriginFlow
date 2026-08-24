@@ -56,6 +56,28 @@ export interface PrintTypography {
    * per table and per image.
    */
   blockSpacingMm: number;
+  /**
+   * Bottom margin on paragraphs and lists, in em of body size (list items use 0.3x this).
+   *
+   * Already em-based, so it scaled with the type correctly — the default was simply a web one.
+   * At the live A5 setting 1em is 2.47mm against a 2.96mm line box, so every paragraph break
+   * cost 0.83 of a line: 9.4 A5 pages per language of pure gap over the section corpus.
+   */
+  paragraphSpacingEm: number;
+  /**
+   * Table text size as a ratio of bodyPt, floored at MIN_TABLE_PT by the renderer.
+   *
+   * A ratio rather than an absolute size so tables cannot drift away from body text when the
+   * body size changes.
+   */
+  tableFontScale: number;
+  /**
+   * Table rule weight in mm. 0 draws no rules at all.
+   *
+   * Was a hardcoded `1px`, which in print is 0.265mm = 0.75pt — 11% of the table type size,
+   * so the grid read heavier than the content it was supporting.
+   */
+  tableBorderMm: number;
   margins: PrintMarginsMm;
 }
 
@@ -83,10 +105,10 @@ export const profileKey = (templateType: string, pageSize: string): string => `$
  * an un-migrated or unreachable database still renders the output everyone is used to.
  */
 export const DEFAULT_PRINT_TYPOGRAPHY: Record<string, PrintTypography> = {
-  'im::a4': { fontFamily: 'Inter', bodyPt: 10.77, headingPt: 17.58, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 60, blockSpacingMm: 2.5, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
-  'im::a5': { fontFamily: 'Inter', bodyPt: 8.83, headingPt: 14.41, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 40, blockSpacingMm: 2.5, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
-  'warning_leaflet::a4': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
-  'warning_leaflet::a5': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
+  'im::a4': { fontFamily: 'Inter', bodyPt: 10.77, headingPt: 17.58, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 60, blockSpacingMm: 2.5, paragraphSpacingEm: 0.5, tableFontScale: 0.95, tableBorderMm: 0.1, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
+  'im::a5': { fontFamily: 'Inter', bodyPt: 8.83, headingPt: 14.41, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 40, blockSpacingMm: 2.5, paragraphSpacingEm: 0.5, tableFontScale: 0.95, tableBorderMm: 0.1, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
+  'warning_leaflet::a4': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, paragraphSpacingEm: 0.35, tableFontScale: 1, tableBorderMm: 0.1, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
+  'warning_leaflet::a5': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, paragraphSpacingEm: 0.35, tableFontScale: 1, tableBorderMm: 0.1, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
 };
 
 /** The built-in profile for a combination (never throws — falls back to the full-IM A4 set). */
@@ -111,6 +133,9 @@ export const PRINT_SETTING_LIMITS = {
   tableCellPaddingMm: { min: 0, max: 6, step: 0.1 },
   cellImageMaxHeightMm: { min: 5, max: 200, step: 1 },
   blockSpacingMm: { min: 0, max: 15, step: 0.1 },
+  paragraphSpacingEm: { min: 0, max: 2, step: 0.05 },
+  tableFontScale: { min: 0.6, max: 1, step: 0.05 },
+  tableBorderMm: { min: 0, max: 1, step: 0.05 },
   marginTop: { min: 0, max: 60, step: 0.5 },
   marginBottom: { min: 8, max: 60, step: 0.5 },
   marginLeft: { min: 0, max: 60, step: 0.5 },
@@ -143,6 +168,9 @@ export const normalizePrintTypography = (
     tableCellPaddingMm: clamp(raw?.tableCellPaddingMm, L.tableCellPaddingMm.min, L.tableCellPaddingMm.max, fallback.tableCellPaddingMm),
     cellImageMaxHeightMm: clamp(raw?.cellImageMaxHeightMm, L.cellImageMaxHeightMm.min, L.cellImageMaxHeightMm.max, fallback.cellImageMaxHeightMm),
     blockSpacingMm: clamp(raw?.blockSpacingMm, L.blockSpacingMm.min, L.blockSpacingMm.max, fallback.blockSpacingMm),
+    paragraphSpacingEm: clamp(raw?.paragraphSpacingEm, L.paragraphSpacingEm.min, L.paragraphSpacingEm.max, fallback.paragraphSpacingEm),
+    tableFontScale: clamp(raw?.tableFontScale, L.tableFontScale.min, L.tableFontScale.max, fallback.tableFontScale),
+    tableBorderMm: clamp(raw?.tableBorderMm, L.tableBorderMm.min, L.tableBorderMm.max, fallback.tableBorderMm),
     margins: {
       top: clamp(raw?.margins?.top, L.marginTop.min, L.marginTop.max, fallback.margins.top),
       bottom: clamp(raw?.margins?.bottom, L.marginBottom.min, L.marginBottom.max, fallback.margins.bottom),

@@ -195,3 +195,64 @@
   font-weight: bold;
   text-align: left;
 }
+
+/*
+ * Images: the same ceilings the print stylesheet applies (im-print-html.ts).
+ *
+ * The editor used to place no limit on an image at all, so a tall one filled the canvas, looked
+ * correct, and was then clamped to cellImageMaxHeightMm in the PDF — authors were sizing images,
+ * exporting, and coming back to adjust. The cap arrives as an em value from the print geometry
+ * (--im-img-max-h), so it stays proportional to the text in both the print-width preview and the
+ * wide canvas. Unset, it falls back to no limit, which is the old behaviour.
+ */
+.im-content img {
+  max-width: 100%;
+  height: auto;
+  max-height: var(--im-img-max-h, none);
+  object-fit: contain;
+}
+
+/* Floats must not escape their block and drag into the next one, exactly as in print. */
+.im-content::after {
+  content: '';
+  display: table;
+  clear: both;
+}
+
+/*
+ * Image spacing, mirroring the print stylesheet's rules exactly (im-print-html.ts).
+ *
+ * These margins used to be baked onto every image inline as `1rem` by imgStyleFor, which beat
+ * both stylesheets: the editor showed 8.47mm of gap regardless of page size, print stripped it
+ * and applied blockSpacingMm instead, and no setting could change either. The gap now arrives as
+ * --im-block-gap in em of the body size, so it is proportional on the fluid canvas and exact in
+ * the print-width preview. The 1rem fallback keeps unprovisioned screens looking sane.
+ */
+.im-content img:not([data-align]),
+.im-content img[data-align='center'] {
+  margin-top: var(--im-block-gap, 1rem);
+  margin-bottom: var(--im-block-gap, 1rem);
+}
+
+.im-content img[data-align='center'] {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.im-content img[data-align='left'] {
+  margin: 0 var(--im-block-gap, 1rem) calc(var(--im-block-gap, 1rem) / 2) 0;
+}
+
+.im-content img[data-align='right'] {
+  margin: 0 0 calc(var(--im-block-gap, 1rem) / 2) var(--im-block-gap, 1rem);
+}
+
+.im-content img[data-align='inline'] {
+  margin: 0 calc(var(--im-block-gap, 1rem) / 2);
+}
+
+/* A paragraph holding a cell's text must not add its trailing margin to the cell padding. */
+.im-content td > p:last-child,
+.im-content th > p:last-child {
+  margin-bottom: 0;
+}

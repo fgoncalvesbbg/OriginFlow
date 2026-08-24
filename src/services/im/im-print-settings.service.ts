@@ -68,6 +68,11 @@ const mapRow = (r: any): PrintSettingsProfile => ({
       cellImageMaxHeightMm: r.cell_image_max_height_mm == null ? undefined : Number(r.cell_image_max_height_mm),
       // Added by migration 125.
       blockSpacingMm: r.block_spacing_mm == null ? undefined : Number(r.block_spacing_mm),
+      // Added by migration 126.
+      paragraphSpacingEm: r.paragraph_spacing_em == null ? undefined : Number(r.paragraph_spacing_em),
+      tableFontScale: r.table_font_scale == null ? undefined : Number(r.table_font_scale),
+      // Added by migration 127.
+      tableBorderMm: r.table_border_mm == null ? undefined : Number(r.table_border_mm),
       margins: {
         top: Number(r.margin_top_mm),
         bottom: Number(r.margin_bottom_mm),
@@ -146,6 +151,9 @@ export const savePrintSettingsProfile = async (
       table_cell_padding_mm: typography.tableCellPaddingMm,
       cell_image_max_height_mm: typography.cellImageMaxHeightMm,
       block_spacing_mm: typography.blockSpacingMm,
+      paragraph_spacing_em: typography.paragraphSpacingEm,
+      table_font_scale: typography.tableFontScale,
+      table_border_mm: typography.tableBorderMm,
       margin_top_mm: typography.margins.top,
       margin_bottom_mm: typography.margins.bottom,
       margin_left_mm: typography.margins.left,

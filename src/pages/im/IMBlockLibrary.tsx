@@ -160,32 +160,68 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
 
   // --- AI translation (EN → all / specific language) ---
   const [translateTarget, setTranslateTarget] = useState('all');
+  // "Only missing languages" is OPT-IN. It used to be forced on for "all", so on a
+  // block that already carried every language — the normal state of a library block —
+  // the run skipped all 21 targets, changed nothing and said nothing: the button
+  // looked broken. Retranslating after an edit to EN is the common case, so the
+  // default now translates every target and replaces what is there (after a confirm).
+  const [translateOnlyMissing, setTranslateOnlyMissing] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [translateProgress, setTranslateProgress] = useState({ done: 0, total: 0 });
+  // Outcome of the last run, shown under the button. Every exit path sets this, so
+  // the button always reports what it did — including "nothing, and here's why".
+  const [translateStatus, setTranslateStatus] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
 
   // Translate the block's English content into the chosen target(s). Placeholders/
   // formatting are preserved by translation.service. Results populate the language
-  // tabs; the user still reviews and clicks Save. For "all" we skip languages that
-  // already have content; a specific pick overwrites that language.
+  // tabs; nothing is persisted until the user reviews and clicks Save.
   const handleTranslateBlock = async () => {
     const source = (draft.content?.['en'] ?? '').trim();
-    if (!source) { alert('Add English content first — translation uses EN as the source.'); return; }
-    const targets = translateTarget === 'all'
+    if (!source) {
+      setTranslateStatus({ tone: 'warn', text: 'Add English content first — translation uses EN as the source.' });
+      return;
+    }
+    const isAll = translateTarget === 'all';
+    const candidates = isAll
       ? LANGUAGES.filter(l => l.code !== 'en').map(l => l.code)
       : [translateTarget];
+    const isFilled = (code: string) => !!(draft.content?.[code] ?? '').trim();
+    const targets = isAll && translateOnlyMissing ? candidates.filter(c => !isFilled(c)) : candidates;
+    if (!targets.length) {
+      setTranslateStatus({
+        tone: 'warn',
+        text: `Nothing to translate — all ${candidates.length} languages already have content. Untick "Only missing" to retranslate them.`,
+      });
+      return;
+    }
+    // One click on "All languages" replaces every translation of the block, so ask
+    // first — a specific pick is a deliberate single-language overwrite and doesn't.
+    const overwrites = targets.filter(isFilled);
+    if (isAll && overwrites.length) {
+      const listed = overwrites.slice(0, 8).map(c => c.toUpperCase()).join(', ');
+      const ok = window.confirm(
+        `Retranslate from English and REPLACE the existing content in ${overwrites.length} language(s)` +
+        ` (${listed}${overwrites.length > 8 ? '…' : ''})?\n\nNothing is saved until you click Save.`
+      );
+      if (!ok) { setTranslateStatus({ tone: 'warn', text: 'Translation cancelled — nothing changed.' }); return; }
+    }
 
+    setTranslateStatus(null);
     setTranslating(true);
     setTranslateProgress({ done: 0, total: targets.length });
     const nextContent: Record<string, string> = { ...(draft.content ?? {}) };
     const failures: string[] = [];
+    let firstError = '';
     let idx = 0, done = 0;
     const worker = async () => {
       while (idx < targets.length) {
         const code = targets[idx++];
-        const skip = translateTarget === 'all' && !!(nextContent[code] ?? '').trim();
-        if (!skip) {
-          try { nextContent[code] = await translateHtml(source, 'en', code); }
-          catch { failures.push(code.toUpperCase()); }
+        try { nextContent[code] = await translateHtml(source, 'en', code); }
+        catch (e: any) {
+          failures.push(code.toUpperCase());
+          // Keep the first message: a whole run failing is nearly always ONE cause
+          // (not signed in, or the Netlify function isn't served) worth showing.
+          if (!firstError) firstError = e?.message ?? '';
         }
         done += 1;
         setTranslateProgress({ done, total: targets.length });
@@ -196,7 +232,14 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
       set({ content: nextContent });
       // Reseed the visual surface if the currently-shown language was translated.
       if (contentMode === 'visual' && visualRef.current) visualRef.current.innerHTML = sanitizeHtml(nextContent[activeLang] ?? '');
-      if (failures.length) alert(`Translated with ${failures.length} language(s) skipped due to errors: ${failures.join(', ')}`);
+      const translated = targets.length - failures.length;
+      setTranslateStatus(failures.length
+        ? {
+            tone: 'warn',
+            text: `Translated ${translated} of ${targets.length}. Failed: ${failures.join(', ')} (left unchanged)` +
+              `${firstError ? ` — ${firstError}` : ''}`,
+          }
+        : { tone: 'ok', text: `Translated ${translated} language(s) — review the tabs, then Save.` });
     } finally {
       setTranslating(false);
     }
@@ -402,7 +445,7 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                 <span className="text-[10px] text-gray-400 uppercase tracking-wide">AI translate EN →</span>
                 <select
                   value={translateTarget}
-                  onChange={e => setTranslateTarget(e.target.value)}
+                  onChange={e => { setTranslateTarget(e.target.value); setTranslateStatus(null); }}
                   disabled={translating}
                   className="border border-indigo-200 rounded px-2 py-1 text-xs bg-indigo-50 text-indigo-700 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-60"
                 >
@@ -411,6 +454,18 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                     <option key={l.code} value={l.code}>{l.name}</option>
                   ))}
                 </select>
+                {translateTarget === 'all' && (
+                  <label className="flex items-center gap-1 text-[10px] text-gray-500" title="Skip languages that already have content — otherwise every language is retranslated from EN">
+                    <input
+                      type="checkbox"
+                      checked={translateOnlyMissing}
+                      onChange={e => { setTranslateOnlyMissing(e.target.checked); setTranslateStatus(null); }}
+                      disabled={translating}
+                      className="w-3 h-3 accent-indigo-600"
+                    />
+                    Only missing
+                  </label>
+                )}
                 <button
                   type="button"
                   onClick={handleTranslateBlock}
@@ -424,6 +479,15 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                 </button>
               </div>
             </div>
+            {translateStatus && (
+              <div className={`mb-2 text-xs rounded border px-2 py-1 ${
+                translateStatus.tone === 'ok'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                  : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}>
+                {translateStatus.text}
+              </div>
+            )}
             {/* Language tabs — wrap across rows so all 28 languages fit; hover shows the full name */}
             <div className="flex flex-wrap gap-1 mb-2">
               {LANGUAGES.map(l => (
@@ -433,13 +497,17 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                   onClick={() => setActiveLang(l.code)}
                   title={l.name}
                   aria-label={l.name}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                     activeLang === l.code
                       ? 'bg-indigo-600 text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
                   {l.label}
+                  {/* Dot = this language has content, so a translation run's effect is visible here */}
+                  {!!(draft.content?.[l.code] ?? '').trim() && (
+                    <span className={`w-1.5 h-1.5 rounded-full ${activeLang === l.code ? 'bg-white' : 'bg-emerald-500'}`} />
+                  )}
                 </button>
               ))}
             </div>

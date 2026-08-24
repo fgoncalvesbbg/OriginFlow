@@ -38,7 +38,9 @@ import { isInReview } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
+import EditorToolbarMenu, { type ToolbarMenuItem } from './editor/EditorToolbarMenu';
 import { ProjectImImportDialog } from './ProjectImImportDialog';
 import { ProjectSupplierDiffImportDialog } from './ProjectSupplierDiffImportDialog';
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
@@ -166,10 +168,6 @@ const ProjectIMGenerator: React.FC = () => {
   // Live phase text during publish ("Rendering PDF…", "Publishing 3/12 (de)…") so the long
   // publish shows visible progress instead of an opaque, seemingly-stuck spinner.
   const [publishStatus, setPublishStatus] = useState<string | null>(null);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  // Settings menu holds destructive/rare actions (Delete Draft / Reset) so they
-  // aren't a single misclick away in the toolbar.
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   // Which job the print dialog was opened for: rendering a PDF, or creating a
@@ -244,8 +242,6 @@ const ProjectIMGenerator: React.FC = () => {
 
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
-  const settingsMenuRef = useRef<HTMLDivElement>(null);
   const [showImport, setShowImport] = useState(false);
   const [showDiffImport, setShowDiffImport] = useState(false);
 
@@ -293,20 +289,6 @@ const ProjectIMGenerator: React.FC = () => {
       setSubmittedAttrValues(flat);
     }
   }, [projectSkus, attrRequests, boundSkuIds, allAttributes]);
-
-  // Close export menu on click outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-        if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
-            setShowExportMenu(false);
-        }
-        if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
-            setShowSettingsMenu(false);
-        }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -1061,10 +1043,27 @@ const ProjectIMGenerator: React.FC = () => {
 
     const reduceMotion = typeof window !== 'undefined'
       && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    scroller.scrollTo({
-      top: previewScrollTopFor(scroller, target),
-      behavior: reduceMotion ? 'auto' : 'smooth',
-    });
+
+    // A collapsed preview is still mounted (its refs stay live, and the scroll target has to be
+    // measurable), but it has no layout — scrolling it now would move nothing and the jump would
+    // look broken. Expand first, then scroll once the browser has laid the pane out.
+    if (previewPane.collapsed) {
+      previewPane.setCollapsed(false);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const live = previewScrollRef.current;
+          const shown = live && findPreviewSection(live, sectionId);
+          if (live && shown) {
+            live.scrollTo({ top: previewScrollTopFor(live, shown), behavior: 'auto' });
+          }
+        }),
+      );
+    } else {
+      scroller.scrollTo({
+        top: previewScrollTopFor(scroller, target),
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      });
+    }
 
     setFlashSectionId(sectionId);
     if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
@@ -1789,21 +1788,18 @@ const ProjectIMGenerator: React.FC = () => {
       URL.revokeObjectURL(url);
   };
 
-  // Canonical structured export: the same ResolvedManual that gets published to the
-  // im-published bucket, so this download is byte-identical to the hosted file.
-  // (An XML/InDesign export used to live here; it exported only legacy section content —
-  // no blocks/overrides/additions — and was confirmed unused, so it was removed.)
-  const handleExport = async () => {
-      if (!project) return;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${project.name.replace(/\s+/g, '_')}_${activeLang}_${timestamp}.json`;
-
-      if (!template) { alert('Template not loaded.'); return; }
+  /**
+   * The editor's live state in the shape the resolver (and the publisher) expects.
+   * Both exports below build from this ONE function on purpose: if they each
+   * assembled their own, the "this language" file and the "everything" file could
+   * quietly disagree about the same manual.
+   */
+  const buildResolverIM = (): ProjectIM => {
       const exportData: Record<string, string> = { ...submittedAttrValues, ...formData };
       Object.entries(conditions).forEach(([k, v]) => { exportData[`cond_${k}`] = String(v); });
       Object.entries(sectionVisibility).forEach(([k, v]) => { exportData[`secvis_${k}`] = String(v); });
       Object.entries(refVisibility).forEach(([k, v]) => { exportData[`refvis_${k}`] = String(v); });
-      const resolverIM: ProjectIM = {
+      return {
           id: instance?.id ?? '',
           templateId: selectedTemplateId,
           templateType,
@@ -1818,16 +1814,71 @@ const ProjectIMGenerator: React.FC = () => {
           sectionSkus,
           blockOverrides,
       };
+  };
+
+  /** Blocks + attribute definitions + SKU refs, so a resolve here matches the published file. */
+  const loadResolveContext = async () => {
       const blocks = await getIMBlocks();
       const blocksById: Record<string, any> = {};
       for (const b of blocks) blocksById[b.id] = b;
       // Attribute definitions so section conditions resolve identically to the published file.
       const attributesById = allAttributes.reduce<Record<string, CategoryAttribute>>((m, a) => { m[a.id] = a; return m; }, {});
-      const resolved = resolveManual(template, sections, blocksById, resolverIM, activeLang, projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })), attributesById);
-      downloadData(JSON.stringify(resolved, null, 2), filename, 'application/json');
-      setShowExportMenu(false);
+      return { blocksById, attributesById, skuRefs: projectSkus.map(s => ({ id: s.id, skuNumber: s.skuNumber })) };
   };
 
+  // Canonical structured export: the same ResolvedManual that gets published to the
+  // im-published bucket, so this download is byte-identical to the hosted file.
+  // (An XML/InDesign export used to live here; it exported only legacy section content —
+  // no blocks/overrides/additions — and was confirmed unused, so it was removed.)
+  const handleExport = async () => {
+      if (!project) return;
+      if (!template) { alert('Template not loaded.'); return; }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${project.name.replace(/\s+/g, '_')}_${activeLang}_${timestamp}.json`;
+      const { blocksById, attributesById, skuRefs } = await loadResolveContext();
+      const resolved = resolveManual(template, sections, blocksById, buildResolverIM(), activeLang, skuRefs, attributesById);
+      downloadData(JSON.stringify(resolved, null, 2), filename, 'application/json');
+  };
+
+  /**
+   * Everything this editor knows, in one file: the template and its section tree, the
+   * project inputs (values, conditions, section/reference visibility), the per-SKU
+   * content, the SKU binding — and EVERY required language resolved, not just the tab
+   * you happen to be on.
+   *
+   * The per-language export above is the published artefact; this one is the handover /
+   * backup / bug-report file, which is why it carries the raw inputs next to the
+   * resolved output. Language list comes from getProjectRequiredLanguages, the same
+   * source publish and print use, so this file can never claim a language they skip.
+   */
+  const handleExportAllData = async () => {
+      if (!project) return;
+      if (!template) { alert('Template not loaded.'); return; }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${project.name.replace(/\s+/g, '_')}_ALL-DATA_${timestamp}.json`;
+      const langs = getProjectRequiredLanguages(template, formData);
+      const { blocksById, attributesById, skuRefs } = await loadResolveContext();
+      const resolverIM = buildResolverIM();
+      const resolved: Record<string, unknown> = {};
+      for (const lang of langs) {
+          resolved[lang] = resolveManual(template, sections, blocksById, resolverIM, lang, skuRefs, attributesById);
+      }
+      downloadData(JSON.stringify({
+          kind: 'originflow.project-im.full-export',
+          formatVersion: 1,
+          exportedAt: new Date().toISOString(),
+          project: { id: project.id, name: project.name },
+          manual: { id: instance?.id ?? null, type: templateType, status: instance?.status ?? null, version: instance?.version ?? null },
+          languages: langs,
+          template,
+          sections,
+          skus: projectSkus,
+          attributes: allAttributes,
+          inputs: { formData, submittedAttrValues, conditions, sectionVisibility, refVisibility },
+          editorState: resolverIM,
+          resolved,
+      }, null, 2), filename, 'application/json');
+  };
   // ---------------- EDITOR LOGIC ----------------
 
   const processContent = (html: string) => {
@@ -2155,6 +2206,17 @@ const ProjectIMGenerator: React.FC = () => {
   }
 
   const metadata = normalizeIMTemplateMetadata(template?.metadata);
+  // Profile the editors model so image sizes on screen match the exported PDF.
+  const printPageSize = metadata.pageSize === 'a5' ? 'a5' : 'a4';
+  // Editor/preview split. Both panes had widths fixed in the markup, so filling in a long form
+  // meant scrolling a narrow column beside a preview that could not be narrowed or dismissed.
+  // The default follows the old fractions: the inputs took half the row in "Add content" mode
+  // and a third otherwise.
+  const previewPane = useResizablePane(
+    'im.project.preview',
+    'right',
+    editorMode === 'content' ? 50 : 67,
+  );
   const pageBackground = metadata.assets?.backgroundAssetUrl
     ? `url(${metadata.assets.backgroundAssetUrl}) center/cover no-repeat`
     : undefined;
@@ -3007,6 +3069,9 @@ const ProjectIMGenerator: React.FC = () => {
     Object.values(translationGaps).forEach(set => set.forEach(l => s.add(l)));
     return s;
   })();
+  // Nothing left to translate — the header's Translations button turns green on this
+  // instead of just dropping its amber count, so "done" is a state you can see.
+  const translationsComplete = untranslatedSectionLabels.size === 0;
 
   // Toggle a SKU in/out of this IM's binding. Enforces ≥1 bound SKU (can't remove the last).
   const toggleBoundSku = (skuId: string) => {
@@ -3361,7 +3426,7 @@ const ProjectIMGenerator: React.FC = () => {
           <button onClick={opts.onRemove} title="Remove" className="p-1 text-gray-400 hover:text-rose-600"><Trash2 size={13} /></button>
         </div>
       </div>
-      <InlineBlockEditor
+      <InlineBlockEditor printTemplateType={templateType} printPageSize={printPageSize}
         rowKey={opts.rowKey}
         content={block.content}
         variant={block.variant}
@@ -3680,7 +3745,7 @@ const ProjectIMGenerator: React.FC = () => {
                         </span>
                         <button onClick={() => resetBlockOverride(section.id, [blockOvKey(i, ref), String(i)])} title="Discard the project edits and go back to the template block" className="text-[10px] font-medium text-gray-500 hover:text-rose-600 flex items-center gap-1"><RotateCcw size={11} /> Reset to template</button>
                       </div>
-                      <InlineBlockEditor
+                      <InlineBlockEditor printTemplateType={templateType} printPageSize={printPageSize}
                         rowKey={`${section.id}-bo-${i}`}
                         content={getBlockOverride(section.id, i, ref)!.content}
                         variant={getBlockOverride(section.id, i, ref)!.variant}
@@ -4294,6 +4359,11 @@ const ProjectIMGenerator: React.FC = () => {
                        </div>
                    </div>
                </div>
+               {/* Header actions — same grammar as the template editor: state, history,
+                   the content actions in workflow order (save → translate → import →
+                   export), the primary action, then the gear. Rare and destructive work
+                   lives in the gear so it can't be reached by a stray click, and the
+                   menus keep their state on the trigger instead of hiding it. */}
                <div className="flex gap-3 items-center">
                    {/* Autosave / unsaved status — mirrors the template editor's honesty about save state. */}
                    <span className="text-xs text-muted min-w-[90px] text-right hidden sm:block">
@@ -4302,11 +4372,13 @@ const ProjectIMGenerator: React.FC = () => {
                         : lastAutoSavedAt ? `Saved ${lastAutoSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                         : instance ? 'All changes saved' : ''}
                    </span>
+
                    <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden">
                        <button onClick={undoRedo.undo} disabled={!undoRedo.canUndo || isBusy || locked} title="Undo (Ctrl/Cmd+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
                        <div className="w-px h-5 bg-gray-200" />
                        <button onClick={undoRedo.redo} disabled={!undoRedo.canRedo || isBusy || locked} title="Redo (Ctrl/Cmd+Shift+Z)" className="flex items-center justify-center w-9 h-9 text-gray-600 hover:bg-light disabled:opacity-30 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
                    </div>
+
                    {locked ? (
                      <button onClick={() => setShowUnlockConfirm(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-medium hover:bg-amber-600 disabled:opacity-70">
                         {finalizing ? <Loader2 size={16} className="animate-spin" /> : <Unlock size={16} />} Unlock to edit
@@ -4318,44 +4390,44 @@ const ProjectIMGenerator: React.FC = () => {
                    </button>
                    )}
 
-                   {!locked && otherRequiredLangs.length > 0 && (
-                     <button onClick={() => setIsTranslateModalOpen(true)} disabled={isBusy} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Review & auto-translate project-authored sections">
-                        <Globe size={16} /> Translations
-                        {untranslatedSectionLabels.size > 0 && (
-                          <span className="ml-0.5 text-[10px] font-bold bg-amber-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untranslatedSectionLabels.size}</span>
-                        )}
+                   {/* Translations — emerald once every required language is covered, amber
+                       with the outstanding count while it isn't. Stays in the header when
+                       locked (disabled) so the row doesn't reshuffle on finalize. */}
+                   {otherRequiredLangs.length > 0 && (
+                     <button
+                        onClick={() => setIsTranslateModalOpen(true)}
+                        disabled={isBusy || locked}
+                        className={`flex items-center gap-2 px-4 py-2 bg-white border rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60 ${translationsComplete ? 'border-emerald-300 text-emerald-700' : 'border-amber-300 text-amber-700'}`}
+                        title={translationsComplete
+                          ? `Every project-authored section is translated into all ${otherRequiredLangs.length} other language${otherRequiredLangs.length === 1 ? '' : 's'}`
+                          : `${untranslatedSectionLabels.size} section${untranslatedSectionLabels.size === 1 ? '' : 's'} still untranslated — review & auto-translate`}
+                     >
+                        {translationsComplete ? <CheckCircle size={16} /> : <Globe size={16} />} Translations
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${translationsComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-orange-700'}`}>
+                          {translationsComplete ? otherRequiredLangs.length : untranslatedSectionLabels.size}
+                        </span>
                      </button>
                    )}
 
-                   <button onClick={() => setShowImport(true)} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Replace this manual by importing a reviewed JSON">
-                      <FileJson size={16} /> Import
-                   </button>
-
+                   {/* Import — one import only: the supplier draft applied on top of the
+                       template. Replacing the whole manual from a JSON export is the rare,
+                       overwriting path, so it moved into the gear. */}
                    {!!template?.categoryId && (
-                     <button onClick={() => setShowDiffImport(true)} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Add a reviewed supplier draft on top of this project's template, keeping the template as-is">
-                        <GitBranch size={16} /> Import supplier draft (diff)
+                     <button onClick={() => setShowDiffImport(true)} disabled={isBusy || locked} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light disabled:opacity-60" title="Import a reviewed supplier draft on top of this project's template, keeping the template as-is (diff import)">
+                        <GitBranch size={16} /> Import
                      </button>
                    )}
 
-                   {/* Export Menu */}
-                   <div className="relative" ref={exportMenuRef}>
-                       <button 
-                          onClick={() => setShowExportMenu(!showExportMenu)}
-                          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-light"
-                       >
-                          <Download size={16} /> Export Data <ChevronDown size={14} />
-                       </button>
-                       {showExportMenu && (
-                           <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
-                               <button
-                                  onClick={() => handleExport()}
-                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2"
-                               >
-                                  <FileJson size={16} /> Export as JSON
-                               </button>
-                           </div>
-                       )}
-                   </div>
+                   <EditorToolbarMenu
+                     icon={<Download size={16} />}
+                     label="Export"
+                     title="Download this manual as JSON"
+                     panelWidth="w-80"
+                     groups={[{ items: [
+                       { key: 'json-lang', icon: <FileJson size={15} className="text-indigo-600" />, label: `Manual JSON — ${activeLang.toUpperCase()}`, hint: 'The resolved manual for this language, byte-identical to the published file', onClick: () => { void handleExport(); } },
+                       { key: 'json-all', icon: <Boxes size={15} className="text-sky-600" />, label: 'All data as JSON', hint: 'Every required language resolved, plus the template, sections, SKUs, attributes and raw inputs — for handover, backup or a bug report', onClick: () => { void handleExportAllData(); } },
+                     ] }]}
+                   />
 
                    <button onClick={handlePublishClick} disabled={isBusy} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
                       {(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
@@ -4363,59 +4435,33 @@ const ProjectIMGenerator: React.FC = () => {
                       <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'})`}</span>
                    </button>
 
-                   {/* Settings menu — houses destructive/rare actions (Delete Draft / Reset)
-                       so they can't be triggered by a single stray click in the toolbar. */}
-                   <div className="relative" ref={settingsMenuRef}>
-                       <button
-                          onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-                          disabled={loading || isBusy}
-                          className="flex items-center justify-center w-10 h-10 bg-white border border-gray-300 text-gray-600 rounded-xl hover:bg-light disabled:opacity-60"
-                          title="Settings"
-                       >
-                          <Settings size={16} />
-                       </button>
-                       {showSettingsMenu && (
-                           <div className="absolute top-full right-0 mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1">
-                               {instance && (
-                                 locked ? (
-                                   <button
-                                      onClick={() => { setShowSettingsMenu(false); setShowUnlockConfirm(true); }}
-                                      disabled={loading || isBusy}
-                                      className="w-full text-left px-4 py-2 text-sm text-amber-700 hover:bg-amber-50 flex items-center gap-2 disabled:opacity-60"
-                                   >
-                                      <Unlock size={16} /> Unlock to edit
-                                   </button>
-                                 ) : (
-                                   <button
-                                      onClick={() => { setShowSettingsMenu(false); setShowFinalizeConfirm(true); }}
-                                      disabled={loading || isBusy}
-                                      className="w-full text-left px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 flex items-center gap-2 disabled:opacity-60"
-                                   >
-                                      <Lock size={16} /> Mark as final
-                                   </button>
-                                 )
-                               )}
-                               {instance && (
-                                 <button
-                                    onClick={() => { setShowSettingsMenu(false); void openBackups(); }}
-                                    disabled={loading || isBusy || locked}
-                                    title="Load one of the last 3 daily snapshots into the editor"
-                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-light flex items-center gap-2 disabled:opacity-60"
-                                 >
-                                    <RotateCcw size={16} /> Restore daily backup
-                                 </button>
-                               )}
-                               <button
-                                  onClick={() => { setShowSettingsMenu(false); handleDeleteDraft(); }}
-                                  disabled={loading || isBusy || locked}
-                                  className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2 disabled:opacity-60"
-                               >
-                                  {instance ? <Trash2 size={16} /> : <RotateCcw size={16} />}
-                                  {instance ? 'Delete Draft' : 'Reset'}
-                               </button>
-                           </div>
-                       )}
-                   </div>
+                   {/* Gear — release state, the overwriting data paths, and the destructive
+                       ones, none of which belong a single stray click away in the toolbar. */}
+                   <EditorToolbarMenu
+                     icon={<Settings size={16} />}
+                     title="Release, data & danger zone"
+                     panelWidth="w-72"
+                     disabled={loading || isBusy}
+                     groups={[
+                       { label: 'Release', items: !instance ? [] : (locked ? ([{
+                           key: 'unlock', icon: <Unlock size={15} />, label: 'Unlock to edit', tone: 'warn',
+                           hint: 'Reopen this FINAL manual for changes',
+                           onClick: () => setShowUnlockConfirm(true), disabled: loading || isBusy,
+                         }] as ToolbarMenuItem[]) : ([{
+                           key: 'final', icon: <Lock size={15} />, label: 'Mark as final', tone: 'success',
+                           hint: 'Locks the content — you can still publish and export it',
+                           onClick: () => setShowFinalizeConfirm(true), disabled: loading || isBusy,
+                         }] as ToolbarMenuItem[]))
+                       },
+                       { label: 'Data', items: [
+                         { key: 'import-json', icon: <FileJson size={15} />, label: 'Replace from manual JSON…', hint: 'Overwrites this manual with a reviewed JSON export', onClick: () => setShowImport(true), disabled: loading || isBusy || locked },
+                         ...(instance ? ([{ key: 'backups', icon: <RotateCcw size={15} />, label: 'Restore daily backup', hint: 'Load one of the last 3 daily snapshots into the editor', onClick: () => { void openBackups(); }, disabled: loading || isBusy || locked }] as ToolbarMenuItem[]) : []),
+                       ] },
+                       { items: [
+                         { key: 'delete', icon: instance ? <Trash2 size={15} /> : <RotateCcw size={15} />, label: instance ? 'Delete Draft' : 'Reset', tone: 'danger', hint: instance ? 'Removes this project manual and everything authored in it' : 'Clear the editor back to the template', onClick: handleDeleteDraft, disabled: loading || isBusy || locked },
+                       ] },
+                     ]}
+                   />
                </div>
            </div>
 
@@ -4515,10 +4561,10 @@ const ProjectIMGenerator: React.FC = () => {
              </div>
            )}
 
-           <div className="flex flex-1 gap-6 overflow-hidden">
+           <div className="flex flex-1 gap-6 overflow-hidden" {...previewPane.containerProps}>
                {/* LEFT: INPUTS — wider in "Add content" mode to fit the section tree + editor.
                    `lockedCls` neutralizes every editing surface when the manual is FINAL. */}
-               <div className={`${editorMode === 'content' ? 'w-1/2' : 'w-1/3'} bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden transition-all ${lockedCls}`}>
+               <div className={`flex-1 min-w-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden transition-all ${lockedCls}`}>
                    <div className="bg-light border-b border-gray-200">
                        <div className="p-4 pb-2 font-bold text-gray-700 flex items-center justify-between">
                            <div className="flex items-center gap-2"><Settings size={16} /> Configuration</div>
@@ -5008,7 +5054,14 @@ const ProjectIMGenerator: React.FC = () => {
                </div>
 
                {/* RIGHT: PREVIEW */}
-               <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
+               {previewPane.collapsed && (
+                 <CollapsedPaneRail onExpand={() => previewPane.setCollapsed(false)} label="Preview" side="right" />
+               )}
+               {!previewPane.collapsed && <previewPane.Divider label="Resize the preview" />}
+               <div
+                 className={`${previewPane.collapsed ? 'hidden' : ''} min-w-0 shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden`}
+                 style={{ width: previewPane.width }}
+               >
                    <div className="p-4 bg-light border-b border-gray-200 font-bold text-gray-700 flex justify-between items-center">
                        <span>Live Preview</span>
                        <div className="flex items-center gap-3">

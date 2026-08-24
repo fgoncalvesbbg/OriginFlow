@@ -164,6 +164,27 @@ const ProfileCard: React.FC<{
               onChange={(n) => set({ blockSpacingMm: n })}
             />
             <NumField
+              label="Paragraph spacing"
+              suffix="em"
+              value={profile.paragraphSpacingEm}
+              limits={L.paragraphSpacingEm}
+              onChange={(n) => set({ paragraphSpacingEm: n })}
+            />
+            <NumField
+              label="Table rules"
+              suffix="mm"
+              value={profile.tableBorderMm}
+              limits={L.tableBorderMm}
+              onChange={(n) => set({ tableBorderMm: n })}
+            />
+            <NumField
+              label="Table text"
+              suffix="x body"
+              value={profile.tableFontScale}
+              limits={L.tableFontScale}
+              onChange={(n) => set({ tableFontScale: n })}
+            />
+            <NumField
               label="Max image height"
               suffix="mm"
               value={profile.cellImageMaxHeightMm}
@@ -181,6 +202,14 @@ const ProfileCard: React.FC<{
           <p className="text-[11px] text-gray-400 mt-1">
             Where an image sits — inline, wrapped left or right, or centred on its own line — stays
             an author decision, set per image with the Align control in the block editor.
+          </p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Paragraph spacing is the gap after every paragraph and list, in em of body size (list
+            items take 0.3x it). It was a hardcoded 1em — a web default, and 0.83 of a line box at
+            this body size. Table text is a ratio of body size, floored at 6pt so it cannot shrink
+            safety content without limit. Table rules
+            were a fixed 1px — 0.75pt in print, against 6.65pt cell text. 0 draws no rules; below
+            about 0.09mm a hairline risks dropping out on press.
           </p>
         </div>
 

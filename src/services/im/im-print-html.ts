@@ -21,6 +21,8 @@
  */
 
 import { getCalloutTitle, getContentsLabel } from './callout-titles.i18n';
+import { sanitizeAuthorHtml, styleOf, IMG_TAG_RE, TAG_END_RE } from './im-author-html';
+import { inferImageAlign, FLOAT_MAX_WIDTH_PCT, type ImageAlign } from './im-image-align';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
 import { defaultTypographyFor, type PrintTypography } from './im-print-typography';
 import { interFontFaceCss } from './fonts/inter-webfont';
@@ -337,89 +339,62 @@ const renderAnnotatedImage = (img: PrintAnnotatedImage, lang: string): string =>
   )}" />${markers}</div>${caption}${legend}</div>`;
 };
 
-const IMG_TAG_RE = /<img\b[^>]*>/gi;
-const STYLE_ATTR_RE = /(\bstyle\s*=\s*")([^"]*)(")/i;
-const PX_SIZE_DECL_RE = /^\s*(?:width|height|max-width|max-height)\s*:\s*\d+(?:\.\d+)?px\s*$/i;
-/** The presentational attribute form, e.g. `<img width="160" height="90">`. */
-const PX_SIZE_ATTR_RE = /\s(?:width|height)\s*=\s*"?\d+(?:\.\d+)?"?/gi;
-const MARGIN_DECL_RE = /^\s*margin(?:-top|-right|-bottom|-left)?\s*:/i;
-const TABLE_BLOCK_RE = /<table\b[\s\S]*?<\/table>/gi;
 const DATA_ALIGN_RE = /\bdata-align\s*=\s*"([a-z]+)"/i;
-const TAG_END_RE = /(\s*\/?>)$/;
-
-/** The placements the editor's Align control offers, plus the default full-width band. */
-type PrintImageAlign = 'inline' | 'left' | 'right' | 'center' | 'block';
-const AUTHOR_ALIGNS: readonly string[] = ['inline', 'left', 'right', 'center'];
 
 /**
- * The placement the author chose for an image.
+ * Does the tag carry an explicit width? `max-width` deliberately does not count — the pattern
+ * anchors `width` to the start of a declaration, so `max-width:` never matches.
+ */
+const WIDTH_DECL_RE = /(^|;)\s*width\s*:/i;
+const WIDTH_ATTR_RE = /\swidth\s*=/i;
+
+/** The default full-width band, for an image that asks for no placement of its own. */
+type PrintImageAlign = ImageAlign | 'block';
+
+/**
+ * The placement an image asks for, defaulting to a band of its own.
  *
- * InlineBlockEditor mirrors its Align control to `data-align`, so that is authoritative when
- * present. Images migrated from the old library predate the attribute and carry the same
- * intent as inline `float` / `display` instead, so those are read as a fallback rather than
- * being flattened to the default band.
+ * The decision itself lives in im-image-align so the editor and this renderer cannot disagree
+ * about what a given image means; only the parsing differs, since here the style is still a
+ * string rather than a parsed CSSStyleDeclaration.
  */
 const printAlignOf = (tag: string): PrintImageAlign => {
-  const explicit = tag.match(DATA_ALIGN_RE)?.[1]?.toLowerCase();
-  if (explicit && AUTHOR_ALIGNS.includes(explicit)) return explicit as PrintImageAlign;
-
-  const style = (tag.match(STYLE_ATTR_RE)?.[2] ?? '').toLowerCase();
-  if (/float\s*:\s*left/.test(style)) return 'left';
-  if (/float\s*:\s*right/.test(style)) return 'right';
-  if (/display\s*:\s*inline/.test(style)) return 'inline';
-  if (/margin\s*:[^;]*\bauto\b/.test(style)) return 'center';
-  return 'block';
+  const style = styleOf(tag).toLowerCase();
+  const declaration = (name: string) =>
+    style.match(new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`))?.[1]?.trim() ?? null;
+  return (
+    inferImageAlign(tag.match(DATA_ALIGN_RE)?.[1], {
+      cssFloat: declaration('float'),
+      display: declaration('display'),
+      margin: declaration('margin') ?? declaration('margin-left'),
+    }) ?? 'block'
+  );
 };
-
-/** Drop the inline style declarations `drop` selects, leaving the rest of the tag intact. */
-const withoutDeclarations = (tag: string, drop: (declaration: string) => boolean): string =>
-  tag.replace(STYLE_ATTR_RE, (_full, open: string, css: string, close: string) => {
-    const kept = css
-      .split(';')
-      .filter((declaration) => declaration.trim() && !drop(declaration))
-      .join(';');
-    return `${open}${kept}${close}`;
-  });
 
 /**
- * Prepare author `<img>` tags for print.
+ * Author HTML, repaired and then annotated for the print stylesheet.
  *
- * Two problems, both caused by inline styles beating the print stylesheet:
- *
- *  1. Spacing. The editor bakes `margin:1rem 0` (8.47mm) onto every image, so the gap above and
- *     below it was frozen at a value belonging to neither the pt nor the mm scale — nearly
- *     three A5 line boxes per image, identical on a 6pt leaflet and a 10.77pt A4 manual. The
- *     margins are stripped here and the stylesheet re-applies them from blockSpacingMm, keyed
- *     on `data-print-align` so each placement still gets the right spacing.
- *
- *  2. Pinned widths inside tables. A width in px fixes that column on EVERY row, including
- *     rows whose image cell is empty — the phantom ~43mm image column in the exports (160px is
- *     42.3mm). Stripped, but ONLY inside a table: elsewhere a width is a deliberate editorial
- *     choice (a floated logo sized to 150px), and removing it would let the image grow to the
- *     full column.
- *
- * Nested tables would end the first pass at the inner `</table>`; manuals do not use them, and
- * the cost of missing one is a phantom column, not broken markup.
+ * sanitizeAuthorHtml applies the same repairs the editor now makes on ingress, so an export is
+ * correct even for content saved before that existed. The annotation is print-only: it records
+ * the placement each image asked for, and whether the author gave it a width, so the stylesheet
+ * can float it and cap only the unsized ones.
  */
-const normalizeImagesForPrint = (html: string): string => {
-  const tablesNormalized = html.replace(TABLE_BLOCK_RE, (block) =>
-    block.replace(IMG_TAG_RE, (tag) =>
-      withoutDeclarations(tag, (d) => PX_SIZE_DECL_RE.test(d)).replace(PX_SIZE_ATTR_RE, ''),
-    ),
-  );
-  return tablesNormalized.replace(IMG_TAG_RE, (tag) => {
+const normalizeAuthorHtmlForPrint = (html: string): string =>
+  sanitizeAuthorHtml(html).replace(IMG_TAG_RE, (tag) => {
     const align = printAlignOf(tag);
-    const stripped = withoutDeclarations(tag, (d) => MARGIN_DECL_RE.test(d));
-    return stripped.replace(TAG_END_RE, ` data-print-align="${align}"$1`);
+    const sized = WIDTH_DECL_RE.test(styleOf(tag)) || WIDTH_ATTR_RE.test(tag);
+    return tag.replace(
+      TAG_END_RE,
+      ` data-print-align="${align}" data-print-width="${sized ? 'set' : 'auto'}"$1`,
+    );
   });
-};
 
 const renderNode = (node: PrintNode, lang: string): string => {
   switch (node.type) {
     case 'html':
-      return `<div class="imv-node imv-content">${normalizeImagesForPrint(node.html)}</div>`;
+      return `<div class="imv-node imv-content">${normalizeAuthorHtmlForPrint(node.html)}</div>`;
     case 'callout':
-      return `<div class="imv-node imv-content">${wrapCallout(node.variant as CalloutVariant, normalizeImagesForPrint(node.html), lang)}</div>`;
+      return `<div class="imv-node imv-content">${wrapCallout(node.variant as CalloutVariant, normalizeAuthorHtmlForPrint(node.html), lang)}</div>`;
     case 'annotated_image_set':
       return `<div class="imv-node imv-annotated">${node.images.map((img) => renderAnnotatedImage(img, lang)).join('')}</div>`;
     case 'legend_table':
@@ -656,8 +631,6 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
     .im-section { margin: 0 0 2.5mm; }
     .im-section-title { margin: 0 0 1.5mm; padding-bottom: 1mm; }
     .im-section-content h1, .im-section-content h2, .im-section-content h3 { margin: 1.5mm 0 1mm; }
-    .imv-content p, .imv-content ul, .imv-content ol { margin: 0 0 0.35em; }
-    .imv-content li { margin-bottom: 0.1em; }
 
     /* ISO-symbol callout boxes — tighter padding / margin / gap and a smaller icon. */
     .imv-block-wrapper { gap: 0.4rem; padding: 0.35rem 0.5rem; margin: 0.4rem 0; border-left-width: 3px; border-radius: 4px; }
@@ -690,6 +663,16 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
  * (title 6.2 : h1 5.5 : h2 5.0 : h3 4.5), so one heading number still yields the same
  * hierarchy.
  */
+/**
+ * Floor for table text, in points.
+ *
+ * tableFontScale exists so tabular matter can run a step below running text, as print
+ * manuals conventionally set it. But this is safety content that has to stay readable at
+ * arm length, so the scale is clamped rather than trusted: at the 6pt leaflet body size a
+ * 0.6 scale would otherwise produce 3.6pt. 6pt matches the smallest body size any profile
+ * ships with.
+ */
+const MIN_TABLE_PT = 6;
 const buildStyles = (
   pageSize: PrintPageSize,
   primaryColor: string,
@@ -701,7 +684,7 @@ const buildStyles = (
   const s = pageSize === 'a5' ? 0.82 : 1; // A5 scale for page furniture only (see above)
   const mm = (base: number) => `${(base * s).toFixed(2)}mm`;
   const fillH = fillHeightMm(pageSize, typography);
-  const { bodyPt, headingPt, lineHeight, tableCellPaddingMm, cellImageMaxHeightMm, blockSpacingMm } = typography;
+  const { bodyPt, headingPt, lineHeight, tableCellPaddingMm, cellImageMaxHeightMm, blockSpacingMm, paragraphSpacingEm, tableFontScale, tableBorderMm } = typography;
   // Table/image density is an absolute per-profile setting: each (template, page size) pair
   // has its own row, so it must NOT go through mm() and pick up the A5 furniture scale.
   const absMm = (value: number) => `${Number(value.toFixed(2))}mm`;
@@ -709,7 +692,19 @@ const buildStyles = (
   // (a caption under its image, a callout title above its body).
   const gap = absMm(blockSpacingMm);
   const halfGap = absMm(blockSpacingMm / 2);
+  // Paragraph and list rhythm. List items sit tighter than paragraphs — they are already
+  // visually grouped by their markers — so they take a fraction of the same setting rather
+  // than a second knob that could contradict it.
+  const paraGap = `${Number(paragraphSpacingEm.toFixed(3))}em`;
+  const itemGap = `${Number((paragraphSpacingEm * 0.3).toFixed(3))}em`;
   const pt = (value: number) => `${Number(value.toFixed(2))}pt`;
+  // Tabular text runs a step below body by convention, but this is safety content: the scale
+  // is floored so no setting can shrink it without limit.
+  const tablePt = pt(Math.max(MIN_TABLE_PT, bodyPt * tableFontScale));
+  // A table rule is furniture supporting the text, not a box around it: 1px (0.75pt) read as
+  // heavy against 6.65pt cell text. Absolute mm, so it does not pick up the A5 furniture scale
+  // and quietly become a different weight per page size.
+  const tableRule = `${absMm(tableBorderMm)} solid #cbd5e1`;
   return `
     ${fontCss}
     :root { color-scheme: light only; }
@@ -777,16 +772,16 @@ const buildStyles = (
 
     /* Rich content (ported from im-viewer.css) */
     .imv-content { line-height: ${lineHeight}; color: #374151; }
-    .imv-content ul { list-style: disc; padding-left: 1.5em; margin: 0 0 1em; }
-    .imv-content ol { list-style: decimal; padding-left: 1.5em; margin: 0 0 1em; }
-    .imv-content li { display: list-item; margin-bottom: 0.25em; }
-    .imv-content p { margin: 0 0 1em; }
+    .imv-content ul { list-style: disc; padding-left: 1.5em; margin: 0 0 ${paraGap}; }
+    .imv-content ol { list-style: decimal; padding-left: 1.5em; margin: 0 0 ${paraGap}; }
+    .imv-content li { display: list-item; margin-bottom: ${itemGap}; }
+    .imv-content p { margin: 0 0 ${paraGap}; }
     .imv-content b, .imv-content strong { font-weight: 700; }
     .imv-content i, .imv-content em { font-style: italic; }
     .imv-content u { text-decoration: underline; }
     .imv-content a { color: ${primaryColor}; text-decoration: underline; }
     /* Images. The author picks the placement in the editor (Align: inline / left / right /
-       centered) and normalizeImagesForPrint hoists that choice to data-print-align, having
+       centered) and normalizeAuthorHtmlForPrint hoists that choice to data-print-align, having
        stripped the inline margins the editor bakes in - an inline style beats this stylesheet,
        so a 1rem (8.47mm) margin was otherwise frozen onto every image whatever the page size.
        object-fit preserves the aspect ratio when max-height binds on a width-pinned image. */
@@ -795,12 +790,20 @@ const buildStyles = (
     .imv-content img[data-print-align="center"] { display: block; margin: ${gap} auto; }
     .imv-content img[data-print-align="left"] { float: left; margin: 0 ${gap} ${halfGap} 0; }
     .imv-content img[data-print-align="right"] { float: right; margin: 0 0 ${halfGap} ${gap}; }
+    /* An unsized float would fill the column at max-width:100% and leave room for exactly one
+       line beside it — the worst of both layouts. An author width is respected instead. */
+    .imv-content img[data-print-align="left"][data-print-width="auto"],
+    .imv-content img[data-print-align="right"][data-print-width="auto"] { max-width: ${FLOAT_MAX_WIDTH_PCT}%; }
     .imv-content img[data-print-align="inline"] { display: inline; vertical-align: middle; margin: 0 ${halfGap}; }
     /* A float must not escape its node and drag into the next section: the layout is
        flow-based, so an uncleared float would shift pagination downstream. */
     .imv-node.imv-content::after { content: ""; display: table; clear: both; }
-    .imv-content table { width: 100%; border-collapse: collapse; margin: ${gap} 0; }
-    .imv-content th, .imv-content td { border: 1px solid #cbd5e1; padding: ${absMm(tableCellPaddingMm)}; vertical-align: top; }
+    .imv-content table { width: 100%; border-collapse: collapse; margin: ${gap} 0; font-size: ${tablePt}; }
+    .imv-content th, .imv-content td { border: ${tableRule}; padding: ${absMm(tableCellPaddingMm)}; vertical-align: top; }
+    /* A paragraph is often used just to hold a cell's text; its trailing margin then adds to the
+       cell padding and inflates the row. The callout body already did this for the same reason. */
+    .imv-content td > p:last-child, .imv-content th > p:last-child { margin-bottom: 0; }
+    .imv-content td > p:first-child, .imv-content th > p:first-child { margin-top: 0; }
     .imv-content th { background: #f1f5f9; font-weight: 700; text-align: left; }
 
     /* Callouts */
@@ -831,8 +834,8 @@ const buildStyles = (
     .imv-legend-num { flex-shrink: 0; min-width: ${mm(4)}; height: ${mm(4)}; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: ${pt(bodyPt * 0.85)}; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 
     /* Legend table */
-    .imv-legend-table { width: 100%; border-collapse: collapse; margin: ${gap} 0; }
-    .imv-legend-table td { border: 1px solid #cbd5e1; padding: ${absMm(tableCellPaddingMm)}; text-align: left; }
+    .imv-legend-table { width: 100%; border-collapse: collapse; margin: ${gap} 0; font-size: ${tablePt}; }
+    .imv-legend-table td { border: ${tableRule}; padding: ${absMm(tableCellPaddingMm)}; text-align: left; }
     .imv-legend-table td:first-child { width: ${mm(10)}; text-align: center; font-weight: 700; }
 
     /* Step sequence */
