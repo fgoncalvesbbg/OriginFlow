@@ -148,6 +148,8 @@ export {
   approveTmSegments,
   deprecateTmSegments,
   replaceApprovedTmSegment,
+  updateUnreviewedTmSegment,
+  validateTmTargetText,
   noteTmSegmentsUsed,
   logTmReuse,
   reuseTierFor,
@@ -156,6 +158,19 @@ export {
   TmImmutableSegmentError,
   TmBatchTooLargeError,
 } from './im-tm-write.service';
+export {
+  browseTmSegments,
+  getTmStats,
+  getTmLeverage,
+} from './im-tm-admin.service';
+export type {
+  TmStatus,
+  TmBrowseSort,
+  TmBrowseFilters,
+  TmBrowsePage,
+  TmStatsRow,
+  TmLeverageRow,
+} from './im-tm-admin.service';
 export type {
   TmOrigin,
   TmRunKind,

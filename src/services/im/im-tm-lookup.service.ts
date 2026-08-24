@@ -77,6 +77,16 @@ export interface TmSegmentRecord {
   usageCount: number;
   reviewedBy: string | null;
   createdBy: string | null;
+  // Audit trail. Not used by retrieval — the admin console reads these to show who
+  // decided what, when, and which row a correction superseded.
+  lastUsedAt: string | null;
+  reviewedAt: string | null;
+  deprecatedAt: string | null;
+  deprecatedReason: string | null;
+  supersedesId: string | null;
+  sourceRef: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export const mapTmSegmentRow = (r: any): TmSegmentRecord => ({
@@ -106,6 +116,14 @@ export const mapTmSegmentRow = (r: any): TmSegmentRecord => ({
   usageCount: r.usage_count ?? 0,
   reviewedBy: r.reviewed_by ?? null,
   createdBy: r.created_by ?? null,
+  lastUsedAt: r.last_used_at ?? null,
+  reviewedAt: r.reviewed_at ?? null,
+  deprecatedAt: r.deprecated_at ?? null,
+  deprecatedReason: r.deprecated_reason ?? null,
+  supersedesId: r.supersedes_id ?? null,
+  sourceRef: r.source_ref ?? null,
+  createdAt: r.created_at ?? null,
+  updatedAt: r.updated_at ?? null,
 });
 
 /** What the caller wants translated. One per (segment, target locale). */

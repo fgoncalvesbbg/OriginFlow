@@ -62,6 +62,12 @@ const mapRow = (r: any): PrintSettingsProfile => ({
       bodyPt: Number(r.body_pt),
       headingPt: Number(r.heading_pt),
       lineHeight: Number(r.line_height),
+      // Added by migration 123 — absent on a database that predates it, in which case
+      // normalizePrintTypography substitutes the built-in default.
+      tableCellPaddingMm: r.table_cell_padding_mm == null ? undefined : Number(r.table_cell_padding_mm),
+      cellImageMaxHeightMm: r.cell_image_max_height_mm == null ? undefined : Number(r.cell_image_max_height_mm),
+      // Added by migration 125.
+      blockSpacingMm: r.block_spacing_mm == null ? undefined : Number(r.block_spacing_mm),
       margins: {
         top: Number(r.margin_top_mm),
         bottom: Number(r.margin_bottom_mm),
@@ -112,8 +118,10 @@ export const getPrintTypography = async (
     '[im-print-settings] getPrintTypography',
   );
   if (!rows.length) return fallback;
-  const { fontFamily, bodyPt, headingPt, lineHeight, margins } = mapRow(rows[0]);
-  return { fontFamily, bodyPt, headingPt, lineHeight, margins };
+  // Strip the row-only fields rather than listing the typography ones: enumerating them
+  // meant every setting added to PrintTypography was silently dropped here.
+  const { id: _id, templateType: _templateType, pageSize: _pageSize, updatedAt: _updatedAt, ...typography } = mapRow(rows[0]);
+  return typography;
 };
 
 /**
@@ -135,6 +143,9 @@ export const savePrintSettingsProfile = async (
       body_pt: typography.bodyPt,
       heading_pt: typography.headingPt,
       line_height: typography.lineHeight,
+      table_cell_padding_mm: typography.tableCellPaddingMm,
+      cell_image_max_height_mm: typography.cellImageMaxHeightMm,
+      block_spacing_mm: typography.blockSpacingMm,
       margin_top_mm: typography.margins.top,
       margin_bottom_mm: typography.margins.bottom,
       margin_left_mm: typography.margins.left,

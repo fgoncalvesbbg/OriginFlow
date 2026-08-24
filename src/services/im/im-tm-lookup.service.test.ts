@@ -93,6 +93,14 @@ const record = (over: Partial<TmSegmentRecord> = {}): TmSegmentRecord => ({
   usageCount: 0,
   reviewedBy: 'admin@example.test',
   createdBy: 'pm@example.test',
+  lastUsedAt: null,
+  reviewedAt: null,
+  deprecatedAt: null,
+  deprecatedReason: null,
+  supersedesId: null,
+  sourceRef: null,
+  createdAt: null,
+  updatedAt: null,
   ...over,
 });
 

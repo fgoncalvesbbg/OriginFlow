@@ -15,7 +15,16 @@ describe('normalizePrintTypography — untrusted input', () => {
   const fallback = defaultTypographyFor('im', 'a4');
 
   it('passes a valid set through unchanged', () => {
-    const input = { fontFamily: 'Lato', bodyPt: 11, headingPt: 18, lineHeight: 1.5, margins: { top: 20, bottom: 20, left: 15, right: 15 } };
+    // Built from a real profile and then overridden, so the set stays complete as settings are
+    // added — the assertion is that valid values survive, not that this list is exhaustive.
+    const input = {
+      ...defaultTypographyFor('im', 'a5'),
+      fontFamily: 'Lato',
+      bodyPt: 11,
+      headingPt: 18,
+      lineHeight: 1.5,
+      margins: { top: 20, bottom: 20, left: 15, right: 15 },
+    };
     expect(normalizePrintTypography(input, fallback)).toEqual(input);
   });
 

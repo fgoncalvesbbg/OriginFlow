@@ -11,7 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import {
-  PDFDocument, StandardFonts, degrees, rgb,
+  PDFDocument, degrees, rgb,
   PDFArray, PDFDict, PDFName, PDFNumber, PDFRef, type PDFFont,
 } from 'pdf-lib';
 import {
@@ -19,6 +19,7 @@ import {
   getTabLayout,
   PrintPart,
 } from '../../src/services/im/im-print-html';
+import { embedStampFonts } from './lib/fonts/inter-stamp';
 import {
   NetlifyEvent,
   RenderRequestBase,
@@ -48,6 +49,47 @@ const isValidMergeRequest = (b: unknown): b is MergeRequest => {
 const MM_TO_PT = 72 / 25.4;
 
 /**
+ * Minimum clearance between any stamped ink and the trimmed paper edge (mm).
+ *
+ * Mirrors PRINT_SETTING_LIMITS.marginBottom.min (src/services/im/im-print-typography.ts).
+ * The admin panel enforces 8mm on the *margin*; nothing used to enforce it on the stamp
+ * itself, so a 15mm bottom margin centred the footer baseline at 7.5mm and put ink 6.9mm
+ * from trim — inside a bookbinder's trim tolerance on a perfect-bound booklet.
+ */
+const MIN_INK_CLEARANCE_MM = 8;
+
+/** Fraction of the font size below the baseline. Inter and Helvetica are both ~0.21em;
+ *  0.22 keeps the floor pessimistic rather than optimistic. */
+const DESCENDER_RATIO = 0.22;
+
+/** Fraction of the font size above the baseline, used only to detect a stamp reaching
+ *  up into the text block. */
+const ASCENDER_RATIO = 0.78;
+
+/**
+ * Baseline Y (pt) for text stamped into the bottom margin band.
+ *
+ * Centres the text in the band (the long-standing behaviour), then lifts it if the
+ * descender would cross the MIN_INK_CLEARANCE_MM trim guard. `band` is the fraction of
+ * the bottom margin used for centring — 0.5 for the running footer, 0.625 for the
+ * leaflet copyright line, both preserved from the original heuristic.
+ */
+const stampBaselineY = (bottomMarginMm: number, sizePt: number, band: number): number =>
+  Math.max(
+    bottomMarginMm * band * MM_TO_PT,
+    MIN_INK_CLEARANCE_MM * MM_TO_PT + sizePt * DESCENDER_RATIO,
+  );
+
+/**
+ * True when the bottom margin is too thin to hold a stamp of `sizePt` above the trim
+ * guard without reaching into the text block. Both constraints cannot be met at once;
+ * trim safety wins in stampBaselineY and the caller warns, because the only real fix is
+ * a larger bottom margin.
+ */
+const bandTooThinForStamp = (bottomMarginMm: number, sizePt: number, band: number): boolean =>
+  stampBaselineY(bottomMarginMm, sizePt, band) + sizePt * ASCENDER_RATIO > bottomMarginMm * MM_TO_PT;
+
+/**
  * Human-friendly download filename: "SKU - Name - Instruction Manual.pdf".
  * SKU = the article number(s) on the cover, Name = the cover title. Empty segments are
  * dropped so a missing SKU/title doesn't leave stray " - " in the name. Characters that
@@ -62,30 +104,6 @@ const buildDownloadName = (req: MergeRequest): string => {
   return `${base || kind}.pdf`;
 };
 
-/**
- * Make text safe for a pdf-lib standard (WinAnsi-encoded) font WITHOUT throwing away
- * everything non-ASCII: Helvetica can draw the full Latin-1 range (ä, é, ñ, ß, ç …),
- * so keep every glyph the font actually supports and only transliterate/drop the rest.
- * (The old version stripped to pure ASCII, silently mutilating any non-English footer.)
- * Known limit: scripts outside WinAnsi (Greek, Cyrillic) still can't be stamped by a
- * standard font — fixing that needs an embedded Unicode font (fontkit + TTF).
- */
-const encodeForFont = (font: { getCharacterSet?: () => number[] }, text: string): string => {
-  const charSet = typeof font.getCharacterSet === 'function' ? font.getCharacterSet() : null;
-  if (!charSet) {
-    // Fallback for a font object without getCharacterSet — old ASCII behaviour.
-    return text.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '').trim();
-  }
-  const supported = new Set(charSet);
-  let out = '';
-  for (const ch of text.normalize('NFC')) {
-    if (supported.has(ch.codePointAt(0)!)) { out += ch; continue; }
-    // Last resort: decompose and drop combining marks (ő→o); skip what still can't draw.
-    const base = ch.normalize('NFKD').replace(/[̀-ͯ]/g, '');
-    if ([...base].every((c) => supported.has(c.codePointAt(0)!))) out += base;
-  }
-  return out.replace(/\s{2,}/g, ' ').trim();
-};
 
 /**
  * TOC page numbers + internal-link repair.
@@ -232,6 +250,69 @@ const hexRgb = (hex: string) => {
  *     edge — right on recto (odd) pages, left on verso (even) pages, so it lands on the
  *     open edge of a bound double-sided booklet and reads as a flag when fanned.
  */
+export interface PrintPreflight {
+  /** Every font in the finished document, and whether it carries its own program. */
+  fonts: { name: string; embedded: boolean }[];
+  /** Names of fonts a print vendor would reject. Empty is the passing state. */
+  nonEmbeddedFonts: string[];
+  /** Distance from the trimmed edge to the lowest stamped ink, in mm. */
+  footerInkClearanceMm: number | null;
+  /** The floor that distance must clear. */
+  minInkClearanceMm: number;
+  /** True when the bottom margin cannot satisfy both the trim guard and the text block. */
+  bottomMarginTooThin: boolean;
+  /** Characters in stamped text that no embedded subset could draw. */
+  unsupportedStampCharacters: string[];
+}
+
+const FONT_FILE_KEYS = ['FontFile', 'FontFile2', 'FontFile3'];
+
+/**
+ * Which fonts the finished document actually embeds.
+ *
+ * A PDF font is embedded only if its descriptor carries a FontFile/FontFile2/FontFile3
+ * stream. The base-14 (Helvetica, Times, Courier) are referenced by name and rely on the
+ * consumer owning them, which is exactly what fails preflight at a print vendor — and what
+ * this pipeline used to do for every stamped footer, page number and edge tab.
+ *
+ * A Type0 font keeps its descriptor on the descendant CIDFont, so that has to be followed
+ * before concluding a font is unembedded.
+ */
+const auditEmbeddedFonts = (doc: PDFDocument): { name: string; embedded: boolean }[] => {
+  const found = new Map<string, boolean>();
+
+  const descriptorOf = (font: PDFDict): PDFDict | null => {
+    const direct = resolveIn(doc, font.get(PDFName.of('FontDescriptor')));
+    if (direct instanceof PDFDict) return direct;
+    const descendants = resolveIn(doc, font.get(PDFName.of('DescendantFonts')));
+    if (descendants instanceof PDFArray) {
+      for (let i = 0; i < descendants.size(); i++) {
+        const child = resolveIn(doc, descendants.get(i));
+        if (child instanceof PDFDict) {
+          const nested = resolveIn(doc, child.get(PDFName.of('FontDescriptor')));
+          if (nested instanceof PDFDict) return nested;
+        }
+      }
+    }
+    return null;
+  };
+
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict)) continue;
+    const type = obj.get(PDFName.of('Type'));
+    if (!(type instanceof PDFName) || type.asString() !== '/Font') continue;
+    const base = obj.get(PDFName.of('BaseFont'));
+    const raw = base instanceof PDFName ? base.asString() : '';
+    const name = (raw.startsWith('/') ? raw.slice(1) : raw) || '(unnamed)';
+    const descriptor = descriptorOf(obj);
+    const embedded = !!descriptor && FONT_FILE_KEYS.some((k) => descriptor.get(PDFName.of(k)) !== undefined);
+    // A Type0 parent and its CIDFont child share a BaseFont. Keep the optimistic result so a
+    // parent that delegates its descriptor is not reported as a second, unembedded font.
+    found.set(name, (found.get(name) ?? false) || embedded);
+  }
+  return [...found].map(([name, embedded]) => ({ name, embedded }));
+};
+
 const mergeAndStamp = async (
   partPdfs: Uint8Array[],
   parts: PrintPart[],
@@ -242,9 +323,24 @@ const mergeAndStamp = async (
   /** Page margins (mm) the parts were rendered with — the stamped footer has to land
    *  inside that band and align with the text block, not at a hardcoded 14/9mm. */
   margins: { top: number; bottom: number; left: number; right: number },
-): Promise<Buffer> => {
+): Promise<{ pdf: Buffer; preflight: PrintPreflight }> => {
   const merged = await PDFDocument.create();
-  const font = await merged.embedFont(StandardFonts.Helvetica);
+  // Every string this function stamps, so only the needed Inter subsets get embedded.
+  const stampTexts = [runningText, copyrightText, ...parts.map((p) => p.tab?.code.toUpperCase() ?? '')];
+  const fonts = await embedStampFonts(merged, stampTexts);
+  // Anything still undrawable is now reported rather than silently dropped, which is how
+  // Greek and Bulgarian footers used to lose their text.
+  const unsupportedStampCharacters: string[] = [];
+  for (const text of [runningText, copyrightText]) {
+    const missing = fonts.unsupported(text);
+    if (missing.length) {
+      unsupportedStampCharacters.push(...missing);
+      console.warn(
+        '[render-print-merge] no embedded Inter subset covers', JSON.stringify(missing.join('')),
+        'in stamped text', JSON.stringify(text), '- those characters are omitted.',
+      );
+    }
+  }
 
   // Track which language tab (if any) each merged page belongs to. Internal links
   // (the TOC's) are collected per part BEFORE copying — see stampTocPageNumbers —
@@ -267,11 +363,11 @@ const mergeAndStamp = async (
   // TOC page numbers + link repair — after merging (indices are final), before the
   // footer pass. Best-effort: a failure degrades to a numberless TOC, never a failed merge.
   if (!compact && internalLinks.length) {
-    try { stampTocPageNumbers(merged, font, internalLinks); }
+    try { stampTocPageNumbers(merged, fonts.base, internalLinks); }
     catch (e) { console.error('[render-print-merge] TOC page-number stamping failed:', e); }
   }
 
-  const running = encodeForFont(font, runningText);
+  const running = runningText;
   const total = merged.getPageCount();
   const size = 8;
   const footColor = rgb(0.39, 0.45, 0.55);
@@ -279,10 +375,17 @@ const mergeAndStamp = async (
   // Vertically centered in the bottom margin band, and aligned with the text block's
   // left/right edges — both derived from the configured margins, so widening or
   // tightening them in Admin → IM Print moves the footer with the text.
-  const footY = (margins.bottom / 2) * MM_TO_PT;
+  const footY = stampBaselineY(margins.bottom, size, 0.5);
+  if (!compact && bandTooThinForStamp(margins.bottom, size, 0.5)) {
+    console.warn(
+      '[render-print-merge] bottom margin', margins.bottom,
+      'mm is too thin to hold the running footer clear of both the', MIN_INK_CLEARANCE_MM,
+      'mm trim guard and the text block; the footer may overlap body text. Raise it in Admin -> IM Print.',
+    );
+  }
   const footLeft = margins.left * MM_TO_PT;
   const footRight = margins.right * MM_TO_PT;
-  const copyright = encodeForFont(font, copyrightText);
+  const copyright = copyrightText;
 
   merged.getPages().forEach((page, i) => {
     const pageNum = i + 1;
@@ -293,15 +396,15 @@ const mergeAndStamp = async (
       // Leaflet: fully clean pages (no running footer, no page numbers). A single minimal
       // copyright/version line is stamped, centered, at the bottom of the LAST page only.
       if (copyright && pageNum === total) {
-        const cw = font.widthOfTextAtSize(copyright, 7);
-        page.drawText(copyright, { x: (width - cw) / 2, y: margins.bottom * 0.625 * MM_TO_PT, size: 7, font, color: footColor });
+        const cw = fonts.widthOfText(copyright, 7);
+        fonts.drawText(page, copyright, { x: (width - cw) / 2, y: stampBaselineY(margins.bottom, 7, 0.625), size: 7, color: footColor });
       }
     } else if (pageNum >= 2) {
       // Full IM: footer + page number (cover stays clean).
-      if (running) page.drawText(running, { x: footLeft, y: footY, size, font, color: footColor });
+      if (running) fonts.drawText(page, running, { x: footLeft, y: footY, size, color: footColor });
       const right = `${pageNum} / ${total}`;
-      const rw = font.widthOfTextAtSize(right, size);
-      page.drawText(right, { x: width - footRight - rw, y: footY, size, font, color: footColor });
+      const rw = fonts.widthOfText(right, size);
+      fonts.drawText(page, right, { x: width - footRight - rw, y: footY, size, color: footColor });
     }
 
     // Edge thumb-tab (language bodies only).
@@ -316,21 +419,33 @@ const mergeAndStamp = async (
       page.drawRectangle({ x, y, width: w, height: h, color: hexRgb(lay.color) });
 
       // Language code, rotated to run along the bar (dark text stays legible in B&W).
-      const label = encodeForFont(font, tab.code.toUpperCase()) || tab.code.toUpperCase();
+      const label = tab.code.toUpperCase();
       const ts = 7;
-      const tw = font.widthOfTextAtSize(label, ts);
+      const tw = fonts.base.widthOfTextAtSize(label, ts);
       page.drawText(label, {
         x: x + w / 2 + ts / 2,
         y: y + h / 2 - tw / 2,
         size: ts,
-        font,
+        font: fonts.base,
         color: tabTextColor,
         rotate: degrees(90),
       });
     }
   });
 
-  return Buffer.from(await merged.save());
+  // Audited before save, on the document that is about to be serialized.
+  const auditedFonts = auditEmbeddedFonts(merged);
+  return {
+    pdf: Buffer.from(await merged.save()),
+    preflight: {
+      fonts: auditedFonts,
+      nonEmbeddedFonts: auditedFonts.filter((entry) => !entry.embedded).map((entry) => entry.name),
+      footerInkClearanceMm: compact ? null : Number(((footY - size * DESCENDER_RATIO) / MM_TO_PT).toFixed(2)),
+      minInkClearanceMm: MIN_INK_CLEARANCE_MM,
+      bottomMarginTooThin: !compact && bandTooThinForStamp(margins.bottom, size, 0.5),
+      unsupportedStampCharacters: [...new Set(unsupportedStampCharacters)],
+    },
+  };
 };
 
 export const handler = async (event: NetlifyEvent) => {
@@ -377,17 +492,24 @@ export const handler = async (event: NetlifyEvent) => {
       partPdfs.push(new Uint8Array(await data.arrayBuffer()));
     }
 
+    // Page count per part, in merge order. Needed twice: for the cover's language directory,
+    // and for the render record — nothing used to store how long a booklet actually was, so a
+    // template change that added pages across five languages was invisible until someone
+    // opened two PDFs side by side.
+    const partPageCounts = await Promise.all(
+      partPdfs.map(async (bytes) => (await PDFDocument.load(bytes)).getPageCount()),
+    );
+
     // Cover language directory: with page counts now known, compute each language's start
     // page and re-render the cover with real numbers. The directory's row count is unchanged,
     // so the cover's own page count is stable. parts = [cover, lang0, lang1, …, back].
     // Skipped for compact leaflets — they have no cover part (partPdfs[0] is a language body).
     if (manuals.length > 1 && !compact) {
-      const counts = await Promise.all(partPdfs.map(async (b) => (await PDFDocument.load(b)).getPageCount()));
       const langStart: number[] = [];
-      let acc = counts[0]; // pages before the first language body = the cover
+      let acc = partPageCounts[0]; // pages before the first language body = the cover
       for (let i = 0; i < manuals.length; i++) {
         langStart.push(acc + 1);
-        acc += counts[i + 1];
+        acc += partPageCounts[i + 1];
       }
       const coverHtml = buildCoverPartHtml(
         // Same typography as the first cover render — omitting it here would re-render the
@@ -397,7 +519,19 @@ export const handler = async (event: NetlifyEvent) => {
         langStart,
       );
       partPdfs[0] = await renderPartPdf(coverHtml, req.pageSize.toUpperCase(), apiKey, marginFor(typography));
+      // The directory's row count is unchanged so this should match, but re-reading keeps the
+      // recorded total honest if a long language list ever spills the cover onto a second page.
+      partPageCounts[0] = (await PDFDocument.load(partPdfs[0])).getPageCount();
     }
+
+    // parts = [cover, lang0, …, back] for a full IM, [lang0, …] for a compact leaflet, and
+    // `manuals` is built by iterating `ordered`, so the two are index-aligned.
+    const languagePartOffset = compact ? 0 : 1;
+    const pagesByLanguage: Record<string, number> = {};
+    ordered.forEach((lang, i) => {
+      pagesByLanguage[lang] = partPageCounts[i + languagePartOffset] ?? 0;
+    });
+    const totalPages = partPageCounts.reduce((sum, n) => sum + n, 0);
 
     // Merge + stamp (footer/page numbers for IMs; a single last-page copyright line for leaflets) + edge tabs.
     const name = `${req.templateType}-${ordered.join('-')}-${req.pageSize}`;
@@ -406,7 +540,16 @@ export const handler = async (event: NetlifyEvent) => {
     const companyName = req.cover.companyName ?? '';
     const versionLabel = req.version ? ` · v${req.version}` : '';
     const copyrightText = `© ${year} ${companyName}. All rights reserved.${versionLabel}`;
-    const pdf = await mergeAndStamp(partPdfs, parts, running, req.pageSize, compact, copyrightText, typography.margins);
+    const { pdf, preflight } = await mergeAndStamp(partPdfs, parts, running, req.pageSize, compact, copyrightText, typography.margins);
+    if (preflight.nonEmbeddedFonts.length) {
+      console.warn('[render-print-merge] NOT embedded, will fail vendor preflight:', preflight.nonEmbeddedFonts.join(', '));
+    }
+    if (preflight.footerInkClearanceMm !== null && preflight.footerInkClearanceMm < preflight.minInkClearanceMm) {
+      console.warn(
+        '[render-print-merge] stamped footer ink sits', preflight.footerInkClearanceMm,
+        'mm from trim, under the', preflight.minInkClearanceMm, 'mm guard.',
+      );
+    }
 
     // Upload to im-print under a UNIQUE path — keyed on the client-generated jobId, NOT a
     // timestamp, so the merge is IDEMPOTENT per job: when the client's 25s timeout fires
@@ -452,6 +595,8 @@ export const handler = async (event: NetlifyEvent) => {
       storage_path: storagePath,
       url: publicUrl,
       bytes: pdf.byteLength,
+      pages: totalPages,
+      pages_by_language: pagesByLanguage,
       created_by: createdBy,
       comment: req.comment ?? '',
       market: req.market ?? null,
@@ -469,6 +614,9 @@ export const handler = async (event: NetlifyEvent) => {
       url: publicUrl,
       storagePath,
       bytes: pdf.byteLength,
+      pages: totalPages,
+      pagesByLanguage,
+      preflight,
       render: row ?? null,
       ...(insErrMsg ? {
         warning: 'The PDF was generated, but recording it in the render history failed — it will not appear ' +

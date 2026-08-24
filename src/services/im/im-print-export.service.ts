@@ -30,13 +30,14 @@ import { isLive } from '../../config/environment.config';
 import { generateUUID } from '../../utils';
 import type { IMTemplateType } from '../../types';
 import type { PrintTypography } from './im-print-typography';
+import { flagEnabled } from './feature-flags';
 
 const BUCKET = 'im-print';
 const FN_BASE = '/.netlify/functions';
 
 /** Whether the print-PDF export feature is enabled (server secrets configured). */
 export const isPrintExportAvailable = (): boolean =>
-  (import.meta.env.VITE_PRINT_EXPORT_ENABLED as string | undefined) === 'true';
+  flagEnabled(import.meta.env.VITE_PRINT_EXPORT_ENABLED as string | undefined);
 
 export interface PrintCoverInput {
   logoUrl?: string;
@@ -64,6 +65,14 @@ export interface PrintRender {
   storagePath: string;
   url: string;
   bytes: number | null;
+  /**
+   * Pages in this render, total and per language. NULL on rows written before migration 124,
+   * which is why both are nullable — "not measured" must not read as zero pages. Comparing
+   * these across two renders is the page-budget diff: it is how a template change that adds
+   * pages across five languages becomes visible before the file reaches a print vendor.
+   */
+  pages: number | null;
+  pagesByLanguage: Record<string, number> | null;
   createdBy: string | null;
   createdAt: string;
   /** Required change note captured when this PDF was generated. '' for legacy rows. */
@@ -107,10 +116,31 @@ export interface RequestPrintPdfParams {
   onProgress?: (label: string, done: number, total: number) => void;
 }
 
+/**
+ * Warn-only checks the merge step runs on the finished PDF. Nothing here blocks an export —
+ * the operator gets the file plus the report, because a false positive must never stop
+ * production. `nonEmbeddedFonts` being non-empty is the one that fails a print vendor's
+ * preflight outright.
+ */
+export interface PrintPreflightReport {
+  fonts: { name: string; embedded: boolean }[];
+  nonEmbeddedFonts: string[];
+  /** Distance from the trimmed edge to the lowest stamped ink, in mm; null for leaflets. */
+  footerInkClearanceMm: number | null;
+  minInkClearanceMm: number;
+  bottomMarginTooThin: boolean;
+  unsupportedStampCharacters: string[];
+}
+
 export interface PrintPdfResult {
   url: string;
   storagePath: string;
   bytes?: number;
+  /** Total pages in the merged booklet, cover and back matter included. */
+  pages?: number;
+  /** Language code → pages in that language's body. The basis for the page-budget diff. */
+  pagesByLanguage?: Record<string, number>;
+  preflight?: PrintPreflightReport;
   render?: PrintRender | null;
   /** Non-fatal server-side problem (e.g. the history row could not be recorded). */
   warning?: string;
@@ -127,6 +157,8 @@ const mapRender = (r: any): PrintRender => ({
   storagePath: r.storage_path,
   url: r.url,
   bytes: r.bytes ?? null,
+  pages: r.pages ?? null,
+  pagesByLanguage: r.pages_by_language ?? null,
   createdBy: r.created_by ?? null,
   createdAt: r.created_at,
   comment: r.comment ?? '',

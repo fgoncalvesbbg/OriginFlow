@@ -23,6 +23,7 @@
 import { getCalloutTitle, getContentsLabel } from './callout-titles.i18n';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
 import { defaultTypographyFor, type PrintTypography } from './im-print-typography';
+import { interFontFaceCss } from './fonts/inter-webfont';
 
 export type PrintPageSize = 'a4' | 'a5';
 
@@ -165,6 +166,17 @@ export interface PrintHtmlOptions {
    * the PDF engine, not to CSS); the rest is consumed here.
    */
   typography?: PrintTypography;
+  /**
+   * Let the first content section continue on the table-of-contents page instead of forcing
+   * it onto a fresh sheet.
+   *
+   * A TOC uses roughly 23 of the ~61 lines an A5 page holds, and the content block that
+   * follows carried its own `im-break`, so the rest of that sheet was always discarded — once
+   * per language. Off by default: it saves a page per language but gives up the clean
+   * "contents, then the manual" separation, which is a judgement call about the printed
+   * artefact rather than a straightforward win.
+   */
+  mergeTocIntoContent?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +202,29 @@ const getFontImport = (fontFamily?: string): string => {
 
 const getFontStack = (fontFamily?: string): string =>
   !fontFamily || fontFamily === 'Inter' ? 'Inter, Arial, sans-serif' : `'${fontFamily}', Arial, sans-serif`;
+
+/**
+ * Every string that could reach the page, used to decide which Inter subsets to inline.
+ *
+ * Serialising the manuals is deliberately crude: over-including a subset costs a few KB of
+ * request payload, whereas missing one would put a fallback typeface on the page — the exact
+ * failure this replaced.
+ */
+const documentTextOf = (manuals: PrintManual[]): string => JSON.stringify(manuals);
+
+/**
+ * Font CSS for the print stylesheet.
+ *
+ * Inter — the default, and the family every profile currently uses — is inlined as @font-face
+ * data URIs by interFontFaceCss, so the render no longer depends on a fonts.googleapis.com
+ * fetch that PDFShift is never told to wait for. The other whitelisted families are still
+ * fetched remotely and remain subject to that race; anything unrecognised falls through to the
+ * embedded Inter rather than to a remote request.
+ */
+const buildFontCss = (fontFamily: string | undefined, documentText: string): string =>
+  fontFamily && fontFamily !== 'Inter' && GOOGLE_FONT_IMPORTS[fontFamily]
+    ? getFontImport(fontFamily)
+    : interFontFaceCss(documentText);
 
 const escapeHtml = (value: string) =>
   value
@@ -302,12 +337,89 @@ const renderAnnotatedImage = (img: PrintAnnotatedImage, lang: string): string =>
   )}" />${markers}</div>${caption}${legend}</div>`;
 };
 
+const IMG_TAG_RE = /<img\b[^>]*>/gi;
+const STYLE_ATTR_RE = /(\bstyle\s*=\s*")([^"]*)(")/i;
+const PX_SIZE_DECL_RE = /^\s*(?:width|height|max-width|max-height)\s*:\s*\d+(?:\.\d+)?px\s*$/i;
+/** The presentational attribute form, e.g. `<img width="160" height="90">`. */
+const PX_SIZE_ATTR_RE = /\s(?:width|height)\s*=\s*"?\d+(?:\.\d+)?"?/gi;
+const MARGIN_DECL_RE = /^\s*margin(?:-top|-right|-bottom|-left)?\s*:/i;
+const TABLE_BLOCK_RE = /<table\b[\s\S]*?<\/table>/gi;
+const DATA_ALIGN_RE = /\bdata-align\s*=\s*"([a-z]+)"/i;
+const TAG_END_RE = /(\s*\/?>)$/;
+
+/** The placements the editor's Align control offers, plus the default full-width band. */
+type PrintImageAlign = 'inline' | 'left' | 'right' | 'center' | 'block';
+const AUTHOR_ALIGNS: readonly string[] = ['inline', 'left', 'right', 'center'];
+
+/**
+ * The placement the author chose for an image.
+ *
+ * InlineBlockEditor mirrors its Align control to `data-align`, so that is authoritative when
+ * present. Images migrated from the old library predate the attribute and carry the same
+ * intent as inline `float` / `display` instead, so those are read as a fallback rather than
+ * being flattened to the default band.
+ */
+const printAlignOf = (tag: string): PrintImageAlign => {
+  const explicit = tag.match(DATA_ALIGN_RE)?.[1]?.toLowerCase();
+  if (explicit && AUTHOR_ALIGNS.includes(explicit)) return explicit as PrintImageAlign;
+
+  const style = (tag.match(STYLE_ATTR_RE)?.[2] ?? '').toLowerCase();
+  if (/float\s*:\s*left/.test(style)) return 'left';
+  if (/float\s*:\s*right/.test(style)) return 'right';
+  if (/display\s*:\s*inline/.test(style)) return 'inline';
+  if (/margin\s*:[^;]*\bauto\b/.test(style)) return 'center';
+  return 'block';
+};
+
+/** Drop the inline style declarations `drop` selects, leaving the rest of the tag intact. */
+const withoutDeclarations = (tag: string, drop: (declaration: string) => boolean): string =>
+  tag.replace(STYLE_ATTR_RE, (_full, open: string, css: string, close: string) => {
+    const kept = css
+      .split(';')
+      .filter((declaration) => declaration.trim() && !drop(declaration))
+      .join(';');
+    return `${open}${kept}${close}`;
+  });
+
+/**
+ * Prepare author `<img>` tags for print.
+ *
+ * Two problems, both caused by inline styles beating the print stylesheet:
+ *
+ *  1. Spacing. The editor bakes `margin:1rem 0` (8.47mm) onto every image, so the gap above and
+ *     below it was frozen at a value belonging to neither the pt nor the mm scale — nearly
+ *     three A5 line boxes per image, identical on a 6pt leaflet and a 10.77pt A4 manual. The
+ *     margins are stripped here and the stylesheet re-applies them from blockSpacingMm, keyed
+ *     on `data-print-align` so each placement still gets the right spacing.
+ *
+ *  2. Pinned widths inside tables. A width in px fixes that column on EVERY row, including
+ *     rows whose image cell is empty — the phantom ~43mm image column in the exports (160px is
+ *     42.3mm). Stripped, but ONLY inside a table: elsewhere a width is a deliberate editorial
+ *     choice (a floated logo sized to 150px), and removing it would let the image grow to the
+ *     full column.
+ *
+ * Nested tables would end the first pass at the inner `</table>`; manuals do not use them, and
+ * the cost of missing one is a phantom column, not broken markup.
+ */
+const normalizeImagesForPrint = (html: string): string => {
+  const tablesNormalized = html.replace(TABLE_BLOCK_RE, (block) =>
+    block.replace(IMG_TAG_RE, (tag) =>
+      withoutDeclarations(tag, (d) => PX_SIZE_DECL_RE.test(d)).replace(PX_SIZE_ATTR_RE, ''),
+    ),
+  );
+  return tablesNormalized.replace(IMG_TAG_RE, (tag) => {
+    const align = printAlignOf(tag);
+    const stripped = withoutDeclarations(tag, (d) => MARGIN_DECL_RE.test(d));
+    return stripped.replace(TAG_END_RE, ` data-print-align="${align}"$1`);
+  });
+};
+
 const renderNode = (node: PrintNode, lang: string): string => {
   switch (node.type) {
     case 'html':
-      return `<div class="imv-node imv-content">${node.html}</div>`;
+      return `<div class="imv-node imv-content">${normalizeImagesForPrint(node.html)}</div>`;
     case 'callout':
-      return `<div class="imv-node imv-content">${wrapCallout(node.variant as CalloutVariant, node.html, lang)}</div>`;
+      return `<div class="imv-node imv-content">${wrapCallout(node.variant as CalloutVariant, normalizeImagesForPrint(node.html), lang)}</div>`;
     case 'annotated_image_set':
       return `<div class="imv-node imv-annotated">${node.images.map((img) => renderAnnotatedImage(img, lang)).join('')}</div>`;
     case 'legend_table':
@@ -415,13 +527,14 @@ const flattenInReadingOrder = (sections: PrintSection[]): PrintSection[] => {
   return out;
 };
 
-const buildTocPage = (manual: PrintManual): string => {
+const buildTocPage = (manual: PrintManual, band = ''): string => {
   const ordered = flattenInReadingOrder(manual.sections);
   const rows = ordered
     .map((s) => `<a class="im-toc-row${s.parentId ? ' im-toc-sub' : ''}" href="#sec-${s.id}">${escapeHtml(s.title)}</a>`)
     .join('');
   return `
     <section class="im-page im-break im-page-toc">
+      ${band}
       <h2 class="im-toc-title">${escapeHtml(getContentsLabel(manual.language))}</h2>
       <nav class="im-toc">${rows}</nav>
     </section>
@@ -431,7 +544,7 @@ const buildTocPage = (manual: PrintManual): string => {
 // Sections flow continuously within a single content page (matching the live preview), instead
 // of forcing a new page per section. Only the content block as a whole starts on a fresh page
 // (im-break); individual sections break naturally on overflow.
-const buildSectionPages = (manual: PrintManual): string => {
+const buildSectionPages = (manual: PrintManual, startOnNewPage = true): string => {
   const ordered = flattenInReadingOrder(manual.sections);
   const inner = ordered
     .map((section) => {
@@ -444,17 +557,25 @@ const buildSectionPages = (manual: PrintManual): string => {
       `;
     })
     .join('');
-  return `<div class="im-page im-break im-page-content">${inner}</div>`;
+  // Dropping im-break lets the block continue on the TOC page; the sections inside still
+  // break naturally on overflow either way.
+  const cls = startOnNewPage ? 'im-page im-break im-page-content' : 'im-page im-page-content';
+  return `<div class="${cls}">${inner}</div>`;
 };
 
-const buildLanguageDivider = (code: string, primaryColor: string): string => `
-  <section class="im-page im-break im-page-divider">
-    <div class="im-divider-inner">
-      <div class="im-divider-bar" style="background:${primaryColor}"></div>
-      <h2 class="im-divider-title">${escapeHtml(languageName(code))}</h2>
-      <p class="im-divider-code">${escapeHtml(code.toUpperCase())}</p>
+/**
+ * The language's name as a band at the top of its own TOC page.
+ *
+ * This used to be a standalone page ("im-page im-break im-page-divider" plus a min-height
+ * that filled the sheet) carrying three lines. On a five-language booklet that was five
+ * whole sheets spent on wayfinding the colour-coded edge tabs already provide, so the name
+ * now rides above that language's table of contents instead.
+ */
+const buildLanguageBand = (code: string): string => `
+    <div class="im-lang-band">
+      <span class="im-lang-band-name">${escapeHtml(languageName(code))}</span>
+      <span class="im-lang-band-code">${escapeHtml(code.toUpperCase())}</span>
     </div>
-  </section>
 `;
 
 const buildBackPage = (opts: PrintBackOptions, companyName: string, versionLabel: string): string => {
@@ -574,15 +695,23 @@ const buildStyles = (
   primaryColor: string,
   typography: PrintTypography,
   compact = false,
+  fontCss = '',
 ): string => {
   const dims = PAGE_DIMS[pageSize];
   const s = pageSize === 'a5' ? 0.82 : 1; // A5 scale for page furniture only (see above)
   const mm = (base: number) => `${(base * s).toFixed(2)}mm`;
   const fillH = fillHeightMm(pageSize, typography);
-  const { bodyPt, headingPt, lineHeight } = typography;
+  const { bodyPt, headingPt, lineHeight, tableCellPaddingMm, cellImageMaxHeightMm, blockSpacingMm } = typography;
+  // Table/image density is an absolute per-profile setting: each (template, page size) pair
+  // has its own row, so it must NOT go through mm() and pick up the A5 furniture scale.
+  const absMm = (value: number) => `${Number(value.toFixed(2))}mm`;
+  // Vertical rhythm between content blocks, plus the half step used for tighter pairings
+  // (a caption under its image, a callout title above its body).
+  const gap = absMm(blockSpacingMm);
+  const halfGap = absMm(blockSpacingMm / 2);
   const pt = (value: number) => `${Number(value.toFixed(2))}pt`;
   return `
-    ${getFontImport(typography.fontFamily)}
+    ${fontCss}
     :root { color-scheme: light only; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; }
@@ -622,10 +751,9 @@ const buildStyles = (
     .im-mark { height: ${mm(12)}; width: auto; object-fit: contain; }
 
     /* Language divider */
-    .im-page-divider { min-height: ${fillH}mm; display: flex; align-items: center; justify-content: center; text-align: center; }
-    .im-divider-bar { width: ${mm(40)}; height: ${mm(2)}; margin: 0 auto ${mm(8)}; border-radius: 2px; }
-    .im-divider-title { color: ${primaryColor}; font-size: ${mm(14)}; margin: 0; }
-    .im-divider-code { color: #64748b; letter-spacing: 0.3em; margin: ${mm(2)} 0 0; }
+    .im-lang-band { display: flex; align-items: baseline; justify-content: space-between; gap: ${mm(3)}; margin: 0 0 ${mm(3)}; }
+    .im-lang-band-name { color: ${primaryColor}; font-size: ${mm(5)}; font-weight: 700; line-height: 1.1; }
+    .im-lang-band-code { color: #64748b; letter-spacing: 0.3em; font-size: ${mm(2.6)}; }
 
     /* TOC — clickable links. Page numbers are stamped into each row's link rectangle at
        merge time (stampTocPageNumbers), so the row reserves right padding for them: a long
@@ -657,19 +785,32 @@ const buildStyles = (
     .imv-content i, .imv-content em { font-style: italic; }
     .imv-content u { text-decoration: underline; }
     .imv-content a { color: ${primaryColor}; text-decoration: underline; }
-    .imv-content img { max-width: 100%; height: auto; border-radius: 4px; }
-    .imv-content table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-    .imv-content th, .imv-content td { border: 1px solid #cbd5e1; padding: 0.5rem; vertical-align: top; }
+    /* Images. The author picks the placement in the editor (Align: inline / left / right /
+       centered) and normalizeImagesForPrint hoists that choice to data-print-align, having
+       stripped the inline margins the editor bakes in - an inline style beats this stylesheet,
+       so a 1rem (8.47mm) margin was otherwise frozen onto every image whatever the page size.
+       object-fit preserves the aspect ratio when max-height binds on a width-pinned image. */
+    .imv-content img { max-width: 100%; max-height: ${absMm(cellImageMaxHeightMm)}; height: auto; object-fit: contain; border-radius: 4px; }
+    .imv-content img[data-print-align="block"] { display: block; margin: ${gap} 0; }
+    .imv-content img[data-print-align="center"] { display: block; margin: ${gap} auto; }
+    .imv-content img[data-print-align="left"] { float: left; margin: 0 ${gap} ${halfGap} 0; }
+    .imv-content img[data-print-align="right"] { float: right; margin: 0 0 ${halfGap} ${gap}; }
+    .imv-content img[data-print-align="inline"] { display: inline; vertical-align: middle; margin: 0 ${halfGap}; }
+    /* A float must not escape its node and drag into the next section: the layout is
+       flow-based, so an uncleared float would shift pagination downstream. */
+    .imv-node.imv-content::after { content: ""; display: table; clear: both; }
+    .imv-content table { width: 100%; border-collapse: collapse; margin: ${gap} 0; }
+    .imv-content th, .imv-content td { border: 1px solid #cbd5e1; padding: ${absMm(tableCellPaddingMm)}; vertical-align: top; }
     .imv-content th { background: #f1f5f9; font-weight: 700; text-align: left; }
 
     /* Callouts */
-    .imv-block-wrapper { display: flex; align-items: flex-start; gap: 1.25rem; padding: 1.25rem; margin: 1.25rem 0; border-radius: 6px; border-left: 6px solid; background: #fff; break-inside: avoid; }
-    .imv-block-icon { flex-shrink: 0; width: 48px; height: 48px; }
+    .imv-block-wrapper { display: flex; align-items: flex-start; gap: ${gap}; padding: ${gap}; margin: ${gap} 0; border-radius: 6px; border-left: 6px solid; background: #fff; break-inside: avoid; }
+    .imv-block-icon { flex-shrink: 0; width: ${mm(8)}; height: ${mm(8)}; }
     .imv-block-content { flex: 1; min-width: 0; }
     .imv-block-content p:last-child { margin-bottom: 0; }
     /* Callout titles are headings too — 0.62 of the section title matches the 0.9rem this
        rule used to hardcode at the default heading size. */
-    .imv-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: ${pt(headingPt * 0.62)}; margin-bottom: 0.5rem; letter-spacing: 0.05em; }
+    .imv-block-title { display: block; font-weight: 800; text-transform: uppercase; font-size: ${pt(headingPt * 0.62)}; margin-bottom: ${halfGap}; letter-spacing: 0.05em; }
     .imv-block-warning { background: #fff7ed; border-left-color: #f97316; } .imv-block-warning .imv-block-title { color: #c2410c; }
     .imv-block-danger { background: #fee2e2; border-left-color: #b91c1c; } .imv-block-danger .imv-block-title { color: #7f1d1d; }
     .imv-block-caution { background: #fefce8; border-left-color: #eab308; } .imv-block-caution .imv-block-title { color: #854d0e; }
@@ -679,28 +820,28 @@ const buildStyles = (
     .imv-block-info { background: #eff6ff; border-left-color: #3b82f6; } .imv-block-info .imv-block-title { color: #1d4ed8; }
 
     /* Annotated images */
-    .imv-annotated { margin: 1.25rem 0; }
-    .imv-annotated-item { margin-bottom: 1.25rem; break-inside: avoid; }
+    .imv-annotated { margin: ${gap} 0; }
+    .imv-annotated-item { margin-bottom: ${gap}; break-inside: avoid; }
     .imv-annotated-frame { position: relative; display: inline-block; max-width: 100%; }
-    .imv-annotated-frame img { max-width: 100%; height: auto; display: block; border-radius: 4px; }
+    .imv-annotated-frame img { max-width: 100%; max-height: ${absMm(cellImageMaxHeightMm)}; object-fit: contain; height: auto; display: block; border-radius: 4px; }
     .imv-marker { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; }
-    .imv-caption { font-size: ${pt(bodyPt * 0.92)}; color: #6b7280; margin-top: 6px; font-style: italic; }
-    .imv-legend { list-style: none; padding: 0; margin: 10px 0 0; }
-    .imv-legend li { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
-    .imv-legend-num { flex-shrink: 0; min-width: 20px; height: 20px; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+    .imv-caption { font-size: ${pt(bodyPt * 0.92)}; color: #6b7280; margin-top: ${halfGap}; font-style: italic; }
+    .imv-legend { list-style: none; padding: 0; margin: ${gap} 0 0; }
+    .imv-legend li { display: flex; gap: ${mm(2)}; align-items: baseline; margin-bottom: ${halfGap}; }
+    .imv-legend-num { flex-shrink: 0; min-width: ${mm(4)}; height: ${mm(4)}; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: ${pt(bodyPt * 0.85)}; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 
     /* Legend table */
-    .imv-legend-table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; }
-    .imv-legend-table td { border: 1px solid #cbd5e1; padding: 0.5rem; text-align: left; }
-    .imv-legend-table td:first-child { width: 56px; text-align: center; font-weight: 700; }
+    .imv-legend-table { width: 100%; border-collapse: collapse; margin: ${gap} 0; }
+    .imv-legend-table td { border: 1px solid #cbd5e1; padding: ${absMm(tableCellPaddingMm)}; text-align: left; }
+    .imv-legend-table td:first-child { width: ${mm(10)}; text-align: center; font-weight: 700; }
 
     /* Step sequence */
-    .imv-steps { counter-reset: imv-step; list-style: none; padding: 0; margin: 1.25rem 0; }
-    .imv-step { display: flex; gap: 16px; margin-bottom: 16px; align-items: flex-start; break-inside: avoid; }
-    .imv-step-num { counter-increment: imv-step; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: ${primaryColor}; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+    .imv-steps { counter-reset: imv-step; list-style: none; padding: 0; margin: ${gap} 0; }
+    .imv-step { display: flex; gap: ${mm(3)}; margin-bottom: ${gap}; align-items: flex-start; break-inside: avoid; }
+    .imv-step-num { counter-increment: imv-step; flex-shrink: 0; width: ${mm(5)}; height: ${mm(5)}; border-radius: 50%; background: ${primaryColor}; color: #fff; font-size: ${pt(bodyPt * 0.9)}; font-weight: 700; display: flex; align-items: center; justify-content: center; }
     .imv-step-num::before { content: counter(imv-step); }
     .imv-step-body { flex: 1; }
-    .imv-step-img { max-width: 60mm; height: auto; margin-top: 8px; border-radius: 4px; }
+    .imv-step-img { max-width: 60mm; max-height: ${absMm(cellImageMaxHeightMm)}; height: auto; object-fit: contain; margin-top: ${halfGap}; border-radius: 4px; }
 
     /* Back page */
     .im-page-end { min-height: ${fillH}mm; background: #f8fafc; padding: ${mm(8)}; }
@@ -767,8 +908,8 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
 
   const body = manuals
     .map((manual) => {
-      const divider = multi ? buildLanguageDivider(manual.language, primaryColor) : '';
-      return divider + buildTocPage(manual) + buildSectionPages(manual);
+      const band = multi ? buildLanguageBand(manual.language) : '';
+      return buildTocPage(manual, band) + buildSectionPages(manual, !opts.mergeTocIntoContent);
     })
     .join('');
 
@@ -783,7 +924,7 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <style>${buildStyles(opts.pageSize, primaryColor, resolveTypography(opts))}</style>
+    <style>${buildStyles(opts.pageSize, primaryColor, resolveTypography(opts), false, buildFontCss(resolveTypography(opts).fontFamily, documentTextOf(manuals)))}</style>
   </head>
   <body>
     ${cover}
@@ -823,7 +964,14 @@ const wrapStandalone = (inner: string, styles: string): string => `<!doctype htm
 
 const partStyles = (manuals: PrintManual[], opts: PrintHtmlOptions): string => {
   const base = manuals[0].metadata;
-  return buildStyles(opts.pageSize, base?.primaryColor || '#0f172a', resolveTypography(opts), opts.compact);
+  const typography = resolveTypography(opts);
+  return buildStyles(
+    opts.pageSize,
+    base?.primaryColor || '#0f172a',
+    typography,
+    opts.compact,
+    buildFontCss(typography.fontFamily, documentTextOf(manuals)),
+  );
 };
 
 /**
@@ -877,9 +1025,12 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
   // Cover with a PLACEHOLDER directory (page numbers unknown until every part is rendered).
   parts.push({ html: buildCoverPartHtml(manuals, opts, manuals.map(() => null)), tab: null });
   manuals.forEach((manual, i) => {
-    const divider = multi ? buildLanguageDivider(manual.language, primaryColor) : '';
+    const band = multi ? buildLanguageBand(manual.language) : '';
     parts.push({
-      html: wrapStandalone(divider + buildTocPage(manual) + buildSectionPages(manual), styles),
+      html: wrapStandalone(
+        buildTocPage(manual, band) + buildSectionPages(manual, !opts.mergeTocIntoContent),
+        styles,
+      ),
       // Only tag with an edge tab when the booklet actually spans multiple languages.
       tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,
     });

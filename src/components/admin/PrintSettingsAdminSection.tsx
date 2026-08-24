@@ -35,6 +35,23 @@ const profileTitle = (p: PrintSettingsProfile) =>
 
 const key = (p: { templateType: string; pageSize: string }) => `${p.templateType}::${p.pageSize}`;
 
+const MM_PER_PT = 25.4 / 72;
+const PAGE_HEIGHT_MM: Record<string, number> = { a4: 297, a5: 210 };
+
+/**
+ * What the point size and line spacing actually buy on the page.
+ *
+ * "Line spacing ×" on its own is ambiguous — it is a multiplier of the font size, and nothing
+ * on the screen said what that came to in millimetres or how many lines a page then holds.
+ * Since those two numbers are what decide the page count, they are shown next to the fields
+ * that produce them.
+ */
+const lineBudget = (p: PrintSettingsProfile) => {
+  const mmPerLine = p.bodyPt * p.lineHeight * MM_PER_PT;
+  const textHeightMm = (PAGE_HEIGHT_MM[p.pageSize] ?? 297) - p.margins.top - p.margins.bottom;
+  return { mmPerLine, linesPerPage: mmPerLine > 0 ? Math.floor(textHeightMm / mmPerLine) : 0 };
+};
+
 /** A labelled number input bound to one numeric field of a profile. */
 const NumField: React.FC<{
   label: string;
@@ -120,6 +137,52 @@ const ProfileCard: React.FC<{
         <NumField label="Headings" suffix="pt" value={profile.headingPt} limits={L.headingPt} onChange={(n) => set({ headingPt: n })} />
         <NumField label="Line spacing" suffix="×" value={profile.lineHeight} limits={L.lineHeight} onChange={(n) => set({ lineHeight: n })} />
         <div />
+
+        <p className="col-span-2 -mt-1 text-[11px] text-gray-500">
+          {profile.bodyPt}pt × {profile.lineHeight} ={' '}
+          <strong className="font-semibold text-gray-600">{lineBudget(profile).mmPerLine.toFixed(2)}mm</strong> per line
+          {' → ~'}
+          <strong className="font-semibold text-gray-600">{lineBudget(profile).linesPerPage}</strong> lines per{' '}
+          {profile.pageSize.toUpperCase()} page at these margins.
+        </p>
+
+        <div className="col-span-2 pt-1">
+          <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Content density</span>
+          <div className="grid grid-cols-3 gap-2">
+            <NumField
+              label="Cell padding"
+              suffix="mm"
+              value={profile.tableCellPaddingMm}
+              limits={L.tableCellPaddingMm}
+              onChange={(n) => set({ tableCellPaddingMm: n })}
+            />
+            <NumField
+              label="Block spacing"
+              suffix="mm"
+              value={profile.blockSpacingMm}
+              limits={L.blockSpacingMm}
+              onChange={(n) => set({ blockSpacingMm: n })}
+            />
+            <NumField
+              label="Max image height"
+              suffix="mm"
+              value={profile.cellImageMaxHeightMm}
+              limits={L.cellImageMaxHeightMm}
+              onChange={(n) => set({ cellImageMaxHeightMm: n })}
+            />
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1.5">
+            Cell padding applies to each side of every table cell, so a row costs twice this value
+            on top of its text; it was fixed at ~2.12mm, more than a whole line box at this body
+            size. Block spacing is the gap above and below tables, images, callouts, step lists and
+            legends — previously a fixed 8.5mm on every page size. The image cap stops one
+            illustration from setting its row height and stretching the text beside it to match.
+          </p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Where an image sits — inline, wrapped left or right, or centred on its own line — stays
+            an author decision, set per image with the Align control in the block editor.
+          </p>
+        </div>
 
         <div className="col-span-2 pt-1">
           <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Page margins (mm)</span>

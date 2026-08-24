@@ -36,7 +36,7 @@ import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection
 import type { PublishResult, PrintPdfResult, PrintRender, MarkupReviewResult } from '../../services';
 import { isInReview } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useUndoRedo } from './editor/useUndoRedo';
 import { ProjectImImportDialog } from './ProjectImImportDialog';
@@ -172,6 +172,9 @@ const ProjectIMGenerator: React.FC = () => {
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
+  // Which job the print dialog was opened for: rendering a PDF, or creating a
+  // Markup.io review round (which renders one first if there isn't a current one).
+  const [printIntent, setPrintIntent] = useState<'print' | 'review'>('print');
   // Pre-publish review panel (see PublishReviewPanel): docked beside the editor rather than
   // modal, because every row in it is a pointer into the editor and the list has to survive
   // being acted on. `armed` = opened by pressing Publish, so the panel carries the go/no-go
@@ -3245,7 +3248,7 @@ const ProjectIMGenerator: React.FC = () => {
   // Open the print-export dialog for the ALREADY-published version without republishing.
   // The publish-result payload is rebuilt from the deterministic storage layout
   // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed.
-  const openPrintForPublished = () => {
+  const openPrintDialog = (intent: 'print' | 'review') => {
     if (!project || !instance) return;
     const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
     setPublishResult({
@@ -3260,8 +3263,13 @@ const ProjectIMGenerator: React.FC = () => {
       })),
     });
     setNoChangesPrompt(null);
+    setPrintIntent(intent);
     setShowPrintDialog(true);
   };
+
+  const openPrintForPublished = () => openPrintDialog('print');
+  /** Open the dialog on the "Send for review" job — the Markup.io round leads. */
+  const openPrintForReview = () => openPrintDialog('review');
 
   // Read-only HTML for a single template block ref (shown as a locked card in the
   // content editor). Mirrors buildSectionHtml's per-ref rendering.
@@ -3978,8 +3986,20 @@ const ProjectIMGenerator: React.FC = () => {
              <div className="flex justify-end gap-2">
                <button onClick={() => setPublishResult(null)} className="text-sm px-3 py-2 border rounded hover:bg-gray-50">Stay here</button>
                {isPrintExportAvailable() && (
-                 <button onClick={() => setShowPrintDialog(true)} className="text-sm px-3 py-2 border border-primary text-primary rounded hover:bg-primary/5 flex items-center gap-1.5">
+                 <button onClick={() => { setPrintIntent('print'); setShowPrintDialog(true); }} className="text-sm px-3 py-2 border border-primary text-primary rounded hover:bg-primary/5 flex items-center gap-1.5">
                    <FileDown size={14} /> Export print PDF
+                 </button>
+               )}
+               {/* Publishing produces no PDF, so the review round has to render one — this
+                   button is the shortcut that does both, rather than making the operator
+                   find the Markup.io panel inside the print dialog. */}
+               {isPrintExportAvailable() && isMarkupReviewAvailable() && (
+                 <button
+                   onClick={() => { setPrintIntent('review'); setShowPrintDialog(true); }}
+                   title="Send this manual's print PDF to Markup.io for supplier review"
+                   className="text-sm px-3 py-2 border border-sky-300 text-sky-700 rounded hover:bg-sky-50 flex items-center gap-1.5"
+                 >
+                   <Send size={14} /> Send for review
                  </button>
                )}
                <button onClick={() => navigate(`/project/${project?.id}`)} className="text-sm px-3 py-2 bg-primary text-white rounded hover:opacity-90">Go to project</button>
@@ -4007,7 +4027,8 @@ const ProjectIMGenerator: React.FC = () => {
            }}
            onCoverPrefs={persistCoverPrefs}
            onReviewSent={handleReviewSent}
-           onClose={() => setShowPrintDialog(false)}
+           intent={printIntent}
+           onClose={() => { setShowPrintDialog(false); setPrintIntent('print'); }}
          />
        )}
 
@@ -4445,9 +4466,9 @@ const ProjectIMGenerator: React.FC = () => {
                      title: !isMarkupReviewAvailable()
                        ? 'Optional review step (Markup.io is not configured in this environment)'
                        : published
-                         ? 'Open the Print dialog — the "Supplier review (Markup.io)" panel sends the latest PDF'
+                         ? 'Send the print PDF to Markup.io for supplier review (renders one first if needed)'
                          : 'Publish first — the review round uploads a rendered print PDF to Markup.io',
-                     onClick: published ? () => openPrintForPublished() : undefined,
+                     onClick: published && isMarkupReviewAvailable() ? () => openPrintForReview() : undefined,
                    }
                  : reviewDone
                    ? {

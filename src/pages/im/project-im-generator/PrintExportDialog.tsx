@@ -15,6 +15,7 @@ import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, Al
 import { IMTemplate, IMTemplateType } from '../../../types';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, getIMMarkets, checkPrintImageWeights, sendRenderToMarkup, isMarkupReviewAvailable, PrintPdfResult, PrintRender, IMMarket, PrintImageReport, MarkupReviewResult } from '../../../services';
+import { PrintExportReport } from './PrintExportReport';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '../../../services/im/im-print-settings.service';
 
@@ -46,6 +47,13 @@ interface PrintExportDialogProps {
    * can refresh the manual's review state (badge + link) without re-fetching.
    */
   onReviewSent?: (result: MarkupReviewResult) => void;
+  /**
+   * What the operator came here to do. 'review' opens the dialog as the
+   * "Send for review" step: the Markup.io panel leads, and the primary button
+   * sends an existing current-version PDF or renders one first when there is
+   * none (a markup can only be made from a rendered PDF). Defaults to 'print'.
+   */
+  intent?: 'print' | 'review';
   onClose: () => void;
 }
 
@@ -103,9 +111,11 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   onRendered,
   onCoverPrefs,
   onReviewSent,
+  intent = 'print',
   onClose,
 }) => {
   const meta = template?.metadata;
+  const isReview = intent === 'review';
 
   // Warning Leaflets render as a compact PDF with no cover/back — so the dialog only needs the
   // logo (which feeds the per-language header), languages, and page size. The backend ignores
@@ -166,7 +176,9 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
 
   // Required change note for this generation — every new PDF must say what changed. Shown
   // (per render) in the export history so the render log doubles as a changelog.
-  const [comment, setComment] = useState('');
+  // Prefilled in review mode so the required-change-note guard doesn't block the
+  // one-click "render & send"; still editable, and still saved to the history row.
+  const [comment, setComment] = useState(intent === 'review' ? 'Rendered for supplier review' : '');
 
   const [uploading, setUploading] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -251,6 +263,11 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const hasComment = comment.trim().length > 0;
   const canGenerate = !!selected.length && hasComment && !busy && (!needsConfirm || confirmCredit);
 
+  // Review mode: an up-to-date PDF for this selection that was never sent can be
+  // reused as-is — no render, no credit. Already-sent renders are deliberately NOT
+  // reused; a fresh round means a fresh PDF (each send creates a NEW markup).
+  const reusableRender = status === 'current' && match && !match.markupUrl ? match : null;
+
   // Re-evaluate confirmation whenever the selection (and thus the match) changes.
   useEffect(() => {
     setConfirmCredit(false);
@@ -307,6 +324,9 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const [copiedReviewId, setCopiedReviewId] = useState<string | null>(null);
 
+  // Reusing an existing PDF needs neither a change note nor a credit confirmation.
+  const canSendForReview = !busy && sendingReviewId === null && (reusableRender ? true : canGenerate);
+
   const markupNameFor = (r: PrintRender) =>
     `${projectName} – ${isLeaflet ? 'Warning Leaflet' : 'Instruction Manual'}` +
     `${r.imVersion != null ? ` v${r.imVersion}` : ''} (${r.languages.map((l) => l.toUpperCase()).join(', ')})`;
@@ -336,7 +356,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     }).catch(() => {});
   };
 
-  const handleGenerate = async () => {
+  /** Renders the PDF. Returns the new history row (needed to send it to Markup.io), or null on failure. */
+  const handleGenerate = async (): Promise<PrintRender | null> => {
     setBusy(true);
     setElapsed(0);
     setProgress(null);
@@ -387,13 +408,91 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         setAttachParams({ res, langs: selected, pageSize });
         await doAttach(res, selected, pageSize);
       }
+      return (res.render as PrintRender | undefined) ?? null;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Print render failed.');
+      return null;
     } finally {
       setBusy(false);
       setProgress(null);
     }
   };
+
+  /**
+   * The review-mode primary action: send an existing current-version PDF, or render
+   * one first when none matches. Render and send fail into DIFFERENT slots (error vs
+   * reviewError) on purpose — if the render succeeds but the send fails, the PDF is
+   * still rendered, attached and downloadable, and the send can be retried from the
+   * panel. Never auto-retries the send: a retry after a server-side success would
+   * create a duplicate markup (see im-review.service).
+   */
+  const renderAndSend = async () => {
+    if (reusableRender) {
+      await sendForReview(reusableRender);
+      return;
+    }
+    const fresh = await handleGenerate();
+    if (fresh) await sendForReview(fresh);
+  };
+
+  /**
+   * Supplier review (Markup.io) — always shown when the feature is enabled, so the
+   * review round is findable without expanding the history. Per-row send/links remain
+   * in the history below. Rendered at the TOP of the dialog in review intent (where it
+   * is the point of the dialog), and in-flow otherwise.
+   */
+  const supplierReviewPanel = markupEnabled && !loadingHistory && (() => {
+    // In review mode the panel must describe the PDF the primary button will actually
+    // send — that is the one matching the CURRENT selection, which is not necessarily
+    // the newest render once the operator changes languages or page size.
+    const latest = (isReview ? reusableRender ?? renders[0] : renders[0]) ?? null;
+    return (
+      <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2.5">
+        <div className="flex items-center gap-2 mb-1">
+          <Send size={14} className="text-sky-600 shrink-0" />
+          <span className="text-sm font-semibold text-sky-900">Supplier review (Markup.io)</span>
+        </div>
+        {!latest ? (
+          <p className="text-xs text-sky-800/80">
+            {isReview
+              ? 'No print PDF exists yet — “Render & send for review” below will make one and upload it to Markup.io.'
+              : 'Reviews work on a rendered PDF — generate one below, then send it to Markup.io from here.'}
+          </p>
+        ) : latest.markupUrl ? (
+          <div className="space-y-1.5">
+            <p className="text-xs text-sky-800/80">
+              The latest PDF{latest.imVersion != null ? <> (<strong>v{latest.imVersion}</strong>)</> : null} is on
+              Markup.io — share this link with the reviewers:
+            </p>
+            <div className="flex items-center gap-2">
+              <input readOnly value={latest.markupUrl} className="flex-1 min-w-0 text-xs border border-sky-200 rounded px-2 py-1 bg-white text-gray-700" />
+              <button onClick={() => copyReviewLink(latest)} className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-100 whitespace-nowrap">
+                {copiedReviewId === latest.id ? 'Copied!' : 'Copy'}
+              </button>
+              <a href={latest.markupUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-100 flex items-center gap-1">
+                <ExternalLink size={11} /> Open
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-sky-800/80 flex-1">
+              Upload the latest PDF{latest.imVersion != null ? <> (<strong>v{latest.imVersion}</strong>, {latest.languages.join(', ').toUpperCase()})</> : null} to
+              Markup.io — reviewers comment directly on the pages, and the manual shows as <strong>In Review</strong>.
+            </p>
+            <button
+              onClick={() => void sendForReview(latest)}
+              disabled={sendingReviewId !== null}
+              className="shrink-0 text-sm px-3 py-1.5 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1.5 font-medium"
+            >
+              {sendingReviewId === latest.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              Send for review
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  })();
 
   const fmtDate = (iso: string) => {
     const d = new Date(iso);
@@ -435,7 +534,9 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-            <FileDown size={18} /> {isLeaflet ? 'Export leaflet PDF' : 'Export print PDF'}
+            {isReview
+              ? <><Send size={18} /> Send for review</>
+              : <><FileDown size={18} /> {isLeaflet ? 'Export leaflet PDF' : 'Export print PDF'}</>}
           </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
             <X size={20} />
@@ -443,6 +544,19 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         </div>
 
         <div className="px-6 py-4 overflow-auto space-y-5">
+          {/* Review intent: the Markup.io round is the point of the dialog, so it leads —
+              the render settings below are the means, shown for review before sending. */}
+          {isReview && (
+            <>
+              {supplierReviewPanel}
+              <p className="text-xs text-gray-500 -mt-2">
+                {reusableRender
+                  ? 'The current print PDF will be sent as-is — no new render, no credit.'
+                  : 'No up-to-date PDF for this selection yet, so one will be rendered first. Check the settings below before sending.'}
+              </p>
+            </>
+          )}
+
           {/* Market preset — admin-configured market → language sets (Admin panel → Markets).
               One click selects the market's languages and stamps the market on the render. */}
           {markets.length > 0 && (
@@ -665,56 +779,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </div>
           )}
 
-          {/* Supplier review (Markup.io) — ALWAYS visible when the feature is enabled, so
-              the review round is findable without expanding the history. Acts on the
-              NEWEST rendered PDF; per-row send/links remain in the history below. */}
-          {markupEnabled && !loadingHistory && (() => {
-            const latest = renders[0] ?? null;
-            return (
-              <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2.5">
-                <div className="flex items-center gap-2 mb-1">
-                  <Send size={14} className="text-sky-600 shrink-0" />
-                  <span className="text-sm font-semibold text-sky-900">Supplier review (Markup.io)</span>
-                </div>
-                {!latest ? (
-                  <p className="text-xs text-sky-800/80">
-                    Reviews work on a rendered PDF — generate one below, then send it to Markup.io from here.
-                  </p>
-                ) : latest.markupUrl ? (
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-sky-800/80">
-                      The latest PDF{latest.imVersion != null ? <> (<strong>v{latest.imVersion}</strong>)</> : null} is on
-                      Markup.io — share this link with the reviewers:
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <input readOnly value={latest.markupUrl} className="flex-1 min-w-0 text-xs border border-sky-200 rounded px-2 py-1 bg-white text-gray-700" />
-                      <button onClick={() => copyReviewLink(latest)} className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-100 whitespace-nowrap">
-                        {copiedReviewId === latest.id ? 'Copied!' : 'Copy'}
-                      </button>
-                      <a href={latest.markupUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border border-sky-200 text-sky-700 rounded hover:bg-sky-100 flex items-center gap-1">
-                        <ExternalLink size={11} /> Open
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-sky-800/80 flex-1">
-                      Upload the latest PDF{latest.imVersion != null ? <> (<strong>v{latest.imVersion}</strong>, {latest.languages.join(', ').toUpperCase()})</> : null} to
-                      Markup.io — reviewers comment directly on the pages, and the manual shows as <strong>In Review</strong>.
-                    </p>
-                    <button
-                      onClick={() => void sendForReview(latest)}
-                      disabled={sendingReviewId !== null}
-                      className="shrink-0 text-sm px-3 py-1.5 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1.5 font-medium"
-                    >
-                      {sendingReviewId === latest.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      Send for review
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {/* In review mode this panel leads the dialog instead (rendered above). */}
+          {!isReview && supplierReviewPanel}
 
           {/* Full render history */}
           {!loadingHistory && renders.length > 0 && (
@@ -729,6 +795,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                       <span className="text-gray-600">
                         {r.market && <span className="inline-block mr-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold">{r.market}</span>}
                         <span className="font-medium uppercase">{r.languages.join(', ')}</span> · {r.pageSize?.toUpperCase()}
+                        {/* NULL on rows written before migration 124 — omit rather than print 0pp. */}
+                        {r.pages != null && <> · {r.pages}pp</>}
                         {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
                         {r.createdBy && <> · {r.createdBy}</>}
                       </span>
@@ -845,6 +913,10 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             );
           })()}
 
+          {/* Page budget + preflight for the render just produced. Warn-only: it never gates
+              the download above, which is already in the operator's hands by this point. */}
+          {result && <PrintExportReport result={result} renders={renders} pageSize={pageSize} />}
+
           {reviewError && (
             <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{reviewError}</div>
           )}
@@ -877,15 +949,37 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
           <button onClick={onClose} className="text-sm px-3 py-2 border rounded hover:bg-gray-50">
             Close
           </button>
-          <button
-            onClick={handleGenerate}
-            disabled={!canGenerate}
-            title={!selected.length ? 'Select at least one language' : !hasComment ? 'Add a change note first' : needsConfirm && !confirmCredit ? 'This selection already exists — confirm to spend a credit' : ''}
-            className="text-sm px-4 py-2 bg-primary text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
-            {busy ? `Rendering… ${elapsed}s` : status === 'outdated' ? 'Generate updated PDF' : 'Generate print PDF'}
-          </button>
+          {isReview ? (
+            <button
+              onClick={() => void renderAndSend()}
+              disabled={!canSendForReview}
+              title={
+                reusableRender
+                  ? 'Send the current print PDF to Markup.io — no new render, no credit'
+                  : !selected.length ? 'Select at least one language'
+                  : !hasComment ? 'Add a change note first'
+                  : needsConfirm && !confirmCredit ? 'This selection already exists — confirm to spend a credit'
+                  : 'Render a print PDF and send it to Markup.io'
+              }
+              className="text-sm px-4 py-2 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {busy || sendingReviewId ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              {busy ? `Rendering… ${elapsed}s`
+                : sendingReviewId ? 'Sending to Markup.io…'
+                : reusableRender ? 'Send this PDF for review'
+                : 'Render & send for review'}
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleGenerate()}
+              disabled={!canGenerate}
+              title={!selected.length ? 'Select at least one language' : !hasComment ? 'Add a change note first' : needsConfirm && !confirmCredit ? 'This selection already exists — confirm to spend a credit' : ''}
+              className="text-sm px-4 py-2 bg-primary text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
+              {busy ? `Rendering… ${elapsed}s` : status === 'outdated' ? 'Generate updated PDF' : 'Generate print PDF'}
+            </button>
+          )}
         </div>
       </div>
     </div>

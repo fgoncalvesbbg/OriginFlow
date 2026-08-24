@@ -59,6 +59,8 @@ import {
   recordTmSegments,
   replaceApprovedTmSegment,
   reuseTierFor,
+  updateUnreviewedTmSegment,
+  validateTmTargetText,
   type RecordTmSegmentInput,
 } from './im-tm-write.service';
 import { NORMALIZATION_VERSION } from './im-tm-normalize';
@@ -312,6 +314,19 @@ describe('replaceApprovedTmSegment', () => {
       TmImmutableSegmentError,
     );
   });
+
+  it('refuses a replacement that breaks a marker, rather than storing an unusable row', async () => {
+    // A correction is hand-typed and has no alignment gate in front of it. Without this
+    // check the bad row stores fine and only surfaces months later, on another product,
+    // as a fragment that silently refuses to translate.
+    selectResult.rows = [storedRow({ status: 'approved', placeholder_types: ['measure'] })];
+    await expect(
+      replaceApprovedTmSegment('seg-1', 'Fassung ohne Platzhalter.', 'wording corrected'),
+    ).rejects.toBeInstanceOf(TmImmutableSegmentError);
+    // Crucially the old row is NOT deprecated — a refused correction leaves the memory intact.
+    expect(calls.find((c) => c.op === 'updateWhere')).toBeUndefined();
+    expect(calls.find((c) => c.op === 'insert')).toBeUndefined();
+  });
 });
 
 describe('noteTmSegmentsUsed', () => {
@@ -377,5 +392,108 @@ describe('reuseTierFor', () => {
     ['none', 'miss'],
   ])('maps %s to the reporting tier %s', (tier, expected) => {
     expect(reuseTierFor(tier)).toBe(expected);
+  });
+});
+
+
+describe('validateTmTargetText', () => {
+  const seg = (over: Partial<{ placeholderTypes: unknown[]; tokenIdentities: string[] }> = {}) => ({
+    placeholderTypes: [] as unknown[],
+    tokenIdentities: [] as string[],
+    ...over,
+  });
+
+  it('accepts a target that uses every declared placeholder exactly once', () => {
+    const v = validateTmTargetText('Auf {{P0}} stellen, dann {{P1}} warten.', seg({
+      placeholderTypes: ['measure', 'measure'],
+    }));
+    expect(v.ok).toBe(true);
+  });
+
+  it('rejects an empty target', () => {
+    expect(validateTmTargetText('   ', seg()).ok).toBe(false);
+  });
+
+  it('rejects a dropped placeholder — the value would vanish from the manual', () => {
+    const v = validateTmTargetText('Auf {{P0}} stellen.', seg({ placeholderTypes: ['measure', 'measure'] }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('{{P1}}');
+  });
+
+  it('rejects a duplicated placeholder — re-injection has one value for two slots', () => {
+    const v = validateTmTargetText('{{P0}} und {{P0}}', seg({ placeholderTypes: ['measure'] }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('exactly once');
+  });
+
+  it('rejects a placeholder the segment never declared', () => {
+    const v = validateTmTargetText('{{P0}} und {{P3}}', seg({ placeholderTypes: ['measure'] }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('{{P3}}');
+  });
+
+  it('rejects a formatting marker whose identity does not match the source', () => {
+    const v = validateTmTargetText('{{T0:o.em}}Warnung{{T1:c.strong}}', seg({
+      tokenIdentities: ['o.strong', 'c.strong'],
+    }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('o.strong');
+  });
+
+  it('rejects a dropped formatting marker', () => {
+    const v = validateTmTargetText('{{T0:o.strong}}Warnung', seg({
+      tokenIdentities: ['o.strong', 'c.strong'],
+    }));
+    expect(v.ok).toBe(false);
+  });
+
+  it('ALLOWS markers in a different order — a translator legitimately reorders for word order', () => {
+    // Same rule injectTokens applies at read time: the multiset must match, the order need not.
+    const v = validateTmTargetText('{{T1:c.strong}}{{T0:o.strong}}', seg({
+      tokenIdentities: ['o.strong', 'c.strong'],
+    }));
+    expect(v.ok).toBe(true);
+  });
+});
+
+describe('updateUnreviewedTmSegment', () => {
+  it('edits an unreviewed row in place and re-stamps origin as human', async () => {
+    selectResult.rows = [storedRow({ status: 'unreviewed' })];
+    await updateUnreviewedTmSegment('seg-1', 'Korrigierte Fassung.');
+
+    const update = calls.find((c) => c.op === 'updateWhere');
+    expect(update?.payload).toMatchObject({ target_text: 'Korrigierte Fassung.', origin: 'human' });
+    // No lineage row: nothing consumed this text, so there is nothing to supersede.
+    expect(calls.find((c) => c.op === 'insert')).toBeUndefined();
+  });
+
+  it('refuses an approved row — that path must go through deprecate-then-insert', async () => {
+    selectResult.rows = [storedRow({ status: 'approved' })];
+    await expect(updateUnreviewedTmSegment('seg-1', 'Neu.')).rejects.toBeInstanceOf(
+      TmImmutableSegmentError,
+    );
+    expect(calls.find((c) => c.op === 'updateWhere')).toBeUndefined();
+  });
+
+  it('refuses a deprecated row', async () => {
+    selectResult.rows = [storedRow({ status: 'deprecated' })];
+    await expect(updateUnreviewedTmSegment('seg-1', 'Neu.')).rejects.toBeInstanceOf(
+      TmImmutableSegmentError,
+    );
+  });
+
+  it('refuses an edit that breaks a placeholder', async () => {
+    selectResult.rows = [storedRow({ status: 'unreviewed', placeholder_types: ['measure'] })];
+    await expect(updateUnreviewedTmSegment('seg-1', 'Kein Platzhalter hier.')).rejects.toBeInstanceOf(
+      TmImmutableSegmentError,
+    );
+    expect(calls.find((c) => c.op === 'updateWhere')).toBeUndefined();
+  });
+
+  it('is a no-op write when the text is unchanged', async () => {
+    const row = storedRow({ status: 'unreviewed' });
+    selectResult.rows = [row];
+    await updateUnreviewedTmSegment('seg-1', row.target_text);
+    expect(calls.find((c) => c.op === 'updateWhere')).toBeUndefined();
   });
 });

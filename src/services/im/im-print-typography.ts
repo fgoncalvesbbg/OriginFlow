@@ -31,6 +31,31 @@ export interface PrintTypography {
   headingPt: number;
   /** Unitless line-height multiplier for body text. */
   lineHeight: number;
+  /**
+   * Padding inside every print table cell, per side, in mm.
+   *
+   * Replaces a hardcoded `padding: 0.5rem` (8px ~ 2.12mm), which put 4.23mm of chrome on
+   * every row — more than a whole line box at the A5 body size — and, being rem-based,
+   * ignored both the pt and the mm scale.
+   */
+  tableCellPaddingMm: number;
+  /**
+   * Largest rendered height, in mm, of an image inside body content.
+   *
+   * The print stylesheet had no max-height at all, so an illustration dictated its table
+   * row height and the sibling text cells stretched to match it.
+   */
+  cellImageMaxHeightMm: number;
+  /**
+   * Vertical rhythm between content blocks (tables, images, callouts, step lists, legends,
+   * annotated sets), in mm.
+   *
+   * Replaces a spread of `rem`/`px` values that belonged to neither of the renderer's two
+   * scales, so they were identical on a 6pt A5 leaflet and a 10.77pt A4 manual. At the live A5
+   * setting a 1rem margin was 8.47mm against a 2.96mm line box — nearly three lines of page
+   * per table and per image.
+   */
+  blockSpacingMm: number;
   margins: PrintMarginsMm;
 }
 
@@ -58,10 +83,10 @@ export const profileKey = (templateType: string, pageSize: string): string => `$
  * an un-migrated or unreachable database still renders the output everyone is used to.
  */
 export const DEFAULT_PRINT_TYPOGRAPHY: Record<string, PrintTypography> = {
-  'im::a4': { fontFamily: 'Inter', bodyPt: 10.77, headingPt: 17.58, lineHeight: 1.6, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
-  'im::a5': { fontFamily: 'Inter', bodyPt: 8.83, headingPt: 14.41, lineHeight: 1.6, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
-  'warning_leaflet::a4': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
-  'warning_leaflet::a5': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
+  'im::a4': { fontFamily: 'Inter', bodyPt: 10.77, headingPt: 17.58, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 60, blockSpacingMm: 2.5, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
+  'im::a5': { fontFamily: 'Inter', bodyPt: 8.83, headingPt: 14.41, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 40, blockSpacingMm: 2.5, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
+  'warning_leaflet::a4': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
+  'warning_leaflet::a5': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
 };
 
 /** The built-in profile for a combination (never throws — falls back to the full-IM A4 set). */
@@ -83,6 +108,9 @@ export const PRINT_SETTING_LIMITS = {
   bodyPt: { min: 4, max: 32, step: 0.25 },
   headingPt: { min: 4, max: 48, step: 0.25 },
   lineHeight: { min: 1, max: 3, step: 0.05 },
+  tableCellPaddingMm: { min: 0, max: 6, step: 0.1 },
+  cellImageMaxHeightMm: { min: 5, max: 200, step: 1 },
+  blockSpacingMm: { min: 0, max: 15, step: 0.1 },
   marginTop: { min: 0, max: 60, step: 0.5 },
   marginBottom: { min: 8, max: 60, step: 0.5 },
   marginLeft: { min: 0, max: 60, step: 0.5 },
@@ -112,6 +140,9 @@ export const normalizePrintTypography = (
     bodyPt: clamp(raw?.bodyPt, L.bodyPt.min, L.bodyPt.max, fallback.bodyPt),
     headingPt: clamp(raw?.headingPt, L.headingPt.min, L.headingPt.max, fallback.headingPt),
     lineHeight: clamp(raw?.lineHeight, L.lineHeight.min, L.lineHeight.max, fallback.lineHeight),
+    tableCellPaddingMm: clamp(raw?.tableCellPaddingMm, L.tableCellPaddingMm.min, L.tableCellPaddingMm.max, fallback.tableCellPaddingMm),
+    cellImageMaxHeightMm: clamp(raw?.cellImageMaxHeightMm, L.cellImageMaxHeightMm.min, L.cellImageMaxHeightMm.max, fallback.cellImageMaxHeightMm),
+    blockSpacingMm: clamp(raw?.blockSpacingMm, L.blockSpacingMm.min, L.blockSpacingMm.max, fallback.blockSpacingMm),
     margins: {
       top: clamp(raw?.margins?.top, L.marginTop.min, L.marginTop.max, fallback.margins.top),
       bottom: clamp(raw?.margins?.bottom, L.marginBottom.min, L.marginBottom.max, fallback.margins.bottom),

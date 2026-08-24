@@ -13,15 +13,18 @@
  *
  * Feature gating mirrors the print export: the server secret (MARKUPIO_API_KEY)
  * can't be seen by the browser, so the UI is gated on the public flag
- * VITE_MARKUP_REVIEW_ENABLED ("true"), set alongside it.
+ * VITE_MARKUP_REVIEW_ENABLED ("true", any casing — see feature-flags.ts), set
+ * alongside it. Note this must ALSO be set in the deploy environment, not just
+ * a local .env, or the feature stays invisible in production.
  */
 
 import { auth } from '../../data';
 import type { IMTemplateType } from '../../types';
+import { flagEnabled } from './feature-flags';
 
 /** Whether the Markup.io review feature is enabled (server secret configured). */
 export const isMarkupReviewAvailable = (): boolean =>
-  (import.meta.env.VITE_MARKUP_REVIEW_ENABLED as string | undefined) === 'true';
+  flagEnabled(import.meta.env.VITE_MARKUP_REVIEW_ENABLED as string | undefined);
 
 /** The fields the send-to-markup function needs to identify what to upload. */
 export interface SendToMarkupParams {

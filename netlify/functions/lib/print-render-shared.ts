@@ -20,6 +20,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { flagEnabled } from '../../../src/services/im/feature-flags';
 import {
   buildPrintPartsHtml,
   PrintManual,
@@ -175,6 +176,10 @@ export const buildParts = (
     version: req.version,
     compact,
     typography: resolveTypography(req),
+    // Server-side flag (IM_PRINT_MERGE_TOC): saves a page per language by letting content
+    // continue on the TOC page. Opt-in, because it trades away the clean "contents, then the
+    // manual" separation — a judgement call about the printed artefact, not a free win.
+    mergeTocIntoContent: flagEnabled(process.env.IM_PRINT_MERGE_TOC),
   });
   return { parts, compact };
 };

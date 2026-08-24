@@ -41,6 +41,7 @@ import { NORMALIZATION_VERSION } from './im-tm-normalize';
 import { PLACEHOLDER_VERSION } from './im-tm-placeholders';
 import { SEGMENTATION_VERSION } from './im-tm-segment';
 import { mapTmSegmentRow, type TmSegmentRecord } from './im-tm-lookup.service';
+import { sameMarkerSet } from './im-xliff-codec';
 import type { PlaceholderType } from './im-tm-types';
 
 // ---------------------------------------------------------------------------
@@ -130,29 +131,93 @@ export interface RecordTmResult {
 }
 
 /**
- * Reject a row whose target could never be re-injected.
+ * Every `{{Pn}}` the source declared appears in the target exactly once, and no others.
  *
- * Defence in depth against a too-generous `placeholderSafe` upstream: every placeholder
- * the source declared must appear in the target EXACTLY ONCE, and no others. Reassembly
- * enforces the same thing at read time, but catching it here means the corruption is
- * never stored in the first place — otherwise it surfaces months later, on a different
- * product, as a fragment that silently refuses to translate.
+ * Defence in depth against a too-generous `placeholderSafe` upstream. Reassembly enforces
+ * the same thing at read time, but catching it at write time means the corruption is never
+ * stored in the first place — otherwise it surfaces months later, on a different product,
+ * as a fragment that silently refuses to translate.
  */
-const isStorable = (input: RecordTmSegmentInput): boolean => {
-  if (!input.sourceKey || !input.placeholderedSource || !input.targetText.trim()) return false;
-
+const placeholderFault = (targetText: string, declared: number): string | null => {
   const counts = new Map<number, number>();
-  for (const marker of input.targetText.match(/\{\{P(\d+)\}\}/g) ?? []) {
+  for (const marker of targetText.match(/\{\{P(\d+)\}\}/g) ?? []) {
     const index = Number(/\d+/.exec(marker)?.[0] ?? -1);
     counts.set(index, (counts.get(index) ?? 0) + 1);
   }
 
-  const declared = input.placeholderTypes.length;
-  if (counts.size !== declared) return false;
-  for (let i = 0; i < declared; i++) {
-    if (counts.get(i) !== 1) return false;
+  for (const index of counts.keys()) {
+    if (index < 0 || index >= declared) {
+      return 'The target uses {{P' + index + '}}, which this segment does not define.';
+    }
   }
-  return true;
+  for (let i = 0; i < declared; i++) {
+    const n = counts.get(i) ?? 0;
+    if (n === 0) return 'The target is missing {{P' + i + '}}.';
+    if (n > 1) return '{{P' + i + '}} appears ' + n + ' times in the target — it must appear exactly once.';
+  }
+  return null;
+};
+
+/**
+ * Every `{{Tn:identity}}` marker resolves to the segment's own token list, and the set of
+ * markers used matches the source's exactly.
+ *
+ * ORDER MAY DIFFER — a translator legitimately reorders formatting for target word order —
+ * but nothing may be added, dropped or duplicated. Deliberately the same rule and the same
+ * helper (`sameMarkerSet`) that `injectTokens` in im-tm-reassemble.ts and the XLIFF import
+ * integrity check apply, so a target this accepts is one reassembly will accept.
+ */
+const tokenFault = (targetText: string, identities: readonly string[]): string | null => {
+  const used: string[] = [];
+  for (const m of targetText.matchAll(/\{\{T(\d+):([A-Za-z0-9_.-]+)\}\}/g)) {
+    const index = Number(m[1]);
+    const identity = m[2];
+    if (index < 0 || index >= identities.length) {
+      return 'The target references {{T' + index + '}}, which this segment does not have.';
+    }
+    if (identities[index] !== identity) {
+      return 'Marker {{T' + index + '}} should be "' + identities[index] + '" but the target has "' + identity + '".';
+    }
+    used.push(identity);
+  }
+  if (!sameMarkerSet([...identities], used)) {
+    return 'The formatting markers do not match the source — expected [' + identities.join(', ')
+      + '], target has [' + used.join(', ') + '].';
+  }
+  return null;
+};
+
+/**
+ * Whether a hand-edited target can be stored and later re-injected.
+ *
+ * Exported because the admin console edits targets by hand, and a human needs the reason
+ * rather than a silent refusal. Checks both marker families: `{{Pn}}` placeholders and
+ * `{{Tn:identity}}` formatting tokens.
+ */
+export const validateTmTargetText = (
+  targetText: string,
+  segment: { placeholderTypes: readonly unknown[]; tokenIdentities: readonly string[] },
+): { ok: boolean; reason?: string } => {
+  if (!targetText.trim()) return { ok: false, reason: 'The target text cannot be empty.' };
+  const fault =
+    placeholderFault(targetText, segment.placeholderTypes.length)
+    ?? tokenFault(targetText, segment.tokenIdentities);
+  return fault ? { ok: false, reason: fault } : { ok: true };
+};
+
+/**
+ * Reject a row whose target could never be re-injected.
+ *
+ * Placeholder-only on purpose: machine and imported write-back reaches this function via
+ * `alignTargetToSource`, which has already rejected the fragment unless the ordered token
+ * identity sequence matched exactly. Adding the token check here would be redundant on
+ * that path and would change what `recordTmSegments` accepts, which is not this change's
+ * business. Hand edits, which have no alignment gate in front of them, go through
+ * `validateTmTargetText` instead.
+ */
+const isStorable = (input: RecordTmSegmentInput): boolean => {
+  if (!input.sourceKey || !input.placeholderedSource || !input.targetText.trim()) return false;
+  return placeholderFault(input.targetText, input.placeholderTypes.length) === null;
 };
 
 const toRow = (input: RecordTmSegmentInput): Record<string, unknown> => ({
@@ -406,6 +471,16 @@ export const replaceApprovedTmSegment = async (
   if (!isLive) return null;
 
   const prior = mapTmSegmentRow(await db.selectOne<Row>('im_tm_segments', { where: { id } }));
+
+  // A replacement is hand-typed, so it has no alignment gate in front of it. Validate
+  // against the PRIOR row's markers — the correction changes wording, never the segment's
+  // placeholder or token inventory. Without this a mangled marker is stored happily and
+  // only surfaces later as a fragment that silently refuses to translate.
+  const verdict = validateTmTargetText(newTargetText, prior);
+  if (!verdict.ok) {
+    throw new TmImmutableSegmentError('The replacement cannot be stored. ' + verdict.reason);
+  }
+
   const now = new Date().toISOString();
 
   await db.updateWhere(
@@ -441,6 +516,56 @@ export const replaceApprovedTmSegment = async (
     updated_at: now,
   });
   return mapTmSegmentRow(created);
+};
+
+/**
+ * Correct an UNREVIEWED segment's target in place.
+ *
+ * Legal where `replaceApprovedTmSegment` is not: the governance trigger freezes an
+ * approved row's linguistic payload, but an unreviewed row is still a candidate and
+ * nothing downstream has consumed it — there is no lineage worth preserving for text no
+ * reviewer has ever signed off. Refuses anything that is not `unreviewed`, so a caller
+ * cannot reach for this to sidestep the deprecate-then-insert rule; the database would
+ * refuse anyway, but the message here says why.
+ */
+export const updateUnreviewedTmSegment = async (
+  id: string,
+  newTargetText: string,
+): Promise<TmSegmentRecord | null> => {
+  if (!isLive) return null;
+
+  const current = mapTmSegmentRow(await db.selectOne<Row>('im_tm_segments', { where: { id } }));
+  if (current.status === 'approved') {
+    throw new TmImmutableSegmentError(
+      'This segment is approved and cannot be edited in place — deprecate it and insert a '
+      + 'replacement so published content keeps a traceable lineage.',
+    );
+  }
+  if (current.status === 'deprecated') {
+    throw new TmImmutableSegmentError('This segment is deprecated and is no longer editable.');
+  }
+
+  const verdict = validateTmTargetText(newTargetText, current);
+  if (!verdict.ok) {
+    throw new TmImmutableSegmentError('The edit cannot be stored. ' + verdict.reason);
+  }
+  if (newTargetText === current.targetText) return current;
+
+  const now = new Date().toISOString();
+  await db.updateWhere(
+    'im_tm_segments',
+    // `origin` becomes 'human': the row is no longer what the engine produced, and origin
+    // is what a later reviewer uses to judge how much scrutiny it needs.
+    //
+    // This does not breach the column's "never accepted from the browser" rule. The value
+    // is FIXED BY THIS FUNCTION, derived from the caller's code path exactly as
+    // `replaceApprovedTmSegment` fixes it — no caller can claim an origin. The rule guards
+    // against a client labelling model output as human; reaching this line means a person
+    // actually retyped the text.
+    { target_text: newTargetText, origin: 'human', updated_at: now },
+    { where: { id } },
+  );
+  return { ...current, targetText: newTargetText, origin: 'human' };
 };
 
 /** Bump usage counters atomically. Read-modify-write from a concurrent pool loses increments. */

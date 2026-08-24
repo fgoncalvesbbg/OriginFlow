@@ -21,12 +21,13 @@ import type { IMMarket } from '../services';
 import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../utils';
 import type { ParsedAttributeRow } from '../utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import PrintSettingsAdminSection from '../components/admin/PrintSettingsAdminSection';
+import TranslationMemoryAdmin from '../components/admin/translation-memory/TranslationMemoryAdmin';
 
 /**
  * Markets admin — the market → language mapping the print-export dialog offers as
@@ -213,7 +214,7 @@ const MarketsAdminSection: React.FC = () => {
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'prompts' | 'markets' | 'imPrint'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'prompts' | 'markets' | 'imPrint' | 'translationMemory'>('users');
   const [refreshing, setRefreshing] = useState(false);
 
   // Core Data
@@ -1341,6 +1342,9 @@ const AdminDashboard: React.FC = () => {
         <button onClick={() => setActiveTab('imPrint')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'imPrint' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Type size={18} /> IM Print
         </button>
+        <button onClick={() => setActiveTab('translationMemory')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'translationMemory' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <Languages size={18} /> Translation Memory
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow border border-gray-200 min-h-[400px]">
@@ -1350,6 +1354,9 @@ const AdminDashboard: React.FC = () => {
 
         {/* IM PRINT TAB — global print typography for the PDF export. */}
         {activeTab === 'imPrint' && <PrintSettingsAdminSection />}
+
+        {/* TRANSLATION MEMORY TAB — browse, correct and approve the reuse corpus. */}
+        {activeTab === 'translationMemory' && <TranslationMemoryAdmin />}
 
         {/* USERS TAB */}
         {activeTab === 'users' && (
