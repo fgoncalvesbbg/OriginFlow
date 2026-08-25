@@ -18,13 +18,14 @@ import { usePrintColumn } from './usePrintColumn';
 import { previewZoomFor, widthAsColumnPercent, CRAMPED_PREVIEW_ZOOM } from '../../../services/im/im-print-geometry';
 import { imgStyleFor, imgTag, readImgAlign, readImgBorder, readImgValign, IMG_VALIGNS, type ImgVAlign } from './im-image-markup';
 import { imContentVars } from './im-content-style';
-import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns } from 'lucide-react';
+import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns, QrCode } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { markTranslatedFromEn, translationStaleAgainstEn } from '../../../services/im/im-translation-marker';
 import { getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim } from '../../../services/ai/translation-verbatim.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
 import { TEMP_HIGHLIGHT_CLASS } from '../../../services/im/im-resolver';
+import { QR_SKU_PLACEHOLDER_ID } from '../../../config/im.constants';
 import { CalloutVariant, CategoryAttribute, TranslationVerbatim } from '../../../types';
 import type { IMTemplateType } from '../../../types';
 import type { PrintPageSizeKey } from '../../../services/im/im-print-typography';
@@ -34,6 +35,15 @@ import { AttributePicker } from './AttributePicker';
 import { AssetLibraryPanel } from './AssetLibraryPanel';
 import EditorToolbarMenu from './EditorToolbarMenu';
 import { setInsertTarget, clearInsertTarget, insertToActiveEditor, setCommitPlaceholderTarget, clearCommitPlaceholderTarget, commitPlaceholder as commitPlaceholderToTarget } from './insertTarget';
+
+// --- SKU QR code chip --------------------------------------------------------
+// A system-computed placeholder chip (same im-placeholder markup the resolver and
+// translation memory already know how to handle) rather than a plain {{token}}: its
+// resolved value is raw SVG, which the im-placeholder text-chip path splices in verbatim,
+// and freezing it as a chip keeps it out of machine translation entirely. There is
+// nothing to bind — the resolver fills the QR in automatically (im-resolver.ts) from the
+// manual's first bound SKU — so it carries a fixed reserved id instead of an attrId.
+const QR_CHIP_HTML = `&nbsp;<span class="im-placeholder bg-amber-100 border-yellow-300 text-amber-800 border px-2 py-0.5 rounded text-xs font-bold select-none mx-1 cursor-default" contenteditable="false" data-type="text" data-id="${QR_SKU_PLACEHOLDER_ID}" data-label="${encodeURIComponent('QR Code')}" title="SKU QR code — filled in automatically with a QR code linking to use.berlin/<SKU> for this manual's SKU">[QR Code]</span>&nbsp;`;
 
 // --- Verbatim phrase badges (EN tab only) ------------------------------------
 // Known verbatim phrases (translation_verbatims table) are fetched once per
@@ -138,8 +148,10 @@ type EditorBlock =
   | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign }
   | { id: string; type: 'list'; ordered: boolean; items: ListItemData[] }
   // `fit` — 'content' shrinks the table to its content instead of the full column (the
-  // default house style). `colWidths` — author-set column widths in % of the table,
-  // null for auto columns; serialized as a <colgroup> so print honours them too.
+  // default house style). `colWidths` — author-set column widths in ABSOLUTE mm (not
+  // %, which is relative to the table's own width and unresolvable once that width is
+  // itself auto — see setCaretColumnWidth), null for auto columns; serialized as a
+  // <colgroup> so print honours them too.
   | { id: string; type: 'table'; rows: TableCellData[][]; fit?: 'content'; colWidths?: (number | null)[] }
   | { id: string; type: 'conditional'; condition: { id: string; featureId: string; featureName?: string }; content: InlineNode[] }
   | { id: string; type: 'legacy_html'; html: string };
@@ -781,14 +793,16 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
           align: readCellAlign(cell),
           content: normalizeCellInlines(parseInlineNodes(cell as HTMLElement)),
         })));
-        // Width mode + author column widths (a <colgroup> of % widths) must round-trip:
+        // Width mode + author column widths (a <colgroup> of mm widths) must round-trip:
         // the serializer rebuilds the whole tag, so anything not on the node is destroyed
         // on the next keystroke — exactly how pasted Word/Excel column widths were lost.
+        // mm, not %: see setCaretColumnWidth's comment for why a percentage column width
+        // defeats the OTHER column's ability to shrink to its own content.
         const fit = el.getAttribute('data-table-fit') === 'content' ? ('content' as const) : undefined;
         const cols = Array.from(el.querySelectorAll('col'));
         const colWidths = cols.length
           ? cols.map((c) => {
-              const m = ((c as HTMLElement).style.width || '').match(/^(\d+(?:\.\d+)?)%$/);
+              const m = ((c as HTMLElement).style.width || '').match(/^(\d+(?:\.\d+)?)mm$/);
               return m ? Number(m[1]) : null;
             })
           : undefined;
@@ -859,13 +873,15 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         const th = (headerRow || []).map((cell) => cellHtml(cell, 'th')).join('');
         const tr = body.map((row) => `<tr>${row.map((cell) => cellHtml(cell, 'td')).join('')}</tr>`).join('');
         // Width mode + column widths. data-table-fit switches the table to shrink-to-content
-        // (both stylesheets); the <colgroup> carries author column widths in %, flagged with
-        // data-col-widths so full-width tables get table-layout:fixed and honour them exactly.
+        // (both stylesheets); the <colgroup> carries author column widths in mm — NOT %,
+        // which would be relative to the table's own width and unresolvable the moment
+        // that width is itself auto (fit-content) — flagged with data-col-widths so a
+        // full-width table gets table-layout:fixed and honours the pinned column exactly.
         const fitAttr = block.fit === 'content' ? ' data-table-fit="content"' : '';
         const hasWidths = !!block.colWidths?.some((w) => w != null);
         const widthsAttr = hasWidths ? ' data-col-widths="1"' : '';
         const colgroup = hasWidths
-          ? `<colgroup>${(block.colWidths ?? []).map((w) => (w != null ? `<col style="width:${w}%;" />` : '<col />')).join('')}</colgroup>`
+          ? `<colgroup>${(block.colWidths ?? []).map((w) => (w != null ? `<col style="width:${w}mm;" />` : '<col />')).join('')}</colgroup>`
           : '';
         return `<table class="im-table"${fitAttr}${widthsAttr}>${colgroup}<thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
       }
@@ -1018,10 +1034,18 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Mirrors the caret cell's current alignment so the toolbar can highlight it,
   // the same way imgAlign mirrors the selected image's alignment.
   const [caretCellAlign, setCaretCellAlign] = useState<CellAlign | undefined>(undefined);
-  // Mirrors of the caret table's width mode and the caret COLUMN's set width (%),
+  // Mirrors of the caret table's width mode and the caret COLUMN's set width (mm),
   // so the table context row can show the current values.
   const [caretTableFit, setCaretTableFit] = useState<'content' | undefined>(undefined);
   const [caretColWidth, setCaretColWidth] = useState<string>('');
+  // The last NON-NULL table context, kept even after live selection leaves the table.
+  // The "Col" width control is a real text <input> — unlike the table toolbar's other
+  // buttons (mousedown+preventDefault, selection never moves), focusing it to type a
+  // value inevitably moves the browser's selection into the input, so getTableContext()
+  // sees no selection left inside the table by the time Enter/blur commits. Without
+  // this ref, the commit silently fell back to the table's LAST column instead of the
+  // one the operator actually opened the control from.
+  const lastTableCtxRef = useRef<{ tableIdx: number; row: number; col: number } | null>(null);
   // Which block the caret sits in, so the style group can SHOW the current block
   // instead of only offering conversions. Same refresh path as caretInTable.
   const [caretBlockTag, setCaretBlockTag] = useState<'h1' | 'h2' | 'h3' | 'p' | null>(null);
@@ -1035,6 +1059,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const blockEl = el && startEl && el.contains(startEl) ? startEl.closest('h1, h2, h3, p') : null;
     setCaretBlockTag(blockEl ? (blockEl.tagName.toLowerCase() as 'h1' | 'h2' | 'h3' | 'p') : null);
     const ctx = getTableContext();
+    if (ctx) lastTableCtxRef.current = ctx;
     setCaretInTable(!!ctx);
     if (!ctx) { setCaretCellAlign(undefined); setCaretTableFit(undefined); setCaretColWidth(''); return; }
     let seen = -1;
@@ -1048,6 +1073,23 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         setCaretColWidth(w != null ? String(w) : '');
         return;
       }
+    }
+    // Not a structured block — the same opaque-wrapper case findCaretTableEl exists for
+    // (see its comment). Read the live DOM directly instead of blanking the display: a
+    // table that already carries e.g. data-table-fit="content" from a migration was
+    // showing "Fit page" as the pressed pill, so clicking "Fit content" (believing it
+    // was off) landed on an attribute that was already there — no visible change, and
+    // no way to tell from the toolbar that it had ever been on.
+    const table = el?.querySelectorAll('table')[ctx.tableIdx];
+    const tr = table?.querySelectorAll('tr')[ctx.row];
+    const cell = tr?.children[ctx.col] as HTMLElement | undefined;
+    if (table) {
+      setCaretCellAlign(cell ? readCellAlign(cell) : undefined);
+      setCaretTableFit(table.getAttribute('data-table-fit') === 'content' ? 'content' : undefined);
+      const colEl = table.querySelector('colgroup')?.children[ctx.col] as HTMLElement | undefined;
+      const m = (colEl?.style.width || '').match(/^(\d+(?:\.\d+)?)mm$/);
+      setCaretColWidth(m ? m[1] : '');
+      return;
     }
     setCaretCellAlign(undefined);
     setCaretTableFit(undefined);
@@ -1086,7 +1128,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         isUserEditingRef.current = true; // keep the live DOM; just sync blocks + emit
         if (contentRef.current) setBlocks(deserializeHtmlToBlocks(contentRef.current.innerHTML));
       };
-      if (chip.classList.contains('im-placeholder') && onEditPlaceholder) {
+      // The SKU QR code chip is system-computed (no attribute to rebind), so it's excluded
+      // from the generic placeholder-edit modal — clicking it does nothing.
+      if (chip.classList.contains('im-placeholder') && chip.dataset.id !== QR_SKU_PLACEHOLDER_ID && onEditPlaceholder) {
         onEditPlaceholder({
           id: chip.dataset.id || '',
           type: (chip.dataset.type as 'text' | 'image') || 'text',
@@ -1420,21 +1464,120 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     insertBlocksAtCaret([newBlock]);
   };
 
+  /**
+   * The live caret cell + its row/table, by DOM position — the row/column sibling of
+   * findCaretTableEl (see that comment for why DOM position, not the `blocks` model,
+   * is the only lookup that works for a table trapped inside an opaque legacy_html
+   * wrapper). Used by every row/column/cell operation below.
+   */
+  const findCaretCellEl = (): { table: HTMLTableElement; tr: HTMLTableRowElement; cell: HTMLElement; row: number; col: number } | null => {
+    const el = contentRef.current;
+    const ctx = getTableContext() ?? lastTableCtxRef.current;
+    if (!el || !ctx) return null;
+    const table = el.querySelectorAll('table')[ctx.tableIdx] as HTMLTableElement | undefined;
+    if (!table) return null;
+    const trs = table.querySelectorAll('tr');
+    const tr = trs[Math.min(ctx.row, trs.length - 1)] as HTMLTableRowElement | undefined;
+    const cell = tr?.children[Math.min(ctx.col, tr.children.length - 1)] as HTMLElement | undefined;
+    if (!tr || !cell) return null;
+    return { table, tr, cell, row: Array.from(trs).indexOf(tr), col: Array.from(tr.children).indexOf(cell) };
+  };
+
+  /** A blank cell shaped like `source` — same tag (td/th) and attributes (so a layout
+   *  table's width/padding/border carries over), no content and no inherited align. A
+   *  shallow clone (no children) IS an empty cell; nothing to strip but alignment. */
+  const clearedCellClone = (source: Element): HTMLElement => {
+    const clone = source.cloneNode(false) as HTMLElement;
+    clone.removeAttribute('data-align');
+    clone.style.textAlign = '';
+    return clone;
+  };
+
+  // --- DOM-direct table edits ----------------------------------------------
+  // Fallback path for a table the `blocks` model can't see (see findCaretTableEl):
+  // mutate the live DOM node itself, per-row/per-cell, so an existing table's own
+  // tag types (<th> vs <td>) and <thead> membership carry over exactly instead of
+  // being reconstructed from the "row 0 is the header" assumption the structured
+  // model bakes in — an assumption that doesn't hold for a table with no header
+  // concept at all (a plain two-cell icon+text layout, for instance).
+  const addTableRowDom = () => {
+    const found = findCaretCellEl();
+    if (!found) return;
+    const newTr = document.createElement('tr');
+    Array.from(found.tr.children).forEach((cell) => newTr.appendChild(clearedCellClone(cell)));
+    found.tr.after(newTr);
+    syncBlocksFromLiveDom();
+  };
+  const addTableColumnDom = () => {
+    const found = findCaretCellEl();
+    if (!found) return;
+    const { table, col } = found;
+    Array.from(table.querySelectorAll('tr')).forEach((row) => {
+      const cells = Array.from(row.children);
+      const source = cells[Math.min(col, cells.length - 1)];
+      source?.after(clearedCellClone(source));
+    });
+    const colgroup = table.querySelector('colgroup');
+    if (colgroup) {
+      const cols = Array.from(colgroup.children);
+      const at = cols[Math.min(col, cols.length - 1)];
+      if (at) at.after(document.createElement('col')); else colgroup.appendChild(document.createElement('col'));
+    }
+    syncBlocksFromLiveDom();
+  };
+  const removeTableRowDom = () => {
+    const found = findCaretCellEl();
+    if (!found) return;
+    // Never remove the last remaining row, or a row that's genuinely a <thead> header
+    // (a headerless table has nothing here to protect, so this is a strict superset
+    // of the structured model's "never remove row 0").
+    if (found.table.querySelectorAll('tr').length <= 1 || found.tr.closest('thead')) return;
+    found.tr.remove();
+    syncBlocksFromLiveDom();
+  };
+  const removeTableColumnDom = () => {
+    const found = findCaretCellEl();
+    if (!found) return;
+    const { table, col } = found;
+    const rows = Array.from(table.querySelectorAll('tr'));
+    if (Math.max(...rows.map((r) => r.children.length)) <= 1) return;
+    rows.forEach((row) => row.children[Math.min(col, row.children.length - 1)]?.remove());
+    table.querySelector('colgroup')?.children[col]?.remove();
+    syncBlocksFromLiveDom();
+  };
+  const setCellAlignDom = (align: CellAlign) => {
+    const found = findCaretCellEl();
+    if (!found) return;
+    found.cell.setAttribute('data-align', align);
+    found.cell.style.textAlign = align;
+    syncBlocksFromLiveDom();
+  };
+  const removeCaretTableDom = () => {
+    const found = findCaretTableEl();
+    if (!found) return;
+    found.table.remove();
+    syncBlocksFromLiveDom();
+    setCaretInTable(false);
+  };
+
   // Delete the whole table the caret is in. The row/column removers deliberately keep
   // the header and the last column, so without this an unwanted table was permanently
   // stuck in the content.
   const removeCaretTable = () => {
     const el = contentRef.current;
-    const ctx = getTableContext();
+    const ctx = getTableContext() ?? lastTableCtxRef.current;
     if (!el || !ctx) return;
     if (!window.confirm('Delete this entire table?')) return;
     const fresh = deserializeHtmlToBlocks(el.innerHTML);
     let seen = -1;
+    let found = false;
     const next = fresh.filter((b) => {
       if (b.type !== 'table') return true;
       seen++;
-      return seen !== ctx.tableIdx;
+      if (seen === ctx.tableIdx) { found = true; return false; }
+      return true;
     });
+    if (!found) { removeCaretTableDom(); return; }
     isUserEditingRef.current = false; // force the render effect to rewrite the DOM
     setBlocks(next.length ? next : [{ id: createId(), type: 'paragraph', content: [] }]);
     setCaretInTable(false);
@@ -1445,19 +1588,30 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   // Apply a change to the table BLOCK the caret is in. Reads the live DOM first
   // (like switchToHtml) so in-progress typing isn't lost, maps the matching block,
   // then lets the render effect rewrite the DOM + emit onChange.
+  //
+  // Falls back to the last REMEMBERED table position (lastTableCtxRef) when the live
+  // selection has left the table — committing the "Col" width input is exactly that
+  // case: typing into it moved the browser's selection there, so a live-only lookup
+  // would silently target the table's last column instead of the one the operator
+  // actually opened the control from.
+  //
+  // `domFallback` runs instead of silently doing nothing when the caret's table isn't
+  // one the `blocks` model can see at all (findCaretTableEl's opaque-wrapper case) —
+  // every call site below passes its DOM-direct equivalent from the block above.
   const mutateCaretTableBlock = (
     fn: (block: TableBlock, ctx: { row: number; col: number }) => TableBlock,
+    domFallback?: () => void,
   ) => {
     const el = contentRef.current;
     if (!el) return;
-    const ctx = getTableContext();
+    const ctx = getTableContext() ?? lastTableCtxRef.current;
     const fresh = deserializeHtmlToBlocks(el.innerHTML);
     let seen = -1;
     let targetId: string | null = null;
     for (const b of fresh) {
       if (b.type === 'table') { seen++; if (seen === (ctx?.tableIdx ?? 0)) { targetId = b.id; break; } }
     }
-    if (!targetId) return;
+    if (!targetId) { domFallback?.(); return; }
     const next = fresh.map((b) => {
       if (b.id !== targetId || b.type !== 'table') return b;
       const cols = b.rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
@@ -1470,7 +1624,8 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
 
   const mutateCaretTable = (
     fn: (rows: TableCellData[][], ctx: { row: number; col: number }) => TableCellData[][],
-  ) => mutateCaretTableBlock((b, ctx) => ({ ...b, rows: fn(b.rows, ctx) }));
+    domFallback?: () => void,
+  ) => mutateCaretTableBlock((b, ctx) => ({ ...b, rows: fn(b.rows, ctx) }), domFallback);
 
   const tableColCount = (rows: TableCellData[][]) => rows.reduce((m, r) => Math.max(m, r.length), 0) || 1;
   const addTableRow = () => mutateCaretTable((rows, { row }) => {
@@ -1478,7 +1633,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const newRow = Array.from({ length: cols }, () => textCell(''));
     const at = Math.min(row + 1, rows.length);
     return [...rows.slice(0, at), newRow, ...rows.slice(at)];
-  });
+  }, addTableRowDom);
   // Column edits keep colWidths index-aligned — a stale width on the wrong column is
   // worse than no width at all.
   const addTableColumn = () => mutateCaretTableBlock((b, { col }) => {
@@ -1490,9 +1645,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       ? [...b.colWidths.slice(0, col + 1), null, ...b.colWidths.slice(col + 1)]
       : undefined;
     return { ...b, rows, colWidths };
-  });
+  }, addTableColumnDom);
   // Never remove the header row (index 0) or the last remaining row.
-  const removeTableRow = () => mutateCaretTable((rows, { row }) => (rows.length <= 1 || row === 0 ? rows : rows.filter((_, i) => i !== row)));
+  const removeTableRow = () => mutateCaretTable((rows, { row }) => (rows.length <= 1 || row === 0 ? rows : rows.filter((_, i) => i !== row)), removeTableRowDom);
   const removeTableColumn = () => mutateCaretTableBlock((b, { col }) => {
     if (tableColCount(b.rows) <= 1) return b;
     const colWidths = b.colWidths?.filter((_, i) => i !== col);
@@ -1501,34 +1656,106 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       rows: b.rows.map((r) => r.filter((_, i) => i !== col)),
       colWidths: colWidths?.some((w) => w != null) ? colWidths : undefined,
     };
-  });
+  }, removeTableColumnDom);
   // Align the caret's cell only — this editor has no multi-cell selection, so a
   // toolbar click always targets the one cell the caret is in.
   const setCellAlign = (align: CellAlign) => mutateCaretTable((rows, { row, col }) =>
-    rows.map((r, ri) => (ri !== row ? r : r.map((cell, ci) => (ci === col ? { ...cell, align } : cell)))));
+    rows.map((r, ri) => (ri !== row ? r : r.map((cell, ci) => (ci === col ? { ...cell, align } : cell)))), () => setCellAlignDom(align));
+
+  /**
+   * The live <table> DOM element (+ caret column) for width-mode edits — found by DOM
+   * position, NOT by looking the caret's table up in the structured `blocks` model.
+   *
+   * Why: real author content routinely nests a table inside a wrapping element the
+   * top-level parser doesn't recognise (a <div> around a legend, a stray <br>, an
+   * inline <style> block from a Word/Excel paste — all found in production content).
+   * That wrapper — table included — round-trips as an opaque `legacy_html` block, so
+   * it still RENDERS correctly and the table toolbar still APPEARS (caretInTable is
+   * itself DOM-only), but `mutateCaretTableBlock`'s `block.type === 'table'` search
+   * never finds it — every Fit/Col-width click silently did nothing. Row/column DOM
+   * position has no such gap: `getTableContext`'s indices identify the exact live
+   * <table> regardless of what wraps it, so width-mode edits go straight to the DOM
+   * and let the next parse pick the result up — into a structured block where one
+   * exists, or back into the same opaque blob otherwise. Falls back to the last
+   * REMEMBERED position (lastTableCtxRef) once live selection has left the editor —
+   * typing into the "Col" input does exactly that.
+   */
+  const findCaretTableEl = (): { table: HTMLTableElement; col: number } | null => {
+    const el = contentRef.current;
+    const ctx = getTableContext() ?? lastTableCtxRef.current;
+    if (!el || !ctx) return null;
+    const table = el.querySelectorAll('table')[ctx.tableIdx] as HTMLTableElement | undefined;
+    return table ? { table, col: ctx.col } : null;
+  };
+
+  /** Re-derive `blocks` from the live DOM after a direct mutation, without rewriting it
+   *  (the mutation already IS the DOM's current state) — the same "keep the live node,
+   *  just sync + emit" pattern restyleSelectedImg uses for images. */
+  const syncBlocksFromLiveDom = () => {
+    const el = contentRef.current;
+    if (!el) return;
+    isUserEditingRef.current = true;
+    setBlocks(deserializeHtmlToBlocks(el.innerHTML));
+  };
 
   // Width mode of the whole table: full column (default) or shrink-to-content.
   const setTableFit = (fit: 'content' | undefined) => {
+    const found = findCaretTableEl();
+    if (!found) return;
     setCaretTableFit(fit);
-    mutateCaretTableBlock((b) => ({ ...b, fit }));
+    if (fit === 'content') found.table.setAttribute('data-table-fit', 'content');
+    else found.table.removeAttribute('data-table-fit');
+    syncBlocksFromLiveDom();
   };
 
-  // Set/clear the caret COLUMN's width as % of the table. Stored index-aligned with
-  // the widest row; the serializer emits it as a <colgroup>.
-  const setCaretColumnWidth = (pct: number | null) => {
-    mutateCaretTableBlock((b, { col }) => {
-      const cols = tableColCount(b.rows);
-      const widths: (number | null)[] = Array.from({ length: cols }, (_, i) => b.colWidths?.[i] ?? null);
-      widths[Math.min(col, cols - 1)] = pct;
-      return { ...b, colWidths: widths.some((w) => w != null) ? widths : undefined };
-    });
+  /**
+   * Set/clear the caret COLUMN's width in mm (absolute, not %), via a <colgroup> on
+   * the live table.
+   *
+   * Why mm and not a percentage: a % <col> width is relative to the TABLE's own
+   * width, but a "fit content" table's width is ITSELF auto (computed FROM its
+   * columns) — a circular dependency the CSS spec leaves largely to the engine.
+   * Measured in Chromium: a 20%/auto pair on a two-column table left the unset
+   * column at 80% of the table's width regardless of how little text it held (a
+   * single character still claimed 149px of a 187px table) — so a pinned %
+   * column defeats "let the other column shrink to its content" outright, no
+   * matter the table's own width mode. An absolute unit has no such ambiguity:
+   * the pinned column holds its exact size and the other genuinely sizes to its
+   * own content in "fit content" mode, while `table-layout: fixed` (still
+   * applied by both stylesheets whenever a width is set and the table itself is
+   * full-width) makes it hold exactly in "fit page" mode too, with the other
+   * column absorbing the remainder — verified the same way, same two configs.
+   */
+  const setCaretColumnWidth = (mm: number | null) => {
+    const found = findCaretTableEl();
+    if (!found) return;
+    const { table, col } = found;
+    const firstRow = table.querySelector('tr');
+    const colCount = firstRow ? firstRow.children.length : col + 1;
+    let colgroup = table.querySelector('colgroup');
+    if (!colgroup) {
+      colgroup = document.createElement('colgroup');
+      for (let i = 0; i < colCount; i++) colgroup.appendChild(document.createElement('col'));
+      table.insertBefore(colgroup, table.firstChild);
+    }
+    // The table may have grown columns since this colgroup was created.
+    while (colgroup.children.length < colCount) colgroup.appendChild(document.createElement('col'));
+    const cols = Array.from(colgroup.children) as HTMLElement[];
+    const target = cols[Math.min(col, cols.length - 1)];
+    if (target) target.style.width = mm != null ? `${mm}mm` : '';
+    if (cols.some((c) => c.style.width)) table.setAttribute('data-col-widths', '1');
+    else { table.removeAttribute('data-col-widths'); colgroup.remove(); }
+    syncBlocksFromLiveDom();
   };
 
   const commitCaretColWidth = () => {
-    const v = caretColWidth.trim().replace('%', '');
+    const v = caretColWidth.trim().replace(/mm$/i, '');
     if (v === '') { setCaretColumnWidth(null); return; }
     const n = Number(v);
-    if (Number.isFinite(n) && n >= 3 && n <= 97) setCaretColumnWidth(Math.round(n));
+    // Bounded by the printed column itself when known (a column can't exceed the
+    // page), else a generous fallback so the control still works with no profile.
+    const max = printColumn ? printColumn.columnMm : 300;
+    if (Number.isFinite(n) && n >= 3 && n <= max) setCaretColumnWidth(Math.round(n * 10) / 10);
   };
 
   // Mode switching. Going to HTML seeds the textarea from the current blocks;
@@ -1641,7 +1868,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                     panelWidth="w-72"
                     icon={uploadingImg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
                     label={uploadingImg ? 'Uploading…' : 'Insert'}
-                    title="Insert a field, an image or a table at the cursor"
+                    title="Insert a field, an image, a table or a QR code at the cursor"
                     groups={[
                       { label: 'Fields the project fills in', items: [
                         { key: 'ph-text', icon: <Type size={15} className="text-amber-600" />, label: 'Text field', hint: 'Amber chip — the project types the value', onClick: () => { saveSelection(); registerAsInsertTarget(); onInsertPlaceholder?.('text'); } },
@@ -1651,6 +1878,9 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                       { label: 'Image', items: [
                         { key: 'upload', icon: uploadingImg ? <Loader2 size={15} className="animate-spin text-emerald-600" /> : <Upload size={15} className="text-emerald-600" />, label: uploadingImg ? 'Uploading…' : 'Upload an image', hint: 'From this computer — stored with the manual', disabled: uploadingImg, onClick: () => { saveSelection(); registerAsInsertTarget(); imgInputRef.current?.click(); } },
                         { key: 'assets', icon: <Images size={15} className="text-sky-600" />, label: 'Asset library', hint: 'Search and insert an image already uploaded', onClick: () => { saveSelection(); setShowAssetPicker(true); } },
+                      ] },
+                      { label: 'Automatic', items: [
+                        { key: 'qr-sku', icon: <QrCode size={15} className="text-amber-600" />, label: 'SKU QR code', hint: 'Links to use.berlin/<SKU> — filled in automatically, nothing to type', onClick: () => { saveSelection(); insertHtmlAtCursor(QR_CHIP_HTML); } },
                       ] },
                       { label: 'Block', items: [
                         { key: 'table', icon: <TableIcon size={15} className="text-gray-500" />, label: 'Table', hint: 'A 2-column table after the current block', onClick: () => insertBlock('table') },
@@ -1712,7 +1942,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               <TbPill active={caretTableFit !== 'content'} onPress={() => setTableFit(undefined)} title="Stretch the table across the full text column (the house style for data tables)">Fit page</TbPill>
               <TbPill active={caretTableFit === 'content'} onPress={() => setTableFit('content')} title="Shrink the table to what its content needs — no stretched columns">Fit content</TbPill>
             </TbGroup>
-            <TbCaption title="Width of the current column, as % of the table — leave empty for automatic">Col</TbCaption>
+            <TbCaption title="Pin the current column to an exact width, in mm — the other columns still size to their own content. Leave empty for automatic.">Col</TbCaption>
             <input
               value={caretColWidth}
               onChange={(e) => setCaretColWidth(e.target.value)}
@@ -1720,9 +1950,14 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitCaretColWidth(); } }}
               onBlur={commitCaretColWidth}
               placeholder="auto"
-              className="w-14 px-1.5 h-7 text-[11px] border border-gray-200 rounded-md bg-white"
-              title="Current column's width as % of the table (3–97). Empty = automatic."
+              className="w-16 px-1.5 h-7 text-[11px] border border-gray-200 rounded-md bg-white"
+              title="Current column's width in mm — the other columns keep sizing to their own content. Empty = automatic."
             />
+            {printColumn && caretColWidth.trim() !== '' && Number.isFinite(Number(caretColWidth)) && (
+              <TbCaption title={`${caretColWidth}mm is ${Math.round((Number(caretColWidth) / printColumn.columnMm) * 100)}% of the ${Math.round(printColumn.columnMm)}mm printed column`}>
+                ≈{Math.round((Number(caretColWidth) / printColumn.columnMm) * 100)}% of column
+              </TbCaption>
+            )}
             <TbCaption title="Align the current cell's content (text or image)">Cell</TbCaption>
             <TbGroup>
               {([

@@ -376,7 +376,15 @@ describe('icon cells: row height must come from the icon, not its surroundings',
 describe('author table width mode and column widths', () => {
   it('shrinks a data-table-fit="content" table to its content instead of the full column', () => {
     const out = bodyHtmlFor('a5', textNode);
-    expect(out).toContain('.imv-content table[data-table-fit="content"] { width: auto; }');
+    expect(out).toContain('.imv-content table[data-table-fit="content"] { width: auto; max-width: 100%; }');
+  });
+
+  it('caps the fit-content width at the column — width:auto alone lets a text-heavy cell overflow it', () => {
+    // Measured directly: a 3-column table with one prose-heavy column rendered at 942px inside a
+    // 453px-wide column under width:auto with no cap — the text never wrapped at all. max-width
+    // is what forces it back to wrapping instead of bursting the printed page.
+    const out = bodyHtmlFor('a5', textNode);
+    expect(out).toMatch(/\.imv-content table\[data-table-fit="content"\] \{[^}]*max-width:\s*100%/);
   });
 
   it('honours author column widths exactly via fixed layout — but only on full-width tables', () => {
@@ -388,11 +396,23 @@ describe('author table width mode and column widths', () => {
 
   it('passes the fit attribute and the colgroup through to the print HTML untouched', () => {
     const out = bodyHtmlFor('a5', html(
-      '<table class="im-table" data-table-fit="content" data-col-widths="1"><colgroup><col style="width:20%;" /><col /></colgroup><thead><tr><th style="border:0.1mm solid #cbd5e1">A</th><th style="border:0.1mm solid #cbd5e1">B</th></tr></thead><tbody><tr><td style="border:0.1mm solid #cbd5e1">1</td><td style="border:0.1mm solid #cbd5e1">2</td></tr></tbody></table>',
+      '<table class="im-table" data-table-fit="content" data-col-widths="1"><colgroup><col style="width:20mm;" /><col /></colgroup><thead><tr><th style="border:0.1mm solid #cbd5e1">A</th><th style="border:0.1mm solid #cbd5e1">B</th></tr></thead><tbody><tr><td style="border:0.1mm solid #cbd5e1">1</td><td style="border:0.1mm solid #cbd5e1">2</td></tr></tbody></table>',
     ));
     expect(out).toContain('data-table-fit="content"');
     expect(out).toContain('data-col-widths="1"');
-    expect(out).toContain('<col style="width:20%;" />');
+    expect(out).toContain('<col style="width:20mm;" />');
+  });
+
+  it('uses mm, not %, for a pinned column width — a % is ambiguous once the table itself is auto', () => {
+    // Measured in Chromium: with a 20%/auto column pair and the table itself width:auto (fit
+    // content), the unset column still claimed 80% of the table's width regardless of how
+    // little text it held. An absolute mm width has no such circular dependency — the pinned
+    // column holds its size and the OTHER column genuinely shrinks to its own content.
+    const out = bodyHtmlFor('a5', html(
+      '<table class="im-table" data-table-fit="content" data-col-widths="1"><colgroup><col style="width:12mm;" /><col /></colgroup><thead><tr><th style="border:0.1mm solid #cbd5e1">H1</th><th style="border:0.1mm solid #cbd5e1">H2</th></tr></thead><tbody><tr><td style="border:0.1mm solid #cbd5e1">A</td><td style="border:0.1mm solid #cbd5e1">B</td></tr></tbody></table>',
+    ));
+    expect(out).toContain('<col style="width:12mm;" />');
+    expect(out).not.toContain('width:12%');
   });
 });
 

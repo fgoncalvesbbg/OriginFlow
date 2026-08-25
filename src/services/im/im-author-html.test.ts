@@ -54,6 +54,38 @@ describe('table cells', () => {
   });
 });
 
+describe('table tag', () => {
+  // Real shape found in migrated content: `data-table-fit="content"` set at import time
+  // SIDE BY SIDE with an inline `width:100%` — the exact combination that made the Fit
+  // page/Fit content toggle silently do nothing, since the inline declaration beats
+  // `[data-table-fit="content"] { width: auto }` regardless of the stylesheet's specificity.
+  it('drops an inline width that would defeat data-table-fit', () => {
+    const out = sanitizeAuthorHtml('<table style="width:100%;border-collapse:collapse;border:1px solid #ccc" data-table-fit="content"><tr><td>x</td></tr></table>');
+    expect(out).not.toContain('width:100%');
+    expect(out).toContain('data-table-fit="content"');
+    // Untouched: doesn't conflict with anything the print stylesheet controls.
+    expect(out).toContain('border-collapse:collapse');
+    expect(out).toContain('border:1px solid #ccc');
+  });
+
+  it('drops table-layout the same way — it competes with data-col-widths', () => {
+    const out = sanitizeAuthorHtml('<table style="table-layout:fixed;width:600px" data-col-widths="1"><tr><td>x</td></tr></table>');
+    expect(out).not.toContain('table-layout:fixed');
+    expect(out).not.toContain('width:600px');
+  });
+
+  it('does not touch max-width, or width declared on a cell', () => {
+    const out = sanitizeAuthorHtml('<table style="max-width:600px"><tr><td style="width:120px;border:none;">x</td></tr></table>');
+    expect(out).toContain('max-width:600px');
+    expect(out).toContain('width:120px');
+  });
+
+  it('leaves a table with no inline style alone', () => {
+    const clean = '<table class="im-table" data-table-fit="content"><tr><td>x</td></tr></table>';
+    expect(sanitizeAuthorHtml(clean)).toBe(clean);
+  });
+});
+
 describe('images', () => {
   it('drops the inline margins that beat both stylesheets', () => {
     const out = sanitizeAuthorHtml('<img src="a.png" style="max-width:100%;height:auto;margin:1rem 0;" />');
@@ -84,6 +116,7 @@ describe('images', () => {
 describe('idempotence', () => {
   const samples = [
     '<table><tr><th style="width: 22%; padding: 12px; border: 1px solid #ccc;">H</th></tr></table>',
+    '<table style="width:100%" data-table-fit="content"><tr><td>x</td></tr></table>',
     '<img src="a.png" style="margin:1rem 0;max-width:100%;" />',
     '<td style="border:0;padding:8px;">x</td>',
     '<p>Plain content, nothing to repair.</p>',

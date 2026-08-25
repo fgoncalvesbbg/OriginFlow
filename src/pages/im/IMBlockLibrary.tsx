@@ -9,9 +9,10 @@ import { sanitizeHtml } from '../../utils';
 import {
   Layers, Plus, Search, CheckCircle2, Clock, Edit2, Trash2, X,
   ChevronDown, ChevronUp, AlertTriangle, Info, Zap, AlertCircle, FileText, Upload, Images, Loader2, RefreshCw, Flame, Thermometer,
-  Code, Bold, Italic, Underline, Languages as LanguagesIcon
+  Code, Bold, Italic, Underline, Languages as LanguagesIcon, QrCode
 } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
+import { QR_SKU_PLACEHOLDER_ID } from '../../config/im.constants';
 import { AssetLibraryPanel } from './editor/AssetLibraryPanel';
 // Shared blocks are edited outside any one template, so model the HOUSE DEFAULT
 // profile (full IM, A5) — the size most blocks will actually print at.
@@ -557,6 +558,14 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
                   ))}
                 </select>
               )}
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); saveSelection(); insertIntoContent(`{{${QR_SKU_PLACEHOLDER_ID}}}`); }}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                title="SKU QR code — filled in automatically with a QR code linking to use.berlin/<SKU>, wherever this block is used"
+              >
+                <QrCode size={12} /> QR Code
+              </button>
               <button
                 type="button"
                 onMouseDown={e => { e.preventDefault(); saveSelection(); imgInputRef.current?.click(); }}

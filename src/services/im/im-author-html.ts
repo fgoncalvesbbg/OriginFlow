@@ -32,7 +32,11 @@ const PX_SIZE_DECL_RE = /^\s*(?:width|height|max-width|max-height)\s*:\s*\d+(?:\
 const PX_SIZE_ATTR_RE = /\s(?:width|height)\s*=\s*"?\d+(?:\.\d+)?"?/gi;
 const MARGIN_DECL_RE = /^\s*margin(?:-top|-right|-bottom|-left)?\s*:/i;
 const TABLE_BLOCK_RE = /<table\b[\s\S]*?<\/table>/gi;
+export const TABLE_TAG_RE = /<table\b[^>]*>/gi;
 const CELL_TAG_RE = /<t[dh]\b[^>]*>/gi;
+/** Anchored so `max-width:`/`min-width:` never match — only a bare `width` declaration. */
+const WIDTH_DECL_ONLY_RE = /^\s*width\s*:/i;
+const TABLE_LAYOUT_DECL_RE = /^\s*table-layout\s*:/i;
 const PADDING_DECL_RE = /^\s*padding(?:-top|-right|-bottom|-left)?\s*:/i;
 const BORDER_DECL_RE = /^\s*border(?:-(?:top|right|bottom|left))?\s*:\s*(.*)$/i;
 /** A length the reader can actually see — i.e. not `0`, `none` or `0px`. */
@@ -103,9 +107,27 @@ const repairTableCells = (html: string): string =>
   });
 
 /**
+ * Strip the TABLE-level `width` / `table-layout` that compete with the print settings' own
+ * width control — the Fit page / Fit content toggle (`data-table-fit`) and pinned column
+ * widths (`data-col-widths`).
+ *
+ * An inline `width` on the <table> element itself beats every external stylesheet rule
+ * UNCONDITIONALLY, regardless of specificity — including `[data-table-fit="content"] { width:
+ * auto }`. A migrated or pasted table that hardcodes `style="width:100%"` (a real, common shape:
+ * several imported tables carry `data-table-fit="content"` AND `style="width:100%"` on the same
+ * tag, from a source that set both) therefore made the toggle silently do nothing: the attribute
+ * flips, the rule that would apply it is present and correct, and the inline declaration wins
+ * anyway regardless. `table-layout` competes with `data-col-widths`'s fixed/auto choice the same
+ * way. Nothing else on the table tag conflicts with anything the print stylesheet controls — a
+ * table-level border or background is left exactly as authored.
+ */
+const repairTableTag = (html: string): string =>
+  html.replace(TABLE_TAG_RE, (tag) => withoutDeclarations(tag, (d) => WIDTH_DECL_ONLY_RE.test(d) || TABLE_LAYOUT_DECL_RE.test(d)));
+
+/**
  * Everything author HTML needs before it is stored or printed.
  *
  * Safe to call on content that is already clean, and on content that has already been through
  * it — nothing here depends on running exactly once.
  */
-export const sanitizeAuthorHtml = (html: string): string => repairTableCells(repairImages(html));
+export const sanitizeAuthorHtml = (html: string): string => repairTableTag(repairTableCells(repairImages(html)));

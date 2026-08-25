@@ -30,15 +30,6 @@ export interface IMTemplateMetadata {
       body: string;
       heading: string;
     };
-    fontSizes: {
-      body: number;
-      small: number;
-    };
-    headingScale: {
-      h1: number;
-      h2: number;
-      h3: number;
-    };
     textColors: {
       primary: string;
       heading: string;
@@ -134,6 +125,18 @@ export interface ProjectIM {
   finalizedAt?: string | null;
   // Who marked the manual FINAL (email/id) — the sign-off attribution. Null when not final.
   finalizedBy?: string | null;
+  // The Printed IM — a language SUBSET of this same manual (templateType 'im' only),
+  // shipped physically alongside the Warning Leaflet while the Digital IM stays online.
+  // Independent sign-off from isFinalized above, but requires it to already be true (see
+  // migration 129): same content, so it must be locked before a printed subset of it can
+  // be signed off. The subset itself is stored in placeholderData (see
+  // getProjectPrintedLanguages), mirroring how the Digital IM's own language set works.
+  printedIsFinalized?: boolean;
+  printedFinalizedAt?: string | null;
+  printedFinalizedBy?: string | null;
+  // im_print_renders.id of the exact PDF signed off as the shipped Printed IM. Required
+  // when printedIsFinalized is true.
+  printedRenderId?: string | null;
   updatedAt: string;
   // Who last saved the row (email/id) — shown when a concurrent-edit conflict is detected.
   updatedBy?: string | null;
@@ -443,6 +446,15 @@ export interface ResolvedManual {
   sections: ResolvedSection[];
   searchIndex: Array<{ sectionId: string; nodeId: string; text: string }>;
   warnings: string[];
+  /**
+   * Inline SVG QR code for this manual's primary SKU (first bound SKU, or the project's
+   * first SKU if unbound) — the same value the "SKU QR code" chip/token resolves to
+   * (see QR_SKU_PLACEHOLDER_ID in im-resolver.ts). Carried at the top level too so a
+   * renderer can place it automatically (e.g. the Warning Leaflet's print header) without
+   * requiring the chip to be authored anywhere in the content. Absent when the manual has
+   * no SKU to encode.
+   */
+  primarySkuQrSvg?: string;
 }
 
 /**

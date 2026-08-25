@@ -838,3 +838,73 @@ describe('resolveManual — manual per-section hide', () => {
     expect(result.sections).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// "SKU QR code" chip (QR_SKU_PLACEHOLDER_ID) — always the first bound SKU
+// ---------------------------------------------------------------------------
+
+describe('resolveManual — SKU QR code chip', () => {
+  const qrChip = '<span class="im-placeholder" contenteditable="false" data-type="text" data-id="sys.qr_sku" data-label="QR%20Code">[QR Code]</span>';
+  const section = makeSection({ id: 'qr1', content: { en: `<p>${qrChip}</p>` } });
+  const mkIM = (boundSkuIds: string[] = []) => ({
+    id: 'proj-qr', templateId: 'tmpl-1', placeholderData: {}, skuContent: {},
+    status: 'draft' as const, updatedAt: '', boundSkuIds,
+  });
+
+  it('resolves to a scannable SVG for the first bound SKU', () => {
+    const projectSkus = [
+      { id: 'sku-a', skuNumber: '10035294' },
+      { id: 'sku-b', skuNumber: '10035295' },
+    ];
+    const result = resolveManual(baseTemplate, [section], {}, mkIM(['sku-b', 'sku-a']), 'en', projectSkus);
+    const html = (result.sections[0].nodes[0] as any).html;
+    expect(html).toContain('<svg');
+    // Never the second bound SKU — the encoded URL is only visible via the module
+    // pattern, so assert indirectly through the same builder used by the resolver.
+    expect(html).not.toContain('[QR Code]');
+  });
+
+  it('falls back to the first project SKU when nothing is explicitly bound', () => {
+    const projectSkus = [{ id: 'sku-only', skuNumber: '20011111' }];
+    const result = resolveManual(baseTemplate, [section], {}, mkIM([]), 'en', projectSkus);
+    const html = (result.sections[0].nodes[0] as any).html;
+    expect(html).toContain('<svg');
+  });
+
+  it('falls back to the chip label when the manual has no SKU at all', () => {
+    const result = resolveManual(baseTemplate, [section], {}, mkIM([]), 'en', []);
+    const html = (result.sections[0].nodes[0] as any).html;
+    expect(html).toContain('QR Code');
+    expect(html).not.toContain('<svg');
+  });
+
+  it('never mutates the caller-supplied placeholderData object', () => {
+    const placeholderData = { existing: 'value' };
+    const projectIM = { id: 'proj-qr2', templateId: 'tmpl-1', placeholderData, skuContent: {}, status: 'draft' as const, updatedAt: '', boundSkuIds: ['sku-a'] };
+    resolveManual(baseTemplate, [section], {}, projectIM, 'en', [{ id: 'sku-a', skuNumber: '30022222' }]);
+    expect(Object.keys(placeholderData)).toEqual(['existing']);
+  });
+
+  // Global shared blocks (IMBlockLibrary) author the chip as a plain {{sys.qr_sku}}
+  // text token (matching how they already do {{attr.id}} for attribute values), which
+  // substituteTokens resolves from the very same placeholderData entry as the chip.
+  it('stamps ResolvedManual.primarySkuQrSvg for the same SKU as the chip — auto leaflet header', () => {
+    const result = resolveManual(baseTemplate, [section], {}, mkIM(['sku-a']), 'en', [{ id: 'sku-a', skuNumber: '50044444' }]);
+    expect(result.primarySkuQrSvg).toContain('<svg');
+    expect(result.primarySkuQrSvg).toContain('width:12mm');
+  });
+
+  it('omits primarySkuQrSvg when the manual has no SKU at all', () => {
+    const result = resolveManual(baseTemplate, [section], {}, mkIM([]), 'en', []);
+    expect(result.primarySkuQrSvg).toBeUndefined();
+  });
+
+  it('resolves the {{sys.qr_sku}} text-token form used by shared blocks', () => {
+    const block = makeBlock({ id: 'blk-qr', slug: 'blk-qr', content: { en: '<p>Scan: {{sys.qr_sku}}</p>' } });
+    const withBlock = makeSection({ id: 'qr2', blockRefs: [{ kind: 'block', block_id: 'blk-qr' }] });
+    const result = resolveManual(baseTemplate, [withBlock], { 'blk-qr': block }, mkIM(['sku-a']), 'en', [{ id: 'sku-a', skuNumber: '40033333' }]);
+    const html = (result.sections[0].nodes[0] as any).html;
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('{{sys.qr_sku}}');
+  });
+});

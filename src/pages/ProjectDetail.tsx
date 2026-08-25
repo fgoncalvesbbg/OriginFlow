@@ -29,6 +29,9 @@ import {
   getComplianceRequests,
   getCategories,
   getProjectIM,
+  getIMTemplateById,
+  getProjectRequiredLanguages,
+  getProjectPrintedLanguages,
   getProjectIMStaleReasons,
   getPrintRenders,
   getPublishHistory,
@@ -49,10 +52,11 @@ import {
 import { getAttributesForCategory } from '../utils';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
-  ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, ProductionUpdate, ProductionDelayReason,
+  ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, IMTemplate, ProductionUpdate, ProductionDelayReason,
   ProjectAttributeRequest, ProjectSku, SkuAttributeValue
 } from '../types';
 import type { PrintRender } from '../services';
+import { printedManualStatusOf, MANUAL_STATUS_META } from './im/im-manual-status';
 import { StatusBadge } from '../components/StatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
@@ -102,6 +106,9 @@ const ProjectDetail: React.FC = () => {
   // IM State
   const [projectIM, setProjectIM] = useState<ProjectIM | null>(null);
   const [projectLeaflet, setProjectLeaflet] = useState<ProjectIM | null>(null);
+  // The Digital IM's template — needed to derive the Printed IM's language subset
+  // (getProjectPrintedLanguages), which shares this same manual and template.
+  const [imTemplate, setImTemplate] = useState<IMTemplate | null>(null);
   // Drill-down reasons a published manual is out of date (empty = up to date).
   const [imStaleReasons, setImStaleReasons] = useState<import('../services').StaleReason[]>([]);
   const [leafletStaleReasons, setLeafletStaleReasons] = useState<import('../services').StaleReason[]>([]);
@@ -395,6 +402,76 @@ const ProjectDetail: React.FC = () => {
     );
   };
 
+  // The Printed IM — a language subset of the Digital IM's own manual (projectIM), shipped
+  // physically with the product alongside the Warning Leaflet. Derived rather than stored
+  // separately: it shares projectIM's content, template and print-render history, only
+  // narrowing which languages are signed off as "the printed booklet".
+  const printedLanguages = (projectIM && imTemplate)
+    ? getProjectPrintedLanguages(imTemplate, projectIM.placeholderData)
+    : [];
+  const requiredLanguagesForPrint = (projectIM && imTemplate)
+    ? getProjectRequiredLanguages(imTemplate, projectIM.placeholderData)
+    : [];
+  const printedRenderCandidate = printedLanguages.length
+    ? imRenders.find(r => r.languages.length === printedLanguages.length && r.languages.every(l => printedLanguages.includes(l))) ?? null
+    : null;
+  const printedIsStale = !printedRenderCandidate ? null
+    : (printedRenderCandidate.imVersion == null || projectIM?.version == null) ? null
+    : printedRenderCandidate.imVersion < projectIM.version;
+  const printedStatus = printedManualStatusOf(!!projectIM?.printedIsFinalized, !!printedRenderCandidate, printedIsStale);
+
+  // Completion checklist: the project can only be marked Completed once all three
+  // documents that ship — Digital IM, Printed IM, Warning Leaflet — are final. See
+  // handleUpdateProject and the Status select in the Edit Project Details modal below.
+  const imCompletionChecklist = {
+    digitalFinal: !!projectIM?.isFinalized,
+    printedFinal: !!projectIM?.printedIsFinalized,
+    leafletFinal: !!projectLeaflet?.isFinalized,
+  };
+  const imAllFinal = imCompletionChecklist.digitalFinal && imCompletionChecklist.printedFinal && imCompletionChecklist.leafletFinal;
+
+  // Card for the Printed IM, sitting between the Digital IM and the Warning Leaflet — same
+  // gradient-header + status-grid layout as those two, but its "Edit" link goes to the same
+  // Digital IM generator (where the Printed IM's languages/finalize controls live).
+  const renderPrintedIMCard = () => (
+    <div className="mt-8 bg-gradient-to-br from-sky-900 to-sky-950 rounded-xl p-8 text-white shadow-lg flex justify-between items-center">
+      <div>
+        <h3 className="text-2xl font-bold mb-2 flex items-center gap-2"><FileDown className="text-sky-300" /> Printed IM</h3>
+        <p className="text-sky-100/80 text-sm max-w-lg">
+          The subset of the Instruction Manual's languages printed and shipped in the box, alongside the Warning Leaflet.
+        </p>
+      </div>
+      <Link to={`/project/${project?.id}/im-generator`} className="bg-sky-500 hover:bg-sky-400 text-sky-950 px-6 py-3 rounded-xl font-bold shadow-lg transition-all flex items-center gap-2">
+        {projectIM ? 'Manage' : 'Start Generator'} <ArrowRight size={18} />
+      </Link>
+    </div>
+  );
+
+  const renderPrintedIMStatusGrid = () => (
+    <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+        <h4 className="text-xs font-bold text-muted uppercase mb-2">Status</h4>
+        <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${MANUAL_STATUS_META[printedStatus].classes}`}>
+          {MANUAL_STATUS_META[printedStatus].label}
+        </span>
+      </div>
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+        <h4 className="text-xs font-bold text-muted uppercase mb-2">Printed Languages</h4>
+        <span className="font-mono text-gray-700">
+          {printedLanguages.length} of {requiredLanguagesForPrint.length || printedLanguages.length}
+        </span>
+      </div>
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
+        <h4 className="text-xs font-bold text-muted uppercase mb-2">Signed off</h4>
+        <span className="font-mono text-gray-700">
+          {projectIM?.printedIsFinalized && projectIM.printedFinalizedAt
+            ? new Date(projectIM.printedFinalizedAt).toLocaleString()
+            : '—'}
+        </span>
+      </div>
+    </div>
+  );
+
   const loadProjectData = async () => {
     if (!id) return;
     try {
@@ -431,6 +508,14 @@ const ProjectDetail: React.FC = () => {
         setProjectIM(imData || null);
         setProjectLeaflet(leafletData || null);
         setProductionUpdates(prodUpdates);
+
+        // The Digital IM's template — best-effort, only needed to derive the Printed IM's
+        // language subset for the status card below.
+        if (imData?.templateId) {
+          getIMTemplateById(imData.templateId).then(setImTemplate).catch(() => setImTemplate(null));
+        } else {
+          setImTemplate(null);
+        }
 
         // Historical print-PDF renders for each doc type (best-effort — [] off-line/on error).
         getPrintRenders(p.id, 'im').then(setImRenders).catch(() => {});
@@ -569,7 +654,24 @@ const ProjectDetail: React.FC = () => {
   const handleUpdateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!project) return;
-    
+
+    // Gate the transition INTO Completed (not already-completed projects being edited for
+    // other reasons) on all three IM documents — Digital IM, Printed IM, Warning Leaflet —
+    // being published and FINAL, since those are what "the project is done" means here.
+    if (
+      projectEditForm.status === ProjectOverallStatus.COMPLETED &&
+      project.status !== ProjectOverallStatus.COMPLETED &&
+      !imAllFinal
+    ) {
+      const missing = [
+        !imCompletionChecklist.digitalFinal && 'Digital IM',
+        !imCompletionChecklist.printedFinal && 'Printed IM',
+        !imCompletionChecklist.leafletFinal && 'Warning Leaflet',
+      ].filter(Boolean).join(', ');
+      showNotification(`Can't mark this project Completed yet — still missing FINAL: ${missing}.`, 'error');
+      return;
+    }
+
     try {
       await updateProject(project.id, projectEditForm);
       setIsEditProjectOpen(false);
@@ -2226,6 +2328,11 @@ const ProjectDetail: React.FC = () => {
 
             {renderPrintTimeline(imRenders, 'indigo')}
 
+            {/* Printed IM — a language subset of the manual above, not a separate document.
+                Only shown once there's a Digital IM to derive it from. */}
+            {projectIM && renderPrintedIMCard()}
+            {projectIM && renderPrintedIMStatusGrid()}
+
             {/* Warning Leaflet */}
             <div className="mt-8 bg-gradient-to-br from-amber-900 to-amber-950 rounded-xl p-8 text-white shadow-lg flex justify-between items-center">
                <div>
@@ -2463,8 +2570,20 @@ const ProjectDetail: React.FC = () => {
                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                   <select className="w-full border rounded p-2 text-sm" value={projectEditForm.status} onChange={e => setProjectEditForm({...projectEditForm, status: e.target.value as ProjectOverallStatus})}>
-                     {Object.values(ProjectOverallStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                     {Object.values(ProjectOverallStatus).map(s => {
+                       const locksCompleted = s === ProjectOverallStatus.COMPLETED && project?.status !== ProjectOverallStatus.COMPLETED && !imAllFinal;
+                       return <option key={s} value={s} disabled={locksCompleted}>{s}{locksCompleted ? ' (locked)' : ''}</option>;
+                     })}
                   </select>
+                  {project?.status !== ProjectOverallStatus.COMPLETED && !imAllFinal && (
+                    <p className="text-[11px] text-muted mt-1">
+                      "Completed" is locked until Digital IM, Printed IM and Warning Leaflet are all published and FINAL — still missing: {[
+                        !imCompletionChecklist.digitalFinal && 'Digital IM',
+                        !imCompletionChecklist.printedFinal && 'Printed IM',
+                        !imCompletionChecklist.leafletFinal && 'Warning Leaflet',
+                      ].filter(Boolean).join(', ')}.
+                    </p>
+                  )}
                </div>
                <div className="flex justify-end gap-3 pt-4">
                   <button type="button" onClick={() => setIsEditProjectOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium">Cancel</button>

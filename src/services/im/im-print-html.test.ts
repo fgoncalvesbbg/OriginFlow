@@ -96,6 +96,21 @@ describe('buildPrintPartsHtml — Warning Leaflet compact layout', () => {
     });
   });
 
+  it('compact: places the SKU QR code in the header, opposite the logo, when the manual has one', () => {
+    const withQr: PrintManual = { ...manual, primarySkuQrSvg: '<svg><rect/></svg>' };
+    const [part] = buildPrintPartsHtml([withQr], { ...opts, compact: true });
+    expect(part.html).toContain('im-leaflet-qr');
+    expect(part.html).toContain('<svg><rect/></svg>');
+    // Logo first, QR second — margin-left:auto (CSS) then docks the QR to the right.
+    expect(part.html.indexOf('im-leaflet-logo')).toBeLessThan(part.html.indexOf('im-leaflet-qr'));
+  });
+
+  it('compact: no QR element in the header when the manual has no SKU to encode', () => {
+    const [part] = buildPrintPartsHtml([manual], { ...opts, compact: true });
+    // The stylesheet always defines the .im-leaflet-qr rule; only the ELEMENT is conditional.
+    expect(part.html).not.toContain('<div class="im-leaflet-qr">');
+  });
+
   it('compact: single language has no edge tab (matches the main manual)', () => {
     const [part] = buildPrintPartsHtml([manual], { ...opts, compact: true });
     expect(part.tab).toBeNull();
@@ -188,6 +203,28 @@ describe('default logo fallback — normalized-empty companyLogoUrl', () => {
     });
     expect(part.html).toContain('https://example.com/custom.png');
     expect(part.html).not.toContain(DEFAULT_LEAFLET_LOGO_URL);
+  });
+});
+
+describe('buildPrintHtml / buildCoverPartHtml — full IM cover footer QR code', () => {
+  const withQr: PrintManual = { ...manual, primarySkuQrSvg: '<svg><rect/></svg>' };
+
+  it('buildPrintHtml: places the SKU QR code in the cover footer, opposite the company name', () => {
+    const html = buildPrintHtml([withQr], opts);
+    expect(html).toContain('<div class="im-cover-qr"><svg><rect/></svg></div>');
+    // Company name/marks column first, QR second — CSS docks it to the far side.
+    expect(html.indexOf('<div class="im-cover-footer-text">')).toBeLessThan(html.indexOf('<div class="im-cover-qr">'));
+  });
+
+  it('buildCoverPartHtml: also carries the QR code (used by the compact-cover render path)', () => {
+    const html = buildCoverPartHtml([withQr], opts, [null]);
+    expect(html).toContain('im-cover-qr');
+    expect(html).toContain('<svg><rect/></svg>');
+  });
+
+  it('no QR element in the cover footer when the manual has no SKU to encode', () => {
+    const html = buildPrintHtml([manual], opts);
+    expect(html).not.toContain('<div class="im-cover-qr">');
   });
 });
 

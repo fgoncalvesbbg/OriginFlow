@@ -71,6 +71,27 @@ export const manualStatusOf = (im: ManualStatusInput, isStale: boolean | null): 
   return 'draft';
 };
 
+/**
+ * Derived display status for the PRINTED IM track (the project's language-subset print
+ * run, shipped with the product) — reuses the exact same `ManualStatus` vocabulary as
+ * `manualStatusOf` above, so the badge/group UI doesn't need a second set of colors/labels.
+ * Unlike the Digital IM there's no draft/generated split or Markup.io review round on this
+ * track: it's either "no print render yet" (draft), "rendered and matches the current
+ * manual" (published), "rendered, but the manual changed since" (needs_republish), or
+ * locked (final). `hasRender` = a print render exists for the current printed language
+ * set at all; `isStale` mirrors the Digital IM's staleness check (null = check failed).
+ */
+export const printedManualStatusOf = (
+  printedIsFinalized: boolean,
+  hasRender: boolean,
+  isStale: boolean | null,
+): ManualStatus => {
+  if (printedIsFinalized) return 'final';
+  if (!hasRender) return 'draft';
+  if (isStale === null) return 'unknown';
+  return isStale ? 'needs_republish' : 'published';
+};
+
 export type StatusTone = 'indigo' | 'emerald' | 'amber' | 'orange';
 
 export interface ManualStatusMeta {

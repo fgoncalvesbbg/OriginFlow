@@ -6,6 +6,7 @@ import {
   isInReview,
   manualStatusOf,
   nextActionOf,
+  printedManualStatusOf,
   type ManualStatus,
 } from './im-manual-status';
 
@@ -86,6 +87,27 @@ describe('manualStatusOf', () => {
     // Editing / republishing ends the round; a stale cached outcome must not resurrect it.
     expect(manualStatusOf({ ...reviewed({ status: 'draft' }), reviewDone: true }, false)).toBe('draft');
     expect(manualStatusOf({ ...reviewed({ version: 4, reviewVersion: 3 }), reviewDone: true }, false)).toBe('published');
+  });
+});
+
+describe('printedManualStatusOf', () => {
+  it('reports Final regardless of render/staleness', () => {
+    expect(printedManualStatusOf(true, true, false)).toBe('final');
+    expect(printedManualStatusOf(true, false, null)).toBe('final');
+  });
+
+  it('reports Draft when no print render exists yet', () => {
+    expect(printedManualStatusOf(false, false, false)).toBe('draft');
+    expect(printedManualStatusOf(false, false, true)).toBe('draft');
+  });
+
+  it('distinguishes a stale render from an up-to-date one, once rendered', () => {
+    expect(printedManualStatusOf(false, true, true)).toBe('needs_republish');
+    expect(printedManualStatusOf(false, true, false)).toBe('published');
+  });
+
+  it('reports Status unknown when the staleness check failed', () => {
+    expect(printedManualStatusOf(false, true, null)).toBe('unknown');
   });
 });
 

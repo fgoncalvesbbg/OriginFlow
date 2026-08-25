@@ -59,6 +59,8 @@ export const findTempHighlightSections = (resolved: ResolvedManual): Array<{ id:
     .map((s) => ({ id: s.id, title: s.title }));
 
 import { getCalloutTitle } from './callout-titles.i18n';
+import { buildSkuQrSvg } from './im-qr-code';
+import { QR_SKU_PLACEHOLDER_ID } from '../../config/im.constants';
 import {
   IMTemplate,
   IMSection,
@@ -347,9 +349,11 @@ const resolveSkuSlotRef = (
  *                      Pass null when resolving for template preview (no project context).
  * @param language      BCP-47 language code to resolve content into.
  * @param projectSkus   The project's SKUs (id + number), used to turn a chapter's
- *                      sectionSkus scope into the "Applies to: …" header numbers and to
- *                      hide a chapter whose scope doesn't intersect the bound SKUs.
- *                      Defaults to [] (no SKU headers, no scope-based hiding).
+ *                      sectionSkus scope into the "Applies to: …" header numbers, to
+ *                      hide a chapter whose scope doesn't intersect the bound SKUs, and to
+ *                      pick the SKU the "SKU QR code" chip (QR_SKU_PLACEHOLDER_ID) encodes
+ *                      (always the first bound SKU, or the first project SKU if unbound).
+ *                      Defaults to [] (no SKU headers, no scope-based hiding, no QR code).
  */
 export const resolveManual = (
   template: IMTemplate,
@@ -367,7 +371,9 @@ export const resolveManual = (
 ): ResolvedManual => {
   nodeCounter = 0; // reset per resolve call so IDs are stable for the same inputs
 
-  const placeholderData: Record<string, string> = projectIM?.placeholderData ?? {};
+  // Copied, never the caller's own object — the QR chip injection below writes into this
+  // map, and mutating projectIM.placeholderData in place would leak into the caller's state.
+  const placeholderData: Record<string, string> = { ...(projectIM?.placeholderData ?? {}) };
   const conditions: Record<string, boolean | string> = {};
   // Flatten conditions from placeholderData booleans (legacy ProjectIMGenerator stores them as 'true'/'false')
   for (const [k, v] of Object.entries(placeholderData)) {
@@ -392,6 +398,18 @@ export const resolveManual = (
   const boundSkuSet = new Set<string>(
     boundSkuIds.length ? boundSkuIds : projectSkus.map(s => s.id),
   );
+
+  // "SKU QR code" chip (see QR_SKU_PLACEHOLDER_ID) and the manual's `primarySkuQrSvg` —
+  // always the first bound SKU, so it's unambiguous even for a leaflet template shared
+  // across a multi-SKU family. Both stay undefined (chip falls back to its own label; no
+  // top-level field) when the manual has no SKU at all.
+  const qrSkuId = boundSkuIds[0] ?? projectSkus[0]?.id;
+  const qrSkuNumber = qrSkuId ? skuNumberById.get(qrSkuId) : undefined;
+  if (qrSkuNumber) placeholderData[QR_SKU_PLACEHOLDER_ID] = buildSkuQrSvg(qrSkuNumber);
+  // 12mm — placed automatically into the Warning Leaflet's header band (not spliced into
+  // body prose, so it isn't tied to the logo's own 8mm height). Sized for reliable scanning
+  // rather than to match the logo; buildLeafletHeader below gives the header room to grow.
+  const primarySkuQrSvg = qrSkuNumber ? buildSkuQrSvg(qrSkuNumber, 12) : undefined;
   // Resolve a section's SKU scope against the bound SKUs. Returns:
   //   { hidden: true }            → scoped to SKUs, none of which are bound → drop section
   //   { labels: string[] }        → scoped to bound SKUs → render "Applies to: …" numbers
@@ -564,5 +582,6 @@ export const resolveManual = (
     sections: resolvedSections,
     searchIndex,
     warnings,
+    ...(primarySkuQrSvg ? { primarySkuQrSvg } : {}),
   };
 };

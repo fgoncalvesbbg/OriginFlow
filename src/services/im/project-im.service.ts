@@ -18,6 +18,10 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   isFinalized: data.is_finalized ?? false,
   finalizedAt: data.finalized_at ?? null,
   finalizedBy: data.finalized_by ?? null,
+  printedIsFinalized: data.printed_is_finalized ?? false,
+  printedFinalizedAt: data.printed_finalized_at ?? null,
+  printedFinalizedBy: data.printed_finalized_by ?? null,
+  printedRenderId: data.printed_render_id ?? null,
   updatedAt: data.updated_at,
   updatedBy: data.updated_by ?? null,
   version: data.version ?? 0,
@@ -147,13 +151,17 @@ export const saveProjectIM = async (
     if (boundSkuIds !== undefined) payload.bound_sku_ids = boundSkuIds;
 
     // Echo back only the cheap columns we can't know client-side (row id on insert,
-    // the stored version when a draft save omits it, plus the finalize flag which this
+    // the stored version when a draft save omits it, plus the finalize flags which this
     // write never touches) — never the full jsonb row, which would download the whole
-    // payload again after every save. Echoing is_finalized keeps a publish/save of a
-    // FINAL manual from wrongly clearing the lock in the caller's mapped instance.
+    // payload again after every save. Echoing is_finalized/printed_is_finalized keeps a
+    // publish/save of a FINAL (or Printed-FINAL) manual from wrongly clearing the lock
+    // in the caller's mapped instance.
     const context = existing ? 'saveProjectIM update' : 'saveProjectIM insert';
-    const cols = 'id, version, updated_at, is_finalized, finalized_at';
-    type EchoedColumns = { id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null };
+    const cols = 'id, version, updated_at, is_finalized, finalized_at, printed_is_finalized, printed_finalized_at, printed_finalized_by, printed_render_id';
+    type EchoedColumns = {
+      id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null;
+      printed_is_finalized: boolean; printed_finalized_at: string | null; printed_finalized_by: string | null; printed_render_id: string | null;
+    };
 
     const runWrite = (timeoutMs: number) => withDeadline(
         (signal) => existing
@@ -226,6 +234,41 @@ export const setProjectIMFinalized = async (
     { where: { project_id: projectId, template_type: templateType } },
   );
   return { isFinalized, finalizedAt, finalizedBy, updatedAt };
+};
+
+/**
+ * Mark the Printed IM (the project's language subset of the Digital IM, shipped
+ * physically with the product) as final/locked, or unlock it — touching only the
+ * printed_* columns, same isolation as setProjectIMFinalized above. Finalizing must name
+ * the exact im_print_renders row being signed off; the DB guard (migration 129) also
+ * requires the Digital IM (`is_finalized`) to already be true, since they share content.
+ */
+export const setProjectPrintedFinalized = async (
+  projectId: string,
+  templateType: IMTemplateType,
+  isFinalized: boolean,
+  renderId?: string | null,
+): Promise<{ printedIsFinalized: boolean; printedFinalizedAt: string | null; printedFinalizedBy: string | null; printedRenderId: string | null; updatedAt: string }> => {
+  if (isFinalized && !renderId) {
+    throw new Error('Select a print render to sign off against before marking the Printed IM final.');
+  }
+  const printedFinalizedAt = isFinalized ? new Date().toISOString() : null;
+  const user = isFinalized ? await auth.getUser() : null;
+  const printedFinalizedBy = isFinalized ? (user?.email ?? user?.id ?? null) : null;
+  const printedRenderId = isFinalized ? (renderId ?? null) : null;
+  const updatedAt = new Date().toISOString();
+  await db.updateWhere(
+    'project_ims',
+    {
+      printed_is_finalized: isFinalized,
+      printed_finalized_at: printedFinalizedAt,
+      printed_finalized_by: printedFinalizedBy,
+      printed_render_id: printedRenderId,
+      updated_at: updatedAt,
+    },
+    { where: { project_id: projectId, template_type: templateType } },
+  );
+  return { printedIsFinalized: isFinalized, printedFinalizedAt, printedFinalizedBy, printedRenderId, updatedAt };
 };
 
 // ---------------------------------------------------------------------------
@@ -307,11 +350,12 @@ export const deleteProjectIM = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
 ): Promise<void> => {
-    const row = await db.selectMaybeOne<{ is_finalized?: boolean }>('project_ims', {
-      columns: 'is_finalized',
+    const row = await db.selectMaybeOne<{ is_finalized?: boolean; printed_is_finalized?: boolean }>('project_ims', {
+      columns: 'is_finalized, printed_is_finalized',
       where: { project_id: projectId, template_type: templateType },
     });
     if (row?.is_finalized) throw new Error('This manual is marked FINAL — unlock it before deleting.');
+    if (row?.printed_is_finalized) throw new Error('The Printed IM is marked FINAL — unlock it before deleting.');
     await db.delete('project_ims', { where: { project_id: projectId, template_type: templateType } });
 };
 

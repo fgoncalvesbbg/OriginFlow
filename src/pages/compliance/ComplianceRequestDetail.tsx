@@ -271,6 +271,14 @@ LaunchFlow PLM Platform`;
       doc.setFont("helvetica", "normal");
       doc.text(`${supplier?.name || 'Unknown'}`, 45, y);
 
+      if (req.respondentName) {
+        y += 8;
+        doc.setFont("helvetica", "bold");
+        doc.text(`Declared By:`, 14, y);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${req.respondentName}${req.respondentPosition ? `, ${req.respondentPosition}` : ''}`, 45, y);
+      }
+
       y += 15;
       doc.line(14, y, 196, y);
       y += 10;
@@ -390,6 +398,10 @@ LaunchFlow PLM Platform`;
 
   const isOverdue = req.deadline && new Date(req.deadline) < new Date() && req.status === ComplianceRequestStatus.PENDING_SUPPLIER;
 
+  // The supplier's declaration is final once submitted — internal users can review it
+  // here but must not be able to rewrite what was answered.
+  const isLocked = req.status !== ComplianceRequestStatus.PENDING_SUPPLIER;
+
   const groupedReqs = requirements.reduce((acc, r) => {
       const sec = r.section || 'General Requirements';
       if (!acc[sec]) acc[sec] = [];
@@ -429,6 +441,12 @@ LaunchFlow PLM Platform`;
             }`}>
                 {req.status.replace('_', ' ')}
             </span>
+            {req.respondentName && (
+                <span className="flex items-center gap-1.5">
+                    <User size={14} className="text-gray-400" />
+                    Declared by: <strong>{req.respondentName}{req.respondentPosition ? `, ${req.respondentPosition}` : ''}</strong>
+                </span>
+            )}
           </div>
         </div>
         
@@ -481,6 +499,15 @@ LaunchFlow PLM Platform`;
         </div>
       </div>
 
+      {isLocked && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
+          <Lock size={18} className="text-blue-600 shrink-0" />
+          <p className="text-sm text-blue-900">
+            This declaration was submitted by the supplier and is locked — responses can no longer be edited.
+          </p>
+        </div>
+      )}
+
       <div className="space-y-6 mb-8">
          {sortedSections.map(section => (
             <div key={section} className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
@@ -530,31 +557,34 @@ LaunchFlow PLM Platform`;
                             
                             <div className="w-full md:w-96 shrink-0">
                                 <div className="flex items-center gap-4 mb-3">
-                                    <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${currentAnswer === ComplianceResponseStatus.COMPLY ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-gray-200'}`}>
-                                        <input 
-                                            type="radio" 
+                                    <label className={`flex items-center gap-2 p-2 rounded border ${currentAnswer === ComplianceResponseStatus.COMPLY ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-gray-200'} ${isLocked ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                        <input
+                                            type="radio"
                                             className="text-emerald-600"
                                             checked={currentAnswer === ComplianceResponseStatus.COMPLY}
+                                            disabled={isLocked}
                                             onChange={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
                                         />
                                         <span className="text-sm font-medium">Accept</span>
                                     </label>
 
-                                    <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-rose-50 border-rose-200 text-rose-700' : 'border-gray-200'}`}>
-                                        <input 
-                                            type="radio" 
+                                    <label className={`flex items-center gap-2 p-2 rounded border ${currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY ? 'bg-rose-50 border-rose-200 text-rose-700' : 'border-gray-200'} ${isLocked ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                        <input
+                                            type="radio"
                                             className="text-rose-600"
                                             checked={currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY}
+                                            disabled={isLocked}
                                             onChange={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
                                         />
                                         <span className="text-sm font-medium">Reject</span>
                                     </label>
                                 </div>
-                                <textarea 
-                                    className="w-full text-sm border rounded p-2 outline-none"
+                                <textarea
+                                    className={`w-full text-sm border rounded p-2 outline-none ${isLocked ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
                                     rows={2}
                                     placeholder="Add comment..."
                                     value={comments[r.id] || ''}
+                                    disabled={isLocked}
                                     onChange={(e) => setComments({...comments, [r.id]: e.target.value})}
                                 />
                             </div>
@@ -567,12 +597,14 @@ LaunchFlow PLM Platform`;
          ))}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg flex justify-end gap-3 z-30 md:pl-64">
-         <button onClick={() => navigate('/compliance')} className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded font-medium">Cancel</button>
-         <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded font-bold shadow disabled:opacity-50 flex items-center gap-2">
-            <Save size={18} /> {saving ? 'Saving...' : 'Save & Update Status'}
-         </button>
-      </div>
+      {!isLocked && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg flex justify-end gap-3 z-30 md:pl-64">
+           <button onClick={() => navigate('/compliance')} className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded font-medium">Cancel</button>
+           <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded font-bold shadow disabled:opacity-50 flex items-center gap-2">
+              <Save size={18} /> {saving ? 'Saving...' : 'Save & Update Status'}
+           </button>
+        </div>
+      )}
     </Layout>
   );
 };

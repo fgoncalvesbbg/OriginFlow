@@ -273,11 +273,17 @@ const IMTemplateEditor: React.FC = () => {
         setMetaSettings(normalizeIMTemplateMetadata(temp.metadata));
 
         const secs = await getIMSections(temp.id);
-        // Sections with content but no block_refs get an auto inline row so the
-        // row composer can display them without a separate data migration.
+        // A section with legacy free-typed content but no INLINE row gets one synthesized
+        // at the front so the row composer can display and edit it — without this, content
+        // left over from before a shared block got attached (the resolver's hybrid-mode
+        // fallback, im-resolver.ts) is invisible in this editor yet still prepended to every
+        // resolved manual. Covers both the never-migrated case (blockRefs === []) and the
+        // "shared blocks added on top of old prose" case (blockRefs are all kind 'block').
         const normalizedSecs = secs.map(s => {
-          if ((s.blockRefs ?? []).length === 0 && Object.values(s.content || {}).some(v => v)) {
-            return { ...s, blockRefs: [{ kind: 'inline' as const, content: s.content }] };
+          const refs = s.blockRefs ?? [];
+          const hasInlineRef = refs.some(r => r.kind === 'inline');
+          if (!hasInlineRef && Object.values(s.content || {}).some(v => v)) {
+            return { ...s, blockRefs: [{ kind: 'inline' as const, content: s.content }, ...refs] };
           }
           return s;
         });
@@ -866,6 +872,28 @@ const IMTemplateEditor: React.FC = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [focusMode]);
+
+  // Distraction-free editing: covers the app's sidebar + top header with a fixed,
+  // full-viewport overlay so the editor gets the whole screen. A standing preference
+  // (like the sidebar collapse), not a per-session mode, so it's persisted. z-[45] sits
+  // above Layout's chrome (sidebar z-40, sticky header z-20) but below every modal in
+  // this page (z-50/[65]/[70], including per-section focus mode above), so opening a
+  // modal — or entering focus mode — while fullscreen still shows on top.
+  const [editorFullscreen, setEditorFullscreen] = useState<boolean>(() => {
+    try { return localStorage.getItem('im.template.fullscreen') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('im.template.fullscreen', editorFullscreen ? '1' : '0'); } catch { /* ignore */ }
+  }, [editorFullscreen]);
+  useEffect(() => {
+    if (!editorFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Let focus mode's own handler close IT first — one Escape steps out one layer.
+      if (e.key === 'Escape' && !focusMode) setEditorFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editorFullscreen, focusMode]);
 
   // Template-wide find & replace (chip-safe — see im-find-replace.ts).
   const [showFindReplace, setShowFindReplace] = useState(false);
@@ -1859,7 +1887,12 @@ const IMTemplateEditor: React.FC = () => {
            stays silent (its whole point), and translation shows its own progress modal; the
            local draft is the safety net for both. */}
        <SaveProgressOverlay isOpen={blockingSave} message="Saving your work…" />
-       <div className="flex flex-col h-[calc(100vh-100px)]" style={imThemeVars}>
+       <div
+         className={editorFullscreen
+           ? 'fixed inset-0 z-[45] bg-light p-4 md:p-6 flex flex-col overflow-hidden'
+           : 'flex flex-col h-[calc(100vh-100px)]'}
+         style={imThemeVars}
+       >
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -1966,6 +1999,20 @@ const IMTemplateEditor: React.FC = () => {
                ) : (
                  <button onClick={handleSaveAll} disabled={saving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 shadow"><Save size={16} /> {saving ? 'Saving...' : unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}</button>
                )}
+
+               {/* Fullscreen — a view preference, not a content action, so it sits apart
+                   from the workflow buttons rather than inside the gear. */}
+               <button
+                 onClick={() => setEditorFullscreen((f) => !f)}
+                 title={editorFullscreen
+                   ? 'Exit fullscreen (Esc)'
+                   : 'Fullscreen — hide the sidebar and app header so the editor uses the whole screen'}
+                 className={`flex items-center justify-center w-9 h-9 rounded-xl border transition-colors shadow ${
+                   editorFullscreen ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-light'
+                 }`}
+               >
+                 {editorFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+               </button>
 
                {/* Gear — template-wide setup and tools, the same last-slot role it has in
                    the project IM editor. Nothing here is needed on a normal editing pass. */}
@@ -2558,14 +2605,12 @@ const IMTemplateEditor: React.FC = () => {
 
                     <div className="border rounded-lg p-4 mb-4">
                         <h4 className="font-semibold text-sm mb-3">Brand</h4>
+                        {/* Font sizes and heading scale are NOT set here — they're one admin setting
+                            per (template type, page size) in Admin → IM Print, so every template of a
+                            given type and page size prints at the same, previewed-accurately size. */}
                         <div className="grid grid-cols-2 gap-3">
                             <input className="border rounded p-2 text-sm" value={metaSettings.brand?.fontFamilies.body || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontFamilies: { ...prev.brand!.fontFamilies, body: e.target.value } } }))} placeholder="Body font family" />
                             <input className="border rounded p-2 text-sm" value={metaSettings.brand?.fontFamilies.heading || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontFamilies: { ...prev.brand!.fontFamilies, heading: e.target.value } } }))} placeholder="Heading font family" />
-                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.brand?.fontSizes.body || 12} onChange={(e) => updateMetaNumber(e.target.value, 12, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontSizes: { ...prev.brand!.fontSizes, body: num } } })))} placeholder="Body size" />
-                            <input className="border rounded p-2 text-sm" type="number" value={metaSettings.brand?.fontSizes.small || 10} onChange={(e) => updateMetaNumber(e.target.value, 10, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, fontSizes: { ...prev.brand!.fontSizes, small: num } } })))} placeholder="Small text size" />
-                            <input className="border rounded p-2 text-sm" type="number" step="0.1" value={metaSettings.brand?.headingScale.h1 || 2.6} onChange={(e) => updateMetaNumber(e.target.value, 2.6, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, headingScale: { ...prev.brand!.headingScale, h1: num } } })))} placeholder="H1 scale" />
-                            <input className="border rounded p-2 text-sm" type="number" step="0.1" value={metaSettings.brand?.headingScale.h2 || 1.8} onChange={(e) => updateMetaNumber(e.target.value, 1.8, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, headingScale: { ...prev.brand!.headingScale, h2: num } } })))} placeholder="H2 scale" />
-                            <input className="border rounded p-2 text-sm" type="number" step="0.1" value={metaSettings.brand?.headingScale.h3 || 1.3} onChange={(e) => updateMetaNumber(e.target.value, 1.3, (num) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, headingScale: { ...prev.brand!.headingScale, h3: num } } })))} placeholder="H3 scale" />
                             <input className="border rounded p-2 text-sm" value={metaSettings.brand?.textColors.body || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, body: e.target.value } } }))} placeholder="Body color (#334155)" />
                             <input className="border rounded p-2 text-sm" value={metaSettings.brand?.textColors.heading || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, heading: e.target.value } } }))} placeholder="Heading color" />
                             <input className="border rounded p-2 text-sm" value={metaSettings.brand?.textColors.muted || ''} onChange={(e) => setMetaSettings(prev => ({ ...prev, brand: { ...prev.brand!, textColors: { ...prev.brand!.textColors, muted: e.target.value } } }))} placeholder="Muted color" />

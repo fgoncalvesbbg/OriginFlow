@@ -141,6 +141,52 @@ export const getProjectRequiredLanguages = (
 };
 
 /**
+ * The languages the PRINTED IM (the physical run shipped with the product, alongside
+ * the Warning Leaflet) actually includes — always a subset of `getProjectRequiredLanguages`,
+ * since the Printed IM shares the exact same authored content as the Digital IM and only
+ * narrows which languages go to the print shop. Stored per project as
+ * `__printed_languages` / `__printed_language_order`, mirroring the required-languages
+ * pair above; absent = every required language (nothing narrowed yet).
+ *
+ * Unlike `__required_languages`, English is NOT implicitly included/excluded here — a
+ * printed run for a market that doesn't need English simply omits it.
+ */
+export const getProjectPrintedLanguages = (
+  template: IMTemplate,
+  placeholderData: Record<string, string>,
+): string[] => {
+  const required = getProjectRequiredLanguages(template, placeholderData);
+
+  let enabled = required;
+  try {
+    const raw = placeholderData?.['__printed_languages'];
+    if (raw) {
+      const arr = (JSON.parse(raw) as string[]).filter((l) => required.includes(l));
+      const filtered = orderIMLanguages(arr, required);
+      if (filtered.length) enabled = filtered;
+    }
+  } catch { /* fall through to all required languages */ }
+
+  try {
+    const orderRaw = placeholderData?.['__printed_language_order'];
+    if (orderRaw) {
+      const seen = new Set<string>();
+      const order = (JSON.parse(orderRaw) as string[]).filter((l) => {
+        if (!enabled.includes(l) || seen.has(l)) return false;
+        seen.add(l);
+        return true;
+      });
+      if (order.length) {
+        const rest = enabled.filter((l) => !seen.has(l));
+        return [...order, ...rest];
+      }
+    }
+  } catch { /* fall through to enabled order */ }
+
+  return enabled;
+};
+
+/**
  * Resolve one language through the exact same pipeline publish uses, returning the
  * resolved manual plus its content hash. The staleness check re-runs this and
  * compares the hash to the last published snapshot to detect upstream changes.

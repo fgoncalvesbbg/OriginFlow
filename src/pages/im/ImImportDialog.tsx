@@ -11,7 +11,8 @@ import {
 } from '../../services';
 import type { ImImportDoc, ImImportResult } from '../../services';
 import { CategoryL3, IM_TEMPLATE_TYPE_LABELS } from '../../types';
-import { Upload, X, AlertTriangle, CheckCircle2, FileJson, Image as ImageIcon } from 'lucide-react';
+import { Upload, X, AlertTriangle, CheckCircle2, FileJson, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { ImportPromptGuide } from './ImportPromptGuide';
 
 interface Props {
   categories: CategoryL3[];
@@ -42,6 +43,7 @@ export const ImImportDialog: React.FC<Props> = ({ categories, onClose, onImporte
   const [existingWarning, setExistingWarning] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [showPromptGuide, setShowPromptGuide] = useState(false);
   // Monotonic token so a slow existence-check for a previously selected category
   // can't clobber the result for the currently selected one.
   const checkToken = useRef(0);
@@ -122,6 +124,7 @@ export const ImImportDialog: React.FC<Props> = ({ categories, onClose, onImporte
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={onClose}>
       <div
         className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
@@ -146,8 +149,15 @@ export const ImImportDialog: React.FC<Props> = ({ categories, onClose, onImporte
             </button>
             <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onFile} />
             <p className="text-[11px] text-gray-400 mt-1.5">
-              Produced by the Claude Chat review prompt (see docs/im-import/). Standardized content
-              (company info, WEEE, conformity) is added by the platform and should not be in the file.
+              Produced by a Claude Chat review prompt. Standardized content (company info, WEEE,
+              conformity) is added by the platform and should not be in the file.{' '}
+              <button
+                type="button"
+                onClick={() => setShowPromptGuide(true)}
+                className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-700"
+              >
+                <Sparkles size={11} /> Get the prompt
+              </button>
             </p>
           </div>
 
@@ -233,6 +243,10 @@ export const ImImportDialog: React.FC<Props> = ({ categories, onClose, onImporte
         </div>
       </div>
     </div>
+    {showPromptGuide && (
+      <ImportPromptGuide defaultKind={doc?.kind ?? 'im'} onClose={() => setShowPromptGuide(false)} />
+    )}
+    </>
   );
 };
 

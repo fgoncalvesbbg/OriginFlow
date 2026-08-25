@@ -162,6 +162,7 @@ export {
   saveProjectIM,
   updateProjectIMPlaceholders,
   setProjectIMFinalized,
+  setProjectPrintedFinalized,
   deleteProjectIM,
   getAllProjectIMs,
   getProjectIMBackups,
@@ -188,6 +189,7 @@ export {
   normalizeResolverData,
   getPublishedManifestUrl,
   getProjectRequiredLanguages,
+  getProjectPrintedLanguages,
   getPublishHistory,
   getIMMarkets,
   saveIMMarket,
@@ -223,6 +225,7 @@ export {
   importProjectIMFromDoc,
   exportTemplateForReview,
   importSupplierDraftIntoProject,
+  buildImImportPrompt,
   prefetchTmForRun,
   lookupTmSegment,
   fetchTmCandidates,
@@ -242,7 +245,9 @@ export {
   TM_APPROVAL_BATCH_LIMIT,
   TmApprovalDeniedError,
   TmImmutableSegmentError,
-  TmBatchTooLargeError
+  TmBatchTooLargeError,
+  buildSkuQrSvg,
+  skuQrUrl
 } from './im';
 export type {
   ImImportDoc,
@@ -258,6 +263,7 @@ export type {
   TemplateReviewSection,
   TemplateReviewExport,
   ImSupplierDiffImportResult,
+  ImImportPromptOptions,
   PublishResult,
   PublishHistoryEvent,
   ProjectIMBackup,

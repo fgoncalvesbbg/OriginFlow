@@ -246,17 +246,33 @@
  * tables); `data-table-fit="content"` shrinks the table to what its content needs — for
  * an icon-plus-label pair or a two-column spec that should not stretch across the page.
  * Mirrored exactly by the print stylesheet (im-print-html.ts).
+ *
+ * `max-width: 100%` is load-bearing, not decoration. `width: auto` alone tells the table
+ * layout algorithm to size itself from CONTENT, and for a cell holding real prose (a
+ * paragraph, not a label) that computed "auto" width can legitimately exceed the column —
+ * measured directly: a 3-column step table with one long-text column rendered at 942px
+ * inside a 453px-wide editor column, the text never wrapping at all. `width: auto` sizes
+ * the table; `max-width: 100%` is what keeps that size inside the column once it's larger
+ * than the column allows, forcing the text back to wrapping instead of the table
+ * silently overflowing (and, in the editor's zoomed print-width canvas, overflowing
+ * further still since the wrapper scales with it).
  */
 .im-content table[data-table-fit='content'],
 .im-table[data-table-fit='content'] {
   width: auto;
+  max-width: 100%;
 }
 
 /*
- * Author-set column widths (a <colgroup> of % widths, flagged with data-col-widths).
- * `fixed` makes the browser honour the percentages exactly instead of treating them as
- * suggestions in the auto algorithm. Only for full-width tables: under `width: auto`
- * a fixed layout would collapse to the sum of the columns' resolved widths.
+ * Author-set column widths (a <colgroup> of mm widths — not %, which is relative to
+ * the table's own width and therefore unresolvable the moment that width is itself
+ * auto; see setCaretColumnWidth in InlineBlockEditor.tsx for the measured Chromium
+ * behaviour that ruled percentages out). `fixed` makes the browser honour a pinned
+ * column's mm width exactly and give the rest of the row to the other columns,
+ * instead of treating it as a mere suggestion under the auto algorithm. Only for
+ * full-width tables: under `width: auto` a fixed layout would collapse to the sum of
+ * the columns' resolved widths, so fit-content tables stay on the auto algorithm,
+ * where an UNSET column still shrinks to its own content correctly.
  */
 .im-content table[data-col-widths]:not([data-table-fit='content']),
 .im-table[data-col-widths]:not([data-table-fit='content']) {

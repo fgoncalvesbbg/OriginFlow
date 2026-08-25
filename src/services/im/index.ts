@@ -27,6 +27,7 @@ export {
   saveProjectIM,
   updateProjectIMPlaceholders,
   setProjectIMFinalized,
+  setProjectPrintedFinalized,
   deleteProjectIM,
   getAllProjectIMs,
   getProjectIMBackups,
@@ -55,7 +56,8 @@ export {
 } from './im-asset-library.service';
 
 export { resolveManual, TEMP_HIGHLIGHT_CLASS, containsTempHighlight, findTempHighlightSections } from './im-resolver';
-export { publishResolvedManuals, normalizeResolverData, getPublishedManifestUrl, getPublishedManualUrl, getProjectRequiredLanguages, getPublishHistory } from './im-publish.service';
+export { buildSkuQrSvg, skuQrUrl } from './im-qr-code';
+export { publishResolvedManuals, normalizeResolverData, getPublishedManifestUrl, getPublishedManualUrl, getProjectRequiredLanguages, getProjectPrintedLanguages, getPublishHistory } from './im-publish.service';
 export { checkPrintImageWeights, HEAVY_IMAGE_BYTES } from './im-print-preflight.service';
 export type { PrintImageReport, PrintImageInfo } from './im-print-preflight.service';
 export { getIMMarkets, saveIMMarket, deleteIMMarket } from './im-market.service';
@@ -130,6 +132,8 @@ export type {
   TemplateReviewExport,
   ImSupplierDiffImportResult,
 } from './im-import.service';
+export { buildImImportPrompt } from './im-import-prompt';
+export type { ImImportPromptOptions } from './im-import-prompt';
 export {
   prefetchTmForRun,
   lookupTmSegment,

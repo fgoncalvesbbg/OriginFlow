@@ -15,15 +15,6 @@ export const DEFAULT_IM_TEMPLATE_METADATA: IMTemplateMetadata = {
       body: 'Inter, sans-serif',
       heading: 'Inter, sans-serif'
     },
-    fontSizes: {
-      body: 12,
-      small: 10
-    },
-    headingScale: {
-      h1: 2.6,
-      h2: 1.8,
-      h3: 1.3
-    },
     textColors: {
       primary: '#0f172a',
       heading: '#0f172a',
@@ -89,15 +80,6 @@ export const normalizeIMTemplateMetadata = (
       fontFamilies: {
         body: raw.brand?.fontFamilies?.body || DEFAULT_IM_TEMPLATE_METADATA.brand!.fontFamilies.body,
         heading: raw.brand?.fontFamilies?.heading || DEFAULT_IM_TEMPLATE_METADATA.brand!.fontFamilies.heading
-      },
-      fontSizes: {
-        body: asNumber(raw.brand?.fontSizes?.body, DEFAULT_IM_TEMPLATE_METADATA.brand!.fontSizes.body),
-        small: asNumber(raw.brand?.fontSizes?.small, DEFAULT_IM_TEMPLATE_METADATA.brand!.fontSizes.small)
-      },
-      headingScale: {
-        h1: asNumber(raw.brand?.headingScale?.h1, DEFAULT_IM_TEMPLATE_METADATA.brand!.headingScale.h1),
-        h2: asNumber(raw.brand?.headingScale?.h2, DEFAULT_IM_TEMPLATE_METADATA.brand!.headingScale.h2),
-        h3: asNumber(raw.brand?.headingScale?.h3, DEFAULT_IM_TEMPLATE_METADATA.brand!.headingScale.h3)
       },
       textColors: {
         primary: raw.brand?.textColors?.primary || primaryColor,

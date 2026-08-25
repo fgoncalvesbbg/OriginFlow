@@ -169,7 +169,7 @@ const IMPreview: React.FC = () => {
                   <p className="text-xs mt-1">Content for this section is project-specific and will be added during production.</p>
                </div>
             ) : (
-               <div className="text-gray-700 pl-8 font-sans im-content" style={{ color: metadata.brand?.textColors.body, ...(printGeometry ? imContentPrintScale(printGeometry) : { fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }) }}>
+               <div className="text-gray-700 pl-8 font-sans im-content" style={{ color: metadata.brand?.textColors.body, ...(printGeometry ? imContentPrintScale(printGeometry) : { fontFamily: metadata.brand?.fontFamilies.body }) }}>
                   {html ? (
                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
                   ) : (

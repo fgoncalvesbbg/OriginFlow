@@ -1,8 +1,21 @@
 # Supplier IM Intake — Claude Chat Review Prompt
 
+> **In-app shortcut.** This prompt (both the IM and Warning Leaflet variants) is also generated
+> live in the app — click **Get the prompt** next to any **Import from JSON** button (Category
+> Templates and the project IM generator) to copy it with your category/languages already filled
+> in, via `src/pages/im/ImportPromptGuide.tsx` / `src/services/im/im-import-prompt.ts`. This doc
+> stays the reference copy for the `im` variant and is kept in sync with that generator.
+
 Paste everything in the **Prompt** block below into a new Claude Chat conversation, then attach or
 paste the supplier's draft (PDF, extracted text, and image descriptions). The output is a single
 JSON document conforming to `OriginFlow IM Import v1` (see [`schema.md`](./schema.md)).
+
+For a **Warning Leaflet** (a short, safety-focused document, not a full manual — see
+`IMTemplateRegulations.tsx`), use the Warning Leaflet toggle in the in-app prompt guide instead of
+this doc: it swaps task 3's chapter structure for a compact warning-leaflet layout (General Safety
+Warnings → Specific Hazard Warnings → Symbols and Their Meaning → Correct Use reminders →
+Disposal) and fixes `"kind": "warning_leaflet"` — everything else (callout mapping, HTML rules,
+scope/diff tasks, schema) is identical to the `im` prompt below.
 
 **How to use**
 1. Open the supplier PDF. Attach it to Claude Chat (or paste the text + describe each figure).

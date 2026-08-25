@@ -12,7 +12,8 @@ import {
 } from '../../services';
 import type { ImImportDoc, ImProjectImportResult } from '../../services';
 import { IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
-import { Upload, X, AlertTriangle, CheckCircle2, FileJson, Image as ImageIcon } from 'lucide-react';
+import { Upload, X, AlertTriangle, CheckCircle2, FileJson, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { ImportPromptGuide } from './ImportPromptGuide';
 
 interface Props {
   projectId: string;
@@ -27,6 +28,7 @@ export const ProjectImImportDialog: React.FC<Props> = ({ projectId, templateType
   const [errors, setErrors] = useState<string[]>([]);
   const [hasExisting, setHasExisting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [showPromptGuide, setShowPromptGuide] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -70,6 +72,7 @@ export const ProjectImImportDialog: React.FC<Props> = ({ projectId, templateType
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onMouseDown={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
@@ -90,7 +93,14 @@ export const ProjectImImportDialog: React.FC<Props> = ({ projectId, templateType
             <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onFile} />
             <p className="text-[11px] text-gray-400 mt-1.5">
               Creates a project-only manual — no category template. All content is editable here
-              afterwards. Section headings use the source language only (block text is translatable).
+              afterwards. Section headings use the source language only (block text is translatable).{' '}
+              <button
+                type="button"
+                onClick={() => setShowPromptGuide(true)}
+                className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-700"
+              >
+                <Sparkles size={11} /> Get the prompt
+              </button>
             </p>
           </div>
 
@@ -134,6 +144,10 @@ export const ProjectImImportDialog: React.FC<Props> = ({ projectId, templateType
         </div>
       </div>
     </div>
+    {showPromptGuide && (
+      <ImportPromptGuide defaultKind={templateType} lockKind onClose={() => setShowPromptGuide(false)} />
+    )}
+    </>
   );
 };
 

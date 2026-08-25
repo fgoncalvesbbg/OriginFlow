@@ -89,6 +89,12 @@ export interface PrintManual {
   language: string;
   metadata: PrintManualMetadata;
   sections: PrintSection[];
+  /**
+   * Inline SVG QR code for this manual's primary SKU (see ResolvedManual.primarySkuQrSvg
+   * in im-resolver.ts). Placed automatically opposite the logo in the Warning Leaflet's
+   * compact header (buildLeafletHeader) — absent when the manual has no SKU to encode.
+   */
+  primarySkuQrSvg?: string;
 }
 
 /**
@@ -141,6 +147,12 @@ export interface PrintCoverOptions {
    * Only rendered for multi-language booklets; replaces the plain subtitle when present.
    */
   languageIndex?: { code: string; name: string; page: number | null }[];
+  /**
+   * Inline SVG QR code for this manual's primary SKU (ResolvedManual.primarySkuQrSvg —
+   * same value the Warning Leaflet header uses). Placed automatically in the cover
+   * footer, opposite the company name/marks — no authoring required.
+   */
+  primarySkuQrSvg?: string;
 }
 
 export interface PrintBackOptions {
@@ -440,13 +452,20 @@ const buildLanguageIndex = (entries: NonNullable<PrintCoverOptions['languageInde
   </div>`;
 
 /**
- * Compact leaflet header — a logo-only bar shown at the top of the first page of each language
- * (the Warning Leaflet has no cover page). Empty when no logo is available.
+ * Compact leaflet header — a logo bar shown at the top of the first page of each language
+ * (the Warning Leaflet has no cover page), with the SKU QR code automatically opposite the
+ * logo when the manual has one (ResolvedManual.primarySkuQrSvg — no authoring required, and
+ * every leaflet gets it). Sized to the same height as the logo so the header doesn't grow.
+ * Empty when there's neither a logo nor a QR code.
  */
-const buildLeafletHeader = (logoUrl?: string): string =>
-  logoUrl
-    ? `<header class="im-leaflet-header"><img src="${logoUrl}" alt="Logo" class="im-leaflet-logo" /></header>`
-    : '';
+const buildLeafletHeader = (logoUrl?: string, qrSvg?: string): string => {
+  if (!logoUrl && !qrSvg) return '';
+  const logo = logoUrl ? `<img src="${logoUrl}" alt="Logo" class="im-leaflet-logo" />` : '';
+  // margin-left: auto on .im-leaflet-qr (below) docks it to the right whether or not the
+  // logo is present, without needing a placeholder flex item for the logo-less case.
+  const qr = qrSvg ? `<div class="im-leaflet-qr">${qrSvg}</div>` : '';
+  return `<header class="im-leaflet-header">${logo}${qr}</header>`;
+};
 
 const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string => {
   const coverImage = opts.coverImageUrl
@@ -460,6 +479,7 @@ const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string =>
     ? `<div class="im-cover-skus">${skus.length > 1 ? 'Art. Nos.' : 'Art. No.'}: ${escapeHtml(skus.join(' · '))}</div>`
     : '';
   const imNameLine = opts.imName ? `<div class="im-cover-imname">${escapeHtml(opts.imName)}</div>` : '';
+  const qr = opts.primarySkuQrSvg ? `<div class="im-cover-qr">${opts.primarySkuQrSvg}</div>` : '';
   return `
     <section class="im-page im-page-cover">
       <div class="im-cover-body">
@@ -472,10 +492,13 @@ const buildCoverPage = (opts: PrintCoverOptions, languages: string[]): string =>
         </div>
         ${coverImage}
         <div class="im-cover-footer">
-          ${markRow(opts.markUrls)}
-          <div><strong>${escapeHtml(opts.companyName || '')}</strong></div>
-          ${imNameLine}
-          ${skuLine}
+          <div class="im-cover-footer-text">
+            ${markRow(opts.markUrls)}
+            <div><strong>${escapeHtml(opts.companyName || '')}</strong></div>
+            ${imNameLine}
+            ${skuLine}
+          </div>
+          ${qr}
         </div>
       </div>
     </section>
@@ -617,6 +640,10 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
     /* --- Warning Leaflet compact overrides --- */
     .im-leaflet-header { display: flex; align-items: center; margin: 0 0 3mm; padding-bottom: 1.5mm; border-bottom: 0.5mm solid ${primaryColor}; }
     .im-leaflet-logo { height: 8mm; width: auto; object-fit: contain; }
+    /* Auto SKU QR code, opposite the logo — margin-left:auto docks it right within the same
+       header band (no extra height), whether or not a logo is also present. The SVG itself
+       is already sized to match the logo's 8mm height (ResolvedManual.primarySkuQrSvg). */
+    .im-leaflet-qr { margin-left: auto; line-height: 0; }
     /* Each language is its own render part, so the content block must NOT force a page break —
        otherwise the logo header would sit alone on page 1 and content would start on page 2. */
     .im-page-content { padding: 0; break-before: auto; page-break-before: auto; }
@@ -728,7 +755,10 @@ const buildStyles = (
     .im-cix-code { font-weight: 800; color: ${primaryColor}; min-width: ${mm(7)}; }
     .im-cix-name { flex: 1; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .im-cix-pg { font-weight: 700; color: ${primaryColor}; font-variant-numeric: tabular-nums; }
-    .im-cover-footer { border-top: 1.5mm solid ${primaryColor}; padding-top: ${mm(6)}; font-size: ${mm(3.4)}; color: #334155; }
+    .im-cover-footer { border-top: 1.5mm solid ${primaryColor}; padding-top: ${mm(6)}; font-size: ${mm(3.4)}; color: #334155; display: flex; align-items: flex-end; justify-content: space-between; gap: ${mm(6)}; }
+    .im-cover-footer-text { flex: 1; }
+    /* Auto SKU QR code, docked opposite the company name/marks — no extra footer height. */
+    .im-cover-qr { flex-shrink: 0; line-height: 0; }
     .im-cover-imname { margin-top: ${mm(1.5)}; color: #475569; }
     .im-cover-skus { margin-top: ${mm(1.5)}; font-weight: 600; letter-spacing: 0.02em; color: #334155; }
 
@@ -792,10 +822,16 @@ const buildStyles = (
     .imv-content table { width: 100%; border-collapse: collapse; margin: ${gap} 0; font-size: ${tablePt}; }
     /* Author-chosen width mode: data-table-fit="content" shrinks the table to its content
        instead of stretching across the column — for icon/label pairs and narrow specs that
-       full-width layout was padding with empty space. Mirrors im-content.css exactly. */
-    .imv-content table[data-table-fit="content"] { width: auto; }
-    /* Author column widths (a <colgroup> of % widths). \`fixed\` makes the engine honour the
-       percentages exactly; only for full-width tables, where \`fixed\` has a width to fix to. */
+       full-width layout was padding with empty space. Mirrors im-content.css exactly, INCLUDING
+       the max-width: width:auto alone lets the table-layout algorithm size a text-heavy cell
+       past the printed column — measured at 942px inside a 453px column, text never wrapping —
+       so max-width:100% is what forces it back to wrapping instead of overflowing the page. */
+    .imv-content table[data-table-fit="content"] { width: auto; max-width: 100%; }
+    /* Author column widths (a <colgroup> of mm widths — not %, which is relative to the table's
+       own width and unresolvable once that width is itself auto; see setCaretColumnWidth in
+       InlineBlockEditor.tsx). \`fixed\` makes the engine honour a pinned column's mm width
+       exactly; only for full-width tables, where \`fixed\` has a width to fix to — a fit-content
+       table stays on the auto algorithm, so an unset column still shrinks to its own content. */
     .imv-content table[data-col-widths]:not([data-table-fit="content"]) { table-layout: fixed; }
     .imv-content th, .imv-content td { border: ${tableRule}; padding: ${absMm(tableCellPaddingMm)}; vertical-align: top; }
     /* A paragraph is often used just to hold a cell's text; its trailing margin then adds to the
@@ -890,7 +926,11 @@ const resolveTypography = (opts: PrintHtmlOptions): PrintTypography =>
   opts.typography ?? defaultTypographyFor(opts.compact ? 'warning_leaflet' : 'im', opts.pageSize);
 
 /** Resolve the cover options (explicit values win, else template metadata defaults). */
-const resolveCoverOpts = (opts: PrintHtmlOptions, base: PrintManual['metadata']): PrintCoverOptions => ({
+const resolveCoverOpts = (
+  opts: PrintHtmlOptions,
+  base: PrintManual['metadata'],
+  primarySkuQrSvg?: string,
+): PrintCoverOptions => ({
   title: opts.cover.title,
   subtitle: opts.cover.subtitle,
   // `||` (not `??`): published manifests carry normalized metadata where a missing
@@ -901,6 +941,7 @@ const resolveCoverOpts = (opts: PrintHtmlOptions, base: PrintManual['metadata'])
   skus: opts.cover.skus,
   imName: opts.cover.imName,
   companyName: opts.cover.companyName ?? base?.companyName,
+  primarySkuQrSvg,
 });
 
 /** Resolve the back-page options (explicit values win, else template metadata defaults). */
@@ -927,7 +968,7 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
   const versionLabel = opts.version ? `v${opts.version}` : '';
   const languages = manuals.map((m) => m.language);
 
-  const cover = buildCoverPage(resolveCoverOpts(opts, base), languages);
+  const cover = buildCoverPage(resolveCoverOpts(opts, base, manuals[0].primarySkuQrSvg), languages);
 
   const body = manuals
     .map((manual) => {
@@ -1018,7 +1059,7 @@ export const buildCoverPartHtml = (
         page: pages[i] ?? null,
       }))
     : undefined;
-  const coverOpts = { ...resolveCoverOpts(opts, base), languageIndex };
+  const coverOpts = { ...resolveCoverOpts(opts, base, manuals[0].primarySkuQrSvg), languageIndex };
   return wrapStandalone(buildCoverPage(coverOpts, manuals.map((m) => m.language)), partStyles(manuals, opts));
 };
 
@@ -1040,7 +1081,7 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
     // still fall through to the default so the header logo is always prelinked.
     const logoUrl = opts.cover.logoUrl || base?.companyLogoUrl || DEFAULT_LEAFLET_LOGO_URL;
     return manuals.map((manual, i) => ({
-      html: wrapStandalone(buildLeafletHeader(logoUrl) + buildSectionPages(manual), styles),
+      html: wrapStandalone(buildLeafletHeader(logoUrl, manual.primarySkuQrSvg) + buildSectionPages(manual), styles),
       tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,
     }));
   }

@@ -18,3 +18,13 @@ export const DEFAULT_IM_LOGO_URL =
  */
 export const DEFAULT_LEAFLET_LOGO_URL =
   'https://ecueltibpmpnhnaxlskx.supabase.co/storage/v1/object/public/im-assets/cover/1783680033050_5j98qi.jpg';
+
+/**
+ * Reserved placeholder id for the "SKU QR code" chip (InlineBlockEditor's Insert menu).
+ * Never bound to a real category attribute — the resolver fills its value in automatically
+ * from the manual's first bound SKU, so it must never collide with an attribute id.
+ */
+export const QR_SKU_PLACEHOLDER_ID = 'sys.qr_sku';
+
+/** Base URL the SKU QR code encodes: `${QR_SKU_URL_BASE}<skuNumber>`. */
+export const QR_SKU_URL_BASE = 'https://use.berlin/';

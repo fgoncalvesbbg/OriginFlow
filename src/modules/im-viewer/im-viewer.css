@@ -258,7 +258,7 @@
 .imv-content table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 /* Author-chosen table width mode + column widths — mirrors the print stylesheet
    (im-print-html.ts) so the online viewer agrees with the PDF. */
-.imv-content table[data-table-fit='content'] { width: auto; }
+.imv-content table[data-table-fit='content'] { width: auto; max-width: 100%; }
 .imv-content table[data-col-widths]:not([data-table-fit='content']) { table-layout: fixed; }
 .imv-content th, .imv-content td { border: 1px solid #cbd5e1; padding: 0.5rem; vertical-align: top; }
 .imv-content th { background: #f1f5f9; font-weight: 700; text-align: left; }

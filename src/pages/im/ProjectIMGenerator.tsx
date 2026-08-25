@@ -9,12 +9,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
     getProjectById, getIMTemplateById, getIMSections,
-    getIMTemplates, getProjectIM, saveProjectIM, setProjectIMFinalized, deleteProjectIM,
+    getIMTemplates, getProjectIM, saveProjectIM, setProjectIMFinalized, setProjectPrintedFinalized, deleteProjectIM,
     addDocument, uploadFile, getProjectDocs, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
     getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
-    updateProjectIMPlaceholders, getProjectRequiredLanguages,
+    updateProjectIMPlaceholders, getProjectRequiredLanguages, getProjectPrintedLanguages,
     getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
     checkMarkupReviewStatus, isMarkupReviewAvailable,
     getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
@@ -34,9 +34,9 @@ import { uploadIMAsset, externalizeHtmlImages, externalizeFormDataImages } from 
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender, MarkupReviewResult } from '../../services';
-import { isInReview } from './im-manual-status';
+import { isInReview, printedManualStatusOf, MANUAL_STATUS_META } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2 } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
@@ -242,9 +242,16 @@ const ProjectIMGenerator: React.FC = () => {
   // as the template editor).
   const lockedCls = locked ? 'pointer-events-none select-none opacity-70' : '';
 
+  // Printed IM sign-off (templateType 'im' only) — a SEPARATE lock from the Digital IM's own
+  // above, for the language-subset print run shipped with the product. See
+  // setProjectPrintedFinalized / getProjectPrintedLanguages and migration 129.
+  const [finalizingPrinted, setFinalizingPrinted] = useState(false);
+  const [showPrintedFinalizeConfirm, setShowPrintedFinalizeConfirm] = useState(false);
+  const [showPrintedUnlockConfirm, setShowPrintedUnlockConfirm] = useState(false);
+
   // Any network write is in flight — blocks re-entry and mutating actions, and drives the
   // blocking save overlay so the user can't navigate away and wedge the session mid-save.
-  const isBusy = saving || generating || translating || checkingChanges || finalizing;
+  const isBusy = saving || generating || translating || checkingChanges || finalizing || finalizingPrinted;
 
   // Crash-safe local draft. `savedSnapshotRef` holds a serialization of the last-persisted
   // editable state (the DB baseline); the current state differing from it = "unsaved edits",
@@ -256,6 +263,25 @@ const ProjectIMGenerator: React.FC = () => {
 
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Distraction-free editing: covers the app's sidebar + top header with a fixed,
+  // full-viewport overlay so the editor gets the whole screen instead of sharing it
+  // with chrome the operator isn't using while authoring. A standing preference (like
+  // the sidebar collapse), not a per-session mode, so it's persisted. z-[45] sits
+  // above Layout's chrome (sidebar z-40, sticky header z-20) but below every modal in
+  // this page (z-50/[65]/[70]), so opening a modal while fullscreen still shows on top.
+  const [editorFullscreen, setEditorFullscreen] = useState<boolean>(() => {
+    try { return localStorage.getItem('im.project.fullscreen') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('im.project.fullscreen', editorFullscreen ? '1' : '0'); } catch { /* ignore */ }
+  }, [editorFullscreen]);
+  useEffect(() => {
+    if (!editorFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditorFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editorFullscreen]);
 
   // --- Print-faithful page preview -----------------------------------------
   // The preview used to be a HARDCODED A4 sheet with 20mm margins and the brand's web
@@ -577,6 +603,9 @@ const ProjectIMGenerator: React.FC = () => {
   // best-effort and off the critical path — the stepper renders without them.
   const [pipelineStale, setPipelineStale] = useState<boolean | null>(null); // null = unknown/unchecked
   const [latestRenderVersion, setLatestRenderVersion] = useState<number | null | undefined>(undefined);
+  // Full render history (newest first) — used to find the render matching the Printed IM's
+  // current language set, for the "ready to finalize" / staleness check below.
+  const [printRenders, setPrintRenders] = useState<PrintRender[]>([]);
 
   useEffect(() => {
       if (loading || !projectId) return;
@@ -593,7 +622,7 @@ const ProjectIMGenerator: React.FC = () => {
   useEffect(() => {
       if (loading || !projectId || !isPrintExportAvailable()) return;
       getPrintRenders(projectId, templateType)
-          .then(rs => setLatestRenderVersion(rs[0]?.imVersion ?? null))
+          .then(rs => { setLatestRenderVersion(rs[0]?.imVersion ?? null); setPrintRenders(rs); })
           .catch(() => { /* stepper shows the print step without freshness */ });
   }, [loading, projectId, templateType]);
 
@@ -1055,6 +1084,30 @@ const ProjectIMGenerator: React.FC = () => {
 
   const handleMarkFinal = () => { setShowFinalizeConfirm(false); applyFinalized(true); };
   const handleUnlock = () => { setShowUnlockConfirm(false); applyFinalized(false); };
+
+  // Toggle the Printed IM's own FINAL lock — a separate sign-off from the Digital IM's
+  // above, naming the exact print render that ships. The server (migration 129) also
+  // requires the Digital IM to already be final, since they share content.
+  const applyPrintedFinalized = async (next: boolean, renderId?: string | null) => {
+      if (!projectId || isBusy) return;
+      try {
+          setFinalizingPrinted(true);
+          const res = await setProjectPrintedFinalized(projectId, templateType, next, renderId);
+          setInstance(prev => prev ? {
+            ...prev,
+            printedIsFinalized: res.printedIsFinalized,
+            printedFinalizedAt: res.printedFinalizedAt,
+            printedFinalizedBy: res.printedFinalizedBy,
+            printedRenderId: res.printedRenderId,
+            updatedAt: res.updatedAt,
+          } : prev);
+      } catch (e) {
+          console.error('[ProjectIMGenerator] printed finalize toggle failed', e);
+          alert(`Could not ${next ? 'mark the Printed IM as final' : 'unlock the Printed IM'} — see console for details.`);
+      } finally {
+          setFinalizingPrinted(false);
+      }
+  };
 
   // Debounced background server autosave (on top of the instant local backup): 4s after
   // edits settle, silently persist to the DB so closing the tab never strands work on the
@@ -3080,6 +3133,55 @@ const ProjectIMGenerator: React.FC = () => {
     setIsLangModalOpen(false);
   };
 
+  // --- PRINTED IM (templateType 'im' only) ------------------------------------
+  // The physical print run shipped with the product, alongside the Warning Leaflet — the
+  // exact same authored content as the Digital IM above, just a project-chosen SUBSET of
+  // requiredLanguages. See getProjectPrintedLanguages: absent `__printed_languages` = every
+  // required language. Unlike required languages, English is not force-included here — a
+  // printed run for a market that doesn't need it simply omits it.
+  const printedLanguages = template ? getProjectPrintedLanguages(template, formData) : requiredLanguages;
+
+  const setPrintedLanguages = (next: string[]) => {
+    const enabled = orderIMLanguages(next, requiredLanguages);
+    handleInputChange('__printed_languages', JSON.stringify(enabled));
+    const kept = printedLanguages.filter(l => enabled.includes(l));
+    const order = [...kept, ...enabled.filter(l => !kept.includes(l))];
+    handleInputChange('__printed_language_order', JSON.stringify(order));
+  };
+
+  const togglePrintedLanguage = (code: string) => {
+    setPrintedLanguages(printedLanguages.includes(code)
+      ? printedLanguages.filter(l => l !== code)
+      : [...printedLanguages, code]);
+  };
+
+  // The newest print render whose language set exactly matches the Printed IM's current
+  // selection (printRenders is newest-first, so `.find` is "the latest one that matches").
+  const printedRenderCandidate = printRenders.find(r =>
+    r.languages.length === printedLanguages.length && r.languages.every(l => printedLanguages.includes(l)),
+  ) ?? null;
+  // null = no matching render; true/false = compared against the manual's current version;
+  // null also covers "can't tell" (a legacy render/version with no number recorded).
+  const printedIsStale = !printedRenderCandidate ? null
+    : (printedRenderCandidate.imVersion == null || instance?.version == null)
+      ? null
+      : printedRenderCandidate.imVersion < instance.version;
+  const printedStatus = printedManualStatusOf(!!instance?.printedIsFinalized, !!printedRenderCandidate, printedIsStale);
+  const printedReadyToFinalize = locked && !!printedRenderCandidate && printedIsStale === false && printedLanguages.length > 0;
+
+  const handleMarkPrintedFinal = () => {
+    setShowPrintedFinalizeConfirm(false);
+    void applyPrintedFinalized(true, printedRenderCandidate?.id ?? null);
+  };
+  const handleUnlockPrinted = () => {
+    setShowPrintedUnlockConfirm(false);
+    void applyPrintedFinalized(false);
+  };
+
+  // Open the print-export dialog pre-scoped to exactly the Printed IM's language set,
+  // reusing the same dialog/pipeline the Digital IM's generic print export uses.
+  const openPrintDialogForPrinted = () => openPrintDialog('print', printedLanguages);
+
   // Move a required language up/down in the custom display/publish order. Persists
   // the FULL resulting order (not just the moved pair) so it stays authoritative
   // even if some entries were previously implied by template order.
@@ -3348,13 +3450,13 @@ const ProjectIMGenerator: React.FC = () => {
   // Open the print-export dialog for the ALREADY-published version without republishing.
   // The publish-result payload is rebuilt from the deterministic storage layout
   // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed.
-  const openPrintDialog = (intent: 'print' | 'review') => {
+  const openPrintDialog = (intent: 'print' | 'review', langs: string[] = requiredLanguages) => {
     if (!project || !instance) return;
     const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
     setPublishResult({
       manifestUrl,
       manifestPath: `${project.id}/${templateType}/manifest.json`,
-      languages: requiredLanguages.map(language => ({
+      languages: langs.map(language => ({
         language,
         url: manifestUrl.replace(/manifest\.json(\?.*)?$/, `${language}.json$1`),
         storagePath: `${project.id}/${templateType}/${language}.json`,
@@ -3628,6 +3730,15 @@ const ProjectIMGenerator: React.FC = () => {
     const refs = section.blockRefs ?? [];
     const additions = [...(sectionAdditions[section.id] ?? [])].sort((a, b) => a.position - b.position);
     const hidden = sectionVisibility[section.id] === false;
+    // Legacy free-typed content the resolver still prepends whenever this section has no
+    // INLINE ref (see im-resolver.ts's hybrid mode) — content left over from before a shared
+    // block got attached. Shown read-only here (like a locked shared block) so it's never
+    // invisible in the preview/PDF; it's TEMPLATE-owned, so it's only editable in the Template
+    // Editor, which auto-migrates it into an editable row on open.
+    const legacyContentHasInlineRef = refs.some(r => r.kind === 'inline');
+    const legacyContentHtml = !legacyContentHasInlineRef
+      ? processContent(section.content[activeLang] || section.content['en'] || '')
+      : '';
 
     const hiddenBanner = hidden ? (
       <div className="mb-3 flex items-center justify-between gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-600">
@@ -3740,6 +3851,13 @@ const ProjectIMGenerator: React.FC = () => {
             <span className="bg-gray-100 px-1.5 py-0.5 rounded text-muted text-xs">Sec {section.order}</span> {localizedSectionTitle(section, activeLang)}
           </h4>
           <div className="space-y-2">
+            {legacyContentHtml && (
+              <div className="relative border border-amber-200 rounded bg-amber-50/60 px-3 py-2">
+                <span className="absolute top-1 right-1 text-amber-400" title="Legacy template content — edit it in the Template Editor"><Lock size={11} /></span>
+                <div className="text-[10px] font-bold uppercase tracking-wide text-amber-600 mb-1">Legacy content · shown before the blocks below</div>
+                <div className="im-content text-xs text-gray-600 pointer-events-none" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(legacyContentHtml) }} />
+              </div>
+            )}
             {renderInsertButton(section.id, 0)}
             {additions.filter(a => a.position <= 0).map((a, i, arr) => (
               <div key={a.id}>{renderAdditionEditor(a.block, {
@@ -4009,6 +4127,27 @@ const ProjectIMGenerator: React.FC = () => {
          onCancel={() => setShowUnlockConfirm(false)}
        />
 
+       {/* Mark the Printed IM final — signs off the current print PDF as the exact file
+           that ships with the product. Separate from (but requires) the Digital IM's lock. */}
+       <ConfirmationModal
+         isOpen={showPrintedFinalizeConfirm}
+         title="Mark the Printed IM as final?"
+         message={`This signs off the current print PDF (${printedLanguages.map(l => l.toUpperCase()).join(', ')}) as the exact file that ships with the product. Unlock it later if the printed languages need to change.`}
+         confirmLabel="Mark Printed IM final"
+         onConfirm={handleMarkPrintedFinal}
+         onCancel={() => setShowPrintedFinalizeConfirm(false)}
+       />
+
+       {/* Unlock the Printed IM so its language selection can change again. */}
+       <ConfirmationModal
+         isOpen={showPrintedUnlockConfirm}
+         title="Unlock the Printed IM?"
+         message="This clears the Printed IM's sign-off. You can mark it final again once a matching print PDF is confirmed."
+         confirmLabel="Unlock Printed IM"
+         onConfirm={handleUnlockPrinted}
+         onCancel={() => setShowPrintedUnlockConfirm(false)}
+       />
+
        {/* Blocking overlay while a save/publish is in flight — stops the user navigating away
            and wedging the session. Guaranteed to clear because every network call in the save
            path is time-bounded (see data/resilience.ts / saveProjectIM). Translation is excluded:
@@ -4123,6 +4262,9 @@ const ProjectIMGenerator: React.FC = () => {
            onRendered={async (res, langs, size) => {
              // A fresh render for the current version — keep the pipeline's Print step live.
              setLatestRenderVersion(instance?.version ?? null);
+             // Also keep the Printed IM's render-matching up to date without a reload, so
+             // "Mark Printed IM Final" can enable right after a matching render finishes.
+             if (res.render) setPrintRenders(prev => [res.render as PrintRender, ...prev]);
              await attachPrintPdfToProject(res, langs, size);
            }}
            onCoverPrefs={persistCoverPrefs}
@@ -4366,7 +4508,12 @@ const ProjectIMGenerator: React.FC = () => {
           onChange={(e) => e.target.files?.[0] && uploadId && handleImageUpload(uploadId, e.target.files[0])} 
        />
 
-       <div className="h-[calc(100vh-100px)] flex flex-col" style={imThemeVars}>
+       <div
+         className={editorFullscreen
+           ? 'fixed inset-0 z-[45] bg-light p-4 md:p-6 flex flex-col overflow-hidden'
+           : 'h-[calc(100vh-100px)] flex flex-col'}
+         style={imThemeVars}
+       >
            <div className="flex justify-between items-center mb-4">
                <div className="flex items-center gap-3">
                    <button onClick={() => navigate(`/project/${projectId}`)} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
@@ -4468,6 +4615,20 @@ const ProjectIMGenerator: React.FC = () => {
                       {(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
                       {/* Says what it does: publishes EVERY required language, not the active tab. */}
                       <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'})`}</span>
+                   </button>
+
+                   {/* Fullscreen — a view preference, not a content action, so it sits apart
+                       from the workflow buttons rather than inside the gear. */}
+                   <button
+                     onClick={() => setEditorFullscreen((f) => !f)}
+                     title={editorFullscreen
+                       ? 'Exit fullscreen (Esc)'
+                       : 'Fullscreen — hide the sidebar and app header so the editor uses the whole screen'}
+                     className={`flex items-center justify-center w-9 h-9 rounded-xl border transition-colors ${
+                       editorFullscreen ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-light'
+                     }`}
+                   >
+                     {editorFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                    </button>
 
                    {/* Gear — release state, the overwriting data paths, and the destructive
@@ -4743,6 +4904,96 @@ const ProjectIMGenerator: React.FC = () => {
                                This manual follows its category template, so it can only use the {templateLangs.length} language(s)
                                that template declares. To offer another, add and translate it in the category template first.
                              </p>
+                           )}
+                         </div>
+                       )}
+
+                       {/* PRINTED IM — the physical print run shipped with the product (alongside
+                           the Warning Leaflet), sharing this exact manual's content but limited to a
+                           project-chosen subset of the required languages above. Its own FINAL sign-off
+                           (printedIsFinalized) is independent of the Digital IM's, but requires it —
+                           see setProjectPrintedFinalized and migration 129. Digital-only (this page is
+                           reused for the Warning Leaflet, which has no printed-subset concept of its own). */}
+                       {templateType === 'im' && requiredLanguages.length > 0 && (
+                         <div className="border-b border-gray-100 pb-6">
+                           <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-sm">
+                             <Printer size={14} className="text-indigo-500" /> Printed IM
+                             {instance?.printedIsFinalized ? (
+                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${MANUAL_STATUS_META.final.classes}`}>Final</span>
+                             ) : (
+                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${MANUAL_STATUS_META[printedStatus].classes}`}>{MANUAL_STATUS_META[printedStatus].label}</span>
+                             )}
+                           </h4>
+                           <p className="text-xs text-muted mb-3">
+                             Which of this manual's required languages ship in the PRINTED booklet that goes in the
+                             box with the Warning Leaflet. The Digital IM online always carries all {requiredLanguages.length}.
+                           </p>
+                           <div className="flex flex-wrap gap-2 mb-2">
+                             {requiredLanguages.map(code => {
+                               const on = printedLanguages.includes(code);
+                               return (
+                                 <button
+                                   key={code}
+                                   type="button"
+                                   disabled={locked || !!instance?.printedIsFinalized}
+                                   onClick={() => togglePrintedLanguage(code)}
+                                   className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                     on ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                                   }`}
+                                 >{code.toUpperCase()}</button>
+                               );
+                             })}
+                           </div>
+                           {printedLanguages.length === 0 && (
+                             <p className="text-[11px] text-rose-600 mb-2">Select at least one language for the Printed IM.</p>
+                           )}
+
+                           {instance?.printedIsFinalized ? (
+                             <div className="flex items-center justify-between gap-3 mt-2 px-3 py-2.5 rounded-lg border border-indigo-200 bg-indigo-50">
+                               <p className="text-[11px] text-indigo-900 leading-relaxed">
+                                 Signed off{instance.printedFinalizedAt ? ` ${new Date(instance.printedFinalizedAt).toLocaleString()}` : ''}
+                                 {instance.printedFinalizedBy ? ` by ${instance.printedFinalizedBy}` : ''} — this is the exact PDF that ships with the product.
+                               </p>
+                               <button
+                                 type="button"
+                                 onClick={() => setShowPrintedUnlockConfirm(true)}
+                                 disabled={isBusy}
+                                 className="shrink-0 flex items-center gap-1.5 bg-white border border-indigo-300 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-60"
+                               ><Unlock size={12} /> Unlock</button>
+                             </div>
+                           ) : (
+                             <div className="flex items-center justify-between gap-3 mt-2 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
+                               <p className="text-[11px] text-gray-500 leading-relaxed">
+                                 {!isPrintExportAvailable()
+                                   ? 'Print export is not enabled in this environment.'
+                                   : !locked
+                                     ? 'Mark the Digital IM final first — the Printed IM shares its content.'
+                                     : !printedRenderCandidate
+                                       ? `No print PDF yet for exactly ${printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'}.`
+                                       : printedIsStale
+                                         ? `The print PDF (v${printedRenderCandidate.imVersion}) predates the current manual (v${instance?.version}) — regenerate it.`
+                                         : printedIsStale === null
+                                           ? 'A matching print PDF exists — freshness could not be confirmed.'
+                                           : `Print PDF (v${printedRenderCandidate.imVersion}) is current — ready to sign off.`}
+                               </p>
+                               {isPrintExportAvailable() && locked && (
+                                 printedReadyToFinalize ? (
+                                   <button
+                                     type="button"
+                                     onClick={() => setShowPrintedFinalizeConfirm(true)}
+                                     disabled={isBusy}
+                                     className="shrink-0 flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-60"
+                                   ><Lock size={12} /> Mark Final</button>
+                                 ) : (
+                                   <button
+                                     type="button"
+                                     onClick={openPrintDialogForPrinted}
+                                     disabled={isBusy || printedLanguages.length === 0}
+                                     className="shrink-0 flex items-center gap-1.5 border border-indigo-200 text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-60"
+                                   ><Printer size={12} /> {printedRenderCandidate ? 'Re-render' : 'Render PDF'}</button>
+                                 )
+                               )}
+                             </div>
                            )}
                          </div>
                        )}
@@ -5202,7 +5453,7 @@ const ProjectIMGenerator: React.FC = () => {
                                           {/* Title + body at the PRINT profile's sizes (the exporter's own scale),
                                               not the brand's web font sizes — the brand keeps its colors only. */}
                                           <h3 className="font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, ...(previewGeometry ? { fontSize: `${previewGeometry.headingPx}px`, fontFamily: `'${previewGeometry.fontFamily}', Arial, sans-serif` } : { fontFamily: metadata.brand?.fontFamilies.heading }) }}>{localizedSectionTitle(section, activeLang)}</h3>
-                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, ...(previewGeometry ? imContentPrintScale(previewGeometry) : { fontFamily: metadata.brand?.fontFamilies.body, fontSize: `${metadata.brand?.fontSizes.body}px` }) }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
+                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, ...(previewGeometry ? imContentPrintScale(previewGeometry) : { fontFamily: metadata.brand?.fontFamilies.body }) }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
                                         </div>
                                       );
                                   })}
