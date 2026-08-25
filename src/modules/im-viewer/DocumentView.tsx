@@ -1,6 +1,10 @@
 /**
  * Renders the manual body: an optional cover banner from metadata, then every section in reading
  * order with heading levels derived from tree depth. Section/node ids become scroll anchors.
+ *
+ * `data-imv-section` carries the section id as its value (not just as a marker): the scroll-spy
+ * selector `[data-imv-section]` in ViewerShell matches either way, and a host that layers
+ * commenting on top can read the chapter a text selection landed in straight off the ancestor.
  */
 
 import React from 'react';
@@ -29,7 +33,7 @@ export const DocumentView: React.FC<Props> = ({ ordered, metadata, language }) =
     )}
 
     {ordered.map(({ section, depth }) => (
-      <section key={section.id} id={`section-${section.id}`} className="imv-section" data-imv-section>
+      <section key={section.id} id={`section-${section.id}`} className="imv-section" data-imv-section={section.id}>
         {section.title && (
           <div className={`imv-section-title ${headingClass(depth)}`}>{section.title}</div>
         )}

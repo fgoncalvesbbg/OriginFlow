@@ -5,10 +5,10 @@ import Layout from '../../components/Layout';
 import {
   getCategories, getIMTemplates, createIMTemplate, duplicateIMTemplate, updateIMTemplate, getAllProjectIMs,
   getStaleProjectIMDetails, republishProjectIM, stalenessKey,
-  getLatestRendersByManual, checkMarkupReviewStatus, isMarkupReviewAvailable,
+  getLatestRendersByManual, getReviewRoundsByManual,
   getTemplateRegulationCounts
 } from '../../services';
-import type { StaleManual, MarkupReviewStatus } from '../../services';
+import type { StaleManual, ReviewRoundSummary } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import {
@@ -114,35 +114,27 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
     return () => { active = false; };
   }, []);
 
-  // Live Markup.io review outcomes for the rows currently in review — polled via the
-  // markup-review-status function (which also caches the result on the manual, so the
-  // next dashboard load starts from the cached value). Small pool, best-effort.
-  const [reviewChecks, setReviewChecks] = useState<Map<string, MarkupReviewStatus>>(new Map());
+  // Supplier review state for the whole board, from our own tables. This replaced a
+  // per-manual poll of the Markup.io API that was capped at twelve rows to stay tolerable;
+  // two queries cover every row, so there is no cap and no partial picture.
+  const [reviewRounds, setReviewRounds] = useState<Map<string, ReviewRoundSummary> | null>(null);
   useEffect(() => {
-    if (!isMarkupReviewAvailable()) return;
-    const targets = ims.filter(im => isInReview(im) && im.reviewDone !== true).slice(0, 12);
-    if (!targets.length) return;
     let active = true;
-    let cursor = 0;
-    const worker = async () => {
-      while (active && cursor < targets.length) {
-        const im = targets[cursor++];
-        try {
-          const res = await checkMarkupReviewStatus(im.projectId, im.templateType);
-          if (active) setReviewChecks(prev => new Map(prev).set(im.id, res));
-        } catch { /* best-effort: the cached/derived state stands */ }
-      }
-    };
-    Promise.all(Array.from({ length: Math.min(3, targets.length) }, worker));
+    getReviewRoundsByManual()
+      .then(m => { if (active) setReviewRounds(m); })
+      .catch(e => console.error('[IMDashboard] review rounds failed:', e));
     return () => { active = false; };
-  }, [ims]);
+  }, []);
 
-  /** Row's review outcome: live check first, then the cached column. */
+  /**
+   * Row's review outcome. "Done" means the reviewer submitted AND nothing is outstanding — a
+   * submitted review with open notes is work for the PM, not a finished step.
+   */
   const reviewStateOf = (im: ProjectIMSummary) => {
-    const live = reviewChecks.get(im.id);
+    const round = reviewRounds?.get(stalenessKey(im.projectId, im.templateType));
     return {
-      reviewDone: live ? live.done : im.reviewDone,
-      activeThreads: live ? live.activeThreads : im.reviewActiveThreads,
+      reviewDone: round ? round.submitted && round.openCount === 0 : null,
+      activeThreads: round ? round.openCount : null,
     };
   };
 
@@ -163,6 +155,14 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   /** Mutually-exclusive display status used for the badge, the filter and the grouping. */
   const statusOf = (im: ProjectIMSummary) =>
     manualStatusOf({ ...im, reviewDone: reviewStateOf(im).reviewDone }, isStale(im));
+
+  /**
+   * Where a review link points now: the manual's own editor, where the notes panel lives.
+   * Reviews used to live on Markup.io, so this was an external href; keeping the affordance
+   * in the same places means the board reads the same, it just no longer leaves the app.
+   */
+  const generatorHref = (im: ProjectIMSummary) =>
+    `/project/${im.projectId}/im-generator${im.templateType === 'warning_leaflet' ? '/warning_leaflet' : ''}`;
 
   /** One-line "what next" hint per row (null = nothing actionable — stay quiet). */
   const nextAction = (im: ProjectIMSummary): string | null => {
@@ -466,14 +466,12 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                             </span>
                           );
                         })()}
-                        {statusOf(im) === 'in_review' && im.reviewUrl && (
-                          <a
-                            href={im.reviewUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                        {statusOf(im) === 'in_review' && (
+                          <Link
+                            to={generatorHref(im)}
                             className="text-[10px] font-semibold text-sky-700 underline hover:text-sky-900"
-                            title="Open the Markup.io review"
-                          >Open review</a>
+                            title="Open the supplier review notes"
+                          >Open review</Link>
                         )}
                         {/* A final manual keeps its underlying publish state visible: "Final"
                             says it's locked, not whether it was ever published. */}
@@ -519,16 +517,16 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                       {/* "What next" hint — quiet (null) when nothing is actionable. */}
                       {(() => {
                         const hint = nextAction(im);
-                        const reviewLink = isInReview(im) && im.reviewUrl;
+                        const reviewLink = isInReview(im);
                         if (!hint && !reviewLink) return null;
                         return (
                           <div className="text-[10px] text-gray-400 mt-1 max-w-[220px] flex items-center gap-1.5">
                             {hint && <span className="truncate" title={hint}>↳ {hint}</span>}
                             {reviewLink && (
-                              <a href={im.reviewUrl!} target="_blank" rel="noreferrer"
+                              <Link to={generatorHref(im)}
                                 className="shrink-0 underline font-semibold text-sky-600 hover:text-sky-800"
-                                title="Open this manual's Markup.io review"
-                              >Open review</a>
+                                title="Open this manual's supplier review notes"
+                              >Open review</Link>
                             )}
                           </div>
                         );
@@ -612,11 +610,11 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                             >What changed?</button>
                           )}
                           {hint && <div className="text-[10px] text-gray-500 mt-1 truncate" title={hint}>↳ {hint}</div>}
-                          {isInReview(im) && im.reviewUrl && (
-                            <a href={im.reviewUrl} target="_blank" rel="noreferrer"
+                          {isInReview(im) && (
+                            <Link to={generatorHref(im)}
                               className="inline-block text-[10px] underline font-semibold text-sky-600 hover:text-sky-800 mt-1"
-                              title="Open this manual's Markup.io review"
-                            >Open review</a>
+                              title="Open this manual's supplier review notes"
+                            >Open review</Link>
                           )}
                         </div>
                       );

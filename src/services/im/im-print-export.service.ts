@@ -79,9 +79,6 @@ export interface PrintRender {
   comment: string;
   /** im_markets.code this booklet was produced for (market preset), or null for ad-hoc. */
   market: string | null;
-  /** Markup.io share link this PDF was sent to for review (null = never sent). */
-  markupUrl: string | null;
-  markupId: string | null;
 }
 
 export interface PrintBackInput {
@@ -169,8 +166,6 @@ const mapRender = (r: any): PrintRender => ({
   createdAt: r.created_at,
   comment: r.comment ?? '',
   market: r.market ?? null,
-  markupUrl: r.markup_url ?? null,
-  markupId: r.markup_id ?? null,
 });
 /* eslint-enable @typescript-eslint/no-explicit-any */
 

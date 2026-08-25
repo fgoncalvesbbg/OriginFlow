@@ -388,3 +388,15 @@
   display: inline-block;
   vertical-align: middle;
 }
+
+/* A supplier review note's quoted wording, highlighted in the chapter the PM jumped to
+   (see review-anchor.ts markQuoteInHtml). Background only, no border: DESIGN.md's
+   one-border-or-one-shadow rule, and a border would also shift the text it wraps. */
+.im-content mark.im-review-hit {
+  background: #fde68a;
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

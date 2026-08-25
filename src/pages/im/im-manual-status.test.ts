@@ -12,7 +12,7 @@ import {
 
 const im = (status: 'draft' | 'generated', isFinalized = false) => ({ status, isFinalized });
 
-/** A published manual sent to Markup.io for review at `reviewVersion`. */
+/** A published manual sent out for supplier review at `reviewVersion`. */
 const reviewed = (opts: {
   status?: 'draft' | 'generated';
   isFinalized?: boolean;
@@ -48,7 +48,7 @@ describe('manualStatusOf', () => {
     expect(manualStatusOf(im('draft'), true)).toBe('draft');
   });
 
-  it('reports In Review while the current published version is out on Markup.io', () => {
+  it('reports In Review while the current published version is out with a supplier', () => {
     expect(manualStatusOf(reviewed(), false)).toBe('in_review');
   });
 
@@ -74,40 +74,41 @@ describe('manualStatusOf', () => {
     expect(manualStatusOf(reviewed({ reviewVersion: null }), false)).toBe('in_review');
   });
 
-  it('splits an in-review manual by its polled outcome: done → Review done', () => {
+  it('splits an in-review manual by its outcome: submitted and cleared → Review done', () => {
     expect(manualStatusOf({ ...reviewed(), reviewDone: true }, false)).toBe('review_done');
     expect(manualStatusOf({ ...reviewed(), reviewDone: false }, false)).toBe('in_review');
-    // Never checked (null/absent) stays In Review — no outcome is not an outcome.
+    // Unknown (null/absent) stays In Review — no outcome is not an outcome.
     expect(manualStatusOf({ ...reviewed(), reviewDone: null }, false)).toBe('in_review');
   });
 
   it('keeps stronger claims ahead of Review done', () => {
     expect(manualStatusOf({ ...reviewed(), reviewDone: true, isFinalized: true }, false)).toBe('final');
     expect(manualStatusOf({ ...reviewed(), reviewDone: true }, true)).toBe('needs_republish');
-    // Editing / republishing ends the round; a stale cached outcome must not resurrect it.
+    // Editing / republishing ends the round; a stale outcome must not resurrect it.
     expect(manualStatusOf({ ...reviewed({ status: 'draft' }), reviewDone: true }, false)).toBe('draft');
     expect(manualStatusOf({ ...reviewed({ version: 4, reviewVersion: 3 }), reviewDone: true }, false)).toBe('published');
   });
 });
 
 describe('printedManualStatusOf', () => {
-  it('reports Final regardless of render/staleness', () => {
-    expect(printedManualStatusOf(true, true, false)).toBe('final');
-    expect(printedManualStatusOf(true, false, null)).toBe('final');
-  });
-
-  it('reports Draft when no print render exists yet', () => {
+  it('reports Draft when no print render exists yet, regardless of the Digital IM', () => {
     expect(printedManualStatusOf(false, false, false)).toBe('draft');
-    expect(printedManualStatusOf(false, false, true)).toBe('draft');
-  });
-
-  it('distinguishes a stale render from an up-to-date one, once rendered', () => {
-    expect(printedManualStatusOf(false, true, true)).toBe('needs_republish');
-    expect(printedManualStatusOf(false, true, false)).toBe('published');
+    expect(printedManualStatusOf(true, false, null)).toBe('draft');
   });
 
   it('reports Status unknown when the staleness check failed', () => {
     expect(printedManualStatusOf(false, true, null)).toBe('unknown');
+    expect(printedManualStatusOf(true, true, null)).toBe('unknown');
+  });
+
+  it('reports needs_republish when the matching render predates the current manual', () => {
+    expect(printedManualStatusOf(false, true, true)).toBe('needs_republish');
+    expect(printedManualStatusOf(true, true, true)).toBe('needs_republish');
+  });
+
+  it('derives Final ONLY when the Digital IM is final AND the render is current — never a stored flag', () => {
+    expect(printedManualStatusOf(true, true, false)).toBe('final');
+    expect(printedManualStatusOf(false, true, false)).toBe('published');
   });
 });
 
@@ -119,9 +120,9 @@ describe('nextActionOf', () => {
     expect(nextActionOf({ status: 'draft', version: 0 })).toBeNull();
   });
 
-  it('reports review age and open threads while in review', () => {
+  it('reports review age and open notes while in review', () => {
     expect(nextActionOf({ status: 'in_review', reviewRequestedAt: '2026-08-13T09:00:00Z', reviewActiveThreads: 3 }, NOW))
-      .toBe('review out 5 days · 3 open threads');
+      .toBe('review out 5 days · 3 open notes');
     expect(nextActionOf({ status: 'in_review', reviewRequestedAt: '2026-08-18T09:00:00Z' }, NOW))
       .toBe('review sent today');
   });

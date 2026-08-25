@@ -32,6 +32,9 @@ import {
   getIMTemplateById,
   getProjectRequiredLanguages,
   getProjectPrintedLanguages,
+  setSupplierPdfDocument,
+  supplierPdfDocTitle,
+  GENERATED_DOC_STEP,
   getProjectIMStaleReasons,
   getPrintRenders,
   getPublishHistory,
@@ -66,6 +69,12 @@ import * as XLSX from 'xlsx';
 import AttributeInput from '../components/common/AttributeInput';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import PublishDiffModal from './im/PublishDiffModal';
+
+// Labels for the two supplier-facing PDF documents (see setSupplierPdfDocument) — never
+// "Instruction Manual", since the Digital IM itself is never shared, only its printed
+// language subset.
+const PRINTED_IM_LABEL = 'Printed IM';
+const WARNING_LEAFLET_LABEL = 'Warning Leaflet';
 
 // --- Internal Components ---
 
@@ -109,6 +118,8 @@ const ProjectDetail: React.FC = () => {
   // The Digital IM's template — needed to derive the Printed IM's language subset
   // (getProjectPrintedLanguages), which shares this same manual and template.
   const [imTemplate, setImTemplate] = useState<IMTemplate | null>(null);
+  // Publishing/un-publishing the Printed IM + Warning Leaflet PDFs to the supplier portal.
+  const [sharingWithSupplier, setSharingWithSupplier] = useState(false);
   // Drill-down reasons a published manual is out of date (empty = up to date).
   const [imStaleReasons, setImStaleReasons] = useState<import('../services').StaleReason[]>([]);
   const [leafletStaleReasons, setLeafletStaleReasons] = useState<import('../services').StaleReason[]>([]);
@@ -337,19 +348,6 @@ const ProjectDetail: React.FC = () => {
                   </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-2">
-                  {/* This PDF's Markup.io review round (each send creates its own markup,
-                      so the print timeline doubles as the review-round history). */}
-                  {r.markupUrl && (
-                    <a
-                      href={r.markupUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Open this PDF's Markup.io review"
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-700 border border-sky-200 bg-sky-50 rounded-lg px-3 py-1.5 hover:bg-sky-100"
-                    >
-                      <ExternalLink size={13} /> Review
-                    </a>
-                  )}
                   <a
                     href={r.url}
                     target="_blank"
@@ -402,10 +400,12 @@ const ProjectDetail: React.FC = () => {
     );
   };
 
-  // The Printed IM — a language subset of the Digital IM's own manual (projectIM), shipped
-  // physically with the product alongside the Warning Leaflet. Derived rather than stored
-  // separately: it shares projectIM's content, template and print-render history, only
-  // narrowing which languages are signed off as "the printed booklet".
+  // The Printed IM — not a separate document: it's the Digital IM's own manual (projectIM),
+  // exported for a project-chosen SUBSET of its languages, to physically ship with the
+  // product alongside the Warning Leaflet (the Digital IM stays online, all languages).
+  // No separate content and no separate sign-off — "Final" is fully DERIVED (see
+  // printedManualStatusOf): the Digital IM itself is final AND a print PDF for exactly
+  // this language set is current.
   const printedLanguages = (projectIM && imTemplate)
     ? getProjectPrintedLanguages(imTemplate, projectIM.placeholderData)
     : [];
@@ -418,27 +418,82 @@ const ProjectDetail: React.FC = () => {
   const printedIsStale = !printedRenderCandidate ? null
     : (printedRenderCandidate.imVersion == null || projectIM?.version == null) ? null
     : printedRenderCandidate.imVersion < projectIM.version;
-  const printedStatus = printedManualStatusOf(!!projectIM?.printedIsFinalized, !!printedRenderCandidate, printedIsStale);
+  const printedStatus = printedManualStatusOf(!!projectIM?.isFinalized, !!printedRenderCandidate, printedIsStale);
 
   // Completion checklist: the project can only be marked Completed once all three
   // documents that ship — Digital IM, Printed IM, Warning Leaflet — are final. See
   // handleUpdateProject and the Status select in the Edit Project Details modal below.
   const imCompletionChecklist = {
     digitalFinal: !!projectIM?.isFinalized,
-    printedFinal: !!projectIM?.printedIsFinalized,
+    printedFinal: printedStatus === 'final',
     leafletFinal: !!projectLeaflet?.isFinalized,
   };
   const imAllFinal = imCompletionChecklist.digitalFinal && imCompletionChecklist.printedFinal && imCompletionChecklist.leafletFinal;
 
+  // --- Share with Supplier -----------------------------------------------------
+  // Gives the supplier direct portal access to ONLY the current Printed IM PDF and the
+  // current Warning Leaflet PDF — never the Digital IM (online-only), never older
+  // versions. Nothing is exposed automatically the moment a PM renders a PDF (see
+  // attachPrintPdfToProject in ProjectIMGenerator.tsx) — this is the one deliberate,
+  // explicit action that flips visibility, and it always points the visible copy at a
+  // specific verified render rather than "whatever was rendered most recently".
+  //
+  // The Warning Leaflet has no printed-language-subset concept of its own (unlike the
+  // Digital/Printed IM) — its newest render (leafletRenders[0], newest-first) simply IS
+  // the leaflet PDF, so "current" here only means "matches the leaflet's current version".
+  const leafletRenderCandidate = leafletRenders[0] ?? null;
+  const leafletPdfIsStale = !leafletRenderCandidate ? null
+    : (leafletRenderCandidate.imVersion == null || projectLeaflet?.version == null) ? null
+    : leafletRenderCandidate.imVersion < projectLeaflet.version;
+  const canShareWithSupplier = !!printedRenderCandidate && printedIsStale === false
+    && !!leafletRenderCandidate && leafletPdfIsStale === false;
+
+  const supplierDocIM = docs.find(d =>
+    d.stepNumber === GENERATED_DOC_STEP && d.title === supplierPdfDocTitle(PRINTED_IM_LABEL) && d.responsibleParty === ResponsibleParty.INTERNAL,
+  ) ?? null;
+  const supplierDocLeaflet = docs.find(d =>
+    d.stepNumber === GENERATED_DOC_STEP && d.title === supplierPdfDocTitle(WARNING_LEAFLET_LABEL) && d.responsibleParty === ResponsibleParty.INTERNAL,
+  ) ?? null;
+  const sharedWithSupplier = !!supplierDocIM?.isVisibleToSupplier && !!supplierDocLeaflet?.isVisibleToSupplier;
+
+  const handleShareWithSupplier = async () => {
+    if (!project || !printedRenderCandidate || !leafletRenderCandidate) return;
+    setSharingWithSupplier(true);
+    try {
+      await setSupplierPdfDocument(project.id, PRINTED_IM_LABEL, printedRenderCandidate.url, true);
+      await setSupplierPdfDocument(project.id, WARNING_LEAFLET_LABEL, leafletRenderCandidate.url, true);
+      await loadProjectData();
+      showNotification('The Printed IM and Warning Leaflet PDFs are now available to the supplier.', 'success');
+    } catch (e: any) {
+      showNotification(`Failed to share with the supplier: ${e.message}`, 'error');
+    } finally {
+      setSharingWithSupplier(false);
+    }
+  };
+
+  const handleUnshareFromSupplier = async () => {
+    setSharingWithSupplier(true);
+    try {
+      if (supplierDocIM) await updateDocumentMetadata(supplierDocIM.id, { isVisibleToSupplier: false });
+      if (supplierDocLeaflet) await updateDocumentMetadata(supplierDocLeaflet.id, { isVisibleToSupplier: false });
+      await loadProjectData();
+      showNotification('Removed from the supplier portal.', 'success');
+    } catch (e: any) {
+      showNotification(`Failed to update: ${e.message}`, 'error');
+    } finally {
+      setSharingWithSupplier(false);
+    }
+  };
+
   // Card for the Printed IM, sitting between the Digital IM and the Warning Leaflet — same
   // gradient-header + status-grid layout as those two, but its "Edit" link goes to the same
-  // Digital IM generator (where the Printed IM's languages/finalize controls live).
+  // Digital IM generator (where the Printed IM's language picker and print export live).
   const renderPrintedIMCard = () => (
     <div className="mt-8 bg-gradient-to-br from-sky-900 to-sky-950 rounded-xl p-8 text-white shadow-lg flex justify-between items-center">
       <div>
         <h3 className="text-2xl font-bold mb-2 flex items-center gap-2"><FileDown className="text-sky-300" /> Printed IM</h3>
         <p className="text-sky-100/80 text-sm max-w-lg">
-          The subset of the Instruction Manual's languages printed and shipped in the box, alongside the Warning Leaflet.
+          The Instruction Manual, exported for a subset of its languages, printed and shipped in the box alongside the Warning Leaflet.
         </p>
       </div>
       <Link to={`/project/${project?.id}/im-generator`} className="bg-sky-500 hover:bg-sky-400 text-sky-950 px-6 py-3 rounded-xl font-bold shadow-lg transition-all flex items-center gap-2">
@@ -462,11 +517,9 @@ const ProjectDetail: React.FC = () => {
         </span>
       </div>
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
-        <h4 className="text-xs font-bold text-muted uppercase mb-2">Signed off</h4>
+        <h4 className="text-xs font-bold text-muted uppercase mb-2">Print PDF</h4>
         <span className="font-mono text-gray-700">
-          {projectIM?.printedIsFinalized && projectIM.printedFinalizedAt
-            ? new Date(projectIM.printedFinalizedAt).toLocaleString()
-            : '—'}
+          {printedRenderCandidate ? new Date(printedRenderCandidate.createdAt).toLocaleString() : '—'}
         </span>
       </div>
     </div>
@@ -2381,6 +2434,40 @@ const ProjectDetail: React.FC = () => {
             {renderPublishHistory(leafletPublishHistory, 'amber')}
 
             {renderPrintTimeline(leafletRenders, 'amber')}
+
+            {/* Share with Supplier — the one deliberate step that hands the supplier direct
+                portal access to the current Printed IM and Warning Leaflet PDFs (never the
+                Digital IM, never older versions). See handleShareWithSupplier above. */}
+            {projectIM && projectLeaflet && (
+              <div className="mt-8 bg-white p-6 rounded-xl border border-gray-200 shadow">
+                <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2"><Send size={16} className="text-emerald-600" /> Share with Supplier</h4>
+                <p className="text-xs text-muted mb-3 max-w-xl">
+                  Gives the supplier direct access to the current Printed IM and Warning Leaflet PDFs in their
+                  portal — only these two files, only the latest version. The Digital IM stays online-only.
+                </p>
+                {sharedWithSupplier ? (
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-emerald-200 bg-emerald-50">
+                    <p className="text-xs text-emerald-800">Shared — the supplier can download both PDFs from their portal.</p>
+                    <button
+                      onClick={handleUnshareFromSupplier}
+                      disabled={sharingWithSupplier}
+                      className="shrink-0 flex items-center gap-1.5 bg-white border border-emerald-300 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-emerald-100 disabled:opacity-60"
+                    >Remove from supplier</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
+                    <p className="text-xs text-gray-500">
+                      {canShareWithSupplier ? 'Not yet shared.' : 'Render a current Printed IM PDF and Warning Leaflet PDF first.'}
+                    </p>
+                    <button
+                      onClick={handleShareWithSupplier}
+                      disabled={!canShareWithSupplier || sharingWithSupplier}
+                      className="shrink-0 flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-60"
+                    ><Send size={12} /> Share with Supplier</button>
+                  </div>
+                )}
+              </div>
+            )}
          </div>
       )}
 

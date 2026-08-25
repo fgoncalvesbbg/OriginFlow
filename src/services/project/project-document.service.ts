@@ -64,6 +64,61 @@ export const addDocument = async (doc: Omit<ProjectDocument, 'id'>): Promise<Pro
     return mapProjectDocument(created);
 };
 
+/** The step generated IM/Warning-Leaflet print PDFs are filed under — Production, never RFQ. */
+export const GENERATED_DOC_STEP = 3;
+
+/** Title convention for the single stable "Generated {label}" document a print PDF is attached to. */
+export const generatedDocTitle = (label: string): string => `Generated ${label}`;
+
+/**
+ * Title for the document that hands a specific print PDF to the supplier. Deliberately a
+ * SEPARATE document from generatedDocTitle's PM-internal "latest render of anything" copy:
+ * that copy is overwritten by every render (including ones that don't concern the
+ * supplier, e.g. a full-language test print), so sharing must never point at it directly —
+ * an unrelated render would then silently change what the supplier sees. This title is
+ * only ever written by setSupplierPdfDocument below, on an explicit PM action.
+ */
+export const supplierPdfDocTitle = (label: string): string => `${label} — Supplier Copy`;
+
+/**
+ * Create/update the ONE document that exposes a specific, PM-verified print PDF to the
+ * supplier — always exactly this file, at this exact `fileUrl` (the print-render
+ * pipeline's own public Storage URL; no re-upload, no version history kept). Calling this
+ * with the exact PrintRender the PM checked (e.g. the Printed IM's language-matching
+ * render) is what makes that file, and no other, the one exposed — regardless of what else
+ * gets rendered afterwards.
+ */
+export const setSupplierPdfDocument = async (
+    projectId: string,
+    label: string,
+    fileUrl: string,
+    isVisibleToSupplier: boolean,
+): Promise<ProjectDocument> => {
+    const title = supplierPdfDocTitle(label);
+    const existing = await db.selectMaybeOne<Row>('project_documents', {
+        where: { project_id: projectId, step_number: GENERATED_DOC_STEP, title, responsible_party: ResponsibleParty.INTERNAL },
+    });
+    if (existing) {
+        const updated = await db.update<Row>(
+            'project_documents',
+            { file_url: fileUrl, is_visible_to_supplier: isVisibleToSupplier, status: DocStatus.APPROVED, uploaded_at: new Date().toISOString() },
+            { where: { id: existing.id } },
+        );
+        return mapProjectDocument(updated);
+    }
+    return addDocument({
+        projectId,
+        stepNumber: GENERATED_DOC_STEP,
+        title,
+        description: `The current ${label} PDF shared with the supplier`,
+        responsibleParty: ResponsibleParty.INTERNAL,
+        isVisibleToSupplier,
+        isRequired: false,
+        status: DocStatus.APPROVED,
+        fileUrl,
+    });
+};
+
 /**
  * Update document metadata (title, description, visibility, deadline, etc.)
  */

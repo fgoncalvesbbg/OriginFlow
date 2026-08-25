@@ -27,7 +27,7 @@ export {
   saveProjectIM,
   updateProjectIMPlaceholders,
   setProjectIMFinalized,
-  setProjectPrintedFinalized,
+  setProjectIMReviewRequested,
   deleteProjectIM,
   getAllProjectIMs,
   getProjectIMBackups,
@@ -96,19 +96,35 @@ export type {
   PrintRender,
 } from './im-print-export.service';
 export {
-  sendRenderToMarkup,
-  isMarkupReviewAvailable,
-  checkMarkupReviewStatus,
-} from './im-review.service';
-export type { SendToMarkupParams, MarkupReviewResult, MarkupReviewStatus } from './im-review.service';
-export {
   getIMShares,
   createIMShare,
   revokeIMShare,
   resolveIMShareToken,
   getIMShareUrl,
+  getIMReviewUrl,
+  isShareExpired,
 } from './im-share.service';
-export type { IMShare } from './im-share.service';
+export type { IMShare, IMShareMode } from './im-share.service';
+// Supplier review round (replaces the Markup.io integration). The first group is the
+// anonymous portal path (RPC-only); the second is the PM's triage path.
+export {
+  resolveReviewShare,
+  listReviewCommentsByToken,
+  addReviewComment,
+  deleteReviewComment,
+  submitReview,
+  getReviewComments,
+  setReviewCommentStatus,
+  getOpenReviewCommentCounts,
+  getReviewRoundsByManual,
+} from './im-review-comments.service';
+export type {
+  IMReviewComment,
+  IMReviewCommentStatus,
+  IMReviewSession,
+  AddReviewCommentInput,
+  ReviewRoundSummary,
+} from './im-review-comments.service';
 export {
   validateImImport,
   importIMTemplate,

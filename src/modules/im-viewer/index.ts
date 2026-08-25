@@ -14,4 +14,5 @@ export type {
   ManualSection,
   ManualNode,
   TemplateMetadata,
+  ViewerTextSelection,
 } from './types';

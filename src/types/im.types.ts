@@ -125,42 +125,24 @@ export interface ProjectIM {
   finalizedAt?: string | null;
   // Who marked the manual FINAL (email/id) — the sign-off attribution. Null when not final.
   finalizedBy?: string | null;
-  // The Printed IM — a language SUBSET of this same manual (templateType 'im' only),
-  // shipped physically alongside the Warning Leaflet while the Digital IM stays online.
-  // Independent sign-off from isFinalized above, but requires it to already be true (see
-  // migration 129): same content, so it must be locked before a printed subset of it can
-  // be signed off. The subset itself is stored in placeholderData (see
-  // getProjectPrintedLanguages), mirroring how the Digital IM's own language set works.
-  printedIsFinalized?: boolean;
-  printedFinalizedAt?: string | null;
-  printedFinalizedBy?: string | null;
-  // im_print_renders.id of the exact PDF signed off as the shipped Printed IM. Required
-  // when printedIsFinalized is true.
-  printedRenderId?: string | null;
   updatedAt: string;
   // Who last saved the row (email/id) — shown when a concurrent-edit conflict is detected.
   updatedBy?: string | null;
   // Monotonic publish counter — 0/absent while only ever saved as a draft, then
   // +1 on each publish (status='generated'). Stamped in the generated PDF footer.
   version?: number;
-  // Markup.io review round (migration 111), written by the send-to-markup function.
+  // Supplier review round (migration 111 columns, stamped by setProjectIMReviewRequested).
   // "In Review" is DERIVED: status='generated' AND reviewRequestedAt set AND
-  // reviewVersion = version. A draft save or a republish ends it implicitly; the
-  // link is kept afterwards as the last round's history.
-  reviewUrl?: string | null;
-  reviewMarkupId?: string | null;
+  // reviewVersion = version. A draft save or a republish ends it implicitly.
+  //
+  // The round's OUTCOME is not stored here. It lives in im_shares.submitted_at and the open
+  // note count on im_review_comments (see getReviewRoundsByManual) — the Markup.io cache
+  // columns these replaced (review_status / review_done / review_active_threads /
+  // review_checked_at, migration 112) are still in the database but are no longer read or
+  // written, so they are deliberately absent from this type.
   reviewRequestedAt?: string | null;
   reviewRequestedBy?: string | null;
   reviewVersion?: number | null;
-  // Cached review OUTCOME, polled from the Markup.io API (migration 112).
-  /** Raw Markup.io markup status at last check ('editing', 'complete', …; 'deleted'). Null = never checked. */
-  reviewStatus?: string | null;
-  /** True when the markup reads completed/approved or has >=1 explicit approval. Null = never checked. */
-  reviewDone?: boolean | null;
-  /** Open (unresolved) Markup.io comment threads at last check. */
-  reviewActiveThreads?: number | null;
-  /** When the Markup.io API was last polled. */
-  reviewCheckedAt?: string | null;
   // project_skus.id values this IM is bound to (the SKUs it covers). Empty/absent =
   // all of the project's SKUs (backward compatible). Bound SKUs drive resolution.
   boundSkuIds?: string[];

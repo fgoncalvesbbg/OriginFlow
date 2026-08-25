@@ -30,7 +30,11 @@ export {
   deleteDocumentVersion,
   addDocumentComment,
   addSupplierDocumentComment,
-  getMissingDocumentsForSupplier
+  getMissingDocumentsForSupplier,
+  setSupplierPdfDocument,
+  supplierPdfDocTitle,
+  generatedDocTitle,
+  GENERATED_DOC_STEP
 } from './project-document.service';
 
 export {

@@ -12,10 +12,10 @@
  *                       final, that is the fact about it that matters most.
  *  2. `needs_republish`  published, but a template or shared block changed since. The only
  *                       status that implies an action, so it outranks plain `published`.
- *  3. `in_review`        published and up to date, and the current version is out on
- *                       Markup.io collecting supplier feedback. Below `needs_republish`
- *                       on purpose: if the sources drifted, the PDF being reviewed is
- *                       already outdated — that is the more actionable fact.
+ *  3. `in_review`        published and up to date, and the current version is out with a
+ *                       supplier collecting feedback (see IMReviewPortal). Below
+ *                       `needs_republish` on purpose: if the sources drifted, the manual
+ *                       being reviewed is already outdated — the more actionable fact.
  *  4. `published`        published and up to date.
  *  5. `draft`            never published — or published, then edited again ("in progress"):
  *                       a draft save flips the stored status back to 'draft', which is also
@@ -31,20 +31,25 @@ export type ManualStatus = 'final' | 'needs_republish' | 'unknown' | 'review_don
 export interface ManualStatusInput {
   status: 'draft' | 'generated';
   isFinalized: boolean;
-  /** Publish counter + Markup.io review round (migration 111). Optional: rows that
-   *  predate the feature (or callers that don't track reviews) derive as before. */
+  /** Publish counter + supplier review round (migration 111 columns, stamped by
+   *  setProjectIMReviewRequested). Optional: rows that predate the feature (or callers
+   *  that don't track reviews) derive as before. */
   version?: number | null;
   reviewRequestedAt?: string | null;
   reviewVersion?: number | null;
-  /** Cached review outcome from the Markup.io API (migration 112). Null/absent = never checked. */
+  /**
+   * Whether the round is finished: the reviewer submitted AND nothing is still outstanding.
+   * Derived from im_shares.submitted_at and the open note count (see getReviewRoundsByManual),
+   * not stored on the manual. Null/absent = unknown, which reads as still in review.
+   */
   reviewDone?: boolean | null;
 }
 
 /**
- * True while the manual's CURRENT published version is out for review on Markup.io.
+ * True while the manual's CURRENT published version is out with a supplier for review.
  * Editing (stored status back to 'draft') or republishing (version bump past
  * reviewVersion) ends it implicitly — nothing is ever cleared. A null reviewVersion
- * (a legacy render without a stamped version) counts as current.
+ * (a legacy round without a stamped version) counts as current.
  */
 export const isInReview = (
   im: Pick<ManualStatusInput, 'status' | 'version' | 'reviewRequestedAt' | 'reviewVersion'>,
@@ -63,8 +68,8 @@ export const manualStatusOf = (im: ManualStatusInput, isStale: boolean | null): 
   if (im.status === 'generated') {
     if (isStale === null) return 'unknown';
     if (isStale) return 'needs_republish';
-    // The review round splits by its polled outcome (Markup.io status/approvals):
-    // finished → the next action is sign-off; still open → waiting on reviewers.
+    // The review round splits by its outcome: submitted with nothing outstanding → the next
+    // action is sign-off; anything else → still waiting on reviewers or on the PM's triage.
     if (isInReview(im)) return im.reviewDone ? 'review_done' : 'in_review';
     return 'published';
   }
@@ -72,24 +77,26 @@ export const manualStatusOf = (im: ManualStatusInput, isStale: boolean | null): 
 };
 
 /**
- * Derived display status for the PRINTED IM track (the project's language-subset print
- * run, shipped with the product) — reuses the exact same `ManualStatus` vocabulary as
+ * Derived display status for the PRINTED IM (the project's language-subset print run,
+ * shipped with the product) — reuses the exact same `ManualStatus` vocabulary as
  * `manualStatusOf` above, so the badge/group UI doesn't need a second set of colors/labels.
- * Unlike the Digital IM there's no draft/generated split or Markup.io review round on this
- * track: it's either "no print render yet" (draft), "rendered and matches the current
- * manual" (published), "rendered, but the manual changed since" (needs_republish), or
- * locked (final). `hasRender` = a print render exists for the current printed language
- * set at all; `isStale` mirrors the Digital IM's staleness check (null = check failed).
+ *
+ * The Printed IM is not a separate document with its own sign-off: it is the Digital IM's
+ * own content, exported for fewer languages, so there is nothing to lock independently.
+ * "Final" is therefore fully DERIVED, never a stored flag: the Digital IM itself is final
+ * AND a print PDF exists for exactly the currently-selected printed languages AND that PDF
+ * matches the manual's current version. `hasRender` = such a PDF exists at all; `isStale`
+ * mirrors the Digital IM's own staleness check (null = check failed/unknown).
  */
 export const printedManualStatusOf = (
-  printedIsFinalized: boolean,
+  digitalIsFinalized: boolean,
   hasRender: boolean,
   isStale: boolean | null,
 ): ManualStatus => {
-  if (printedIsFinalized) return 'final';
   if (!hasRender) return 'draft';
   if (isStale === null) return 'unknown';
-  return isStale ? 'needs_republish' : 'published';
+  if (isStale) return 'needs_republish';
+  return digitalIsFinalized ? 'final' : 'published';
 };
 
 export type StatusTone = 'indigo' | 'emerald' | 'amber' | 'orange';
@@ -121,12 +128,12 @@ export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
   review_done: {
     label: 'Review done',
     classes: 'bg-teal-100 text-teal-700 border-teal-200',
-    hint: 'The Markup.io review finished (completed status or an explicit approval). Mark the manual FINAL, or address remaining notes.',
+    hint: 'The supplier submitted their review and every note has been handled. Mark the manual FINAL.',
   },
   in_review: {
     label: 'In Review',
     classes: 'bg-sky-100 text-sky-700 border-sky-200',
-    hint: 'The current PDF is on Markup.io collecting supplier feedback. Editing the manual returns it to In Progress.',
+    hint: 'The published manual is out with a supplier collecting feedback. Editing it returns the manual to In Progress.',
   },
   unknown: {
     label: 'Status unknown',
@@ -168,7 +175,7 @@ export interface NextActionInput {
   /** Publish counter (0 = never published). */
   version?: number | null;
   reviewRequestedAt?: string | null;
-  /** Open Markup.io threads at last check; null/undefined = count unknown. */
+  /** Supplier notes still to be handled; null/undefined = count unknown. */
   reviewActiveThreads?: number | null;
   /**
    * im_version of the manual's NEWEST print render. undefined = render data not
@@ -201,7 +208,7 @@ export const nextActionOf = (im: NextActionInput, now: number = Date.now()): str
         parts.push(d === 0 ? 'review sent today' : `review out ${d} day${d === 1 ? '' : 's'}`);
       }
       if (typeof im.reviewActiveThreads === 'number') {
-        parts.push(`${im.reviewActiveThreads} open thread${im.reviewActiveThreads === 1 ? '' : 's'}`);
+        parts.push(`${im.reviewActiveThreads} open note${im.reviewActiveThreads === 1 ? '' : 's'}`);
       }
       return parts.join(' · ') || null;
     }

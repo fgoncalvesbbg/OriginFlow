@@ -13,6 +13,7 @@ import {
   ViewerSource,
   Manifest,
   ResolvedManual,
+  ViewerTextSelection,
   SUPPORTED_SCHEMA_VERSION,
 } from './types';
 import { loadManifest, loadManual } from './data';
@@ -23,12 +24,21 @@ import { ViewerShell } from './ViewerShell';
 
 export interface IMViewerProps {
   source: ViewerSource;
+  /**
+   * Called when the reader settles on a text selection inside the manual (and with null when
+   * they clear it). Opt-in: omit it and no listener is attached, so the plain read-only share
+   * page behaves exactly as it did before commenting existed.
+   *
+   * The commenting UI itself deliberately lives in the host page, not in here — this module
+   * stays dependency-free and knows nothing about review links or Supabase.
+   */
+  onSelectText?: (selection: ViewerTextSelection | null) => void;
 }
 
 const pickInitialLang = (manifest: Manifest): string | null =>
   manifest.languages?.[0]?.lang ?? null;
 
-export const IMViewer: React.FC<IMViewerProps> = ({ source }) => {
+export const IMViewer: React.FC<IMViewerProps> = ({ source, onSelectText }) => {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [manual, setManual] = useState<ResolvedManual | null>(null);
   const [lang, setLang] = useState<string>('');
@@ -131,6 +141,7 @@ export const IMViewer: React.FC<IMViewerProps> = ({ source }) => {
           languages={manifest?.languages}
           currentLang={lang}
           onChangeLang={onChangeLang}
+          onSelectText={onSelectText}
         />
       </LightboxProvider>
     );

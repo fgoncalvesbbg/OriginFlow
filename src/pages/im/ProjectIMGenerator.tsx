@@ -4,23 +4,25 @@
  * template + the project's data into a previewable, publishable IM and exports it (PDF/JSON/XML).
  * Sub-components and pure helpers live under ./project-im-generator/.
  */
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
     getProjectById, getIMTemplateById, getIMSections,
-    getIMTemplates, getProjectIM, saveProjectIM, setProjectIMFinalized, setProjectPrintedFinalized, deleteProjectIM,
-    addDocument, uploadFile, getProjectDocs, getCategoryAttributes, getAttributeRequestsByProject,
+    getIMTemplates, getProjectIM, saveProjectIM, setProjectIMFinalized, deleteProjectIM,
+    addDocument, uploadFile, getProjectDocs, generatedDocTitle, GENERATED_DOC_STEP, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
     getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
     updateProjectIMPlaceholders, getProjectRequiredLanguages, getProjectPrintedLanguages,
     getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
-    checkMarkupReviewStatus, isMarkupReviewAvailable,
+    getIMShares, createIMShare, getIMReviewUrl,
+    getReviewComments, setReviewCommentStatus, setProjectIMReviewRequested,
     getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
     getTemplateChecklistState, summarizeChecklist, groupChecklistByRegulation
 } from '../../services';
 import type { ChecklistItem, ChecklistItemState, ChecklistItemStatus } from '../../services';
+import type { IMReviewComment, IMReviewCommentStatus, IMShare } from '../../services';
 import type { ProjectIMBackup } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
@@ -33,8 +35,8 @@ import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 import { uploadIMAsset, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
 import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
-import type { PublishResult, PrintPdfResult, PrintRender, MarkupReviewResult } from '../../services';
-import { isInReview, printedManualStatusOf, MANUAL_STATUS_META } from './im-manual-status';
+import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
+import { printedManualStatusOf, MANUAL_STATUS_META } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2 } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
@@ -49,6 +51,9 @@ import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './proj
 import { decodePlaceholderLabel, escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
 import { blockTypeToVariant, isExtraSection, isInlineBlockEmpty, newInlineBlock, sectionToInlineBlocks, seedPlaceholderBlocks } from './project-im-generator/im-blocks.utils';
 import { PREVIEW_SECTION_ATTR, findPreviewSection, findByDataAttr, previewScrollTopFor } from './project-im-generator/preview-scroll.utils';
+import { ReviewCommentsPanel } from './project-im-generator/ReviewCommentsPanel';
+import { groupCommentsBySection, reviewCommentCounts, reviewRoundStateOf } from './project-im-generator/review-comments.utils';
+import { markQuoteInHtml } from './review-anchor';
 import { buildSectionOutline, findExcludedAncestor, METADATA_SECTION_TITLE } from './project-im-generator/section-outline.utils';
 import { FILL_ANCHOR_ATTR, fillAnchors, type PublishIssue } from './project-im-generator/publish-issues';
 import PublishReviewPanel from './project-im-generator/PublishReviewPanel';
@@ -184,9 +189,6 @@ const ProjectIMGenerator: React.FC = () => {
   const [publishStatus, setPublishStatus] = useState<string | null>(null);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
-  // Which job the print dialog was opened for: rendering a PDF, or creating a
-  // Markup.io review round (which renders one first if there isn't a current one).
-  const [printIntent, setPrintIntent] = useState<'print' | 'review'>('print');
   // Pre-publish review panel (see PublishReviewPanel): docked beside the editor rather than
   // modal, because every row in it is a pointer into the editor and the list has to survive
   // being acted on. `armed` = opened by pressing Publish, so the panel carries the go/no-go
@@ -199,6 +201,20 @@ const ProjectIMGenerator: React.FC = () => {
   // click that produced it may also have switched the editor tab or language, so the target
   // is usually not in the DOM until a later frame (see the retry effect below).
   const [pendingJump, setPendingJump] = useState<{ anchor: string; tries: number } | null>(null);
+  // Supplier review (see ReviewCommentsPanel): the notes left on the online manual through a
+  // review link, and the links themselves. Both are loaded once per open; the panel is a
+  // second docked rail alongside the pre-publish one.
+  const [reviewComments, setReviewComments] = useState<IMReviewComment[]>([]);
+  const [reviewShares, setReviewShares] = useState<IMShare[]>([]);
+  const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
+  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [commentBusyId, setCommentBusyId] = useState<string | null>(null);
+  const [sendingForReview, setSendingForReview] = useState(false);
+  // The wording a supplier quoted, highlighted in the chapter the PM was just sent to. Held
+  // as chapter + text rather than as an offset: the editor's HTML is rebuilt on every
+  // keystroke, so anything positional would be stale before it was used.
+  const [quoteHighlight, setQuoteHighlight] = useState<{ sectionId: string; quote: string } | null>(null);
   const [flashAnchor, setFlashAnchor] = useState<string | null>(null);
   // A translation gap the operator asked to fix: the chapter AND the language, so the inline
   // rows in that chapter open on that language instead of their own English default.
@@ -242,16 +258,9 @@ const ProjectIMGenerator: React.FC = () => {
   // as the template editor).
   const lockedCls = locked ? 'pointer-events-none select-none opacity-70' : '';
 
-  // Printed IM sign-off (templateType 'im' only) — a SEPARATE lock from the Digital IM's own
-  // above, for the language-subset print run shipped with the product. See
-  // setProjectPrintedFinalized / getProjectPrintedLanguages and migration 129.
-  const [finalizingPrinted, setFinalizingPrinted] = useState(false);
-  const [showPrintedFinalizeConfirm, setShowPrintedFinalizeConfirm] = useState(false);
-  const [showPrintedUnlockConfirm, setShowPrintedUnlockConfirm] = useState(false);
-
   // Any network write is in flight — blocks re-entry and mutating actions, and drives the
   // blocking save overlay so the user can't navigate away and wedge the session mid-save.
-  const isBusy = saving || generating || translating || checkingChanges || finalizing || finalizingPrinted;
+  const isBusy = saving || generating || translating || checkingChanges || finalizing;
 
   // Crash-safe local draft. `savedSnapshotRef` holds a serialization of the last-persisted
   // editable state (the DB baseline); the current state differing from it = "unsaved edits",
@@ -599,7 +608,7 @@ const ProjectIMGenerator: React.FC = () => {
 
   // --- Manual pipeline (stepper) ------------------------------------------------
   // Async signals the stepper needs beyond page state: publish freshness (staleness),
-  // the newest print render's version, and the live Markup.io review outcome. All
+  // the newest print render's version, and the supplier review round. All
   // best-effort and off the critical path — the stepper renders without them.
   const [pipelineStale, setPipelineStale] = useState<boolean | null>(null); // null = unknown/unchecked
   const [latestRenderVersion, setLatestRenderVersion] = useState<number | null | undefined>(undefined);
@@ -696,23 +705,30 @@ const ProjectIMGenerator: React.FC = () => {
       }
   };
 
-  // Poll Markup.io once per open while a round is out and undecided; the function
-  // caches the outcome on the manual, so this also heals the dashboard's view.
-  const reviewCheckedRef = useRef(false);
+  // Load the supplier review round: the notes, and the links they came in through. Both are
+  // read straight from our own tables now — this replaces a per-open poll of the Markup.io
+  // API, which is why there is no availability flag or caching write-back any more.
+  //
+  // Degrades quietly: a review round is supplementary to editing the manual, so a failure
+  // here leaves the panel empty rather than blocking the page.
+  const loadReviewRound = useCallback(async () => {
+      if (!projectId) return;
+      try {
+          const [notes, shares] = await Promise.all([
+              getReviewComments(projectId, templateType),
+              getIMShares(projectId, templateType, 'review'),
+          ]);
+          setReviewComments(notes);
+          setReviewShares(shares);
+      } catch (e) {
+          console.error('[ProjectIMGenerator] Failed to load supplier review:', e);
+      }
+  }, [projectId, templateType]);
+
   useEffect(() => {
-      if (loading || !projectId || reviewCheckedRef.current || !isMarkupReviewAvailable()) return;
-      if (!instance || !isInReview(instance) || instance.reviewDone === true || !instance.reviewMarkupId) return;
-      reviewCheckedRef.current = true;
-      checkMarkupReviewStatus(projectId, templateType)
-          .then(res => setInstance(prev => prev ? {
-              ...prev,
-              reviewStatus: res.status,
-              reviewDone: res.done,
-              reviewActiveThreads: res.activeThreads,
-              reviewCheckedAt: res.checkedAt,
-          } : prev))
-          .catch(() => { /* the cached/derived state stands */ });
-  }, [loading, projectId, templateType, instance]);
+      if (loading || !projectId) return;
+      loadReviewRound();
+  }, [loading, projectId, loadReviewRound]);
 
   const handleInputChange = (id: string, value: string) => {
       setFormData(prev => ({ ...prev, [id]: value }));
@@ -1085,30 +1101,6 @@ const ProjectIMGenerator: React.FC = () => {
   const handleMarkFinal = () => { setShowFinalizeConfirm(false); applyFinalized(true); };
   const handleUnlock = () => { setShowUnlockConfirm(false); applyFinalized(false); };
 
-  // Toggle the Printed IM's own FINAL lock — a separate sign-off from the Digital IM's
-  // above, naming the exact print render that ships. The server (migration 129) also
-  // requires the Digital IM to already be final, since they share content.
-  const applyPrintedFinalized = async (next: boolean, renderId?: string | null) => {
-      if (!projectId || isBusy) return;
-      try {
-          setFinalizingPrinted(true);
-          const res = await setProjectPrintedFinalized(projectId, templateType, next, renderId);
-          setInstance(prev => prev ? {
-            ...prev,
-            printedIsFinalized: res.printedIsFinalized,
-            printedFinalizedAt: res.printedFinalizedAt,
-            printedFinalizedBy: res.printedFinalizedBy,
-            printedRenderId: res.printedRenderId,
-            updatedAt: res.updatedAt,
-          } : prev);
-      } catch (e) {
-          console.error('[ProjectIMGenerator] printed finalize toggle failed', e);
-          alert(`Could not ${next ? 'mark the Printed IM as final' : 'unlock the Printed IM'} — see console for details.`);
-      } finally {
-          setFinalizingPrinted(false);
-      }
-  };
-
   // Debounced background server autosave (on top of the instant local backup): 4s after
   // edits settle, silently persist to the DB so closing the tab never strands work on the
   // server. Skipped while loading, while a recovered draft awaits a decision, during any
@@ -1351,6 +1343,13 @@ const ProjectIMGenerator: React.FC = () => {
   // "Generated {typeLabel}" document under the Production step (step 3) — never RFQ.
   // Each render is appended as a new version via uploadFile, so the Production section
   // always shows the latest file with older versions collapsed under it (Version History).
+  //
+  // NOT visible to the supplier by default — that used to be hardcoded true here, which
+  // silently exposed every render (draft or not) the moment a PM made one. A PM now
+  // decides that explicitly, from the project page's "Share with Supplier" action, which
+  // writes to a wholly SEPARATE document (see setSupplierPdfDocument in
+  // project-document.service.ts) pointed at a specific verified render — never this one,
+  // so an unrelated render here can't silently change what the supplier sees.
   const attachPrintPdfToProject = async (res: PrintPdfResult, langs: string[], pageSize: 'a4' | 'a5') => {
       if (!project) throw new Error('Project not loaded.');
       const resp = await fetch(res.url);
@@ -1360,46 +1359,24 @@ const ProjectIMGenerator: React.FC = () => {
       const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${langs.map(l => l.toUpperCase()).join('-')}_${pageSize.toUpperCase()}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
 
-      const PRODUCTION_STEP = 3;
-      const generatedDocTitle = `Generated ${typeLabel}`;
+      const title = generatedDocTitle(typeLabel);
       const existingDocs = await getProjectDocs(project.id);
       const targetDoc = existingDocs.find(d =>
-         d.stepNumber === PRODUCTION_STEP &&
-         d.title === generatedDocTitle &&
+         d.stepNumber === GENERATED_DOC_STEP &&
+         d.title === title &&
          d.responsibleParty === ResponsibleParty.INTERNAL
       ) ?? await addDocument({
          projectId: project.id,
-         stepNumber: PRODUCTION_STEP,
-         title: generatedDocTitle,
+         stepNumber: GENERATED_DOC_STEP,
+         title,
          description: `Generated from ${typeLabel} template`,
          responsibleParty: ResponsibleParty.INTERNAL,
-         isVisibleToSupplier: true,
+         isVisibleToSupplier: false,
          isRequired: false,
          status: DocStatus.APPROVED
       });
 
       await uploadFile(targetDoc.id, file, false);
-  };
-
-  // After a PDF is sent to Markup.io, mirror the new review round onto the local
-  // instance so the In Review badge + link appear without a reload. updatedAt is
-  // synced too: the send-to-markup function bumps it server-side, and keeping a
-  // stale baseline would trip the concurrent-edit guard on the next save.
-  const handleReviewSent = (res: MarkupReviewResult) => {
-      setInstance(prev => prev ? {
-          ...prev,
-          reviewUrl: res.markupUrl,
-          reviewMarkupId: res.markupId,
-          reviewRequestedAt: res.reviewRequestedAt,
-          reviewRequestedBy: res.reviewRequestedBy,
-          reviewVersion: res.reviewVersion,
-          // A fresh round has no outcome yet — clear the previous round's cache.
-          reviewStatus: null,
-          reviewDone: null,
-          reviewActiveThreads: null,
-          reviewCheckedAt: null,
-          updatedAt: res.reviewRequestedAt,
-      } : prev);
   };
 
   // Remember the cover choices made in the print dialog (logo / cover image) as this
@@ -3166,21 +3143,14 @@ const ProjectIMGenerator: React.FC = () => {
     : (printedRenderCandidate.imVersion == null || instance?.version == null)
       ? null
       : printedRenderCandidate.imVersion < instance.version;
-  const printedStatus = printedManualStatusOf(!!instance?.printedIsFinalized, !!printedRenderCandidate, printedIsStale);
-  const printedReadyToFinalize = locked && !!printedRenderCandidate && printedIsStale === false && printedLanguages.length > 0;
-
-  const handleMarkPrintedFinal = () => {
-    setShowPrintedFinalizeConfirm(false);
-    void applyPrintedFinalized(true, printedRenderCandidate?.id ?? null);
-  };
-  const handleUnlockPrinted = () => {
-    setShowPrintedUnlockConfirm(false);
-    void applyPrintedFinalized(false);
-  };
+  // "Final" here is never a stored flag — it's true exactly when the Digital IM itself is
+  // final AND a print PDF for this language set is current. Nothing to click, nothing to
+  // lock separately: the Printed IM is just this same manual, exported for fewer languages.
+  const printedStatus = printedManualStatusOf(locked, !!printedRenderCandidate, printedIsStale);
 
   // Open the print-export dialog pre-scoped to exactly the Printed IM's language set,
   // reusing the same dialog/pipeline the Digital IM's generic print export uses.
-  const openPrintDialogForPrinted = () => openPrintDialog('print', printedLanguages);
+  const openPrintDialogForPrinted = () => openPrintDialog(printedLanguages);
 
   // Move a required language up/down in the custom display/publish order. Persists
   // the FULL resulting order (not just the moved pair) so it stays authoritative
@@ -3384,6 +3354,102 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   /**
+   * Act on a click in the supplier review panel: put the editor on the chapter the note is
+   * about and highlight the exact wording the reviewer quoted.
+   *
+   * English only, deliberately — review links always render the English manual, so a note is
+   * always about English wording and switching to it is part of landing on the right thing.
+   *
+   * The highlight is by text match rather than by position (see markQuoteInHtml): the block
+   * ids in the published manual are regenerated on every resolve, so there is nothing
+   * positional to point at, and matching text also survives the PM editing around the quote.
+   */
+  const jumpToComment = (comment: IMReviewComment) => {
+    setActiveCommentId(comment.id);
+    setActiveLang('en');
+    setEditorMode('content');
+    setSelectedContentSectionId(comment.sectionId);
+    setQuoteHighlight(comment.quote ? { sectionId: comment.sectionId, quote: comment.quote } : null);
+    setFlashSectionId(comment.sectionId);
+    // Scroll the paper preview to the chapter too, so the quote is visible in both columns.
+    // Deferred a frame: selecting the chapter above may be what puts it in the DOM.
+    requestAnimationFrame(() => {
+      const scroller = previewScrollRef.current;
+      if (!scroller) return;
+      const target = findPreviewSection(scroller, comment.sectionId);
+      if (target) scroller.scrollTop = previewScrollTopFor(scroller, target);
+    });
+  };
+
+  /** Triage one note. Written through optimistically — a status flip should feel instant. */
+  const setCommentStatus = async (id: string, status: IMReviewCommentStatus) => {
+    setCommentBusyId(id);
+    const before = reviewComments;
+    setReviewComments(prev => prev.map(c => (c.id === id ? { ...c, status } : c)));
+    try {
+      await setReviewCommentStatus(id, status);
+      // Re-read rather than trusting the optimistic row: resolved_at/by are stamped server-side.
+      await loadReviewRound();
+    } catch (e) {
+      console.error('[ProjectIMGenerator] Failed to update review note:', e);
+      setReviewComments(before);
+      alert('Could not update that note. Please try again.');
+    } finally {
+      setCommentBusyId(null);
+    }
+  };
+
+  /**
+   * Mint a supplier review link for the CURRENT published version and copy it to the clipboard.
+   *
+   * The version is stamped on the link, which is what later lets the panel say "this manual
+   * has been republished since it was sent for review".
+   */
+  const sendForReview = async () => {
+    if (!projectId || !instance || sendingForReview) return;
+    setSendingForReview(true);
+    try {
+      const share = await createIMShare(projectId, templateType, {
+        mode: 'review',
+        manualVersion: instance.version ?? null,
+        label: `Supplier review v${instance.version ?? '?'}`,
+      });
+      // Stamp the round on the manual too, so "In Review" is derivable on the dashboard
+      // without loading every manual's share links. Non-fatal: the link is already minted
+      // and usable, and the panel derives its own state from the links directly.
+      try {
+        const stamped = await setProjectIMReviewRequested(projectId, templateType, instance.version ?? null);
+        setInstance(prev => prev ? {
+          ...prev,
+          reviewRequestedAt: stamped.reviewRequestedAt,
+          reviewRequestedBy: stamped.reviewRequestedBy,
+          reviewVersion: instance.version ?? null,
+        } : prev);
+      } catch (e) {
+        console.error('[ProjectIMGenerator] Failed to stamp the review round:', e);
+      }
+      const url = getIMReviewUrl(share.token);
+      try {
+        await navigator.clipboard.writeText(url);
+        alert('Review link copied — send it to the supplier.');
+      } catch {
+        // Clipboard is blocked in some browsers/contexts; the link still exists and is
+        // listed on the Viewer tab, so this is a downgrade, not a failure.
+        alert(`Review link created — copy it from here:
+
+${url}`);
+      }
+      setReviewShares(prev => [share, ...prev]);
+      setCommentsPanelOpen(true);
+    } catch (e) {
+      console.error('[ProjectIMGenerator] Failed to create review link:', e);
+      alert('Could not create a review link. Please try again.');
+    } finally {
+      setSendingForReview(false);
+    }
+  };
+
+  /**
    * Language the inline rows of the chapter on screen should open on, when the review panel
    * sent the operator here to fill it. Undefined for any other chapter, so a row's own
    * language tab keeps working the way it always has.
@@ -3391,6 +3457,19 @@ const ProjectIMGenerator: React.FC = () => {
   const focusRowLang = translationFocus && translationFocus.sectionId === selectedContentSectionId
     ? translationFocus.lang
     : undefined;
+
+  /**
+   * Sanitize a chapter's HTML for display, then highlight the wording a supplier quoted — in
+   * that order. markQuoteInHtml injects a <mark>, so sanitizing afterwards would strip it.
+   * The highlight is scoped to the one chapter the PM was sent to, and is a no-op everywhere
+   * else (and when the quoted wording has since been edited away).
+   */
+  const renderChapterHtml = (sectionId: string, html: string): string => {
+    const clean = sanitizeHtml(html);
+    return quoteHighlight?.sectionId === sectionId
+      ? markQuoteInHtml(clean, quoteHighlight.quote)
+      : clean;
+  };
 
   /** Marks an element in the "Fill values" form as a jump target for the review panel. */
   const fillAnchorProps = (anchor: string) => ({ [FILL_ANCHOR_ATTR]: anchor });
@@ -3450,7 +3529,7 @@ const ProjectIMGenerator: React.FC = () => {
   // Open the print-export dialog for the ALREADY-published version without republishing.
   // The publish-result payload is rebuilt from the deterministic storage layout
   // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed.
-  const openPrintDialog = (intent: 'print' | 'review', langs: string[] = requiredLanguages) => {
+  const openPrintDialog = (langs: string[] = requiredLanguages) => {
     if (!project || !instance) return;
     const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
     setPublishResult({
@@ -3465,13 +3544,10 @@ const ProjectIMGenerator: React.FC = () => {
       })),
     });
     setNoChangesPrompt(null);
-    setPrintIntent(intent);
     setShowPrintDialog(true);
   };
 
-  const openPrintForPublished = () => openPrintDialog('print');
-  /** Open the dialog on the "Send for review" job — the Markup.io round leads. */
-  const openPrintForReview = () => openPrintDialog('review');
+  const openPrintForPublished = () => openPrintDialog();
 
   // Read-only HTML for a single template block ref (shown as a locked card in the
   // content editor). Mirrors buildSectionHtml's per-ref rendering.
@@ -3916,7 +3992,7 @@ const ProjectIMGenerator: React.FC = () => {
                     // template itself is untouched; the edit is stored on this manual.
                     <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
                       <span className="absolute top-1 right-1 text-gray-300" title="Template content — edit it for this project below"><Lock size={11} /></span>
-                      <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
+                      <div className="im-content text-xs text-gray-600 pointer-events-none mb-2" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: renderChapterHtml(section.id, templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                       <button
                         onClick={() => editBlockForProject(section.id, blockOvKey(i, ref), ref as InlineBlockRef)}
                         title={refHasTable(ref)
@@ -3933,7 +4009,7 @@ const ProjectIMGenerator: React.FC = () => {
                   // the Block Library (which updates every manual that uses it).
                   <div className="relative border border-gray-100 rounded bg-gray-50/60 px-3 py-2 opacity-90">
                     <span className="absolute top-1 right-1 text-gray-300" title="Shared block (locked) — edit it in the Block Library"><Lock size={11} /></span>
-                    <div className="im-content text-xs text-gray-600 pointer-events-none" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
+                    <div className="im-content text-xs text-gray-600 pointer-events-none" style={previewGeometry ? imContentVars(previewGeometry) : undefined} dangerouslySetInnerHTML={{ __html: renderChapterHtml(section.id, templateRefPreviewHtml(ref) || '<span class="text-gray-300 italic">Empty template block</span>') }} />
                   </div>
                 )}
                 </div>{/* dimmed body of an excluded block */}
@@ -4080,6 +4156,23 @@ const ProjectIMGenerator: React.FC = () => {
   // Version the next publish will stamp (current persisted version + 1).
   const previewVersion = (instance?.version ?? 0) + 1;
 
+  // Supplier review, derived once so the pipeline's Review step and the panel can never
+  // disagree about how many notes are outstanding.
+  const reviewRound = useMemo(
+    () => reviewRoundStateOf(reviewShares, reviewComments, instance?.version ?? null),
+    [reviewShares, reviewComments, instance?.version],
+  );
+  const reviewCounts = useMemo(() => reviewCommentCounts(reviewComments), [reviewComments]);
+  const reviewGroups = useMemo(
+    () => groupCommentsBySection(
+      reviewComments,
+      orderedSections
+        .filter(sec => sec.title !== '__METADATA__')
+        .map(sec => ({ id: sec.id, title: localizedSectionTitle(sec, activeLang) })),
+    ),
+    [reviewComments, orderedSections, activeLang],
+  );
+
   const completion = calculateCompletion(activeLang);
   // Live pre-publish issues. Computed once per render and shared, so the count on the
   // pipeline's "Content" step and the rows in the review panel can never disagree.
@@ -4125,27 +4218,6 @@ const ProjectIMGenerator: React.FC = () => {
          confirmLabel="Unlock for editing"
          onConfirm={handleUnlock}
          onCancel={() => setShowUnlockConfirm(false)}
-       />
-
-       {/* Mark the Printed IM final — signs off the current print PDF as the exact file
-           that ships with the product. Separate from (but requires) the Digital IM's lock. */}
-       <ConfirmationModal
-         isOpen={showPrintedFinalizeConfirm}
-         title="Mark the Printed IM as final?"
-         message={`This signs off the current print PDF (${printedLanguages.map(l => l.toUpperCase()).join(', ')}) as the exact file that ships with the product. Unlock it later if the printed languages need to change.`}
-         confirmLabel="Mark Printed IM final"
-         onConfirm={handleMarkPrintedFinal}
-         onCancel={() => setShowPrintedFinalizeConfirm(false)}
-       />
-
-       {/* Unlock the Printed IM so its language selection can change again. */}
-       <ConfirmationModal
-         isOpen={showPrintedUnlockConfirm}
-         title="Unlock the Printed IM?"
-         message="This clears the Printed IM's sign-off. You can mark it final again once a matching print PDF is confirmed."
-         confirmLabel="Unlock Printed IM"
-         onConfirm={handleUnlockPrinted}
-         onCancel={() => setShowPrintedUnlockConfirm(false)}
        />
 
        {/* Blocking overlay while a save/publish is in flight — stops the user navigating away
@@ -4225,22 +4297,20 @@ const ProjectIMGenerator: React.FC = () => {
              <div className="flex justify-end gap-2">
                <button onClick={() => setPublishResult(null)} className="text-sm px-3 py-2 border rounded hover:bg-gray-50">Stay here</button>
                {isPrintExportAvailable() && (
-                 <button onClick={() => { setPrintIntent('print'); setShowPrintDialog(true); }} className="text-sm px-3 py-2 border border-primary text-primary rounded hover:bg-primary/5 flex items-center gap-1.5">
+                 <button onClick={() => setShowPrintDialog(true)} className="text-sm px-3 py-2 border border-primary text-primary rounded hover:bg-primary/5 flex items-center gap-1.5">
                    <FileDown size={14} /> Export print PDF
                  </button>
                )}
-               {/* Publishing produces no PDF, so the review round has to render one — this
-                   button is the shortcut that does both, rather than making the operator
-                   find the Markup.io panel inside the print dialog. */}
-               {isPrintExportAvailable() && isMarkupReviewAvailable() && (
-                 <button
-                   onClick={() => { setPrintIntent('review'); setShowPrintDialog(true); }}
-                   title="Send this manual's print PDF to Markup.io for supplier review"
-                   className="text-sm px-3 py-2 border border-sky-300 text-sky-700 rounded hover:bg-sky-50 flex items-center gap-1.5"
-                 >
-                   <Send size={14} /> Send for review
-                 </button>
-               )}
+               {/* Straight from "published" to "out for review" — reviewers read the online
+                   manual that was just published, so there is nothing to render first. */}
+               <button
+                 onClick={() => { setPublishResult(null); sendForReview(); }}
+                 disabled={sendingForReview}
+                 title="Create a supplier review link for this manual and copy it"
+                 className="text-sm px-3 py-2 border border-sky-300 text-sky-700 rounded hover:bg-sky-50 flex items-center gap-1.5 disabled:opacity-50"
+               >
+                 <Send size={14} /> Send for review
+               </button>
                <button onClick={() => navigate(`/project/${project?.id}`)} className="text-sm px-3 py-2 bg-primary text-white rounded hover:opacity-90">Go to project</button>
              </div>
            </div>
@@ -4268,9 +4338,7 @@ const ProjectIMGenerator: React.FC = () => {
              await attachPrintPdfToProject(res, langs, size);
            }}
            onCoverPrefs={persistCoverPrefs}
-           onReviewSent={handleReviewSent}
-           intent={printIntent}
-           onClose={() => { setShowPrintDialog(false); setPrintIntent('print'); }}
+           onClose={() => setShowPrintDialog(false)}
          />
        )}
 
@@ -4522,20 +4590,18 @@ const ProjectIMGenerator: React.FC = () => {
                        <div className="flex items-center gap-2 text-xs text-muted">
                           <span>For: {project?.name}</span>
                           {instance?.status === 'generated' && <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">GENERATED</span>}
-                          {/* Out for supplier review on Markup.io. Derived, never stored: editing
-                              (status back to draft) or republishing (version bump) ends it. */}
-                          {instance && isInReview(instance) && (
-                            instance.reviewUrl ? (
-                              <a
-                                href={instance.reviewUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={`Sent for review${instance.reviewRequestedBy ? ` by ${instance.reviewRequestedBy}` : ''}${instance.reviewRequestedAt ? ` on ${new Date(instance.reviewRequestedAt).toLocaleDateString()}` : ''} — open the Markup.io review`}
-                                className="flex items-center gap-1 bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide hover:bg-sky-200"
-                              ><Eye size={10} /> In Review</a>
-                            ) : (
-                              <span className="flex items-center gap-1 bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"><Eye size={10} /> In Review</span>
-                            )
+                          {/* Out for supplier review. Derived from the live review links, so
+                              revoking the last one ends the round with no extra write. */}
+                          {reviewRound.isOpen && (
+                            <button
+                              onClick={() => setCommentsPanelOpen(true)}
+                              title={reviewRound.openCount > 0
+                                ? `${reviewRound.openCount} open supplier note(s) — open the review panel`
+                                : 'Out for supplier review — open the review panel'}
+                              className="flex items-center gap-1 bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide hover:bg-sky-200"
+                            >
+                              <Eye size={10} /> In Review{reviewRound.openCount > 0 ? ` · ${reviewRound.openCount}` : ''}
+                            </button>
                           )}
                           {locked && <span className="flex items-center gap-1 bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"><Lock size={10} /> Final</span>}
                        </div>
@@ -4668,9 +4734,11 @@ const ProjectIMGenerator: React.FC = () => {
              // Translations have their own step below, so "Content" counts everything else.
              const contentIssues = publishIssues.filter(i => i.kind !== 'translation').length;
              const published = instance?.status === 'generated';
-             const inReview = !!instance && isInReview(instance);
-             const reviewDone = inReview && instance?.reviewDone === true;
-             const threads = instance?.reviewActiveThreads;
+             const inReview = reviewRound.isOpen;
+             // "Done" means the reviewer submitted AND nothing is still outstanding — a
+             // submitted review with open notes is work for the PM, not a finished step.
+             const reviewDone = inReview && reviewRound.isSubmitted && reviewRound.openCount === 0;
+             const threads = reviewRound.openCount;
 
              const steps: PipelineStep[] = [
                {
@@ -4703,26 +4771,28 @@ const ProjectIMGenerator: React.FC = () => {
                      key: 'review', label: 'Review', state: locked ? 'skipped' : 'optional',
                      // Read as an ACTION, not a state — "send for review" is the click.
                      detail: locked ? 'not reviewed'
-                       : !isMarkupReviewAvailable() ? 'optional'
                        : published ? 'send for review →' : 'after publish',
-                     title: !isMarkupReviewAvailable()
-                       ? 'Optional review step (Markup.io is not configured in this environment)'
-                       : published
-                         ? 'Send the print PDF to Markup.io for supplier review (renders one first if needed)'
-                         : 'Publish first — the review round uploads a rendered print PDF to Markup.io',
-                     onClick: published && isMarkupReviewAvailable() ? () => openPrintForReview() : undefined,
+                     title: published
+                       ? 'Create a supplier review link for the published manual and copy it'
+                       : 'Publish first — reviewers read the published online manual',
+                     onClick: published && !sendingForReview ? () => sendForReview() : undefined,
                    }
                  : reviewDone
                    ? {
                        key: 'review', label: 'Review', state: 'done', detail: 'Review done',
-                       title: `Markup.io review finished${instance?.reviewStatus ? ` (${instance.reviewStatus})` : ''} — open it`,
-                       onClick: instance?.reviewUrl ? () => window.open(instance.reviewUrl!, '_blank', 'noreferrer') : undefined,
+                       title: 'Every supplier note has been handled — open the review panel',
+                       onClick: () => setCommentsPanelOpen(true),
                      }
                    : {
-                       key: 'review', label: 'Review', state: 'warn',
-                       detail: typeof threads === 'number' ? `in review · ${threads} open` : 'in review',
-                       title: 'Out on Markup.io collecting feedback — open the review',
-                       onClick: instance?.reviewUrl ? () => window.open(instance.reviewUrl!, '_blank', 'noreferrer') : undefined,
+                       key: 'review', label: 'Review',
+                       state: reviewRound.isStale ? 'warn' : 'warn',
+                       detail: threads > 0
+                         ? `${reviewRound.isSubmitted ? 'returned' : 'in review'} · ${threads} open`
+                         : reviewRound.isSubmitted ? 'returned · no notes' : 'in review',
+                       title: reviewRound.isSubmitted
+                         ? 'The supplier submitted their review — open the notes'
+                         : 'Out with the supplier collecting notes — open what has come in so far',
+                       onClick: () => setCommentsPanelOpen(true),
                      },
                {
                  key: 'final', label: 'Final',
@@ -4908,25 +4978,24 @@ const ProjectIMGenerator: React.FC = () => {
                          </div>
                        )}
 
-                       {/* PRINTED IM — the physical print run shipped with the product (alongside
-                           the Warning Leaflet), sharing this exact manual's content but limited to a
-                           project-chosen subset of the required languages above. Its own FINAL sign-off
-                           (printedIsFinalized) is independent of the Digital IM's, but requires it —
-                           see setProjectPrintedFinalized and migration 129. Digital-only (this page is
-                           reused for the Warning Leaflet, which has no printed-subset concept of its own). */}
+                       {/* PRINTED IM — not a separate document: it's this exact manual, exported for
+                           a project-chosen subset of the required languages above, to physically ship
+                           with the product alongside the Warning Leaflet (the Digital IM stays online,
+                           in all required languages). No separate content, no separate sign-off — its
+                           status is fully DERIVED (see printedManualStatusOf): "Final" simply means the
+                           Digital IM itself is final AND a print PDF for exactly this language set is
+                           current. Digital-only (this page is reused for the Warning Leaflet, which has
+                           no printed-subset concept of its own). */}
                        {templateType === 'im' && requiredLanguages.length > 0 && (
                          <div className="border-b border-gray-100 pb-6">
                            <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-sm">
                              <Printer size={14} className="text-indigo-500" /> Printed IM
-                             {instance?.printedIsFinalized ? (
-                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${MANUAL_STATUS_META.final.classes}`}>Final</span>
-                             ) : (
-                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${MANUAL_STATUS_META[printedStatus].classes}`}>{MANUAL_STATUS_META[printedStatus].label}</span>
-                             )}
+                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${MANUAL_STATUS_META[printedStatus].classes}`}>{MANUAL_STATUS_META[printedStatus].label}</span>
                            </h4>
                            <p className="text-xs text-muted mb-3">
                              Which of this manual's required languages ship in the PRINTED booklet that goes in the
-                             box with the Warning Leaflet. The Digital IM online always carries all {requiredLanguages.length}.
+                             box with the Warning Leaflet — the exact same manual, just fewer languages. The Digital
+                             IM online always carries all {requiredLanguages.length}.
                            </p>
                            <div className="flex flex-wrap gap-2 mb-2">
                              {requiredLanguages.map(code => {
@@ -4935,7 +5004,7 @@ const ProjectIMGenerator: React.FC = () => {
                                  <button
                                    key={code}
                                    type="button"
-                                   disabled={locked || !!instance?.printedIsFinalized}
+                                   disabled={locked}
                                    onClick={() => togglePrintedLanguage(code)}
                                    className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                      on ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
@@ -4948,53 +5017,29 @@ const ProjectIMGenerator: React.FC = () => {
                              <p className="text-[11px] text-rose-600 mb-2">Select at least one language for the Printed IM.</p>
                            )}
 
-                           {instance?.printedIsFinalized ? (
-                             <div className="flex items-center justify-between gap-3 mt-2 px-3 py-2.5 rounded-lg border border-indigo-200 bg-indigo-50">
-                               <p className="text-[11px] text-indigo-900 leading-relaxed">
-                                 Signed off{instance.printedFinalizedAt ? ` ${new Date(instance.printedFinalizedAt).toLocaleString()}` : ''}
-                                 {instance.printedFinalizedBy ? ` by ${instance.printedFinalizedBy}` : ''} — this is the exact PDF that ships with the product.
-                               </p>
+                           <div className="flex items-center justify-between gap-3 mt-2 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
+                             <p className="text-[11px] text-gray-500 leading-relaxed">
+                               {!isPrintExportAvailable()
+                                 ? 'Print export is not enabled in this environment.'
+                                 : !printedRenderCandidate
+                                   ? `No print PDF yet for exactly ${printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'}.`
+                                   : printedIsStale
+                                     ? `The print PDF (v${printedRenderCandidate.imVersion}) predates the current manual (v${instance?.version}) — regenerate it.`
+                                     : printedIsStale === null
+                                       ? 'A matching print PDF exists — freshness could not be confirmed.'
+                                       : !locked
+                                         ? `Print PDF (v${printedRenderCandidate.imVersion}) is current — mark the Digital IM final to make this the shipped Printed IM.`
+                                         : `Print PDF (v${printedRenderCandidate.imVersion}) is current and the manual is FINAL — this is the file that ships.`}
+                             </p>
+                             {isPrintExportAvailable() && (
                                <button
                                  type="button"
-                                 onClick={() => setShowPrintedUnlockConfirm(true)}
-                                 disabled={isBusy}
-                                 className="shrink-0 flex items-center gap-1.5 bg-white border border-indigo-300 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-60"
-                               ><Unlock size={12} /> Unlock</button>
-                             </div>
-                           ) : (
-                             <div className="flex items-center justify-between gap-3 mt-2 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
-                               <p className="text-[11px] text-gray-500 leading-relaxed">
-                                 {!isPrintExportAvailable()
-                                   ? 'Print export is not enabled in this environment.'
-                                   : !locked
-                                     ? 'Mark the Digital IM final first — the Printed IM shares its content.'
-                                     : !printedRenderCandidate
-                                       ? `No print PDF yet for exactly ${printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'}.`
-                                       : printedIsStale
-                                         ? `The print PDF (v${printedRenderCandidate.imVersion}) predates the current manual (v${instance?.version}) — regenerate it.`
-                                         : printedIsStale === null
-                                           ? 'A matching print PDF exists — freshness could not be confirmed.'
-                                           : `Print PDF (v${printedRenderCandidate.imVersion}) is current — ready to sign off.`}
-                               </p>
-                               {isPrintExportAvailable() && locked && (
-                                 printedReadyToFinalize ? (
-                                   <button
-                                     type="button"
-                                     onClick={() => setShowPrintedFinalizeConfirm(true)}
-                                     disabled={isBusy}
-                                     className="shrink-0 flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-60"
-                                   ><Lock size={12} /> Mark Final</button>
-                                 ) : (
-                                   <button
-                                     type="button"
-                                     onClick={openPrintDialogForPrinted}
-                                     disabled={isBusy || printedLanguages.length === 0}
-                                     className="shrink-0 flex items-center gap-1.5 border border-indigo-200 text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-60"
-                                   ><Printer size={12} /> {printedRenderCandidate ? 'Re-render' : 'Render PDF'}</button>
-                                 )
-                               )}
-                             </div>
-                           )}
+                                 onClick={openPrintDialogForPrinted}
+                                 disabled={isBusy || printedLanguages.length === 0}
+                                 className="shrink-0 flex items-center gap-1.5 border border-indigo-200 text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-60"
+                               ><Printer size={12} /> {printedRenderCandidate ? 'Re-render' : 'Render PDF'}</button>
+                             )}
+                           </div>
                          </div>
                        )}
 
@@ -5453,7 +5498,7 @@ const ProjectIMGenerator: React.FC = () => {
                                           {/* Title + body at the PRINT profile's sizes (the exporter's own scale),
                                               not the brand's web font sizes — the brand keeps its colors only. */}
                                           <h3 className="font-bold text-primary mb-3 border-b pb-2" style={{ borderColor: 'var(--im-primary-color)', color: metadata.brand?.textColors.heading, ...(previewGeometry ? { fontSize: `${previewGeometry.headingPx}px`, fontFamily: `'${previewGeometry.fontFamily}', Arial, sans-serif` } : { fontFamily: metadata.brand?.fontFamilies.heading }) }}>{localizedSectionTitle(section, activeLang)}</h3>
-                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, ...(previewGeometry ? imContentPrintScale(previewGeometry) : { fontFamily: metadata.brand?.fontFamilies.body }) }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildSectionHtml(section)) }} />
+                                          <div className="im-content" style={{ color: metadata.brand?.textColors.body, ...(previewGeometry ? imContentPrintScale(previewGeometry) : { fontFamily: metadata.brand?.fontFamilies.body }) }} dangerouslySetInnerHTML={{ __html: renderChapterHtml(section.id, buildSectionHtml(section)) }} />
                                         </div>
                                       );
                                   })}
@@ -5507,6 +5552,26 @@ const ProjectIMGenerator: React.FC = () => {
                      // Disarmed rather than closed: "not yet" means "let me fix these first",
                      // and the list is what they need in order to do that.
                      onCancelPublish={() => setReviewPanel({ armed: false })}
+                   />
+               )}
+
+               {/* SUPPLIER REVIEW — the notes left on the online manual. A second rail beside
+                   the pre-publish one, for the same reason: every row jumps into the editor,
+                   so the list has to survive being acted on. */}
+               {commentsPanelOpen && (
+                   <ReviewCommentsPanel
+                     groups={reviewGroups}
+                     counts={reviewCounts}
+                     reviewers={reviewShares.map(sh => sh.submittedBy || sh.label || 'a supplier')}
+                     submitted={reviewRound.isSubmitted}
+                     stale={reviewRound.isStale}
+                     collapsed={commentsCollapsed}
+                     onToggleCollapsed={() => setCommentsCollapsed(c => !c)}
+                     onClose={() => { setCommentsPanelOpen(false); setQuoteHighlight(null); }}
+                     onJump={jumpToComment}
+                     onSetStatus={setCommentStatus}
+                     activeCommentId={activeCommentId}
+                     busyCommentId={commentBusyId}
                    />
                )}
            </div>

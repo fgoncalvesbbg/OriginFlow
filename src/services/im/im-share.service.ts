@@ -9,6 +9,8 @@ import { auth, db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import type { IMTemplateType } from '../../types';
 
+export type IMShareMode = 'view' | 'review';
+
 export interface IMShare {
   id: string;
   token: string;
@@ -27,6 +29,17 @@ export interface IMShare {
   lastUsedAt: string | null;
   /** How many times the public token has been successfully resolved. */
   useCount: number;
+  /**
+   * 'view' = read-only shared manual (/#/share/im/:token). 'review' = supplier review portal
+   * (/#/review/im/:token), which also collects comments. See db_migrations/130.
+   */
+  mode: IMShareMode;
+  /** Set once a reviewer clicked "Submit review" on a review link. Null on view links. */
+  submittedAt: string | null;
+  /** Display name the reviewer submitted under (self-declared, unauthenticated). */
+  submittedBy: string | null;
+  /** project_ims.version when the link was minted — lets a later republish be spotted. */
+  manualVersion: number | null;
 }
 
 /** True once the link's TTL has passed (the RPC also enforces this server-side). */
@@ -46,12 +59,22 @@ const mapRow = (row: any): IMShare => ({
   label: row.label ?? null,
   lastUsedAt: row.last_used_at ?? null,
   useCount: row.use_count ?? 0,
+  mode: (row.mode ?? 'view') as IMShareMode,
+  submittedAt: row.submitted_at ?? null,
+  submittedBy: row.submitted_by ?? null,
+  manualVersion: row.manual_version ?? null,
 });
 
-/** Active (non-revoked) share links for a manual, most recent first. */
+/**
+ * Active (non-revoked) share links for a manual, most recent first.
+ *
+ * `mode` is an optional filter: omit it to list both kinds (the Viewer tab shows one table),
+ * pass one to list just read-only links or just review links.
+ */
 export const getIMShares = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
+  mode?: IMShareMode,
 ): Promise<IMShare[]> => {
   if (!isLive) return [];
   const rows = await orEmpty(
@@ -60,6 +83,7 @@ export const getIMShares = async (
         project_id: projectId,
         template_type: templateType,
         revoked_at: { op: 'isNull' },
+        mode,
       },
       order: { column: 'created_at', ascending: false },
     }),
@@ -68,11 +92,17 @@ export const getIMShares = async (
   return rows.map(mapRow);
 };
 
-/** Mint a new public share link for a manual, optionally labeled and with a TTL. */
+/**
+ * Mint a new public share link for a manual, optionally labeled and with a TTL.
+ *
+ * `mode: 'review'` makes it a supplier review link instead of a read-only one; pass
+ * `manualVersion` (the project_ims.version being sent out) alongside it so a later republish
+ * is detectable as "reviewed against v3, now on v4".
+ */
 export const createIMShare = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
-  opts?: { label?: string; expiresAt?: string | null },
+  opts?: { label?: string; expiresAt?: string | null; mode?: IMShareMode; manualVersion?: number | null },
 ): Promise<IMShare> => {
   const user = await auth.getUser();
   const createdBy = user?.email ?? user?.id ?? null;
@@ -82,6 +112,8 @@ export const createIMShare = async (
     created_by: createdBy,
     label: opts?.label?.trim() || null,
     expires_at: opts?.expiresAt ?? null,
+    mode: opts?.mode ?? 'view',
+    manual_version: opts?.manualVersion ?? null,
   });
   return mapRow(created);
 };
@@ -118,3 +150,11 @@ export const resolveIMShareToken = async (
 /** Build the public, shareable URL for a token (app uses HashRouter). */
 export const getIMShareUrl = (token: string): string =>
   `${window.location.origin}${window.location.pathname}#/share/im/${token}`;
+
+/**
+ * Build the supplier review URL for a token. Separate page from getIMShareUrl because the
+ * review portal adds the commenting rail on top of the same read-only viewer; a review token
+ * still opens read-only at the /share/im/ URL, which is harmless.
+ */
+export const getIMReviewUrl = (token: string): string =>
+  `${window.location.origin}${window.location.pathname}#/review/im/${token}`;

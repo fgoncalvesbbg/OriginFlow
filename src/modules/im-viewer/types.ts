@@ -150,3 +150,21 @@ export interface CollectedImage {
   alt?: string;
   caption?: string;
 }
+
+/**
+ * A settled text selection inside the document pane, reported to a host that layers commenting
+ * on top of the viewer (see IMViewerProps.onSelectText).
+ *
+ * `rect` is in viewport coordinates, so the host can float a composer next to the selection.
+ * `sectionText` is the whole chapter's plain text — the host uses it to slice a little context
+ * either side of the quote, which is what lets a comment be relocated after the manual is edited.
+ */
+export interface ViewerTextSelection {
+  /** The chapter the selection started in (im_sections.id, or a project-only 'proj-…' id). */
+  sectionId: string;
+  sectionTitle: string | null;
+  sectionText: string;
+  /** The selected text, verbatim. */
+  text: string;
+  rect: { top: number; left: number; bottom: number; right: number };
+}

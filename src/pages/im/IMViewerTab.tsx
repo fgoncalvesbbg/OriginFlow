@@ -9,8 +9,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, Link2, Share2, Copy, Check, X, Ban, Loader2, User as UserIcon, Clock } from 'lucide-react';
-import { getPublishedManifestUrl, createIMShare, getIMShareUrl, getIMShares, revokeIMShare } from '../../services';
-import { isShareExpired, type IMShare } from '../../services/im/im-share.service';
+import { getPublishedManifestUrl, createIMShare, getIMShareUrl, getIMReviewUrl, getIMShares, revokeIMShare } from '../../services';
+import { isShareExpired, type IMShare, type IMShareMode } from '../../services/im/im-share.service';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { IMViewer, type ViewerSource } from '../../modules/im-viewer';
 
@@ -35,6 +35,9 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
   // New-link options: purpose/recipient label + optional TTL (days; '' = never expires).
   const [shareLabel, setShareLabel] = useState('');
   const [shareExpiryDays, setShareExpiryDays] = useState<'' | '7' | '30' | '90'>('');
+  // What kind of link to mint. A 'view' link is read-only; a 'review' link opens the same
+  // manual in the supplier review portal, where the reader can leave notes on the wording.
+  const [shareMode, setShareMode] = useState<IMShareMode>('view');
 
   const selectedManual = generated.find((g) => keyOf(g) === selectedKey) ?? null;
 
@@ -68,6 +71,10 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
     setSource(manifestUrl ? { manifestUrl } : null);
   };
 
+  /** Public URL for a link, which differs by mode. Used by every copy/list/revoke path. */
+  const urlOf = (share: IMShare) =>
+    share.mode === 'review' ? getIMReviewUrl(share.token) : getIMShareUrl(share.token);
+
   const createShareLink = async () => {
     if (!selectedManual) return;
     setSharing(true);
@@ -80,8 +87,10 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
       const share = await createIMShare(selectedManual.projectId, selectedManual.templateType, {
         label: shareLabel,
         expiresAt,
+        mode: shareMode,
+        manualVersion: selectedManual.version ?? null,
       });
-      setShareUrl(getIMShareUrl(share.token));
+      setShareUrl(urlOf(share));
       setShareLabel('');
       // The new link shows up in the managed list immediately.
       setShares((prev) => (prev ? [share, ...prev] : [share]));
@@ -103,7 +112,7 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
       await revokeIMShare(share.id);
       setShares((prev) => (prev ? prev.filter((s) => s.id !== share.id) : prev));
       // If the revoked link is the one just minted above, stop showing it as shareable.
-      if (shareUrl && shareUrl === getIMShareUrl(share.token)) setShareUrl('');
+      if (shareUrl && shareUrl === urlOf(share)) setShareUrl('');
     } catch (e: any) {
       setShareError(e?.message ?? 'Failed to revoke the link.');
     } finally {
@@ -113,7 +122,7 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
 
   const copyLink = async (share: IMShare) => {
     try {
-      await navigator.clipboard.writeText(getIMShareUrl(share.token));
+      await navigator.clipboard.writeText(urlOf(share));
       setCopiedShareId(share.id);
       setTimeout(() => setCopiedShareId(null), 2000);
     } catch { /* clipboard unavailable */ }
@@ -159,6 +168,18 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
         {selectedManual && (
           <div className="flex items-end gap-2 flex-wrap">
             <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Link type</label>
+              <select
+                className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                value={shareMode}
+                onChange={(e) => setShareMode(e.target.value as IMShareMode)}
+                title="A review link lets the reader comment on the manual; a read-only link does not."
+              >
+                <option value="view">Read-only</option>
+                <option value="review">Supplier review</option>
+              </select>
+            </div>
+            <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">Link label (who it's for)</label>
               <input
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-400"
@@ -185,7 +206,7 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
               disabled={sharing}
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
-              <Share2 size={14} /> {sharing ? 'Creating link…' : 'Create shareable link'}
+              <Share2 size={14} /> {sharing ? 'Creating link…' : shareMode === 'review' ? 'Create review link' : 'Create shareable link'}
             </button>
           </div>
         )}
@@ -267,8 +288,8 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
                       {isShareExpired(s) && (
                         <span className="shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">Expired</span>
                       )}
-                      <span className="text-xs font-mono text-gray-500 truncate" title={getIMShareUrl(s.token)}>
-                        {getIMShareUrl(s.token)}
+                      <span className="text-xs font-mono text-gray-500 truncate" title={urlOf(s)}>
+                        {urlOf(s)}
                       </span>
                     </div>
                     <div className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-2 flex-wrap">

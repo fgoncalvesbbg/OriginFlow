@@ -3,8 +3,8 @@ import { flagEnabled } from './feature-flags';
 
 describe('flagEnabled', () => {
   it('accepts "true" in any casing', () => {
-    // The regression this guards: VITE_MARKUP_REVIEW_ENABLED=TRUE silently
-    // disabled the whole Markup.io review feature under a strict === 'true'.
+    // The regression this guards: a VITE_..._ENABLED=TRUE in an env file silently
+    // disabled the whole feature under a strict === 'true' check.
     for (const v of ['true', 'TRUE', 'True', 'tRuE']) {
       expect(flagEnabled(v), v).toBe(true);
     }

@@ -5,7 +5,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
-import { ResolvedManual, ManifestLanguage } from './types';
+import { ResolvedManual, ManifestLanguage, ViewerTextSelection } from './types';
 import { buildSectionTree, flattenInReadingOrder } from './tree';
 import { TableOfContents } from './TableOfContents';
 import { SearchPanel } from './SearchPanel';
@@ -16,9 +16,11 @@ interface Props {
   languages?: ManifestLanguage[];
   currentLang: string;
   onChangeLang?: (lang: string) => void;
+  /** See IMViewerProps.onSelectText. Omitted = no selection tracking at all. */
+  onSelectText?: (selection: ViewerTextSelection | null) => void;
 }
 
-export const ViewerShell: React.FC<Props> = ({ manual, languages, currentLang, onChangeLang }) => {
+export const ViewerShell: React.FC<Props> = ({ manual, languages, currentLang, onChangeLang, onSelectText }) => {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -51,6 +53,59 @@ export const ViewerShell: React.FC<Props> = ({ manual, languages, currentLang, o
     els.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
   }, [ordered]);
+
+  // Report text selections made inside the document pane. Entirely opt-in: with no
+  // onSelectText the listener is never attached, so the read-only share page is untouched.
+  //
+  // Listens on the document rather than the pane because a selection that starts inside the
+  // pane can finish outside it; anything whose anchor isn't in the pane is reported as null,
+  // which is also how a collapsed selection (an ordinary click) clears the host's composer.
+  useEffect(() => {
+    if (!onSelectText) return;
+    const handler = () => {
+      const root = docRef.current;
+      const sel = window.getSelection();
+      if (!root || !sel || sel.isCollapsed || sel.rangeCount === 0) {
+        onSelectText(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      if (!root.contains(range.commonAncestorContainer)) {
+        onSelectText(null);
+        return;
+      }
+      const startEl = range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as HTMLElement)
+        : range.startContainer.parentElement;
+      const sectionEl = startEl?.closest<HTMLElement>('[data-imv-section]');
+      const sectionId = sectionEl?.getAttribute('data-imv-section');
+      if (!sectionEl || !sectionId) {
+        onSelectText(null);
+        return;
+      }
+      const text = sel.toString();
+      if (!text.trim()) {
+        onSelectText(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      onSelectText({
+        sectionId,
+        sectionTitle: sectionEl.querySelector('.imv-section-title')?.textContent?.trim() ?? null,
+        sectionText: sectionEl.textContent ?? '',
+        text,
+        rect: { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right },
+      });
+    };
+    // mouseup/keyup rather than selectionchange: selectionchange fires on every intermediate
+    // state while dragging, and the host only cares about the settled selection.
+    document.addEventListener('mouseup', handler);
+    document.addEventListener('keyup', handler);
+    return () => {
+      document.removeEventListener('mouseup', handler);
+      document.removeEventListener('keyup', handler);
+    };
+  }, [onSelectText]);
 
   const scrollTo = (elementId: string, flash = false) => {
     const root = docRef.current;

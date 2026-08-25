@@ -18,22 +18,12 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   isFinalized: data.is_finalized ?? false,
   finalizedAt: data.finalized_at ?? null,
   finalizedBy: data.finalized_by ?? null,
-  printedIsFinalized: data.printed_is_finalized ?? false,
-  printedFinalizedAt: data.printed_finalized_at ?? null,
-  printedFinalizedBy: data.printed_finalized_by ?? null,
-  printedRenderId: data.printed_render_id ?? null,
   updatedAt: data.updated_at,
   updatedBy: data.updated_by ?? null,
   version: data.version ?? 0,
-  reviewUrl: data.review_url ?? null,
-  reviewMarkupId: data.review_markup_id ?? null,
   reviewRequestedAt: data.review_requested_at ?? null,
   reviewRequestedBy: data.review_requested_by ?? null,
   reviewVersion: data.review_version ?? null,
-  reviewStatus: data.review_status ?? null,
-  reviewDone: data.review_done ?? null,
-  reviewActiveThreads: data.review_active_threads ?? null,
-  reviewCheckedAt: data.review_checked_at ?? null,
   boundSkuIds: data.bound_sku_ids ?? [],
   sectionAdditions: data.section_additions ?? {},
   extraSections: data.extra_sections ?? [],
@@ -151,17 +141,13 @@ export const saveProjectIM = async (
     if (boundSkuIds !== undefined) payload.bound_sku_ids = boundSkuIds;
 
     // Echo back only the cheap columns we can't know client-side (row id on insert,
-    // the stored version when a draft save omits it, plus the finalize flags which this
+    // the stored version when a draft save omits it, plus the finalize flag which this
     // write never touches) — never the full jsonb row, which would download the whole
-    // payload again after every save. Echoing is_finalized/printed_is_finalized keeps a
-    // publish/save of a FINAL (or Printed-FINAL) manual from wrongly clearing the lock
-    // in the caller's mapped instance.
+    // payload again after every save. Echoing is_finalized keeps a publish/save of a
+    // FINAL manual from wrongly clearing the lock in the caller's mapped instance.
     const context = existing ? 'saveProjectIM update' : 'saveProjectIM insert';
-    const cols = 'id, version, updated_at, is_finalized, finalized_at, printed_is_finalized, printed_finalized_at, printed_finalized_by, printed_render_id';
-    type EchoedColumns = {
-      id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null;
-      printed_is_finalized: boolean; printed_finalized_at: string | null; printed_finalized_by: string | null; printed_render_id: string | null;
-    };
+    const cols = 'id, version, updated_at, is_finalized, finalized_at';
+    type EchoedColumns = { id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null };
 
     const runWrite = (timeoutMs: number) => withDeadline(
         (signal) => existing
@@ -237,38 +223,37 @@ export const setProjectIMFinalized = async (
 };
 
 /**
- * Mark the Printed IM (the project's language subset of the Digital IM, shipped
- * physically with the product) as final/locked, or unlock it — touching only the
- * printed_* columns, same isolation as setProjectIMFinalized above. Finalizing must name
- * the exact im_print_renders row being signed off; the DB guard (migration 129) also
- * requires the Digital IM (`is_finalized`) to already be true, since they share content.
+ * Record that this manual's CURRENT version has gone out for supplier review.
+ *
+ * Touches only the two review columns (migration 111), for the same reason
+ * setProjectIMFinalized does: it must never race with the large content save payload.
+ *
+ * These columns are what makes "In Review" derivable everywhere — im-manual-status.ts reads
+ * `reviewRequestedAt != null && reviewVersion === version`, so a republish (which bumps the
+ * version) ends the round with no clearing write, and so does saving a draft. Nothing ever
+ * writes them back to null; that is the design, not an omission.
+ *
+ * The columns predate this feature: they used to be stamped by the send-to-markup function.
+ * The signal is the same, only the sender changed.
  */
-export const setProjectPrintedFinalized = async (
+export const setProjectIMReviewRequested = async (
   projectId: string,
   templateType: IMTemplateType,
-  isFinalized: boolean,
-  renderId?: string | null,
-): Promise<{ printedIsFinalized: boolean; printedFinalizedAt: string | null; printedFinalizedBy: string | null; printedRenderId: string | null; updatedAt: string }> => {
-  if (isFinalized && !renderId) {
-    throw new Error('Select a print render to sign off against before marking the Printed IM final.');
-  }
-  const printedFinalizedAt = isFinalized ? new Date().toISOString() : null;
-  const user = isFinalized ? await auth.getUser() : null;
-  const printedFinalizedBy = isFinalized ? (user?.email ?? user?.id ?? null) : null;
-  const printedRenderId = isFinalized ? (renderId ?? null) : null;
-  const updatedAt = new Date().toISOString();
+  version: number | null,
+): Promise<{ reviewRequestedAt: string; reviewRequestedBy: string | null }> => {
+  const user = await auth.getUser();
+  const reviewRequestedBy = user?.email ?? user?.id ?? null;
+  const reviewRequestedAt = new Date().toISOString();
   await db.updateWhere(
     'project_ims',
     {
-      printed_is_finalized: isFinalized,
-      printed_finalized_at: printedFinalizedAt,
-      printed_finalized_by: printedFinalizedBy,
-      printed_render_id: printedRenderId,
-      updated_at: updatedAt,
+      review_requested_at: reviewRequestedAt,
+      review_requested_by: reviewRequestedBy,
+      review_version: version,
     },
     { where: { project_id: projectId, template_type: templateType } },
   );
-  return { printedIsFinalized: isFinalized, printedFinalizedAt, printedFinalizedBy, printedRenderId, updatedAt };
+  return { reviewRequestedAt, reviewRequestedBy };
 };
 
 // ---------------------------------------------------------------------------
@@ -350,12 +335,11 @@ export const deleteProjectIM = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
 ): Promise<void> => {
-    const row = await db.selectMaybeOne<{ is_finalized?: boolean; printed_is_finalized?: boolean }>('project_ims', {
-      columns: 'is_finalized, printed_is_finalized',
+    const row = await db.selectMaybeOne<{ is_finalized?: boolean }>('project_ims', {
+      columns: 'is_finalized',
       where: { project_id: projectId, template_type: templateType },
     });
     if (row?.is_finalized) throw new Error('This manual is marked FINAL — unlock it before deleting.');
-    if (row?.printed_is_finalized) throw new Error('The Printed IM is marked FINAL — unlock it before deleting.');
     await db.delete('project_ims', { where: { project_id: projectId, template_type: templateType } });
 };
 
@@ -396,14 +380,11 @@ export interface ProjectIMSummary {
   updatedAt: string;
   /** Publish counter — needed (with the review fields) to derive the In Review status. */
   version: number;
-  /** Markup.io review round (see mapProjectIMRow) — drives the derived In Review status. */
-  reviewUrl: string | null;
+  /** Supplier review round (see mapProjectIMRow) — drives the derived In Review status.
+   *  The round's OUTCOME is not here: the dashboard reads it per manual from
+   *  getReviewRoundsByManual, because it lives on the share links and the notes. */
   reviewRequestedAt: string | null;
   reviewVersion: number | null;
-  /** Cached review outcome (migration 112) — drives the derived Review Done status. */
-  reviewDone: boolean | null;
-  reviewStatus: string | null;
-  reviewActiveThreads: number | null;
   skus: string[];            // SKU numbers on the project (a project can have several)
 }
 
@@ -480,12 +461,8 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       finalizedAt: row.finalized_at ?? null,
       updatedAt: row.updated_at,
       version: row.version ?? 0,
-      reviewUrl: row.review_url ?? null,
       reviewRequestedAt: row.review_requested_at ?? null,
       reviewVersion: row.review_version ?? null,
-      reviewDone: row.review_done ?? null,
-      reviewStatus: row.review_status ?? null,
-      reviewActiveThreads: row.review_active_threads ?? null,
       skus,
     };
   });

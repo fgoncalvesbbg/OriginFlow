@@ -31,8 +31,6 @@ const render = (over: Partial<PrintRender>): PrintRender => ({
   createdAt: '2026-08-24T00:00:00Z',
   comment: '',
   market: null,
-  markupUrl: null,
-  markupId: null,
   ...over,
 });
 
