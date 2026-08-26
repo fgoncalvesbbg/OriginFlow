@@ -12,13 +12,13 @@ import {
   setSkuFinal, logSkuChanges, logSkuCreated, logSkuDeleted, getSkuChangeLog, markSkusExported,
 } from '../../services';
 import type { SkuFieldChange } from '../../services';
-import { getAttributesForCategory, generateUUID, parseSkuCsv, buildAkeneoRows } from '../../utils';
+import { getAttributesForCategory, generateUUID, parseSkuCsv, parseSkuRoster, buildAkeneoRows } from '../../utils';
 import type { SkuCsvParseResult } from '../../utils';
 import { CatalogSku, CategoryAttribute, CategoryL3, SkuAttributeValue, SkuChangeLogEntry } from '../../types';
 import { ATTRIBUTE_GROUPS } from '../../config/compliance.constants';
 import { useAuth } from '../../context/AuthContext';
 import * as XLSX from 'xlsx';
-import { Package, Upload, Plus, CheckCircle, Trash2, Search, X, AlertTriangle, Lock, Unlock, History, Download } from 'lucide-react';
+import { Package, Upload, Plus, CheckCircle, Trash2, Search, X, AlertTriangle, Lock, Unlock, History, Download, ListPlus } from 'lucide-react';
 
 const SKUS_PER_PAGE = 20; // SKUs are columns now — paginate columns to keep the table manageable.
 
@@ -54,6 +54,13 @@ const SkuCatalog: React.FC = () => {
   const [uploadResult, setUploadResult] = useState<SkuCsvParseResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // SKU ROSTER modal — "these numbers belong to this category", nothing more. Distinct from
+  // the bulk attribute sheet above: the roster is what leaflet coverage is reported against,
+  // and it needs no attribute values at all.
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [rosterText, setRosterText] = useState('');
+  const [rosterBusy, setRosterBusy] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   // Change-log / history viewer
   const [historySku, setHistorySku] = useState<CatalogSku | null>(null);
@@ -312,6 +319,39 @@ const SkuCatalog: React.FC = () => {
     }
   };
 
+  // ── SKU roster ─────────────────────────────────────────────────────────
+  // Records that a set of SKU numbers exists in this category, with no attribute values.
+  // Deliberately reuses bulkUpsertCatalogSkus rather than adding a second write path: it is
+  // already idempotent on sku_number (partial unique index, migration 93), merges rather than
+  // replaces values, and protects final/locked rows — all of which a roster import wants.
+  const confirmRoster = async () => {
+    if (!selectedCategory) return;
+    const parsed = parseSkuRoster(rosterText);
+    if (!parsed.rows.length) {
+      setRosterError('No SKU numbers found. Paste one per line.');
+      return;
+    }
+    setRosterBusy(true);
+    setRosterError(null);
+    try {
+      const res = await bulkUpsertCatalogSkus(selectedCategory, parsed.rows, actor);
+      await reloadSkus();
+      setRosterOpen(false);
+      setRosterText('');
+      alert(
+        'Roster imported: ' + res.created + ' added, ' + res.updated + ' already present'
+        + (res.lockedSkipped ? ', ' + res.lockedSkipped + ' skipped (final/locked)' : '')
+        + (parsed.duplicates ? ', ' + parsed.duplicates + ' duplicate line(s) collapsed' : '')
+        + (parsed.skipped ? ', ' + parsed.skipped + ' line(s) ignored' : '')
+        + '.'
+      );
+    } catch (e: any) {
+      setRosterError('Import failed: ' + e.message);
+    } finally {
+      setRosterBusy(false);
+    }
+  };
+
   // ── Derived view state ───────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -413,6 +453,13 @@ const SkuCatalog: React.FC = () => {
             </button>
             <button onClick={openUpload} className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-50 text-sm font-medium shadow-sm">
               <Upload size={16} /> Bulk upload
+            </button>
+            <button
+              onClick={() => { setRosterText(''); setRosterError(null); setRosterOpen(true); }}
+              className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-50 text-sm font-medium shadow-sm"
+              title="Paste a list of SKU numbers to register them in this category — no attribute values needed"
+            >
+              <ListPlus size={16} /> Import roster
             </button>
             <button onClick={addSku} className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 border border-gray-200 rounded-md hover:bg-gray-50 text-sm font-medium shadow-sm">
               <Plus size={16} /> Add SKU
@@ -673,6 +720,62 @@ const SkuCatalog: React.FC = () => {
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Upload size={16} /> {uploading ? 'Uploading…' : `Import ${res?.rows.length ?? 0} SKUs`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* SKU roster — register numbers in a category without any attribute data. This is what
+          leaflet coverage is reported against, so it deliberately asks for as little as
+          possible: the bulk attribute sheet above is the wrong amount of ceremony when the
+          answer is just "these 300 SKUs are Beverage Coolers". */}
+      {rosterOpen && (() => {
+        const preview = parseSkuRoster(rosterText);
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                  <ListPlus size={18} className="text-indigo-600" /> Import SKU roster
+                </h3>
+                <button onClick={() => setRosterOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+              </div>
+              <p className="text-xs text-muted mb-3">
+                One SKU per line, with an optional title after a comma. Attribute values are not
+                needed — re-importing the same list updates instead of duplicating.
+              </p>
+
+              <textarea
+                value={rosterText}
+                onChange={(e) => { setRosterText(e.target.value); setRosterError(null); }}
+                rows={10}
+                spellCheck={false}
+                placeholder={'10045678\n10045679, Beverage Cooler 34L Black\n10045680'}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
+              />
+
+              <div className="mt-2 text-xs text-muted flex flex-wrap gap-x-3">
+                <span><span className="font-semibold text-gray-700">{preview.rows.length}</span> SKU{preview.rows.length === 1 ? '' : 's'} detected</span>
+                {preview.duplicates > 0 && <span>{preview.duplicates} duplicate line{preview.duplicates === 1 ? '' : 's'} collapsed</span>}
+                {preview.skipped > 0 && <span>{preview.skipped} line{preview.skipped === 1 ? '' : 's'} ignored</span>}
+              </div>
+
+              {rosterError && (
+                <div className="mt-3 flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-2">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" /> <span>{rosterError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 mt-3">
+                <button onClick={() => setRosterOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium">Cancel</button>
+                <button
+                  onClick={confirmRoster}
+                  disabled={rosterBusy || preview.rows.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ListPlus size={16} /> {rosterBusy ? 'Importing…' : 'Import ' + preview.rows.length + ' SKUs'}
                 </button>
               </div>
             </div>

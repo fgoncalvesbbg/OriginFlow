@@ -95,6 +95,26 @@ export type {
   PrintBackInput,
   PrintRender,
 } from './im-print-export.service';
+// Leaflet coverage — which SKUs a leaflet PDF answers for (migration 132). Generic
+// per-category leaflets and SKU-specific ones resolve through the same read model.
+export {
+  getLeafletCoverage,
+  getLeafletPolicies,
+  setLeafletPolicy,
+  getLeafletIssues,
+  issueCategoryLeaflet,
+  issueLeafletForSkus,
+  withdrawLeafletIssue,
+} from './leaflet-coverage.service';
+export type {
+  LeafletMode,
+  LeafletCoverageStatus,
+  LeafletCoverageRow,
+  LeafletPolicy,
+  LeafletIssue,
+  IssueMeta,
+  IssueForSkusResult,
+} from './leaflet-coverage.service';
 export {
   getIMShares,
   createIMShare,

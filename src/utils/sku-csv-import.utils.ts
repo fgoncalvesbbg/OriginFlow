@@ -150,3 +150,56 @@ export function parseSkuCsv(
 
   return { skus, attributes: attrRows, rows };
 }
+
+// ---------------------------------------------------------------------------------------
+// SKU ROSTER parsing — just "which SKU numbers belong to this category".
+// ---------------------------------------------------------------------------------------
+// Separate from parseSkuCsv on purpose. That function exists to match a transposed sheet
+// against a category's ATTRIBUTE SET, which is the wrong shape (and a needless amount of
+// ceremony) when the goal is only to record that 300 numbers exist in a category so leaflet
+// coverage can be reported against them. bulkUpsertCatalogSkus already accepts an empty
+// `values` array, so a roster is a valid upsert payload with no service changes.
+//
+// Accepts one SKU per line, with an optional title after a comma, semicolon or tab:
+//   10045678
+//   10045679, Beverage Cooler 34L Black
+// Duplicates within the paste collapse to the first occurrence (a later line's title fills
+// in a blank one) rather than fighting each other during the upsert.
+
+export interface SkuRosterParseResult {
+  rows: SkuCsvRow[];
+  /** Lines that held no SKU number — reported rather than silently dropped. */
+  skipped: number;
+  /** Repeated SKU numbers within the paste itself. */
+  duplicates: number;
+}
+
+export function parseSkuRoster(text: string): SkuRosterParseResult {
+  const byNumber = new Map<string, SkuCsvRow>();
+  let skipped = 0;
+  let duplicates = 0;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // First delimiter splits number from title; the title may itself contain commas.
+    const m = line.match(/^([^,;\t]+)(?:[,;\t]\s*(.*))?$/);
+    const skuNumber = (m?.[1] ?? '').trim();
+    const skuTitle = (m?.[2] ?? '').trim();
+    if (!skuNumber) { skipped++; continue; }
+
+    // A header line pasted along with the data is not a SKU.
+    if (LABEL_HEADERS.has(norm(skuNumber))) { skipped++; continue; }
+
+    const existing = byNumber.get(skuNumber);
+    if (existing) {
+      duplicates++;
+      if (!existing.skuTitle && skuTitle) existing.skuTitle = skuTitle;
+      continue;
+    }
+    byNumber.set(skuNumber, { skuNumber, skuTitle, values: [], flags: [] });
+  }
+
+  return { rows: [...byNumber.values()], skipped, duplicates };
+}

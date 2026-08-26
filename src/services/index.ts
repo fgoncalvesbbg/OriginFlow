@@ -259,7 +259,14 @@ export {
   TmImmutableSegmentError,
   TmBatchTooLargeError,
   buildSkuQrSvg,
-  skuQrUrl
+  skuQrUrl,
+  getLeafletCoverage,
+  getLeafletPolicies,
+  setLeafletPolicy,
+  getLeafletIssues,
+  issueCategoryLeaflet,
+  issueLeafletForSkus,
+  withdrawLeafletIssue
 } from './im';
 export type {
   ImImportDoc,
@@ -317,7 +324,13 @@ export type {
   RecordTmSegmentInput,
   RecordTmResult,
   TmDivergence,
-  TmReuseEvent
+  TmReuseEvent,
+  LeafletMode,
+  LeafletCoverageStatus,
+  LeafletCoverageRow,
+  LeafletPolicy,
+  LeafletIssue,
+  IssueForSkusResult
 } from './im';
 
 // Sourcing module

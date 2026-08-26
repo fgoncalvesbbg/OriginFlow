@@ -11,10 +11,19 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History, Type } from 'lucide-react';
+import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History, Type, BookMarked } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, getIMMarkets, checkPrintImageWeights, PrintPdfResult, PrintRender, IMMarket, PrintImageReport } from '../../../services';
+import {
+  getLeafletPolicies,
+  getLeafletIssues,
+  issueCategoryLeaflet,
+  issueLeafletForSkus,
+  type LeafletIssue,
+  type LeafletMode,
+} from '../../../services/im/leaflet-coverage.service';
+import { useAuth } from '../../../context/AuthContext';
 import { PrintExportReport } from './PrintExportReport';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '../../../services/im/im-print-settings.service';
@@ -22,6 +31,12 @@ import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '
 interface PrintExportDialogProps {
   projectId: string;
   templateType: IMTemplateType;
+  /**
+   * The project's L3 category. Needed to record which SKUs a rendered leaflet answers for
+   * (migration 132) — the leaflet is a property of the CATEGORY, not of this one project.
+   * Null disables the "issue as leaflet" action rather than guessing.
+   */
+  categoryId: string | null;
   projectName: string;
   template: IMTemplate | null;
   formData: Record<string, string>;
@@ -90,6 +105,7 @@ const TypographySummary: React.FC<{ typography: PrintTypography; pageSize: 'a4' 
 const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   projectId,
   templateType,
+  categoryId,
   projectName,
   template,
   formData,
@@ -225,6 +241,74 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
       alive = false;
     };
   }, [projectId, templateType]);
+
+  // ---------------------------------------------------------------------------------
+  // "Which SKUs does this PDF answer for?" — recorded here, on the render history, because
+  // this is where the operator is already comparing renders and deciding which one is THE
+  // one to hand out. See db_migrations/132_create_im_leaflet_issues.sql.
+  //
+  // Only leaflets: a full IM is per-project by construction, whereas a leaflet answers for
+  // a category (generically) or for the SKU group whose data is inside it.
+  // ---------------------------------------------------------------------------------
+  const { user } = useAuth();
+  const canIssue = isLeaflet && !!categoryId;
+  const [leafletMode, setLeafletMode] = useState<LeafletMode>('category');
+  const [issues, setIssues] = useState<LeafletIssue[]>([]);
+  const [issuing, setIssuing] = useState<string | null>(null);
+  const [issueError, setIssueError] = useState<string | null>(null);
+  /** Open per-SKU picker: which render, and which of this manual's SKUs to attach to it. */
+  const [skuPicker, setSkuPicker] = useState<{ renderId: string; selected: string[] } | null>(null);
+
+  const loadIssues = React.useCallback(async () => {
+    if (!categoryId) return;
+    const [policies, all] = await Promise.all([getLeafletPolicies(), getLeafletIssues()]);
+    setLeafletMode(policies.find((p) => p.categoryId === categoryId)?.mode ?? 'category');
+    // A per-SKU issue's category_id is always set, so one filter covers both kinds.
+    setIssues(all.filter((i) => i.categoryId === categoryId));
+  }, [categoryId]);
+
+  useEffect(() => {
+    if (!canIssue) return;
+    let alive = true;
+    loadIssues().catch(() => { if (alive) setIssueError('Could not load leaflet assignments.'); });
+    return () => { alive = false; };
+  }, [canIssue, loadIssues]);
+
+  /** The render currently issued for the WHOLE category, if any. */
+  const categoryIssueRenderId = issues.find((i) => i.skuNumber === null)?.renderId ?? null;
+
+  /** How many SKUs each render is individually assigned to. */
+  const skuCountByRender = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of issues) {
+      if (!i.skuNumber || !i.renderId) continue;
+      m.set(i.renderId, (m.get(i.renderId) ?? 0) + 1);
+    }
+    return m;
+  }, [issues]);
+
+  /**
+   * SKU-specific issues standing in a GENERIC category. Not stale and not ignored — a per-SKU
+   * issue outranks the category-wide one at resolve time whatever the mode says (migration 132,
+   * decision 2), so these SKUs keep their own PDF even after issuing for the whole category.
+   * Worth saying out loud, because "Issue for category" otherwise reads as covering everything.
+   */
+  const exceptionCount =
+    leafletMode === 'category' ? issues.filter((i) => i.skuNumber !== null).length : 0;
+
+  const runIssue = async (fn: () => Promise<unknown>, renderId: string) => {
+    setIssuing(renderId);
+    setIssueError(null);
+    try {
+      await fn();
+      await loadIssues();
+      setSkuPicker(null);
+    } catch (e) {
+      setIssueError(e instanceof Error ? e.message : 'Could not record the assignment.');
+    } finally {
+      setIssuing(null);
+    }
+  };
 
   // Tick an elapsed-seconds counter while a render is in flight, so a slow/stuck
   // render visibly progresses instead of showing a static spinner.
@@ -657,9 +741,35 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700 flex items-center gap-2">
                 <History size={14} /> Previous exports ({renders.length})
               </summary>
-              <div className="divide-y border-t max-h-40 overflow-auto">
-                {renders.map((r) => (
-                  <div key={r.id} className="flex items-start justify-between gap-3 px-3 py-2 text-xs">
+              {/* Recording which SKUs a render answers for lives here, on the history, because
+                  this is where the operator already compares renders and decides which one is
+                  THE one to hand out. Generic categories issue once for everything; per-SKU
+                  categories attach the render to the SKU group whose data is inside it. */}
+              {canIssue && (
+                <div className="px-3 py-2 border-t bg-gray-50 text-[11px] text-gray-600 flex items-center gap-1.5 flex-wrap">
+                  <BookMarked size={12} className="text-gray-400" />
+                  {leafletMode === 'category'
+                    ? 'This category uses ONE generic leaflet — issuing covers every SKU in it, now and in future.'
+                    : "This category's leaflet carries SKU data — issue each render to the SKUs it was built from."}
+                  {exceptionCount > 0 && (
+                    <span className="text-amber-700">
+                      · {exceptionCount} SKU{exceptionCount === 1 ? '' : 's'} keep their own
+                      leaflet and will override it
+                    </span>
+                  )}
+                </div>
+              )}
+              {issueError && (
+                <div className="px-3 py-2 border-t bg-red-50 text-[11px] text-red-700">{issueError}</div>
+              )}
+              <div className="divide-y border-t max-h-56 overflow-auto">
+                {renders.map((r) => {
+                  const isCategoryIssued = canIssue && r.id === categoryIssueRenderId;
+                  const skuCount = skuCountByRender.get(r.id) ?? 0;
+                  const picking = skuPicker?.renderId === r.id;
+                  return (
+                  <div key={r.id} className="px-3 py-2 text-xs">
+                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <span className="text-gray-600">
                         {r.market && <span className="inline-block mr-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold">{r.market}</span>}
@@ -669,17 +779,104 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                         {r.imVersion != null && <> · v{r.imVersion}</>} · {fmtDate(r.createdAt)}
                         {r.createdBy && <> · {r.createdBy}</>}
                       </span>
+                      {isCategoryIssued && (
+                        <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 font-semibold">
+                          Issued · all SKUs
+                        </span>
+                      )}
+                      {skuCount > 0 && (
+                        <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 font-semibold">
+                          Issued · {skuCount} SKU{skuCount === 1 ? '' : 's'}
+                        </span>
+                      )}
                       {r.comment && (
                         <p className="text-gray-500 mt-0.5 whitespace-pre-wrap break-words">{r.comment}</p>
                       )}
                     </div>
                     <div className="shrink-0 flex items-center gap-1.5">
+                      {canIssue && leafletMode === 'category' && !isCategoryIssued && (
+                        <button
+                          type="button"
+                          disabled={issuing === r.id}
+                          onClick={() => runIssue(
+                            () => issueCategoryLeaflet(categoryId as string, r.id, { by: user?.email ?? null }),
+                            r.id,
+                          )}
+                          className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {issuing === r.id ? 'Issuing…' : 'Issue for category'}
+                        </button>
+                      )}
+                      {canIssue && leafletMode === 'sku' && (
+                        <button
+                          type="button"
+                          disabled={issuing === r.id || skus.length === 0}
+                          onClick={() => setSkuPicker(picking ? null : { renderId: r.id, selected: skus })}
+                          title={skus.length === 0 ? 'This manual has no bound SKUs to assign.' : undefined}
+                          className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {picking ? 'Cancel' : 'Issue for SKUs (' + skus.length + ')'}
+                        </button>
+                      )}
                       <a href={r.url} target="_blank" rel="noreferrer" className="px-2 py-1 border rounded hover:bg-gray-50">
                         Download
                       </a>
                     </div>
+                   </div>
+                   {/* Pre-filled with this manual's bound SKUs — precisely the group whose data
+                       the PDF contains — but adjustable, since one export can legitimately be
+                       handed to a subset. */}
+                   {picking && skuPicker && (
+                     <div className="mt-2 border rounded bg-gray-50 p-2">
+                       <div className="flex flex-wrap gap-1.5 mb-2">
+                         {skus.map((n) => {
+                           const on = skuPicker.selected.includes(n);
+                           return (
+                             <button
+                               key={n}
+                               type="button"
+                               onClick={() => setSkuPicker({
+                                 renderId: r.id,
+                                 selected: on
+                                   ? skuPicker.selected.filter((x) => x !== n)
+                                   : [...skuPicker.selected, n],
+                               })}
+                               className={on
+                                 ? 'px-1.5 py-0.5 rounded border font-medium bg-emerald-50 border-emerald-200 text-emerald-700'
+                                 : 'px-1.5 py-0.5 rounded border font-medium bg-white border-gray-200 text-gray-400'}
+                             >
+                               {on
+                                 ? <CheckSquare size={10} className="inline mr-1" />
+                                 : <Square size={10} className="inline mr-1" />}
+                               {n}
+                             </button>
+                           );
+                         })}
+                       </div>
+                       <button
+                         type="button"
+                         disabled={issuing === r.id || skuPicker.selected.length === 0}
+                         onClick={() => runIssue(
+                           () => issueLeafletForSkus(
+                             categoryId as string,
+                             r.id,
+                             skuPicker.selected,
+                             { by: user?.email ?? null },
+                           ),
+                           r.id,
+                         )}
+                         className="px-2 py-1 rounded bg-primary text-white font-medium disabled:opacity-50"
+                       >
+                         {issuing === r.id
+                           ? 'Issuing…'
+                           : 'Confirm — this PDF covers ' + skuPicker.selected.length + ' SKU'
+                             + (skuPicker.selected.length === 1 ? '' : 's')}
+                       </button>
+                     </div>
+                   )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </details>
           )}

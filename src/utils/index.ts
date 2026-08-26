@@ -12,7 +12,7 @@ export { validateAttributeValue, getAttributesForCategory } from './attribute-va
 export { passesFeatureGate } from './attribute-condition.utils';
 export { parseAttributeCsv } from './attribute-csv-import.utils';
 export type { ParsedAttributeRow } from './attribute-csv-import.utils';
-export { parseSkuCsv } from './sku-csv-import.utils';
-export type { SkuCsvSkuColumn, SkuCsvAttributeRow, SkuCsvRow, SkuCsvParseResult } from './sku-csv-import.utils';
+export { parseSkuCsv, parseSkuRoster } from './sku-csv-import.utils';
+export type { SkuCsvSkuColumn, SkuCsvAttributeRow, SkuCsvRow, SkuCsvParseResult, SkuRosterParseResult } from './sku-csv-import.utils';
 export { buildAkeneoRows, akeneoColumnCode } from './akeneo-export.utils';
 export type { AkeneoExportRow } from './akeneo-export.utils';

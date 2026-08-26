@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSkuCsv } from './sku-csv-import.utils';
+import { parseSkuCsv, parseSkuRoster } from './sku-csv-import.utils';
 import type { CategoryAttribute } from '../types';
 
 const attrs: CategoryAttribute[] = [
@@ -53,5 +53,37 @@ describe('parseSkuCsv (transposed)', () => {
     expect(c.flags.some(f => /Defrost Type.*allowed options/i.test(f))).toBe(true);
     expect(c.flags.some(f => /Nominal capacity.*not a number/i.test(f))).toBe(true);
     expect(c.flags.some(f => /Interior lighting.*yes\/no/i.test(f))).toBe(true);
+  });
+});
+
+describe('parseSkuRoster', () => {
+  it('takes bare SKU numbers, one per line', () => {
+    const res = parseSkuRoster('10045678\n10045679\n10045680');
+    expect(res.rows.map(r => r.skuNumber)).toEqual(['10045678', '10045679', '10045680']);
+    expect(res.rows.every(r => r.values.length === 0)).toBe(true);
+    expect(res.skipped).toBe(0);
+  });
+
+  it('reads an optional title after a comma, semicolon or tab', () => {
+    const res = parseSkuRoster('10045678, Cooler 34L Black\n10045679;Cooler 50L\n10045680\tCooler 80L');
+    expect(res.rows.map(r => r.skuTitle)).toEqual(['Cooler 34L Black', 'Cooler 50L', 'Cooler 80L']);
+  });
+
+  it('keeps commas inside the title', () => {
+    const res = parseSkuRoster('10045678, Cooler, 34L, Black');
+    expect(res.rows[0].skuTitle).toBe('Cooler, 34L, Black');
+  });
+
+  it('collapses duplicates and backfills a missing title from a later line', () => {
+    const res = parseSkuRoster('10045678\n10045678, Cooler 34L');
+    expect(res.rows).toHaveLength(1);
+    expect(res.duplicates).toBe(1);
+    expect(res.rows[0].skuTitle).toBe('Cooler 34L');
+  });
+
+  it('skips blank lines and a pasted header row rather than importing them as SKUs', () => {
+    const res = parseSkuRoster('SKU\n\n10045678\n   \n10045679');
+    expect(res.rows.map(r => r.skuNumber)).toEqual(['10045678', '10045679']);
+    expect(res.skipped).toBe(1); // the header; blank lines are not "skipped rows"
   });
 });

@@ -14,12 +14,13 @@ import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from 
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
   FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X,
-  List, Kanban, Scale
+  List, Kanban, Scale, ShieldCheck
 } from 'lucide-react';
 import {
   MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf, isInReview, type ManualStatus,
 } from './im-manual-status';
 import { IMViewerTab } from './IMViewerTab';
+import { LeafletCoverageTab } from './LeafletCoverageTab';
 import { ImImportDialog } from './ImImportDialog';
 import PublishDiffModal from './PublishDiffModal';
 import type { ImImportResult } from '../../services';
@@ -801,7 +802,7 @@ const TemplatesTab: React.FC<TemplatesTabProps> = ({
 // Main dashboard
 // ---------------------------------------------------------------------------
 
-type Tab = 'templates' | 'manuals' | 'blocks' | 'regulations' | 'viewer';
+type Tab = 'templates' | 'manuals' | 'blocks' | 'regulations' | 'coverage' | 'viewer';
 
 const IMDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -914,6 +915,7 @@ const IMDashboard: React.FC = () => {
     { id: 'templates', label: 'Category Templates',                        icon: <FileText size={15} /> },
     { id: 'blocks',    label: 'Block Library',                             icon: <BookOpen size={15} /> },
     { id: 'regulations', label: 'Regulations',                             icon: <Scale size={15} /> },
+    { id: 'coverage',  label: 'Leaflet Coverage',                          icon: <ShieldCheck size={15} /> },
     { id: 'viewer',    label: 'Viewer',                                    icon: <Eye size={15} /> },
   ];
 
@@ -978,6 +980,7 @@ const IMDashboard: React.FC = () => {
       )}
       {activeTab === 'blocks' && <BlockLibraryContent />}
       {activeTab === 'regulations' && <RegulationLibraryContent />}
+      {activeTab === 'coverage' && <LeafletCoverageTab />}
       {activeTab === 'viewer' && <IMViewerTab ims={allIMs} />}
 
       {showImport && (

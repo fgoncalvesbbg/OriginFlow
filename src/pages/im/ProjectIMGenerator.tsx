@@ -1333,15 +1333,17 @@ const ProjectIMGenerator: React.FC = () => {
           // rendered on demand from it (PrintExportDialog → render-print-pdf) and attached to
           // the project's documents when that render succeeds (attachPrintPdfToProject).
           setPublishStatus('Publishing languages…');
-          const result = await publishResolvedManuals(
+          await publishResolvedManuals(
               project.id, template, sections, savedIM,
               (done, total, lang) => setPublishStatus(`Publishing ${done}/${total} (${lang.toUpperCase()})…`),
           );
           // No confirmation screen — Publish is one of three quick menu actions now (see the
-          // header's Publish dropdown), not a one-off event needing its own modal. The
-          // manifest/per-language links stay reachable any time via Publish → Print Version
-          // or the project page's publish history.
-          alert(`${typeLabel} published for ${result.languages.length} language${result.languages.length === 1 ? '' : 's'}.`);
+          // header's Publish dropdown), not a one-off event needing its own modal. Straight
+          // into the same print-export dialog every other export goes through (scoped to
+          // every required language, unlike Print Version's reduced subset), so exporting a
+          // full-language PDF right after publishing is still one step, not a hunt for a
+          // second button — dismiss it if a PDF isn't needed right now.
+          if (isPrintExportAvailable()) openPrintDialog();
 
       } catch (e: any) {
           console.error("Publish failed", e);
@@ -3546,9 +3548,11 @@ ${url}`);
 
   // Open the print-export dialog for the ALREADY-published version without republishing.
   // The publish-result payload is rebuilt from the deterministic storage layout
-  // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed.
+  // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed. Guards on
+  // `project` only, not `instance`: called right after a publish inside the same handler
+  // that just called `setInstance`, whose result the closure here can't see yet.
   const openPrintDialog = (langs: string[] = requiredLanguages) => {
-    if (!project || !instance) return;
+    if (!project) return;
     const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
     setPublishResult({
       manifestUrl,
@@ -4340,6 +4344,7 @@ ${url}`);
          <PrintExportDialog
            projectId={project.id}
            templateType={templateType}
+           categoryId={project.categoryId ?? null}
            projectName={project.name}
            template={template}
            formData={formData}
@@ -4403,11 +4408,18 @@ ${url}`);
              </div>
 
              <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
-               {/* Render a (new) Print Version PDF from the already-published version — no republish needed. */}
+               {/* Render a (new) PDF from the already-published version — no republish needed.
+                   Offered for both scopes: the full manual (every required language, same
+                   PDF export dialog Publish → Full IM opens) and the reduced Printed IM set. */}
                {isPrintExportAvailable() && (
-                 <button onClick={openPrintDialogForPrinted} className="text-sm px-3 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 flex items-center gap-1.5">
-                   <Printer size={14} /> Print Version
-                 </button>
+                 <>
+                   <button onClick={() => openPrintDialog()} className="text-sm px-3 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 flex items-center gap-1.5">
+                     <Printer size={14} /> Export PDF
+                   </button>
+                   <button onClick={openPrintDialogForPrinted} className="text-sm px-3 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 flex items-center gap-1.5">
+                     <Printer size={14} /> Print Version
+                   </button>
+                 </>
                )}
                <div className="flex-1" />
                <button onClick={() => setNoChangesPrompt(null)} className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50">Close</button>
