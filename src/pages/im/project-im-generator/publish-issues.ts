@@ -34,7 +34,7 @@ export type PublishIssueKind =
 export type PublishIssueTarget =
   /** "Fill values" tab, scrolled to the element stamped with this anchor. */
   | { pane: 'fill'; anchor: string }
-  /** "Add content" tab, with this chapter selected and this language active. */
+  /** "Edit IM" tab, with this chapter selected and this language active. */
   | { pane: 'content'; sectionId: string; lang: string };
 
 export interface PublishIssue {

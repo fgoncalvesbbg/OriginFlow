@@ -63,6 +63,12 @@ interface EditorToolbarMenuProps {
   preserveSelection?: boolean;
   /** Panel side. Defaults to right-aligned (menus live at the end of a row). */
   align?: 'left' | 'right';
+  /**
+   * Render the trigger as the page's primary action (solid indigo) instead of the
+   * default white/bordered pill — for the one menu per surface that replaces what used
+   * to be a plain filled `<button>` (e.g. Publish) and needs the same visual weight.
+   */
+  primary?: boolean;
 }
 
 const TONE_CLASSES: Record<ToolbarItemTone, string> = {
@@ -74,7 +80,7 @@ const TONE_CLASSES: Record<ToolbarItemTone, string> = {
 
 const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
   icon, label, badge, groups, title, disabled, panelWidth = 'w-64',
-  variant = 'header', preserveSelection = false, align = 'right',
+  variant = 'header', preserveSelection = false, align = 'right', primary = false,
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -120,9 +126,13 @@ const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
     ? `flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
         open ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
       }`
-    : `flex items-center gap-2 bg-white border text-gray-700 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed ${
-        label ? 'px-3 py-2' : 'justify-center w-10 h-10'
-      } ${open ? 'border-indigo-300 ring-1 ring-indigo-100' : 'border-gray-300'}`;
+    : primary
+      ? `flex items-center gap-2 text-white rounded-xl text-sm font-bold shadow disabled:opacity-70 disabled:cursor-not-allowed ${
+          label ? 'px-4 py-2' : 'justify-center w-10 h-10'
+        } ${open ? 'bg-indigo-700' : 'bg-indigo-600 hover:bg-indigo-700'}`
+      : `flex items-center gap-2 bg-white border text-gray-700 rounded-xl text-sm font-medium hover:bg-light shadow disabled:opacity-50 disabled:cursor-not-allowed ${
+          label ? 'px-3 py-2' : 'justify-center w-10 h-10'
+        } ${open ? 'border-indigo-300 ring-1 ring-indigo-100' : 'border-gray-300'}`;
 
   return (
     <div className="relative" ref={ref}>
@@ -139,7 +149,7 @@ const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
         {icon}
         {label && <span>{label}</span>}
         {badge}
-        {label && <ChevronDown size={variant === 'toolbar' ? 12 : 14} className={`${variant === 'toolbar' ? '' : 'text-gray-400'} transition-transform ${open ? 'rotate-180' : ''}`} />}
+        {label && <ChevronDown size={variant === 'toolbar' ? 12 : 14} className={`${variant === 'toolbar' ? '' : primary ? 'text-indigo-200' : 'text-gray-400'} transition-transform ${open ? 'rotate-180' : ''}`} />}
       </button>
 
       {open && (

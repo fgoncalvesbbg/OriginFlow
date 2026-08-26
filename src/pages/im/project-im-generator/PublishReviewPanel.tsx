@@ -28,13 +28,14 @@
 
 import React, { useState } from 'react';
 import {
-  AlertCircle, AlertTriangle, CheckCircle, CheckSquare, ChevronDown, ChevronRight,
-  ChevronsRight, Crosshair, EyeOff, Globe, Loader2, Scale, Square, Table2, X,
+  AlertCircle, AlertTriangle, CheckCircle, ChevronDown, ChevronRight,
+  ChevronsRight, Crosshair, EyeOff, Globe, Table2,
 } from 'lucide-react';
 import {
   groupPublishIssues,
   summarizePublishIssues,
   type PublishIssue,
+  type PublishIssueGroup,
   type PublishIssueKind,
 } from './publish-issues';
 import type {
@@ -43,6 +44,10 @@ import type {
   ChecklistRegulationGroup,
   ChecklistSummary,
 } from '../../../services';
+// The checklist has a second home now (the editor's side rail opens it on its own), so it
+// lives in its own module. Here it stays inline: the publish gate is exactly where it has
+// to be seen before committing.
+import { RegulatoryChecklistSection } from './RegulatoryChecklist';
 
 /** Per-kind presentation: heading, colour vocabulary, and what fixing it means. */
 const KIND_META: Record<PublishIssueKind, {
@@ -94,8 +99,7 @@ export interface PublishReviewPanelProps {
   issues: PublishIssue[];
   /** Human name for a language code, for the translation group headings. */
   languageName: (code: string) => string;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
+  /** Collapse back to the side rail, which owns open/closed for every editor panel. */
   onClose: () => void;
   /** Put the editor on the thing this issue is about. Not called for targetless issues. */
   onJump: (issue: PublishIssue) => void;
@@ -124,40 +128,15 @@ export interface PublishReviewPanelProps {
 }
 
 export const PublishReviewPanel: React.FC<PublishReviewPanelProps> = ({
-  typeLabel, issues, languageName, collapsed, onToggleCollapsed, onClose, onJump,
+  typeLabel, issues, languageName, onClose, onJump,
   activeIssueKey, regulationGroups, checklistState, templateChecklistState, checklistSummary,
   checklistBusyKey, checklistError, onDecide, armed, onPublish, onCancelPublish,
 }) => {
   const summary = summarizePublishIssues(issues);
   const groups = groupPublishIssues(issues);
 
-  // Collapsed rail: the outstanding count has to stay readable, or collapsing the panel
-  // would hide the very thing it exists to report.
-  if (collapsed) {
-    return (
-      <button
-        onClick={onToggleCollapsed}
-        title={`Expand the pre-publish review (${summary.total} open item${summary.total === 1 ? '' : 's'})`}
-        className="w-10 shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col items-center gap-3 py-3 hover:bg-light transition-colors"
-      >
-        <ChevronsRight size={14} className="rotate-180 text-gray-400" />
-        {summary.total > 0 && (
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-            summary.blocking > 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-          }`}>{summary.total}</span>
-        )}
-        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500 [writing-mode:vertical-rl]">
-          Pre-publish review
-        </span>
-        {checklistSummary.open > 0 && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700" title={`${checklistSummary.open} regulatory item(s) still to review`}>
-            {checklistSummary.open}
-          </span>
-        )}
-      </button>
-    );
-  }
-
+  // No collapsed rendering of its own any more: EditorSideRail is the collapsed state for
+  // every editor panel, and it keeps this panel's count on screen while it is shut.
   return (
     <div className="w-[23rem] shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
       <div className="px-3 py-2.5 bg-light border-b border-gray-200 flex items-center gap-2">
@@ -176,11 +155,8 @@ export const PublishReviewPanel: React.FC<PublishReviewPanelProps> = ({
                   : 'Nothing outstanding. This manual is ready to publish.'}
           </p>
         </div>
-        <button onClick={onToggleCollapsed} title="Collapse to the side" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
+        <button onClick={onClose} title="Collapse this panel" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
           <ChevronsRight size={15} />
-        </button>
-        <button onClick={onClose} title="Close the review panel" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
-          <X size={15} />
         </button>
       </div>
 
@@ -198,91 +174,30 @@ export const PublishReviewPanel: React.FC<PublishReviewPanelProps> = ({
             ? `Missing ${languageName(group.lang ?? '')} translation`
             : meta.title;
           return (
-            <div key={group.key}>
-              <div className={`flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide mb-1 ${meta.head}`}>
-                {meta.icon}
-                <span className="min-w-0 truncate">{title}</span>
-                <span className="text-gray-400">({group.issues.length})</span>
-              </div>
-              {meta.hint && <p className="text-[11px] text-muted mb-1.5 leading-relaxed">{meta.hint}</p>}
-              <ul className="rounded-lg border border-gray-200 divide-y divide-gray-100 overflow-hidden">
-                {group.issues.map(issue => {
-                  const active = issue.key === activeIssueKey;
-                  const jumpable = issue.target !== null;
-                  return (
-                    <li key={issue.key}>
-                      <button
-                        type="button"
-                        onClick={() => jumpable && onJump(issue)}
-                        disabled={!jumpable}
-                        title={jumpable
-                          ? issue.target?.pane === 'content'
-                            ? 'Open this chapter in "Add content" for editing'
-                            : 'Jump to this field in "Fill values"'
-                          : 'Nothing to open here — fix this outside the editor'}
-                        className={`group w-full text-left px-2.5 py-2 flex items-start gap-2 transition-colors disabled:cursor-default ${
-                          active ? 'bg-slate-100' : meta.row
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium leading-snug">{issue.label}</div>
-                          {issue.sectionTitle && (
-                            <div className="text-[11px] text-gray-400 truncate">{issue.sectionTitle}</div>
-                          )}
-                          {issue.detail && (
-                            <div className="text-[11px] text-gray-500 leading-snug">{issue.detail}</div>
-                          )}
-                        </div>
-                        {jumpable && (
-                          <ChevronRight size={13} className="mt-0.5 shrink-0 text-gray-300 group-hover:text-gray-600" />
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+            <IssueGroupSection
+              key={group.key}
+              group={group}
+              meta={meta}
+              title={title}
+              // Blocking issues stop the publish outright, so they stay in view; everything
+              // else is advisory and starts collapsed to keep the panel scannable.
+              defaultExpanded={group.kind === 'blocking'}
+              activeIssueKey={activeIssueKey}
+              onJump={onJump}
+            />
           );
         })}
 
-        {/* REGULATORY CHECKLIST — grouped by the regulation that imposes each obligation. */}
         {regulationGroups.length > 0 && (
-          <div className="border border-emerald-200 rounded-lg overflow-hidden">
-            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-50 border-b border-emerald-200">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-800 flex items-center gap-1.5">
-                <Scale size={13} /> Regulatory checklist
-              </div>
-              <div className="text-[10px] font-semibold text-emerald-700 whitespace-nowrap">
-                {checklistSummary.done} confirmed
-                {checklistSummary.na > 0 && <> · {checklistSummary.na} n/a</>}
-                {checklistSummary.open > 0
-                  ? <> · {checklistSummary.open} to review</>
-                  : <> · all {checklistSummary.total} decided</>}
-              </div>
-            </div>
-            <p className="text-[11px] text-muted px-3 pt-2 leading-relaxed">
-              What the regulations applying to this template oblige a person to verify by hand.
-              Optional — an unticked item just records that nobody confirmed it, and never blocks
-              a publish.
-            </p>
-            <div className="divide-y divide-gray-100 mt-1">
-              {regulationGroups.map(group => (
-                <RegulationChecklistGroup
-                  key={group.regulationId}
-                  group={group}
-                  state={checklistState}
-                  templateState={templateChecklistState}
-                  busyKey={checklistBusyKey}
-                  onDecide={onDecide}
-                />
-              ))}
-            </div>
-            {checklistError && (
-              <p className="text-[11px] text-rose-700 bg-rose-50 border-t border-rose-200 px-3 py-1.5">
-                {checklistError}
-              </p>
-            )}
-          </div>
+          <RegulatoryChecklistSection
+            regulationGroups={regulationGroups}
+            checklistState={checklistState}
+            templateChecklistState={templateChecklistState}
+            checklistSummary={checklistSummary}
+            checklistBusyKey={checklistBusyKey}
+            checklistError={checklistError}
+            onDecide={onDecide}
+          />
         )}
       </div>
 
@@ -305,108 +220,75 @@ export const PublishReviewPanel: React.FC<PublishReviewPanelProps> = ({
 };
 
 /**
- * One regulation's items. Collapsible, and collapsed by default once every item under it is
- * decided: a settled regulation is exactly the thing a reviewer should not have to scroll past
- * to reach the one that still needs work.
+ * One issue-kind group (or one language's translation group). Collapsible so a manual with
+ * many gaps doesn't turn into one long scroll — only `blocking` starts open, since that is
+ * the one kind that stops the publish and has to stay in view; everything else is advisory
+ * and starts collapsed, same spirit as the regulatory groups below.
  */
-const RegulationChecklistGroup: React.FC<{
-  group: ChecklistRegulationGroup;
-  state: Record<string, ChecklistItemState>;
-  templateState: Record<string, ChecklistItemState>;
-  busyKey: string | null;
-  onDecide: (key: string, status: ChecklistItemStatus | null) => void;
-}> = ({ group, state, templateState, busyKey, onDecide }) => {
-  const open = group.items.filter(i => !state[i.key]).length;
-  const [expanded, setExpanded] = useState(open > 0);
+const IssueGroupSection: React.FC<{
+  group: PublishIssueGroup;
+  meta: (typeof KIND_META)[PublishIssueKind];
+  title: string;
+  defaultExpanded: boolean;
+  activeIssueKey: string | null;
+  onJump: (issue: PublishIssue) => void;
+}> = ({ group, meta, title, defaultExpanded, activeIssueKey, onJump }) => {
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
     <div>
       <button
         type="button"
         onClick={() => setExpanded(e => !e)}
-        className="w-full flex items-start gap-1.5 px-3 py-2 text-left hover:bg-light"
+        className={`w-full flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide mb-1 ${meta.head}`}
       >
         {expanded
-          ? <ChevronDown size={13} className="mt-0.5 shrink-0 text-gray-400" />
-          : <ChevronRight size={13} className="mt-0.5 shrink-0 text-gray-400" />}
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-bold text-gray-800 font-mono truncate">{group.referenceCode}</div>
-          <div className="text-[11px] text-gray-500 truncate" title={group.title}>{group.title}</div>
-        </div>
-        <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-          open === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-        }`}>
-          {open === 0 ? `${group.items.length} decided` : `${open} of ${group.items.length}`}
-        </span>
+          ? <ChevronDown size={12} className="shrink-0" />
+          : <ChevronRight size={12} className="shrink-0" />}
+        {meta.icon}
+        <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+        <span className="text-gray-400 font-normal">({group.issues.length})</span>
       </button>
       {expanded && (
-        <ul className="divide-y divide-gray-100 border-t border-gray-100 bg-light/40">
-          {group.items.map(item => {
-            const decided = state[item.key];
-            const busy = busyKey === item.key;
-            const done = decided?.status === 'done';
-            const na = decided?.status === 'na';
-            // An obligation two regulations both state is ONE item with ONE confirmation —
-            // say so, or the same row looks unconfirmed under the other citation.
-            const shared = item.regulationReferences.filter(r => r !== group.referenceCode);
-            const fromTemplate = templateState[item.key];
-            return (
-              <li key={item.key} className="flex items-start gap-2 px-3 py-2">
-                <button
-                  onClick={() => onDecide(item.key, done ? null : 'done')}
-                  disabled={busy}
-                  title={done ? 'Clear this confirmation' : 'Mark as taken into account'}
-                  className="shrink-0 mt-0.5 disabled:opacity-40"
-                >
-                  {busy
-                    ? <Loader2 size={15} className="animate-spin text-gray-400" />
-                    : done
-                      ? <CheckSquare size={15} className="text-emerald-600" />
-                      : <Square size={15} className={na ? 'text-gray-300' : 'text-gray-400'} />}
-                </button>
-                <div className="min-w-0 flex-1">
-                  <p className={`text-xs leading-snug ${na ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                    {item.text}
-                  </p>
-                  {(decided || shared.length > 0) && (
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      {decided && (
-                        <>
-                          {done ? 'Confirmed' : 'Not applicable'}
-                          {decided.updatedBy ? ` by ${decided.updatedBy}` : ''}
-                        </>
+        <>
+          {meta.hint && <p className="text-[11px] text-muted mb-1.5 leading-relaxed">{meta.hint}</p>}
+          <ul className="rounded-lg border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+            {group.issues.map(issue => {
+              const active = issue.key === activeIssueKey;
+              const jumpable = issue.target !== null;
+              return (
+                <li key={issue.key}>
+                  <button
+                    type="button"
+                    onClick={() => jumpable && onJump(issue)}
+                    disabled={!jumpable}
+                    title={jumpable
+                      ? issue.target?.pane === 'content'
+                        ? 'Open this chapter in "Edit IM" for editing'
+                        : 'Jump to this field in "Fill values"'
+                      : 'Nothing to open here — fix this outside the editor'}
+                    className={`group w-full text-left px-2.5 py-2 flex items-start gap-2 transition-colors disabled:cursor-default ${
+                      active ? 'bg-slate-100' : meta.row
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium leading-snug">{issue.label}</div>
+                      {issue.sectionTitle && (
+                        <div className="text-[11px] text-gray-400 truncate">{issue.sectionTitle}</div>
                       )}
-                      {decided && shared.length > 0 && ' — '}
-                      {shared.length > 0 && (
-                        <>also required by <span className="font-mono">{shared.join(' · ')}</span></>
+                      {issue.detail && (
+                        <div className="text-[11px] text-gray-500 leading-snug">{issue.detail}</div>
                       )}
-                    </p>
-                  )}
-                  {/* Provenance, not inheritance: the template author's decision is shown,
-                      never applied. */}
-                  {fromTemplate && (
-                    <p className="text-[10px] text-gray-400 italic">
-                      Template: {fromTemplate.status === 'done' ? 'covered' : 'not applicable'}
-                      {fromTemplate.updatedBy ? ` — ${fromTemplate.updatedBy}` : ''}
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={() => onDecide(item.key, na ? null : 'na')}
-                  disabled={busy}
-                  title={na ? 'This item applies after all' : 'Not applicable to this manual'}
-                  className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border disabled:opacity-40 ${
-                    na
-                      ? 'bg-gray-100 text-gray-600 border-gray-300'
-                      : 'text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  N/A
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                    </div>
+                    {jumpable && (
+                      <ChevronRight size={13} className="mt-0.5 shrink-0 text-gray-300 group-hover:text-gray-600" />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </div>
   );

@@ -7,7 +7,7 @@ import { isLive } from '../../config/environment.config';
 import { ProjectSku, SkuAttributeValue, ProjectAttributeRequest } from '../../types';
 import { SKU_ATTRIBUTE_ID } from '../../config/compliance.constants';
 
-export const MAX_SKUS_PER_PROJECT = 10;
+export const MAX_SKUS_PER_PROJECT = 20;
 
 export const mapProjectSku = (r: any): ProjectSku => ({
   id: r.id,

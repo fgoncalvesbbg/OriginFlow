@@ -40,21 +40,23 @@ export const FeedbackWidget: React.FC = () => {
   };
 
   if (!open) {
+    // Icon-only and small on purpose: a wider pill with a text label was overlapping other
+    // pages' own bottom-right controls (action bars, dialog buttons). A compact circle in
+    // the very corner leaves those alone.
     return (
       <button
         onClick={() => setOpen(true)}
         aria-label="Report a bug or request a feature"
         title="Report a bug or request a feature"
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+        className="fixed bottom-4 right-4 z-40 flex items-center justify-center w-10 h-10 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
       >
-        <MessageSquarePlus size={18} />
-        <span className="hidden sm:inline text-sm font-medium">Feedback</span>
+        <MessageSquarePlus size={16} />
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-40 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden animate-scaleIn">
+    <div className="fixed bottom-4 right-4 z-40 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden animate-scaleIn">
       <div className="flex items-center justify-between px-4 py-3 bg-light border-b border-gray-200">
         <h3 className="text-sm font-bold text-primary">Report a bug or idea</h3>
         <button onClick={close} aria-label="Close" className="p-1 text-gray-400 hover:text-gray-700 rounded">

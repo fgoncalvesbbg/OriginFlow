@@ -4,7 +4,7 @@
  * template + the project's data into a previewable, publishable IM and exports it (PDF/JSON/XML).
  * Sub-components and pure helpers live under ./project-im-generator/.
  */
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
@@ -55,8 +55,12 @@ import { ReviewCommentsPanel } from './project-im-generator/ReviewCommentsPanel'
 import { groupCommentsBySection, reviewCommentCounts, reviewRoundStateOf } from './project-im-generator/review-comments.utils';
 import { markQuoteInHtml } from './review-anchor';
 import { buildSectionOutline, findExcludedAncestor, METADATA_SECTION_TITLE } from './project-im-generator/section-outline.utils';
-import { FILL_ANCHOR_ATTR, fillAnchors, type PublishIssue } from './project-im-generator/publish-issues';
+import { FILL_ANCHOR_ATTR, fillAnchors, summarizePublishIssues, type PublishIssue } from './project-im-generator/publish-issues';
 import PublishReviewPanel from './project-im-generator/PublishReviewPanel';
+import EditorSideRail, { type SidePanelId, type SideRailItem } from './project-im-generator/EditorSideRail';
+import TranslationStatusPanel from './project-im-generator/TranslationStatusPanel';
+import { RegulatoryChecklistPanel } from './project-im-generator/RegulatoryChecklist';
+import { AlertTriangle as RailIssuesIcon, MessageSquare as RailCommentsIcon, Languages as RailLangIcon, Scale as RailRegIcon } from 'lucide-react';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { Badge } from '../../components/common/Badge';
 import { OptionalContentPanel, IncludeModeControl, modeOf, type OptionalContentItem } from './project-im-generator/OptionalContentPanel';
@@ -133,7 +137,7 @@ const ProjectIMGenerator: React.FC = () => {
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
   // Editor/preview split. Both panes had widths fixed in the markup, so filling in a long form
   // meant scrolling a narrow column beside a preview that could not be narrowed or dismissed.
-  // The default follows the old fractions: the inputs took half the row in "Add content" mode
+  // The default follows the old fractions: the inputs took half the row in "Edit IM" mode
   // and a third otherwise.
   // Must be called before any early return below (loading/error/no-template) — a hook called
   // only on some renders breaks React's hook-order invariant (error #310).
@@ -193,8 +197,13 @@ const ProjectIMGenerator: React.FC = () => {
   // modal, because every row in it is a pointer into the editor and the list has to survive
   // being acted on. `armed` = opened by pressing Publish, so the panel carries the go/no-go
   // footer; opened from the preview toolbar it is a review list with no publish decision.
-  const [reviewPanel, setReviewPanel] = useState<{ armed: boolean } | null>(null);
-  const [reviewCollapsed, setReviewCollapsed] = useState(false);
+  // The editor's right-hand side rail (see EditorSideRail): ONE panel open at a time, and
+  // null — collapsed to just the icon column — by default. The rail itself is always on
+  // screen, so every panel's outstanding count stays visible while they are all shut.
+  const [activePanel, setActivePanel] = useState<SidePanelId | null>(null);
+  // Whether the pre-publish panel currently owns the go/no-go decision. Orthogonal to which
+  // panel is open: Publish arms it AND opens it, but opening it from the rail must not.
+  const [publishArmed, setPublishArmed] = useState(false);
   // The row last jumped from, kept marked so a long list doesn't lose the operator's place.
   const [activeIssueKey, setActiveIssueKey] = useState<string | null>(null);
   // A requested jump into the "Fill values" form. Held in state rather than done inline: the
@@ -206,8 +215,6 @@ const ProjectIMGenerator: React.FC = () => {
   // second docked rail alongside the pre-publish one.
   const [reviewComments, setReviewComments] = useState<IMReviewComment[]>([]);
   const [reviewShares, setReviewShares] = useState<IMShare[]>([]);
-  const [commentsPanelOpen, setCommentsPanelOpen] = useState(false);
-  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentBusyId, setCommentBusyId] = useState<string | null>(null);
   const [sendingForReview, setSendingForReview] = useState(false);
@@ -254,6 +261,10 @@ const ProjectIMGenerator: React.FC = () => {
   // True when the manual is marked FINAL — mirrors IMTemplate.isFinalized. Every editing
   // surface, save, autosave, translate, import and delete is gated on this being false.
   const locked = instance?.isFinalized ?? false;
+  // True once the Full IM has been published at least once. Print Version and Send for
+  // Review both render from the published content, so both require this — see the Publish
+  // menu in the header below.
+  const published = instance?.status === 'generated';
   // Neutralizes every editing surface in one class: no clicks, no text cursor (same idiom
   // as the template editor).
   const lockedCls = locked ? 'pointer-events-none select-none opacity-70' : '';
@@ -607,13 +618,12 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   // --- Manual pipeline (stepper) ------------------------------------------------
-  // Async signals the stepper needs beyond page state: publish freshness (staleness),
-  // the newest print render's version, and the supplier review round. All
-  // best-effort and off the critical path — the stepper renders without them.
+  // Async signals the stepper needs beyond page state: publish freshness (staleness)
+  // and the supplier review round. Best-effort and off the critical path — the stepper
+  // renders without them.
   const [pipelineStale, setPipelineStale] = useState<boolean | null>(null); // null = unknown/unchecked
-  const [latestRenderVersion, setLatestRenderVersion] = useState<number | null | undefined>(undefined);
   // Full render history (newest first) — used to find the render matching the Printed IM's
-  // current language set, for the "ready to finalize" / staleness check below.
+  // current language set, for its status/freshness check below.
   const [printRenders, setPrintRenders] = useState<PrintRender[]>([]);
 
   useEffect(() => {
@@ -631,8 +641,8 @@ const ProjectIMGenerator: React.FC = () => {
   useEffect(() => {
       if (loading || !projectId || !isPrintExportAvailable()) return;
       getPrintRenders(projectId, templateType)
-          .then(rs => { setLatestRenderVersion(rs[0]?.imVersion ?? null); setPrintRenders(rs); })
-          .catch(() => { /* stepper shows the print step without freshness */ });
+          .then(rs => setPrintRenders(rs))
+          .catch(() => { /* Printed IM panel shows its status without freshness data */ });
   }, [loading, projectId, templateType]);
 
   // --- Pre-publish regulatory checklist (migration 119) --------------------
@@ -1327,7 +1337,11 @@ const ProjectIMGenerator: React.FC = () => {
               project.id, template, sections, savedIM,
               (done, total, lang) => setPublishStatus(`Publishing ${done}/${total} (${lang.toUpperCase()})…`),
           );
-          setPublishResult(result);
+          // No confirmation screen — Publish is one of three quick menu actions now (see the
+          // header's Publish dropdown), not a one-off event needing its own modal. The
+          // manifest/per-language links stay reachable any time via Publish → Print Version
+          // or the project page's publish history.
+          alert(`${typeLabel} published for ${result.languages.length} language${result.languages.length === 1 ? '' : 's'}.`);
 
       } catch (e: any) {
           console.error("Publish failed", e);
@@ -3329,7 +3343,7 @@ const ProjectIMGenerator: React.FC = () => {
   /**
    * Act on a click in the review panel: put the editor on the thing the issue is about.
    *
-   * A translation gap goes to the "Add content" tab with that chapter selected AND that
+   * A translation gap goes to the "Edit IM" tab with that chapter selected AND that
    * language active — both, because editing the chapter in English would not close the gap.
    * Everything else lives in the "Fill values" form and is reached by its anchor (see the
    * retry effect up with the hooks).
@@ -3440,7 +3454,7 @@ const ProjectIMGenerator: React.FC = () => {
 ${url}`);
       }
       setReviewShares(prev => [share, ...prev]);
-      setCommentsPanelOpen(true);
+      setActivePanel('comments');
     } catch (e) {
       console.error('[ProjectIMGenerator] Failed to create review link:', e);
       alert('Could not create a review link. Please try again.');
@@ -3519,8 +3533,8 @@ ${url}`);
     const issues = buildPublishIssues();
     const regOpen = summarizeChecklist(regChecklist, regChecklistState).open;
     if (issues.length || regOpen > 0) {
-      setReviewPanel({ armed: true });
-      setReviewCollapsed(false);
+      setPublishArmed(true);
+      setActivePanel('publish');
     } else {
       handleGenerate();
     }
@@ -3546,8 +3560,6 @@ ${url}`);
     setNoChangesPrompt(null);
     setShowPrintDialog(true);
   };
-
-  const openPrintForPublished = () => openPrintDialog();
 
   // Read-only HTML for a single template block ref (shown as a locked card in the
   // content editor). Mirrors buildSectionHtml's per-ref rendering.
@@ -4156,27 +4168,88 @@ ${url}`);
   // Version the next publish will stamp (current persisted version + 1).
   const previewVersion = (instance?.version ?? 0) + 1;
 
-  // Supplier review, derived once so the pipeline's Review step and the panel can never
-  // disagree about how many notes are outstanding.
-  const reviewRound = useMemo(
-    () => reviewRoundStateOf(reviewShares, reviewComments, instance?.version ?? null),
-    [reviewShares, reviewComments, instance?.version],
-  );
-  const reviewCounts = useMemo(() => reviewCommentCounts(reviewComments), [reviewComments]);
-  const reviewGroups = useMemo(
-    () => groupCommentsBySection(
-      reviewComments,
-      orderedSections
-        .filter(sec => sec.title !== '__METADATA__')
-        .map(sec => ({ id: sec.id, title: localizedSectionTitle(sec, activeLang) })),
-    ),
-    [reviewComments, orderedSections, activeLang],
+  // Supplier review, derived once per render so the pipeline's Review step and the panel can
+  // never disagree about how many notes are outstanding.
+  //
+  // Plain consts, NOT useMemo: everything from here down sits after the `if (loading) return`
+  // above, so a hook here runs on some renders and not others — React counts that as a
+  // changed hook order and throws (#310). It also matches how the rest of this section
+  // derives its values (see publishIssues below); the inputs are small arrays.
+  const reviewRound = reviewRoundStateOf(reviewShares, reviewComments, instance?.version ?? null);
+  const reviewCounts = reviewCommentCounts(reviewComments);
+  const reviewGroups = groupCommentsBySection(
+    reviewComments,
+    orderedSections
+      .filter(sec => sec.title !== '__METADATA__')
+      .map(sec => ({ id: sec.id, title: localizedSectionTitle(sec, activeLang) })),
   );
 
   const completion = calculateCompletion(activeLang);
   // Live pre-publish issues. Computed once per render and shared, so the count on the
   // pipeline's "Content" step and the rows in the review panel can never disagree.
   const publishIssues = buildPublishIssues();
+
+  // The side rail's four items. Counts and tones are derived here, from the same values the
+  // panels themselves render, so a badge can never disagree with the list behind it.
+  //
+  // A tone of 'gray' means "nothing to report and nothing to do" (English-only manual, no
+  // regulations assigned, no review sent) — distinct from emerald, which means "there was
+  // work and it is done".
+  const publishSummary = summarizePublishIssues(publishIssues);
+  const sideRailItems: SideRailItem[] = [
+    {
+      id: 'publish',
+      label: 'Pre-publish review',
+      icon: <RailIssuesIcon size={17} />,
+      title: publishSummary.blocking > 0
+        ? `${publishSummary.blocking} item(s) must be fixed before publishing`
+        : publishSummary.total > 0
+          ? `${publishSummary.total} thing(s) to look at before publishing`
+          : 'Nothing outstanding',
+      count: publishSummary.total,
+      tone: publishSummary.blocking > 0 ? 'rose' : publishSummary.total > 0 ? 'amber' : 'emerald',
+    },
+    {
+      id: 'comments',
+      label: 'Supplier review',
+      icon: <RailCommentsIcon size={17} />,
+      title: reviewCounts.total === 0
+        ? 'No supplier notes yet'
+        : reviewCounts.open > 0
+          ? `${reviewCounts.open} open note(s) of ${reviewCounts.total}`
+          : `All ${reviewCounts.total} note(s) handled`,
+      count: reviewCounts.open,
+      tone: reviewCounts.open > 0 ? 'amber' : reviewCounts.total > 0 ? 'emerald' : 'gray',
+    },
+    {
+      id: 'translation',
+      label: 'Translations',
+      icon: <RailLangIcon size={17} />,
+      title: otherRequiredLangs.length === 0
+        ? 'This manual only produces English'
+        : untranslatedSectionLabels.size > 0
+          ? `${untranslatedSectionLabels.size} chapter(s) still untranslated`
+          : 'Every chapter is translated',
+      count: untranslatedSectionLabels.size,
+      tone: otherRequiredLangs.length === 0
+        ? 'gray'
+        : untranslatedSectionLabels.size > 0 ? 'amber' : 'emerald',
+    },
+    {
+      id: 'regulatory',
+      label: 'Regulatory checklist',
+      icon: <RailRegIcon size={17} />,
+      title: regChecklistGroups.length === 0
+        ? 'No regulations are assigned to this template'
+        : regChecklistSummary.open > 0
+          ? `${regChecklistSummary.open} of ${regChecklistSummary.total} still to review`
+          : `All ${regChecklistSummary.total} decided`,
+      count: regChecklistSummary.open,
+      tone: regChecklistGroups.length === 0
+        ? 'gray'
+        : regChecklistSummary.open > 0 ? 'amber' : 'emerald',
+    },
+  ];
 
   return (
     <Layout>
@@ -4259,64 +4332,6 @@ ${url}`);
          </div>
        )}
 
-       {publishResult && (
-         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-           <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6">
-             <div className="flex items-center gap-2 mb-1">
-               <CheckCircle size={20} className="text-emerald-600" />
-               <h3 className="text-lg font-bold text-gray-800">{typeLabel} published</h3>
-             </div>
-             <p className="text-sm text-muted mb-4">
-               The structured IM has been generated for {publishResult.languages.length} language(s).
-               Use the manifest link as the stable entry point for the web/PDF render service.
-             </p>
-
-             <label className="text-xs font-semibold text-gray-500 uppercase">Manifest (all languages)</label>
-             <div className="flex items-center gap-2 mb-4 mt-1">
-               <input readOnly value={publishResult.manifestUrl} className="flex-1 text-xs border rounded px-2 py-1.5 bg-gray-50 text-gray-700" />
-               <button onClick={() => navigator.clipboard.writeText(publishResult.manifestUrl)} className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50 whitespace-nowrap">Copy</button>
-               <a href={publishResult.manifestUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50">Open</a>
-             </div>
-
-             <label className="text-xs font-semibold text-gray-500 uppercase">Per language</label>
-             <div className="border rounded divide-y mt-1 mb-5 max-h-48 overflow-auto">
-               {publishResult.languages.map(l => (
-                 <div key={l.language} className="flex items-center justify-between px-3 py-2 text-sm">
-                   <span className="font-medium uppercase">{l.language}</span>
-                   <div className="flex items-center gap-2">
-                     {l.warnings.length > 0 && (
-                       <span className="text-amber-600 text-xs flex items-center gap-1" title={l.warnings.join('\n')}><AlertCircle size={12} />{l.warnings.length}</span>
-                     )}
-                     <button onClick={() => navigator.clipboard.writeText(l.url)} className="text-xs px-2 py-1 border rounded hover:bg-gray-50">Copy link</button>
-                     <a href={l.url} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border rounded hover:bg-gray-50">Open</a>
-                   </div>
-                 </div>
-               ))}
-             </div>
-
-             <div className="flex justify-end gap-2">
-               <button onClick={() => setPublishResult(null)} className="text-sm px-3 py-2 border rounded hover:bg-gray-50">Stay here</button>
-               {isPrintExportAvailable() && (
-                 <button onClick={() => setShowPrintDialog(true)} className="text-sm px-3 py-2 border border-primary text-primary rounded hover:bg-primary/5 flex items-center gap-1.5">
-                   <FileDown size={14} /> Export print PDF
-                 </button>
-               )}
-               {/* Straight from "published" to "out for review" — reviewers read the online
-                   manual that was just published, so there is nothing to render first. */}
-               <button
-                 onClick={() => { setPublishResult(null); sendForReview(); }}
-                 disabled={sendingForReview}
-                 title="Create a supplier review link for this manual and copy it"
-                 className="text-sm px-3 py-2 border border-sky-300 text-sky-700 rounded hover:bg-sky-50 flex items-center gap-1.5 disabled:opacity-50"
-               >
-                 <Send size={14} /> Send for review
-               </button>
-               <button onClick={() => navigate(`/project/${project?.id}`)} className="text-sm px-3 py-2 bg-primary text-white rounded hover:opacity-90">Go to project</button>
-             </div>
-           </div>
-         </div>
-       )}
-
        {showPrintDialog && publishResult && project && (
          <PrintExportDialog
            projectId={project.id}
@@ -4330,10 +4345,7 @@ ${url}`);
              .filter(Boolean)}
            version={instance?.version}
            onRendered={async (res, langs, size) => {
-             // A fresh render for the current version — keep the pipeline's Print step live.
-             setLatestRenderVersion(instance?.version ?? null);
-             // Also keep the Printed IM's render-matching up to date without a reload, so
-             // "Mark Printed IM Final" can enable right after a matching render finishes.
+             // Keep the Printed IM panel's render-matching up to date without a reload.
              if (res.render) setPrintRenders(prev => [res.render as PrintRender, ...prev]);
              await attachPrintPdfToProject(res, langs, size);
            }}
@@ -4387,10 +4399,10 @@ ${url}`);
              </div>
 
              <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
-               {/* Render a (new) print PDF from the already-published version — no republish needed. */}
+               {/* Render a (new) Print Version PDF from the already-published version — no republish needed. */}
                {isPrintExportAvailable() && (
-                 <button onClick={openPrintForPublished} className="text-sm px-3 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 flex items-center gap-1.5">
-                   <FileDown size={14} /> Export print PDF
+                 <button onClick={openPrintDialogForPrinted} className="text-sm px-3 py-2 border border-primary text-primary rounded-lg hover:bg-primary/5 flex items-center gap-1.5">
+                   <Printer size={14} /> Print Version
                  </button>
                )}
                <div className="flex-1" />
@@ -4594,7 +4606,7 @@ ${url}`);
                               revoking the last one ends the round with no extra write. */}
                           {reviewRound.isOpen && (
                             <button
-                              onClick={() => setCommentsPanelOpen(true)}
+                              onClick={() => setActivePanel('comments')}
                               title={reviewRound.openCount > 0
                                 ? `${reviewRound.openCount} open supplier note(s) — open the review panel`
                                 : 'Out for supplier review — open the review panel'}
@@ -4677,11 +4689,53 @@ ${url}`);
                      ] }]}
                    />
 
-                   <button onClick={handlePublishClick} disabled={isBusy} title={generating ? (publishStatus ?? 'Publishing…') : undefined} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-70 max-w-[280px]">
-                      {(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileDown size={16} className="shrink-0" />}
-                      {/* Says what it does: publishes EVERY required language, not the active tab. */}
-                      <span className="truncate">{generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : `Publish (${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'})`}</span>
-                   </button>
+                   {/* Publish — three independent actions, each usable at any stage (Print
+                       Version and Send for Review just need the Full IM published at least
+                       once, since they render from that published content). The language
+                       counts shown are configured ahead of time (Manual Languages / Printed
+                       Languages above), so picking an item runs it immediately — no
+                       re-picking languages at click time. */}
+                   <EditorToolbarMenu
+                     icon={(generating || checkingChanges) ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+                     label={generating ? (publishStatus ?? 'Publishing…') : checkingChanges ? 'Checking for changes…' : 'Publish'}
+                     title="Publish the Full IM, render a Print Version, or send it for supplier review"
+                     primary
+                     panelWidth="w-80"
+                     disabled={isBusy}
+                     groups={[{ items: [
+                       {
+                         key: 'full-im',
+                         icon: <FileDown size={15} className="text-indigo-600" />,
+                         label: `Full IM — ${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'}`,
+                         hint: 'Publish every required language to the online Digital IM.',
+                         onClick: () => { void handlePublishClick(); },
+                       },
+                       {
+                         key: 'print-version',
+                         icon: <Printer size={15} className="text-indigo-600" />,
+                         label: `Print Version — ${printedLanguages.length} ${printedLanguages.length === 1 ? 'language' : 'languages'}`,
+                         hint: !isPrintExportAvailable()
+                           ? 'Print export is not enabled in this environment.'
+                           : !published
+                             ? 'Publish the Full IM first — the print PDF renders from it.'
+                             : 'Render the print-shop PDF for the configured printed-language subset.',
+                         onClick: () => openPrintDialogForPrinted(),
+                         disabled: !isPrintExportAvailable() || !published || printedLanguages.length === 0,
+                       },
+                       {
+                         key: 'send-review',
+                         icon: <Send size={15} className="text-indigo-600" />,
+                         label: reviewRound.isOpen ? 'Review in progress — open panel' : 'Send for Review',
+                         hint: !published
+                           ? 'Publish the Full IM first — reviewers read the published online manual.'
+                           : reviewRound.isOpen
+                             ? 'A review round is already open — see the supplier notes so far.'
+                             : 'Create a supplier review link for the published manual and copy it.',
+                         onClick: reviewRound.isOpen ? () => setActivePanel('comments') : () => { void sendForReview(); },
+                         disabled: !published || sendingForReview,
+                       },
+                     ] }]}
+                   />
 
                    {/* Fullscreen — a view preference, not a content action, so it sits apart
                        from the workflow buttons rather than inside the gear. */}
@@ -4733,7 +4787,6 @@ ${url}`);
            {(() => {
              // Translations have their own step below, so "Content" counts everything else.
              const contentIssues = publishIssues.filter(i => i.kind !== 'translation').length;
-             const published = instance?.status === 'generated';
              const inReview = reviewRound.isOpen;
              // "Done" means the reviewer submitted AND nothing is still outstanding — a
              // submitted review with open notes is work for the PM, not a finished step.
@@ -4747,7 +4800,7 @@ ${url}`);
                  detail: contentIssues > 0 ? `${contentIssues} open item${contentIssues === 1 ? '' : 's'}` : undefined,
                  title: contentIssues > 0 ? 'Open the review panel — missing values, SKU content and dropped chapters' : 'All values, slots and conditions are filled',
                  onClick: contentIssues > 0
-                   ? () => { setReviewPanel(prev => prev ?? { armed: false }); setReviewCollapsed(false); }
+                   ? () => setActivePanel('publish')
                    : undefined,
                },
                otherRequiredLangs.length === 0
@@ -4769,19 +4822,18 @@ ${url}`);
                !inReview
                  ? {
                      key: 'review', label: 'Review', state: locked ? 'skipped' : 'optional',
-                     // Read as an ACTION, not a state — "send for review" is the click.
-                     detail: locked ? 'not reviewed'
-                       : published ? 'send for review →' : 'after publish',
+                     // Starting a review round is now a Publish menu action ("Send for Review"),
+                     // not a click here — this step is purely informational until one exists.
+                     detail: locked ? 'not reviewed' : 'use Publish → Send for Review',
                      title: published
-                       ? 'Create a supplier review link for the published manual and copy it'
-                       : 'Publish first — reviewers read the published online manual',
-                     onClick: published && !sendingForReview ? () => sendForReview() : undefined,
+                       ? 'Use Publish → Send for Review to create a supplier review link'
+                       : 'Publish the Full IM first — reviewers read the published online manual',
                    }
                  : reviewDone
                    ? {
                        key: 'review', label: 'Review', state: 'done', detail: 'Review done',
                        title: 'Every supplier note has been handled — open the review panel',
-                       onClick: () => setCommentsPanelOpen(true),
+                       onClick: () => setActivePanel('comments'),
                      }
                    : {
                        key: 'review', label: 'Review',
@@ -4792,7 +4844,7 @@ ${url}`);
                        title: reviewRound.isSubmitted
                          ? 'The supplier submitted their review — open the notes'
                          : 'Out with the supplier collecting notes — open what has come in so far',
-                       onClick: () => setCommentsPanelOpen(true),
+                       onClick: () => setActivePanel('comments'),
                      },
                {
                  key: 'final', label: 'Final',
@@ -4801,16 +4853,6 @@ ${url}`);
                  title: locked ? 'Signed off and locked' : 'Mark this manual FINAL (locks its content)',
                  onClick: !locked && instance ? () => setShowFinalizeConfirm(true) : undefined,
                },
-               ...(isPrintExportAvailable() ? [{
-                 key: 'print', label: 'Print',
-                 state: (latestRenderVersion == null ? 'todo'
-                   : instance?.version != null && latestRenderVersion < instance.version ? 'warn' : 'done') as PipelineStep['state'],
-                 detail: latestRenderVersion === null ? 'no PDF yet'
-                   : latestRenderVersion === undefined ? undefined
-                   : instance?.version != null && latestRenderVersion < instance.version ? `v${latestRenderVersion} outdated` : `v${latestRenderVersion}`,
-                 title: published ? 'Open the print-PDF dialog' : 'Publish first — the print PDF is built from the published files',
-                 onClick: published ? () => openPrintForPublished() : undefined,
-               } satisfies PipelineStep] : []),
              ];
              return <PipelineStepper steps={steps} />;
            })()}
@@ -4828,7 +4870,7 @@ ${url}`);
            )}
 
            <div className="flex flex-1 gap-6 overflow-hidden" {...previewPane.containerProps}>
-               {/* LEFT: INPUTS — wider in "Add content" mode to fit the section tree + editor.
+               {/* LEFT: INPUTS — wider in "Edit IM" mode to fit the section tree + editor.
                    `lockedCls` neutralizes every editing surface when the manual is FINAL. */}
                <div className={`flex-1 min-w-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden transition-all ${lockedCls}`}>
                    <div className="bg-light border-b border-gray-200">
@@ -4844,7 +4886,7 @@ ${url}`);
                            <button
                                onClick={() => setEditorMode('content')}
                                className={`flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors ${editorMode === 'content' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
-                           ><FilePlus2 size={13} /> Add content</button>
+                           ><FilePlus2 size={13} /> Edit IM</button>
                        </div>
                    </div>
                    {editorMode === 'fill' && (
@@ -5017,28 +5059,20 @@ ${url}`);
                              <p className="text-[11px] text-rose-600 mb-2">Select at least one language for the Printed IM.</p>
                            )}
 
-                           <div className="flex items-center justify-between gap-3 mt-2 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
+                           <div className="mt-2 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
                              <p className="text-[11px] text-gray-500 leading-relaxed">
                                {!isPrintExportAvailable()
                                  ? 'Print export is not enabled in this environment.'
                                  : !printedRenderCandidate
-                                   ? `No print PDF yet for exactly ${printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'}.`
+                                   ? <>No print PDF yet for exactly {printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'} — use <strong className="font-semibold text-gray-600">Publish → Print Version</strong> above.</>
                                    : printedIsStale
-                                     ? `The print PDF (v${printedRenderCandidate.imVersion}) predates the current manual (v${instance?.version}) — regenerate it.`
+                                     ? <>The print PDF (v{printedRenderCandidate.imVersion}) predates the current manual (v{instance?.version}) — regenerate it from <strong className="font-semibold text-gray-600">Publish → Print Version</strong> above.</>
                                      : printedIsStale === null
                                        ? 'A matching print PDF exists — freshness could not be confirmed.'
                                        : !locked
                                          ? `Print PDF (v${printedRenderCandidate.imVersion}) is current — mark the Digital IM final to make this the shipped Printed IM.`
                                          : `Print PDF (v${printedRenderCandidate.imVersion}) is current and the manual is FINAL — this is the file that ships.`}
                              </p>
-                             {isPrintExportAvailable() && (
-                               <button
-                                 type="button"
-                                 onClick={openPrintDialogForPrinted}
-                                 disabled={isBusy || printedLanguages.length === 0}
-                                 className="shrink-0 flex items-center gap-1.5 border border-indigo-200 text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-100 disabled:opacity-60"
-                               ><Printer size={12} /> {printedRenderCandidate ? 'Re-render' : 'Render PDF'}</button>
-                             )}
                            </div>
                          </div>
                        )}
@@ -5088,7 +5122,7 @@ ${url}`);
                              single sub-section inside one. Leaving out a section also leaves out everything nested
                              under it. Nothing here changes the shared template. To leave out one block instead of a
                              whole section, use <strong className="font-semibold text-gray-600">Exclude</strong> on that
-                             block in the <strong className="font-semibold text-gray-600">Add content</strong> tab.
+                             block in the <strong className="font-semibold text-gray-600">Edit IM</strong> tab.
                            </p>
                            <div className="overflow-hidden rounded-lg border border-gray-200 divide-y divide-gray-100">
                              {rows.map(s => {
@@ -5403,32 +5437,6 @@ ${url}`);
                                {completion.label}
                            </div>
 
-                           {/* Translation Status Badge */}
-                           {otherRequiredLangs.length > 0 && (
-                             <button
-                               onClick={() => setIsTranslateModalOpen(true)}
-                               className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 font-medium transition-colors ${untranslatedSectionLabels.size === 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-orange-700 border-amber-200 hover:bg-amber-100'}`}
-                               title="Review & auto-translate project-authored sections"
-                             >
-                               <Globe size={12} />
-                               {untranslatedSectionLabels.size === 0 ? 'Translations complete' : `${untranslatedSectionLabels.size} untranslated`}
-                             </button>
-                           )}
-
-                           {/* PRE-PUBLISH REVIEW — the panel Publish opens, on demand: the gaps it
-                               lists are worth fixing while editing, not only at the gate. */}
-                           <button
-                             onClick={() => { setReviewPanel(prev => prev ?? { armed: false }); setReviewCollapsed(false); }}
-                             className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 font-medium transition-colors ${
-                               reviewPanel && !reviewCollapsed
-                                 ? 'bg-slate-100 text-gray-700 border-gray-300'
-                                 : 'bg-white text-gray-500 border-gray-200 hover:bg-light'
-                             }`}
-                             title="Open the pre-publish review — missing values, untranslated chapters and the regulatory checklist"
-                           >
-                             <CheckSquare size={12} /> Publish review
-                           </button>
-
                            {/* Language Selector */}
                            <div className="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs shadow">
                                <Globe size={12} className="text-gray-400"/>
@@ -5527,17 +5535,16 @@ ${url}`);
                    </div>
                </div>
 
-               {/* PRE-PUBLISH REVIEW — docked beside the editor, not over it: every row is a
-                   jump into the editor, so the list has to stay put while it is acted on.
-                   Issues are rebuilt on each render, so a fixed item leaves the list at once. */}
-               {reviewPanel && (
+               {/* THE SIDE PANELS — one at a time, chosen by the rail below. Docked beside the
+                   editor, never over it: every row in every one of them is a jump INTO the
+                   editor, so the list has to stay put while it is being acted on. All four are
+                   rebuilt on each render, so an item leaves its list the moment it is fixed. */}
+               {activePanel === 'publish' && (
                    <PublishReviewPanel
                      typeLabel={typeLabel}
                      issues={publishIssues}
                      languageName={(code) => IM_LANGUAGE_NAMES[code] ?? code.toUpperCase()}
-                     collapsed={reviewCollapsed}
-                     onToggleCollapsed={() => setReviewCollapsed(c => !c)}
-                     onClose={() => setReviewPanel(null)}
+                     onClose={() => { setActivePanel(null); setPublishArmed(false); }}
                      onJump={jumpToIssue}
                      activeIssueKey={activeIssueKey}
                      regulationGroups={regChecklistGroups}
@@ -5547,33 +5554,58 @@ ${url}`);
                      checklistBusyKey={regChecklistBusy}
                      checklistError={regChecklistError}
                      onDecide={setChecklistDecision}
-                     armed={reviewPanel.armed}
-                     onPublish={() => { setReviewPanel(null); handleGenerate(); }}
+                     armed={publishArmed}
+                     onPublish={() => { setActivePanel(null); setPublishArmed(false); handleGenerate(); }}
                      // Disarmed rather than closed: "not yet" means "let me fix these first",
                      // and the list is what they need in order to do that.
-                     onCancelPublish={() => setReviewPanel({ armed: false })}
+                     onCancelPublish={() => setPublishArmed(false)}
                    />
                )}
 
-               {/* SUPPLIER REVIEW — the notes left on the online manual. A second rail beside
-                   the pre-publish one, for the same reason: every row jumps into the editor,
-                   so the list has to survive being acted on. */}
-               {commentsPanelOpen && (
+               {activePanel === 'comments' && (
                    <ReviewCommentsPanel
                      groups={reviewGroups}
                      counts={reviewCounts}
                      reviewers={reviewShares.map(sh => sh.submittedBy || sh.label || 'a supplier')}
                      submitted={reviewRound.isSubmitted}
                      stale={reviewRound.isStale}
-                     collapsed={commentsCollapsed}
-                     onToggleCollapsed={() => setCommentsCollapsed(c => !c)}
-                     onClose={() => { setCommentsPanelOpen(false); setQuoteHighlight(null); }}
+                     onClose={() => { setActivePanel(null); setQuoteHighlight(null); }}
                      onJump={jumpToComment}
                      onSetStatus={setCommentStatus}
                      activeCommentId={activeCommentId}
                      busyCommentId={commentBusyId}
                    />
                )}
+
+               {activePanel === 'translation' && (
+                   <TranslationStatusPanel
+                     issues={publishIssues.filter(i => i.kind === 'translation')}
+                     otherLanguages={otherRequiredLangs}
+                     languageName={(code) => IM_LANGUAGE_NAMES[code] ?? code.toUpperCase()}
+                     untranslatedCount={untranslatedSectionLabels.size}
+                     onJump={jumpToIssue}
+                     activeIssueKey={activeIssueKey}
+                     onAutoTranslate={locked ? undefined : () => setIsTranslateModalOpen(true)}
+                     onClose={() => setActivePanel(null)}
+                   />
+               )}
+
+               {activePanel === 'regulatory' && (
+                   <RegulatoryChecklistPanel
+                     regulationGroups={regChecklistGroups}
+                     checklistState={regChecklistState}
+                     templateChecklistState={regTemplateState}
+                     checklistSummary={regChecklistSummary}
+                     checklistBusyKey={regChecklistBusy}
+                     checklistError={regChecklistError}
+                     onDecide={setChecklistDecision}
+                     onClose={() => setActivePanel(null)}
+                   />
+               )}
+
+               {/* The rail is ALWAYS rendered — it is the only thing telling the operator these
+                   panels exist, and its badges the only always-on signal of outstanding work. */}
+               <EditorSideRail items={sideRailItems} active={activePanel} onSelect={setActivePanel} />
            </div>
 
            {/* Text Edit Modal */}

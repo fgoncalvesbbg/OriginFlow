@@ -7,7 +7,8 @@
  * INTO the editor. A modal would make the PM close the list to act on it and reopen it to find
  * their place. Docked, clicking a row selects that chapter, scrolls the preview to it and
  * highlights the exact wording the supplier quoted — and the row stays put, so the PM can work
- * down the list. Collapsing folds it to a rail that keeps the outstanding count on screen.
+ * down the list. Collapsing is the side rail's job (EditorSideRail), which keeps this panel's
+ * open count on screen while it is shut.
  *
  * WHAT A ROW IS
  * -------------
@@ -28,7 +29,7 @@
 
 import React from 'react';
 import {
-  ChevronsRight, ChevronRight, CheckCircle, MessageSquare, X, Undo2, Ban, Check, AlertTriangle,
+  ChevronsRight, ChevronRight, CheckCircle, MessageSquare, Undo2, Ban, Check, AlertTriangle,
 } from 'lucide-react';
 import type { IMReviewComment, IMReviewCommentStatus } from '../../../services';
 import type { ReviewCommentGroup, ReviewCommentCounts } from './review-comments.utils';
@@ -42,8 +43,7 @@ interface ReviewCommentsPanelProps {
   submitted: boolean;
   /** True when the manual has been republished since the notes were written. */
   stale: boolean;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
+  /** Collapse back to the side rail, which owns open/closed for every editor panel. */
   onClose: () => void;
   /** Put the editor on the chapter this note is about and highlight its quote. */
   onJump: (comment: IMReviewComment) => void;
@@ -64,31 +64,11 @@ const relativeDay = (iso: string): string => {
 };
 
 export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
-  groups, counts, reviewers, submitted, stale, collapsed, onToggleCollapsed, onClose,
+  groups, counts, reviewers, submitted, stale, onClose,
   onJump, onSetStatus, activeCommentId, busyCommentId,
 }) => {
-  // Collapsed rail: the open count has to stay readable, or collapsing would hide the very
-  // thing the panel exists to report.
-  if (collapsed) {
-    return (
-      <button
-        onClick={onToggleCollapsed}
-        title={`Expand supplier review (${counts.open} open note${counts.open === 1 ? '' : 's'})`}
-        className="w-10 shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col items-center gap-3 py-3 hover:bg-light transition-colors"
-      >
-        <ChevronsRight size={14} className="rotate-180 text-gray-400" />
-        {counts.open > 0 && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
-            {counts.open}
-          </span>
-        )}
-        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500 [writing-mode:vertical-rl]">
-          Supplier review
-        </span>
-      </button>
-    );
-  }
-
+  // No collapsed rendering of its own: EditorSideRail is the collapsed state for every
+  // editor panel, and it keeps this panel's open count on screen while it is shut.
   return (
     <div className="w-[23rem] shrink-0 bg-white border border-gray-200 rounded-xl shadow flex flex-col overflow-hidden">
       <div className="px-3 py-2.5 bg-light border-b border-gray-200 flex items-center gap-2">
@@ -105,11 +85,8 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                 : `All ${counts.total} note${counts.total === 1 ? '' : 's'} handled.`}
           </p>
         </div>
-        <button onClick={onToggleCollapsed} title="Collapse to the side" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
+        <button onClick={onClose} title="Collapse this panel" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
           <ChevronsRight size={15} />
-        </button>
-        <button onClick={onClose} title="Close the review panel" className="shrink-0 p-1 text-gray-400 hover:text-gray-700">
-          <X size={15} />
         </button>
       </div>
 
