@@ -52,8 +52,13 @@ export const getProjectIM = async (
 };
 
 /**
- * Thrown by saveProjectIM when the row changed since the caller's baseline — i.e. someone
- * else (or another tab) saved in between. Carries who/when so the UI can say so.
+ * Thrown by saveProjectIM when ANOTHER PERSON saved the row since the caller's baseline.
+ * Carries who/when so the UI can say so.
+ *
+ * Deliberately NOT thrown when the last writer is the current user: a stale baseline in
+ * one's own session (a second tab, or a side-write like the cover-preference patch that
+ * bumps updated_at without refreshing the loaded instance) is not a collaboration
+ * conflict, and halting saves there stranded people on a banner naming themselves.
  */
 export class ProjectIMConflictError extends Error {
   constructor(
@@ -91,9 +96,9 @@ export const saveProjectIM = async (
   // Per-project inline block overrides: sectionId → refIndexOrIdKey → replacement inline block.
   blockOverrides?: Record<string, Record<string, InlineBlockRef>>,
   // Optimistic-concurrency baseline: the updated_at of the row the caller loaded/last
-  // saved. When provided and the stored row is newer, the save throws
-  // ProjectIMConflictError instead of silently overwriting the other person's work.
-  // Omit to skip the check (imports/scripts that intend to replace).
+  // saved. When provided and the stored row is newer AND was last written by someone
+  // else, the save throws ProjectIMConflictError instead of silently overwriting the
+  // other person's work. Omit to skip the check (imports/scripts that intend to replace).
   opts?: { baselineUpdatedAt?: string | null },
 ): Promise<ProjectIM> => {
     // Bound every network call so a stalled request / stale auth lock can't leave the
@@ -113,14 +118,22 @@ export const saveProjectIM = async (
       { context: 'saveProjectIM lookup' },
     );
 
-    // Concurrent-edit guard (check-then-write; not fully atomic, but catches the
-    // human-scale case of two people/tabs on the same manual with 4s autosave).
-    if (existing && opts?.baselineUpdatedAt != null && existing.updated_at !== opts.baselineUpdatedAt) {
-      throw new ProjectIMConflictError(existing.updated_at, existing.updated_by ?? null);
-    }
-
     const user = await auth.getUser();
     const updatedBy = user?.email ?? user?.id ?? null;
+
+    // Concurrent-edit guard (check-then-write; not fully atomic, but catches the
+    // human-scale case of two people on the same manual with 4s autosave).
+    //
+    // Only a DIFFERENT person's write blocks. `updated_by` holds the writer's email (or
+    // uid), so a baseline that drifted under our own account — another tab, or one of the
+    // side-writes that touch updated_at without going through this function — falls
+    // through and overwrites, which is what the operator expects of their own edits.
+    if (existing && opts?.baselineUpdatedAt != null && existing.updated_at !== opts.baselineUpdatedAt) {
+      const lastBy = existing.updated_by ?? null;
+      const isSelf = lastBy != null && (lastBy === updatedBy || lastBy === user?.email || lastBy === user?.id);
+      if (!isSelf) throw new ProjectIMConflictError(existing.updated_at, lastBy);
+      console.warn('[project-im]', 'baseline drifted but the last writer is this same user — saving over it');
+    }
 
     const payload: Record<string, unknown> = {
         project_id: projectId,
@@ -173,27 +186,37 @@ export const saveProjectIM = async (
  * preferences (__custom_logo / __custom_cover_image) chosen in the print-export
  * dialog, so they become the defaults from then on. Best-effort: a missing row
  * or a failed write only logs — preferences never break the main flow.
+ *
+ * Returns the new updated_at (null when nothing was written) so the caller can move its
+ * concurrency baseline forward: this write bumps updated_at outside the save pipeline,
+ * and a caller that ignored it would send a stale baseline on its next save. It also
+ * stamps updated_by, so the row never attributes this session's write to whoever
+ * happened to save last.
  */
 export const updateProjectIMPlaceholders = async (
   projectId: string,
   templateType: IMTemplateType,
   patch: Record<string, string>,
-): Promise<void> => {
-  if (!isLive || !Object.keys(patch).length) return;
+): Promise<string | null> => {
+  if (!isLive || !Object.keys(patch).length) return null;
   try {
     const data = await db.selectMaybeOne<Row>('project_ims', {
       columns: 'id, placeholder_data',
       where: { project_id: projectId, template_type: templateType },
     });
-    if (!data) return;
+    if (!data) return null;
     const merged = { ...(data.placeholder_data ?? {}), ...patch };
+    const user = await auth.getUser();
+    const updatedAt = new Date().toISOString();
     await db.updateWhere(
       'project_ims',
-      { placeholder_data: merged, updated_at: new Date().toISOString() },
+      { placeholder_data: merged, updated_at: updatedAt, updated_by: user?.email ?? user?.id ?? null },
       { where: { id: data.id } },
     );
+    return updatedAt;
   } catch (e) {
     console.error('[project-im] updateProjectIMPlaceholders failed:', e);
+    return null;
   }
 };
 

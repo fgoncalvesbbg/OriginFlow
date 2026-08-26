@@ -43,7 +43,7 @@ vi.mock('../../data', async () => {
 
 vi.mock('../../config/environment.config', () => ({ isLive: true }));
 
-import { saveProjectIM } from './project-im.service';
+import { saveProjectIM, ProjectIMConflictError } from './project-im.service';
 import { DataAccessError } from '../../data/ports/errors';
 
 const call = () =>
@@ -81,6 +81,25 @@ describe('saveProjectIM', () => {
     writeQueue.push(() => Promise.reject(new Error('Request timed out after 12s')));
     await expect(call()).rejects.toThrow(/save failed after 3 attempts.*timed out/s);
     expect(refreshSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks the save when ANOTHER user wrote the row after the loaded baseline', async () => {
+    readResult.current = { id: 'existing-id', updated_at: 't2', updated_by: 'colleague@example.com' };
+    await expect(
+      saveProjectIM('proj-1', 'tmpl-1', { a: '1' }, 'draft', undefined, 'im', undefined, undefined,
+        undefined, undefined, undefined, undefined, undefined, { baselineUpdatedAt: 't1' }),
+    ).rejects.toBeInstanceOf(ProjectIMConflictError);
+    expect(writeQueue.length).toBe(0); // no write attempted
+  });
+
+  it('saves over a drifted baseline when the last writer is the SAME user', async () => {
+    // A second tab, or a side-write like the cover-preference patch, moves updated_at under
+    // our own account. That is not a collaboration conflict and must not halt saving.
+    readResult.current = { id: 'existing-id', updated_at: 't2', updated_by: 'tester@example.com' };
+    writeQueue.push(() => Promise.resolve({ id: 'existing-id', version: 3, updated_at: 't3' }));
+    const result = await saveProjectIM('proj-1', 'tmpl-1', { a: '1' }, 'draft', undefined, 'im', undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, { baselineUpdatedAt: 't1' });
+    expect(result.updatedAt).toBe('t3');
   });
 
   it('fails fast on a permanent error (constraint violation) without retrying', async () => {

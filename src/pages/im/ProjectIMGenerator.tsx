@@ -1407,7 +1407,11 @@ const ProjectIMGenerator: React.FC = () => {
       const nextForm = { ...formData, ...patch };
       setFormData(nextForm);
       if (wasClean) markSaved({ formData: nextForm });
+      // Move the concurrency baseline to this write's timestamp: it bumps project_ims.updated_at
+      // outside the save pipeline, and leaving `instance` behind made the very next autosave
+      // look like a conflict — with the operator's own name on the banner.
       updateProjectIMPlaceholders(project.id, templateType, patch)
+          .then(updatedAt => { if (updatedAt) setInstance(prev => (prev ? { ...prev, updatedAt } : prev)); })
           .catch(e => console.error('Failed to persist cover preferences', e));
   };
 
