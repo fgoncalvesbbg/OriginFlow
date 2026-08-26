@@ -138,6 +138,44 @@ export const reviewRoundStateOf = (
   };
 };
 
+/**
+ * The "who and when" stamp shown on every review note, on both sides of the review.
+ *
+ * ALWAYS ABSOLUTE. This used to render as "today" / "3 days ago", which reads fine on the day
+ * but is useless in the argument the notes actually get used in — "when did the supplier
+ * raise this, and against which version?" A relative day also silently changes meaning as the
+ * page ages on screen. The relative form survives only in the tooltip, where it costs nothing.
+ *
+ * `short` is what the row shows (day, month, year, 24h clock — no seconds, which no reviewer
+ * has ever needed); `full` is the locale's complete rendering for the tooltip. Both come back
+ * empty for a missing or unparseable timestamp so callers can drop the stamp rather than
+ * printing "Invalid Date".
+ */
+export interface ReviewStamp {
+  short: string;
+  full: string;
+  /** "today" / "yesterday" / "12 days ago" — tooltip garnish, never the primary reading. */
+  relative: string;
+}
+
+export const formatReviewStamp = (iso: string | null | undefined, now: Date = new Date()): ReviewStamp => {
+  if (!iso) return { short: '', full: '', relative: '' };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { short: '', full: '', relative: '' };
+  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
+  return {
+    short: d.toLocaleString(undefined, {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+    }),
+    full: d.toLocaleString(),
+    relative: days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`,
+  };
+};
+
+/** `title` text for a stamp: the exact moment, with the relative day as a reading aid. */
+export const reviewStampTitle = (stamp: ReviewStamp): string =>
+  stamp.short ? `${stamp.full}${stamp.relative ? ` · ${stamp.relative}` : ''}` : '';
+
 /** Sort order for the triage controls, so every list offers them the same way round. */
 export const REVIEW_STATUS_ORDER: IMReviewCommentStatus[] = ['open', 'done', 'wont_fix'];
 

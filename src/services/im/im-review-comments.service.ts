@@ -11,9 +11,20 @@
  *  - The PM half is a normal authenticated read/write under the table's "Auth all" policy.
  */
 
-import { auth, db, portalDb, orEmpty, type Row } from '../../data';
+import { auth, db, portalDb, storage, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import type { IMTemplateType } from '../../types';
+
+/** Public bucket the review images live in (db_migrations/132). */
+export const REVIEW_UPLOAD_BUCKET = 'im-review-uploads';
+
+/** One image attached to a note, as stored in im_review_comments.attachments. */
+export interface ReviewAttachment {
+  /** Object path in the im-review-uploads bucket: `<share_id>/<uuid>.<ext>`. */
+  path: string;
+  width: number;
+  height: number;
+}
 
 export type IMReviewCommentStatus = 'open' | 'done' | 'wont_fix';
 
@@ -35,6 +46,8 @@ export interface IMReviewComment {
   quoteAfter: string | null;
   body: string;
   authorName: string;
+  /** Images the reviewer attached, in the im-review-uploads bucket. */
+  attachments: ReviewAttachment[];
   status: IMReviewCommentStatus;
   resolvedAt: string | null;
   resolvedBy: string | null;
@@ -69,6 +82,9 @@ const mapCommentRow = (row: any): IMReviewComment => ({
   quoteAfter: row.quote_after ?? null,
   body: row.body,
   authorName: row.author_name,
+  // Defaulted rather than trusted: rows written before migration 132 have no column, and a
+  // hand-edited value could be any JSON shape.
+  attachments: Array.isArray(row.attachments) ? (row.attachments as ReviewAttachment[]) : [],
   status: (row.status ?? 'open') as IMReviewCommentStatus,
   resolvedAt: row.resolved_at ?? null,
   resolvedBy: row.resolved_by ?? null,
@@ -127,6 +143,8 @@ export interface AddReviewCommentInput {
   quoteAfter?: string | null;
   body: string;
   authorName: string;
+  /** Already uploaded (see uploadReviewImage) — this only records the paths on the note. */
+  attachments?: ReviewAttachment[];
 }
 
 /**
@@ -147,6 +165,7 @@ export const addReviewComment = async (
     p_quote: input.quote ?? null,
     p_quote_before: input.quoteBefore ?? null,
     p_quote_after: input.quoteAfter ?? null,
+    p_attachments: input.attachments ?? [],
   });
   return mapCommentRow(Array.isArray(row) ? row[0] : row);
 };
@@ -166,6 +185,64 @@ export const deleteReviewComment = async (token: string, commentId: string): Pro
  */
 export const submitReview = async (token: string, authorName: string): Promise<string> =>
   portalDb.rpc<string>('im_review_submit', { p_token: token, p_author_name: authorName });
+
+/**
+ * Public URL of an attached review image. Synchronous string-building against a public
+ * bucket, so it costs nothing and works for the anonymous reviewer and the PM alike.
+ */
+export const reviewImageUrl = (path: string): string =>
+  storage.publicUrl(REVIEW_UPLOAD_BUCKET, path);
+
+/**
+ * Upload one already-downscaled image for a review note.
+ *
+ * Two steps, and the split is the security model: a Netlify function validates the review
+ * token with the service role and mints a one-shot signed upload URL for a path IT chooses
+ * (`<share_id>/<uuid>.<ext>`), then the browser PUTs the bytes straight to Storage. The
+ * bucket has no anon INSERT policy — the signed URL is the only way in — and
+ * im_review_add_comment re-checks the path prefix, so a caller cannot attach an arbitrary
+ * object to their note. See netlify/functions/review-upload-url.ts and db_migrations/132.
+ *
+ * Errors carry the server's message: they are written for the reviewer ("too large", "link
+ * revoked"), and a generic failure would hide which rule was hit.
+ */
+export const uploadReviewImage = async (
+  token: string,
+  blob: Blob,
+  contentType: string,
+  size: { width: number; height: number },
+): Promise<ReviewAttachment> => {
+  const res = await fetch('/.netlify/functions/review-upload-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, contentType }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error ?? 'Could not prepare the image upload.');
+  }
+  const { path, signedUrl } = (await res.json()) as { path: string; signedUrl: string };
+
+  // Straight to Storage with the signed URL. Deliberately NOT through the storage port: that
+  // port authenticates as the current session, and there isn't one here — the signed URL is
+  // the whole authorization.
+  const put = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: blob,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!put.ok) {
+    // 413 is the bucket's own file_size_limit rejecting it — worth saying plainly, because
+    // the fix (a smaller image) is the reviewer's to make.
+    throw new Error(put.status === 413
+      ? 'That image is too large to attach.'
+      : 'Uploading the image failed. Please try again.');
+  }
+
+  return { path, width: size.width, height: size.height };
+};
 
 // ---------------------------------------------------------------------------
 // PM side — authenticated, direct table access under the "Auth all" policy

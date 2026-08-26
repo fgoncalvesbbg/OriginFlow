@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  formatReviewStamp,
   groupCommentsBySection,
   reviewCommentCounts,
   reviewRoundStateOf,
+  reviewStampTitle,
 } from './review-comments.utils';
 import type { IMReviewComment } from '../../../services';
 
@@ -24,6 +26,7 @@ const note = (
   quoteAfter: '',
   body: 'wrong wording',
   authorName: 'Anna',
+  attachments: [],
   status: opts.status ?? 'open',
   resolvedAt: null,
   resolvedBy: null,
@@ -144,5 +147,36 @@ describe('reviewRoundStateOf', () => {
     const comments = [note('sec-a'), note('sec-b', { status: 'done' })];
     expect(reviewRoundStateOf([], comments, 3).openCount).toBe(1);
     expect(reviewRoundStateOf([{ submittedAt: null, manualVersion: 3 }], comments, 3).openCount).toBe(1);
+  });
+});
+
+describe('formatReviewStamp', () => {
+  const now = new Date('2026-08-26T12:00:00Z');
+
+  it('always renders an absolute date AND a time, never a bare relative day', () => {
+    const stamp = formatReviewStamp('2026-08-26T09:30:00Z', now);
+    // Locale-dependent ordering, so assert the parts rather than one formatted string.
+    expect(stamp.short).toMatch(/2026/);
+    expect(stamp.short).toMatch(/Aug/);
+    expect(stamp.short).toMatch(/26/);
+    expect(stamp.short).toMatch(/\d{2}:\d{2}/);
+  });
+
+  it('keeps the relative day only as tooltip garnish', () => {
+    expect(formatReviewStamp('2026-08-26T09:30:00Z', now).relative).toBe('today');
+    expect(formatReviewStamp('2026-08-25T09:30:00Z', now).relative).toBe('yesterday');
+    expect(formatReviewStamp('2026-08-14T09:30:00Z', now).relative).toBe('12 days ago');
+  });
+
+  it('returns empty parts for a missing or unparseable timestamp so callers can drop the stamp', () => {
+    for (const bad of [null, undefined, '', 'not-a-date']) {
+      expect(formatReviewStamp(bad, now)).toEqual({ short: '', full: '', relative: '' });
+    }
+  });
+
+  it('builds a tooltip from the full moment plus the relative day, and nothing at all when unstamped', () => {
+    const stamp = formatReviewStamp('2026-08-25T09:30:00Z', now);
+    expect(reviewStampTitle(stamp)).toBe(`${stamp.full} · yesterday`);
+    expect(reviewStampTitle(formatReviewStamp(null, now))).toBe('');
   });
 });

@@ -13,21 +13,28 @@
  * The reviewer's display name is self-declared and kept in localStorage. It identifies who
  * wrote which note in a list; it is not, and must not be read as, authentication.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { AlertTriangle, MessageSquarePlus, CheckCircle2, Trash2, X, Send } from 'lucide-react';
+import { AlertTriangle, MessageSquarePlus, CheckCircle2, Trash2, X, Send, ImagePlus, Loader2 } from 'lucide-react';
 import {
   resolveReviewShare,
   listReviewCommentsByToken,
   addReviewComment,
   deleteReviewComment,
   submitReview,
+  uploadReviewImage,
+  reviewImageUrl,
   getPublishedManifestUrl,
   type IMReviewComment,
   type IMReviewSession,
+  type ReviewAttachment,
 } from '../../services';
 import { IMViewer, type ViewerSource, type ViewerTextSelection } from '../../modules/im-viewer';
 import { buildReviewAnchor, MAX_QUOTE_CHARS } from './review-anchor';
+import { formatReviewStamp, reviewStampTitle } from './project-im-generator/review-comments.utils';
+import {
+  downscaleImage, validateImageFile, IMAGE_ACCEPT_ATTR, MAX_ATTACHMENTS,
+} from './review-image';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 
@@ -83,6 +90,13 @@ const IMReviewPortal: React.FC = () => {
   const [notice, setNotice] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
 
+  // Images staged for the note being written. Uploaded as they are picked, not on save: the
+  // reviewer sees each thumbnail land (and can drop it again) instead of waiting on a long
+  // upload at the moment they press "Add note".
+  const [pending, setPending] = useState<ReviewAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Resolve the token, then point the viewer at the published manifest.
   useEffect(() => {
     let cancelled = false;
@@ -134,12 +148,57 @@ const IMReviewPortal: React.FC = () => {
     if (!selection) return;
     setComposerFor(selection);
     setBody('');
+    setPending([]);
     setNotice(null);
   };
 
   const closeComposer = () => {
     setComposerFor(null);
     setBody('');
+    // Staged uploads are abandoned, not deleted: the objects are orphaned in the bucket
+    // under this share's prefix. Cheap, and far better than blocking Cancel on a round trip.
+    setPending([]);
+  };
+
+  /**
+   * Attach the picked images: validate, downscale in the browser, upload each.
+   *
+   * Sequential rather than parallel — a reviewer on a phone attaching three photos over a
+   * hotel connection gets a stable one-at-a-time progression instead of three uploads
+   * fighting for the same narrow pipe. One failure stops the run and keeps what landed.
+   */
+  const attachFiles = async (files: FileList | null) => {
+    if (!token || !files?.length || uploading) return;
+    setUploading(true);
+    setNotice(null);
+    // A local accumulator, not `pending`: this loop awaits between iterations, so reading
+    // the state variable would see the value captured when the handler was created and the
+    // per-note cap would never advance.
+    let staged = pending;
+    try {
+      for (const file of Array.from(files)) {
+        const rejection = validateImageFile(file, staged.length);
+        if (rejection) {
+          setNotice({ kind: 'error', text: rejection });
+          break;
+        }
+        const { blob, width, height, contentType } = await downscaleImage(file);
+        const attachment = await uploadReviewImage(token, blob, contentType, { width, height });
+        staged = [...staged, attachment];
+        setPending(staged);
+      }
+    } catch (e: any) {
+      console.error('[IMReviewPortal] image upload failed:', e);
+      setNotice({ kind: 'error', text: e?.message ?? 'Could not attach that image.' });
+    } finally {
+      setUploading(false);
+      // Reset the input so picking the SAME file again still fires a change event.
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const removePending = (path: string) => {
+    setPending(prev => prev.filter(a => a.path !== path));
   };
 
   const saveComment = async () => {
@@ -165,6 +224,7 @@ const IMReviewPortal: React.FC = () => {
         quoteAfter: anchor.quoteAfter,
         body: body.trim(),
         authorName: name,
+        attachments: pending,
       });
       setComments(prev => [...prev, created]);
       closeComposer();
@@ -321,9 +381,54 @@ const IMReviewPortal: React.FC = () => {
               placeholder="What's wrong, and what should it say instead?"
               className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
             />
-            <div className="flex justify-end gap-2 mt-2">
+            {/* Staged images. Already uploaded, so a thumbnail appearing means the file is
+                safely stored — not that it will be sent when the note is saved. */}
+            {pending.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {pending.map(a => (
+                  <div key={a.path} className="relative group">
+                    <img
+                      src={reviewImageUrl(a.path)}
+                      alt=""
+                      className="h-14 w-14 object-cover rounded border border-gray-200"
+                    />
+                    <button
+                      onClick={() => removePending(a.path)}
+                      title="Remove this image"
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-gray-300 text-gray-500 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center shadow-sm"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={IMAGE_ACCEPT_ATTR}
+                multiple
+                className="hidden"
+                onChange={e => void attachFiles(e.target.files)}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || pending.length >= MAX_ATTACHMENTS}
+                title={pending.length >= MAX_ATTACHMENTS
+                  ? `A note can carry at most ${MAX_ATTACHMENTS} images`
+                  : 'Attach a screenshot or photo'}
+                className="flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-indigo-600 disabled:opacity-40 disabled:hover:text-gray-500 transition-colors"
+              >
+                {uploading
+                  ? <><Loader2 size={12} className="animate-spin" /> Uploading…</>
+                  : <><ImagePlus size={12} /> Add image</>}
+              </button>
+              <div className="flex-1" />
               <Button variant="ghost" size="sm" onClick={closeComposer}>Cancel</Button>
-              <Button size="sm" loading={saving} disabled={!body.trim()} onClick={saveComment}>Add note</Button>
+              {/* Saving while an upload is in flight would drop that image from the note. */}
+              <Button size="sm" loading={saving} disabled={!body.trim() || uploading} onClick={saveComment}>Add note</Button>
             </div>
           </div>
         ) : (
@@ -336,7 +441,9 @@ const IMReviewPortal: React.FC = () => {
           {comments.length === 0 && (
             <p className="text-xs text-gray-400 text-center py-8">No notes yet.</p>
           )}
-          {comments.map(c => (
+          {comments.map(c => {
+            const stamp = formatReviewStamp(c.createdAt);
+            return (
             <div key={c.id} className="bg-white border border-gray-200 rounded-lg p-3">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500 truncate">
@@ -344,12 +451,39 @@ const IMReviewPortal: React.FC = () => {
                 </span>
                 <Badge tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Badge>
               </div>
+              {/* Who wrote it and exactly when. A share link can go to several people at the
+                  supplier, and the same person returns to the list days later — an unattributed,
+                  undated note is one nobody can act on or stand behind. Matches the stamp the
+                  PM sees on the same note in the editor's review panel. */}
+              <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] text-gray-400 mb-1.5">
+                <span className="font-semibold text-gray-600 truncate max-w-full">{c.authorName}</span>
+                {name && c.authorName === name && <span className="text-gray-400">(you)</span>}
+                {stamp.short && (
+                  <>
+                    <span>·</span>
+                    <time dateTime={c.createdAt} title={reviewStampTitle(stamp)}>{stamp.short}</time>
+                  </>
+                )}
+              </div>
               {c.quote && (
                 <blockquote className="text-[11px] text-gray-500 italic border-l-2 border-gray-200 pl-2 mb-1.5 line-clamp-3">
                   {c.quote}
                 </blockquote>
               )}
               <p className="text-xs text-gray-700 whitespace-pre-wrap">{c.body}</p>
+              {c.attachments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {c.attachments.map(a => (
+                    <a key={a.path} href={reviewImageUrl(a.path)} target="_blank" rel="noreferrer" title="Open full size">
+                      <img
+                        src={reviewImageUrl(a.path)}
+                        alt=""
+                        className="h-12 w-12 object-cover rounded border border-gray-200 hover:border-indigo-300"
+                      />
+                    </a>
+                  ))}
+                </div>
+              )}
               {c.status === 'open' && (
                 <button
                   onClick={() => removeComment(c.id)}
@@ -359,7 +493,8 @@ const IMReviewPortal: React.FC = () => {
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="p-3 border-t border-gray-200 bg-white">

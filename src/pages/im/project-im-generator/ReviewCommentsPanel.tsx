@@ -23,6 +23,9 @@
  *  - RESOLVED notes. They stay listed, dimmed, because "we already decided that" is the answer
  *    to half the follow-up questions a review generates.
  *
+ * Attached images open full size in a new tab rather than in a lightbox: the PM's next move is
+ * usually to put the screenshot beside the editor, which a tab allows and a modal does not.
+ *
  * The panel holds no business rules: groups arrive grouped (review-comments.utils.ts) and every
  * write goes back out through a callback.
  */
@@ -31,8 +34,10 @@ import React from 'react';
 import {
   ChevronsRight, ChevronRight, CheckCircle, MessageSquare, Undo2, Ban, Check, AlertTriangle,
 } from 'lucide-react';
+import { reviewImageUrl } from '../../../services';
 import type { IMReviewComment, IMReviewCommentStatus } from '../../../services';
 import type { ReviewCommentGroup, ReviewCommentCounts } from './review-comments.utils';
+import { formatReviewStamp, reviewStampTitle } from './review-comments.utils';
 
 interface ReviewCommentsPanelProps {
   groups: ReviewCommentGroup[];
@@ -53,15 +58,6 @@ interface ReviewCommentsPanelProps {
   /** The note currently being written, if any. */
   busyCommentId: string | null;
 }
-
-const relativeDay = (iso: string): string => {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '';
-  const days = Math.floor((Date.now() - then) / 86_400_000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  return `${days} days ago`;
-};
 
 export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
   groups, counts, reviewers, submitted, stale, onClose,
@@ -139,6 +135,8 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                 const active = comment.id === activeCommentId;
                 const resolved = comment.status !== 'open';
                 const busy = comment.id === busyCommentId;
+                const created = formatReviewStamp(comment.createdAt);
+                const decided = formatReviewStamp(comment.resolvedAt);
                 return (
                   <li key={comment.id} className={`${active ? 'bg-slate-100' : 'bg-white'} ${resolved ? 'opacity-60' : ''}`}>
                     <button
@@ -151,10 +149,18 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                       className="group w-full text-left px-2.5 pt-2 pb-1.5 flex items-start gap-2 transition-colors hover:bg-light disabled:cursor-default disabled:hover:bg-transparent"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-1">
-                          <span className="font-medium text-gray-600 truncate">{comment.authorName}</span>
-                          <span>·</span>
-                          <span>{relativeDay(comment.createdAt)}</span>
+                        {/* Who and exactly when — never a bare relative day. A note is
+                            evidence in a conversation with a supplier; both halves have to
+                            survive being read weeks later. Wraps rather than truncating the
+                            timestamp, since the date is the half that gets quoted back. */}
+                        <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-gray-400 mb-1">
+                          <span className="font-medium text-gray-600 truncate max-w-full">{comment.authorName}</span>
+                          {created.short && (
+                            <>
+                              <span>·</span>
+                              <time dateTime={comment.createdAt} title={reviewStampTitle(created)}>{created.short}</time>
+                            </>
+                          )}
                         </div>
                         {comment.quote && (
                           <blockquote className="text-[11px] text-gray-500 italic border-l-2 border-gray-200 pl-2 mb-1">
@@ -162,6 +168,23 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                           </blockquote>
                         )}
                         <div className="text-xs text-gray-700 leading-snug whitespace-pre-wrap">{comment.body}</div>
+                        {comment.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {comment.attachments.map(a => (
+                              <img
+                                key={a.path}
+                                src={reviewImageUrl(a.path)}
+                                alt=""
+                                loading="lazy"
+                                title="Open full size"
+                                // Nested inside the row's jump button, so this must not also
+                                // trigger the jump — stop the click and open the image instead.
+                                onClick={e => { e.stopPropagation(); window.open(reviewImageUrl(a.path), '_blank', 'noreferrer'); }}
+                                className="h-12 w-12 object-cover rounded border border-gray-200 hover:border-indigo-400 cursor-zoom-in"
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                       {!group.orphaned && (
                         <ChevronRight size={13} className="mt-0.5 shrink-0 text-gray-300 group-hover:text-gray-600" />
@@ -169,7 +192,7 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                     </button>
 
                     {/* Decision row. Status always carries a text label, never colour alone. */}
-                    <div className="px-2.5 pb-2 flex items-center gap-1.5">
+                    <div className="px-2.5 pb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1">
                       {comment.status === 'open' ? (
                         <>
                           <button
@@ -186,12 +209,19 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                         </>
                       ) : (
                         <>
-                          <span className={`flex items-center gap-1 text-[11px] font-medium ${
+                          {/* The decision carries its own who/when: "who closed this, and
+                              when" is asked as often of a handled note as of the note itself. */}
+                          <span className={`flex flex-wrap items-center gap-x-1 text-[11px] font-medium ${
                             comment.status === 'done' ? 'text-emerald-700' : 'text-gray-500'
                           }`}>
                             {comment.status === 'done' ? <Check size={11} /> : <Ban size={11} />}
                             {comment.status === 'done' ? 'Done' : 'Not changing'}
                             {comment.resolvedBy && <span className="text-gray-400">· {comment.resolvedBy}</span>}
+                            {decided.short && (
+                              <time dateTime={comment.resolvedAt ?? undefined} title={reviewStampTitle(decided)} className="text-gray-400">
+                                · {decided.short}
+                              </time>
+                            )}
                           </span>
                           <button
                             onClick={() => onSetStatus(comment.id, 'open')}

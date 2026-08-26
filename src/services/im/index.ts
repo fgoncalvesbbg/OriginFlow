@@ -136,6 +136,8 @@ export {
   getReviewComments,
   setReviewCommentStatus,
   getOpenReviewCommentCounts,
+  uploadReviewImage,
+  reviewImageUrl,
   getReviewRoundsByManual,
 } from './im-review-comments.service';
 export type {
@@ -143,6 +145,7 @@ export type {
   IMReviewCommentStatus,
   IMReviewSession,
   AddReviewCommentInput,
+  ReviewAttachment,
   ReviewRoundSummary,
 } from './im-review-comments.service';
 export {
