@@ -42,6 +42,18 @@ interface PrintExportDialogProps {
   formData: Record<string, string>;
   /** Published languages available for export. */
   languages: string[];
+  /**
+   * Which of `languages` start ticked. Defaults to all of them (a Full IM booklet).
+   * The caller passes the printed subset when the operator asked for a Print Version, but
+   * the POOL stays the full published set either way — the scope chips below flip between
+   * the two without reopening the dialog, so one PDF trip can produce either book.
+   */
+  initialSelection?: string[];
+  /**
+   * The project's configured Printed IM language subset. Only powers the "Print Version"
+   * scope chip; when it equals the full pool the chips are pointless and are not rendered.
+   */
+  printedLanguages?: string[];
   /** SKU / article numbers this IM covers (one IM can cover several). */
   skus: string[];
   version?: number;
@@ -110,6 +122,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   template,
   formData,
   languages,
+  initialSelection,
+  printedLanguages,
   skus,
   version,
   onRendered,
@@ -123,8 +137,17 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   // the other cover/back inputs for leaflets regardless; hiding them avoids confusion.
   const isLeaflet = templateType === 'warning_leaflet';
 
-  // Language selection — all on by default, preserving the published order.
-  const [selected, setSelected] = useState<string[]>(languages);
+  // The Printed IM subset, intersected with what is actually published and kept in published
+  // order. Empty (or identical to the pool) means there is no meaningful second scope.
+  const printedScope = React.useMemo(
+    () => (printedLanguages ? languages.filter((l) => printedLanguages.includes(l)) : []),
+    [languages, printedLanguages],
+  );
+
+  // Language selection — the caller's scope, else all of them, preserving the published order.
+  const [selected, setSelected] = useState<string[]>(() =>
+    initialSelection ? languages.filter((l) => initialSelection.includes(l)) : languages,
+  );
   // Admin-configured markets (im_markets): one-click language presets. Selecting one sets
   // the languages to the market's list and stamps the market code onto the render history
   // row, so "which booklet went to which market" is answerable later. Cleared when the
@@ -495,6 +518,38 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         </div>
 
         <div className="px-6 py-4 overflow-auto space-y-5">
+          {/* Scope — Full IM (every published language) vs the project's Printed IM subset.
+              Both books render from the SAME published content; they differ only in which
+              languages go in. Having both here is deliberate: the operator arrives at this
+              dialog from a publish, from Export, or from the Printed IM panel, and must
+              never have to close it and hunt for a second entry point to get the other PDF.
+              Hidden when the printed subset IS the full set — two identical chips help nobody. */}
+          {printedScope.length > 0 && !sameSet(printedScope, languages) && (
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Scope</label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {([
+                  { key: 'full', label: 'Full IM', langs: languages, hint: 'Every published language' },
+                  { key: 'printed', label: 'Print Version', langs: printedScope, hint: 'The languages that ship in the printed booklet' },
+                ] as const).map((sc) => {
+                  const on = sameSet(selected, sc.langs);
+                  return (
+                    <button
+                      key={sc.key}
+                      onClick={() => { setMarketCode(''); setSelected(sc.langs); }}
+                      title={`${sc.hint} — ${sc.langs.map((l) => l.toUpperCase()).join(', ')}`}
+                      className={`text-sm px-3 py-1.5 border rounded font-medium ${
+                        on ? 'bg-primary/10 border-primary text-primary' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {sc.label} <span className="text-xs font-normal opacity-70">· {sc.langs.length}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Market preset — admin-configured market → language sets (Admin panel → Markets).
               One click selects the market's languages and stamps the market on the render. */}
           {markets.length > 0 && (

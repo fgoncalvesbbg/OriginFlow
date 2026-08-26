@@ -193,6 +193,9 @@ const ProjectIMGenerator: React.FC = () => {
   const [publishStatus, setPublishStatus] = useState<string | null>(null);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
+  // Which languages the print dialog opens with ticked (Full IM = all, Print Version =
+  // the printed subset). The dialog can still flip between them once open.
+  const [printScope, setPrintScope] = useState<string[] | null>(null);
   // Pre-publish review panel (see PublishReviewPanel): docked beside the editor rather than
   // modal, because every row in it is a pointer into the editor and the list has to survive
   // being acted on. `armed` = opened by pressing Publish, so the panel carries the go/no-go
@@ -3172,6 +3175,23 @@ const ProjectIMGenerator: React.FC = () => {
   // reusing the same dialog/pipeline the Digital IM's generic print export uses.
   const openPrintDialogForPrinted = () => openPrintDialog(printedLanguages);
 
+  // PDF export renders from the PUBLISHED content, so the only hard requirements are a
+  // configured renderer and a publish having happened at all. Deliberately not gated on
+  // freshness or on the FINAL lock: re-downloading the current book must never depend on
+  // the manual being in a particular state.
+  const canExportPdf = isPrintExportAvailable() && published;
+  const pdfExportHint = (ready: string) =>
+    !isPrintExportAvailable()
+      ? 'Print export is not enabled in this environment.'
+      : !published
+        ? `Publish the Full IM once first — the PDF renders from the published ${typeLabel.toLowerCase()}.`
+        : ready;
+
+  // Nothing left to publish: published, no unsaved edits, and the background freshness
+  // check found no drift in the sources. `pipelineStale === null` means it has not run (or
+  // failed) — unknown is not "up to date", so the normal publish path stays on offer.
+  const publishUpToDate = published && !isDirty && pipelineStale === false;
+
   // Move a required language up/down in the custom display/publish order. Persists
   // the FULL resulting order (not just the moved pair) so it stays authoritative
   // even if some entries were previously implied by template order.
@@ -3551,13 +3571,19 @@ ${url}`);
   // ({projectId}/{templateType}/{lang}.json), so no publish round-trip is needed. Guards on
   // `project` only, not `instance`: called right after a publish inside the same handler
   // that just called `setInstance`, whose result the closure here can't see yet.
+  //
+  // `langs` picks the STARTING scope only — the dialog always gets the full published pool,
+  // so Full IM and Print Version are two chips apart inside it rather than two separate
+  // trips through this page. Both PDFs are therefore reachable from wherever the dialog was
+  // opened, which is the point: a PDF must never require a republish to obtain.
   const openPrintDialog = (langs: string[] = requiredLanguages) => {
     if (!project) return;
     const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
+    setPrintScope(langs);
     setPublishResult({
       manifestUrl,
       manifestPath: `${project.id}/${templateType}/manifest.json`,
-      languages: langs.map(language => ({
+      languages: requiredLanguages.map(language => ({
         language,
         url: manifestUrl.replace(/manifest\.json(\?.*)?$/, `${language}.json$1`),
         storagePath: `${project.id}/${templateType}/${language}.json`,
@@ -4349,6 +4375,8 @@ ${url}`);
            template={template}
            formData={formData}
            languages={publishResult.languages.map((l) => l.language)}
+           initialSelection={printScope ?? undefined}
+           printedLanguages={templateType === 'im' ? printedLanguages : undefined}
            skus={(boundSkuIds.length ? projectSkus.filter((s) => boundSkuIds.includes(s.id)) : projectSkus)
              .map((s) => s.skuNumber)
              .filter(Boolean)}
@@ -4694,15 +4722,28 @@ ${url}`);
                      </button>
                    )}
 
+                   {/* Export — everything you can take OUT of this manual, PDFs included.
+                       The two PDFs used to be reachable only through Publish (Full IM's PDF
+                       only as the dialog that auto-opens after a publish, Print Version only
+                       as a Publish menu item), so getting a file out of an unchanged manual
+                       meant walking into a publish flow and being asked to republish. They
+                       render from the PUBLISHED content and change nothing, so they belong
+                       here and stay available for as long as a publish exists. */}
                    <EditorToolbarMenu
                      icon={<Download size={16} />}
                      label="Export"
-                     title="Download this manual as JSON"
+                     title="Download this manual as a PDF or as JSON"
                      panelWidth="w-80"
-                     groups={[{ items: [
-                       { key: 'json-lang', icon: <FileJson size={15} className="text-indigo-600" />, label: `Manual JSON — ${activeLang.toUpperCase()}`, hint: 'The resolved manual for this language, byte-identical to the published file', onClick: () => { void handleExport(); } },
-                       { key: 'json-all', icon: <Boxes size={15} className="text-sky-600" />, label: 'All data as JSON', hint: 'Every required language resolved, plus the template, sections, SKUs, attributes and raw inputs — for handover, backup or a bug report', onClick: () => { void handleExportAllData(); } },
-                     ] }]}
+                     groups={[
+                       { label: 'PDF', items: [
+                         { key: 'pdf-full', icon: <FileDown size={15} className="text-indigo-600" />, label: `PDF — Full IM · ${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'}`, hint: pdfExportHint('Render a PDF of the published manual in every required language.'), onClick: () => openPrintDialog(), disabled: !canExportPdf },
+                         ...(templateType === 'im' ? ([{ key: 'pdf-printed', icon: <Printer size={15} className="text-indigo-600" />, label: `PDF — Print Version · ${printedLanguages.length} ${printedLanguages.length === 1 ? 'language' : 'languages'}`, hint: pdfExportHint('Render the print-shop PDF for the configured printed-language subset.'), onClick: () => openPrintDialogForPrinted(), disabled: !canExportPdf || printedLanguages.length === 0 }] as ToolbarMenuItem[]) : []),
+                       ] },
+                       { label: 'Data', items: [
+                         { key: 'json-lang', icon: <FileJson size={15} className="text-indigo-600" />, label: `Manual JSON — ${activeLang.toUpperCase()}`, hint: 'The resolved manual for this language, byte-identical to the published file', onClick: () => { void handleExport(); } },
+                         { key: 'json-all', icon: <Boxes size={15} className="text-sky-600" />, label: 'All data as JSON', hint: 'Every required language resolved, plus the template, sections, SKUs, attributes and raw inputs — for handover, backup or a bug report', onClick: () => { void handleExportAllData(); } },
+                       ] },
+                     ]}
                    />
 
                    {/* Publish — three independent actions, each usable at any stage (Print
@@ -4721,22 +4762,28 @@ ${url}`);
                      groups={[{ items: [
                        {
                          key: 'full-im',
-                         icon: <FileDown size={15} className="text-indigo-600" />,
-                         label: `Full IM — ${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'}`,
-                         hint: 'Publish every required language to the online Digital IM.',
+                         icon: publishUpToDate
+                           ? <CheckCircle size={15} className="text-emerald-600" />
+                           : <FileDown size={15} className="text-indigo-600" />,
+                         // When there is genuinely nothing to publish, say so IN the menu rather
+                         // than accepting the click and answering with an "Already up to date"
+                         // modal — being asked to publish an unchanged manual is the nag. The
+                         // item stays clickable so a deliberate republish is still possible.
+                         label: publishUpToDate
+                           ? `Full IM — up to date (v${instance?.version})`
+                           : `Full IM — ${requiredLanguages.length} ${requiredLanguages.length === 1 ? 'language' : 'languages'}`,
+                         hint: publishUpToDate
+                           ? 'Nothing has changed since this version — republishing would produce identical files. The PDFs are under Export.'
+                           : 'Publish every required language to the online Digital IM.',
                          onClick: () => { void handlePublishClick(); },
                        },
                        {
                          key: 'print-version',
                          icon: <Printer size={15} className="text-indigo-600" />,
                          label: `Print Version — ${printedLanguages.length} ${printedLanguages.length === 1 ? 'language' : 'languages'}`,
-                         hint: !isPrintExportAvailable()
-                           ? 'Print export is not enabled in this environment.'
-                           : !published
-                             ? 'Publish the Full IM first — the print PDF renders from it.'
-                             : 'Render the print-shop PDF for the configured printed-language subset.',
+                         hint: pdfExportHint('Render the print-shop PDF for the configured printed-language subset.'),
                          onClick: () => openPrintDialogForPrinted(),
-                         disabled: !isPrintExportAvailable() || !published || printedLanguages.length === 0,
+                         disabled: !canExportPdf || printedLanguages.length === 0,
                        },
                        {
                          key: 'send-review',
@@ -4833,7 +4880,9 @@ ${url}`);
                  state: !published ? 'todo' : pipelineStale ? 'warn' : 'done',
                  detail: !published ? undefined : pipelineStale ? `v${instance?.version} · out of date` : `v${instance?.version}`,
                  title: !published ? 'Publish every required language' : pipelineStale ? 'Sources changed since this publish — publish again' : 'Published and up to date',
-                 onClick: () => handlePublishClick(),
+                 // A settled step is a status, not a call to action — clicking it used to run
+                 // the change check and answer with the "Already up to date" modal.
+                 onClick: publishUpToDate ? undefined : () => handlePublishClick(),
                },
                !inReview
                  ? {
@@ -5079,16 +5128,39 @@ ${url}`);
                              <p className="text-[11px] text-gray-500 leading-relaxed">
                                {!isPrintExportAvailable()
                                  ? 'Print export is not enabled in this environment.'
-                                 : !printedRenderCandidate
-                                   ? <>No print PDF yet for exactly {printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'} — use <strong className="font-semibold text-gray-600">Publish → Print Version</strong> above.</>
-                                   : printedIsStale
-                                     ? <>The print PDF (v{printedRenderCandidate.imVersion}) predates the current manual (v{instance?.version}) — regenerate it from <strong className="font-semibold text-gray-600">Publish → Print Version</strong> above.</>
-                                     : printedIsStale === null
-                                       ? 'A matching print PDF exists — freshness could not be confirmed.'
-                                       : !locked
-                                         ? `Print PDF (v${printedRenderCandidate.imVersion}) is current — mark the Digital IM final to make this the shipped Printed IM.`
-                                         : `Print PDF (v${printedRenderCandidate.imVersion}) is current and the manual is FINAL — this is the file that ships.`}
+                                 : !published
+                                   ? `Publish the Full IM once — the print PDF renders from the published ${typeLabel.toLowerCase()}.`
+                                   : !printedRenderCandidate
+                                     ? <>No print PDF yet for exactly {printedLanguages.map(l => l.toUpperCase()).join(', ') || 'these languages'} — render one below.</>
+                                     : printedIsStale
+                                       ? <>The print PDF (v{printedRenderCandidate.imVersion}) predates the current manual (v{instance?.version}) — render it again below.</>
+                                       : printedIsStale === null
+                                         ? 'A matching print PDF exists — freshness could not be confirmed.'
+                                         : !locked
+                                           ? `Print PDF (v${printedRenderCandidate.imVersion}) is current — mark the Digital IM final to make this the shipped Printed IM.`
+                                           : `Print PDF (v${printedRenderCandidate.imVersion}) is current and the manual is FINAL — this is the file that ships.`}
                              </p>
+                             {/* Rendering the printed booklet is the action this panel is about,
+                                 so it happens here rather than being described as a menu path.
+                                 Same dialog as Export → PDF; no republish involved. */}
+                             {canExportPdf && (
+                               <div className="flex items-center gap-2 mt-2.5">
+                                 <button
+                                   type="button"
+                                   onClick={openPrintDialogForPrinted}
+                                   disabled={printedLanguages.length === 0}
+                                   className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                 ><Printer size={12} /> {printedRenderCandidate && !printedIsStale ? 'Render again' : 'Render print PDF'}</button>
+                                 {printedRenderCandidate && (
+                                   <a
+                                     href={printedRenderCandidate.url}
+                                     target="_blank"
+                                     rel="noreferrer"
+                                     className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-white flex items-center gap-1.5"
+                                   ><Download size={12} /> Download latest</a>
+                                 )}
+                               </div>
+                             )}
                            </div>
                          </div>
                        )}
