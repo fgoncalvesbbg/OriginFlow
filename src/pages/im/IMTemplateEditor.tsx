@@ -38,6 +38,8 @@ import EditorToolbarMenu, { type ToolbarMenuItem } from './editor/EditorToolbarM
 import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } from './editor/insertTarget';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { findInTemplate, applyReplacements, matchKey, type FindReplaceMatch } from '../../services/im/im-find-replace';
+import DraftPrintExportDialog, { type DraftResolveResult } from './editor/DraftPrintExportDialog';
+import { isPrintExportAvailable } from '../../services';
 import { RegulatoryCheckModal } from './IMRegulatoryCheckModal';
 import { TemplateChecklistModal, loadTemplateChecklistProgress } from './IMTemplateChecklist';
 import type { ChecklistSummary } from '../../services';
@@ -857,6 +859,11 @@ const IMTemplateEditor: React.FC = () => {
   // Inline preview drawer (#2): resolves the whole document for the active language and
   // renders it read-only, so authors don't have to leave for the standalone /im/preview route.
   const [showPreview, setShowPreview] = useState(false);
+  // Draft print PDF — the printed-page counterpart of the preview above (see
+  // ./editor/DraftPrintExportDialog). Gated on the same server-secret flag as the
+  // production export, so it is simply absent where the render functions aren't configured.
+  const [showDraftPdf, setShowDraftPdf] = useState(false);
+  const printExportAvailable = isPrintExportAvailable();
   // Focus-mode split. The preview was pinned at 44% in the markup, so an author working on a wide
   // table could not give the editor more room, and one who only wanted to type could not reclaim
   // the preview's share of the screen.
@@ -1035,6 +1042,69 @@ const IMTemplateEditor: React.FC = () => {
     };
     return renderSec;
   };
+
+  /**
+   * What a draft render structurally cannot show, counted from the live sections.
+   *
+   * With no project there are no attribute values, so `passesFeatureGate` fails every
+   * "requires this feature" gate and the resolver drops that content — the same thing the
+   * on-screen preview does. Left unsaid, the operator would read the draft's page count as
+   * the manual's page count when it is really a floor. Placeholder sections are counted for
+   * the same reason: they print as a bare heading here.
+   */
+  const draftLimitations = React.useMemo(() => {
+    const notes: string[] = [];
+    const gatedSections = sections.filter(s => s.conditionFeatureId).length;
+    // Only inline/shared rows carry conditions; a SKU slot is gated by project data instead.
+    const gatedRows = sections.reduce(
+      (n, s) => n + (s.blockRefs ?? []).filter(r => r.kind !== 'sku_slot' && (r.requires_feature || r.requires_feature_absent)).length,
+      0,
+    );
+    const skuSlots = sections.reduce(
+      (n, s) => n + (s.blockRefs ?? []).filter(r => r.kind === 'sku_slot').length,
+      0,
+    );
+    const placeholders = sections.filter(s => s.isPlaceholder).length;
+    if (gatedSections || gatedRows) {
+      notes.push(
+        `${[gatedSections && `${gatedSections} conditional section${gatedSections === 1 ? '' : 's'}`,
+            gatedRows && `${gatedRows} conditional row${gatedRows === 1 ? '' : 's'}`]
+          .filter(Boolean).join(' and ')} are left out — a project's attribute values decide those, ` +
+        'so the real manual can be longer than this draft.',
+      );
+    }
+    if (skuSlots) {
+      notes.push(
+        `${skuSlots} SKU slot${skuSlots === 1 ? '' : 's'} (per-product tables, annotated images, step ` +
+        "sequences) render as nothing — they are filled from a project's SKU data.",
+      );
+    }
+    if (placeholders) {
+      notes.push(
+        `${placeholders} placeholder section${placeholders === 1 ? ' prints' : 's print'} as a heading with no body ` +
+        '— their content is written per project.',
+      );
+    }
+    return notes;
+  }, [sections]);
+
+  /**
+   * Resolve one language into the same artifact publish would have uploaded, for the draft
+   * print PDF. Deliberately built from LIVE editor state — `sections` (unsaved edits
+   * included) and `metaSettings` rather than `template.metadata` — because the whole point
+   * of a draft is to see the page you are currently authoring, not the last saved one.
+   *
+   * `projectIM` is null: there is no project, so per-project values stay as literal
+   * {{tokens}} and SKU slots resolve to nothing. Both are reported as warnings by the
+   * dialog rather than hidden (the production export refuses to print them).
+   */
+  const resolveDraftManual = useCallback((language: string): DraftResolveResult => {
+    if (!template) return { json: '', warnings: [] };
+    const blocksById: Record<string, IMBlock> = {};
+    for (const b of availableBlocks) blocksById[b.id] = b;
+    const resolved = resolveManual({ ...template, metadata: metaSettings }, sections, blocksById, null, language);
+    return { json: JSON.stringify(resolved), warnings: resolved.warnings };
+  }, [template, availableBlocks, metaSettings, sections]);
 
   const renderPreviewDrawer = () => {
     if (!showPreview || !template) return null;
@@ -1937,7 +2007,24 @@ const IMTemplateEditor: React.FC = () => {
                  </div>
                )}
 
-               <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-light shadow"><Eye size={16} /> Preview</button>
+               {/* PREVIEW pair — content and pages are two different questions about the same
+                   template, so they sit together: the drawer shows the resolved content, the
+                   draft PDF shows where it actually breaks on an A5 sheet. */}
+               <div className="flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden shadow">
+                 <button onClick={() => setShowPreview(true)} title="Preview the resolved manual inline" className="flex items-center gap-2 text-gray-700 px-3 py-2 text-sm font-medium hover:bg-light"><Eye size={16} /> Preview</button>
+                 {printExportAvailable && (
+                   <>
+                     <div className="w-px h-5 bg-gray-200" />
+                     <button
+                       onClick={() => setShowDraftPdf(true)}
+                       title="Render a throwaway print PDF of this template — same page size, typography and page numbering as the real export. Nothing is saved."
+                       className="flex items-center gap-2 text-gray-700 px-3 py-2 text-sm font-medium hover:bg-light"
+                     >
+                       <FileDown size={16} /> Draft PDF
+                     </button>
+                   </>
+                 )}
+               </div>
 
                {/* LANGUAGES — every language-shaped action in one place: which languages the
                    template carries, AI translation, and the XLIFF round-trip to a TMS. The
@@ -3620,6 +3707,20 @@ const IMTemplateEditor: React.FC = () => {
           })()}
        </div>
        {renderPreviewDrawer()}
+
+       {showDraftPdf && template && (
+         <DraftPrintExportDialog
+           templateId={template.id}
+           templateType={templateType}
+           metadata={metaSettings}
+           defaultTitle={category?.name || template.name || ''}
+           languages={templateLanguages}
+           initialLanguage={activeLang}
+           resolveDraft={resolveDraftManual}
+           limitations={draftLimitations}
+           onClose={() => setShowDraftPdf(false)}
+         />
+       )}
 
        {/* Compliance checklist — the author's readiness gate over the same regulations. */}
        {showChecklist && template && (

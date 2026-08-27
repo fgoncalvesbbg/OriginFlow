@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_db_migrations_69b_restrict_anon_document_reads_sql", "label": "69b_restrict_anon_document_reads.sql", "file_type": "code", "source_file": "db_migrations/69b_restrict_anon_document_reads.sql", "source_location": null}], "edges": []}

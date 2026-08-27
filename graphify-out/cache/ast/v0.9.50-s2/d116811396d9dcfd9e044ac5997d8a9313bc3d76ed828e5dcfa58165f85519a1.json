@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_db_migrations_67_create_im_print_bucket_sql", "label": "67_create_im_print_bucket.sql", "file_type": "code", "source_file": "db_migrations/67_create_im_print_bucket.sql", "source_location": null}], "edges": []}

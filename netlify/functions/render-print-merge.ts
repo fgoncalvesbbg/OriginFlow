@@ -25,12 +25,13 @@ import {
   RenderRequestBase,
   isValidBase,
   json,
-  fetchManifestAndManuals,
+  loadManuals,
   buildParts,
   renderPartPdf,
   marginFor,
   resolveTypography,
   tempPartPath,
+  draftPdfPath,
   BUCKET,
   AuthError,
   PermanentError,
@@ -475,7 +476,7 @@ export const handler = async (event: NetlifyEvent) => {
     if (authErr || !userData?.user) throw new AuthError('Invalid or expired session.');
     const createdBy = userData.user.email ?? userData.user.id;
 
-    const { manuals, ordered } = await fetchManifestAndManuals(supabaseUrl, req);
+    const { manuals, ordered } = await loadManuals(supabase, supabaseUrl, req);
     const { parts, compact } = buildParts(manuals, req);
     // Range-checked global print typography — drives the cover re-render below and where
     // the footer / page numbers are stamped.
@@ -549,6 +550,36 @@ export const handler = async (event: NetlifyEvent) => {
         '[render-print-merge] stamped footer ink sits', preflight.footerInkClearanceMm,
         'mm from trim, under the', preflight.minInkClearanceMm, 'mm guard.',
       );
+    }
+
+    // A DRAFT render stops here (see RenderRequestBase.draft): the PDF goes into the job's
+    // own tmp prefix, which the cleanup call the client already makes deletes moments later,
+    // and NOTHING is recorded in im_print_renders. `upsert: true` makes it idempotent per
+    // job for free — a client-timeout retry lands on the same throwaway object rather than
+    // needing the history lookup the production branch below does. The client fetches the
+    // bytes into a blob before triggering cleanup, so the operator keeps the file even
+    // though the server side of it is gone.
+    if (req.draft) {
+      const draftPath = draftPdfPath(req.projectId, req.templateType, req.jobId);
+      const { error: draftUpErr } = await supabase.storage.from(BUCKET).upload(draftPath, pdf, {
+        upsert: true,
+        contentType: 'application/pdf',
+        cacheControl: '0',
+      });
+      if (draftUpErr) throw new Error(`Draft upload failed (${draftPath}): ${draftUpErr.message}`);
+      const { data: { publicUrl: draftUrl } } = supabase.storage
+        .from(BUCKET)
+        .getPublicUrl(draftPath, { download: buildDownloadName(req) });
+      return json(200, {
+        url: draftUrl,
+        storagePath: draftPath,
+        bytes: pdf.byteLength,
+        pages: totalPages,
+        pagesByLanguage,
+        preflight,
+        render: null,
+        draft: true,
+      });
     }
 
     // Upload to im-print under a UNIQUE path — keyed on the client-generated jobId, NOT a

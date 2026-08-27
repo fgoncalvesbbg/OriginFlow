@@ -23,6 +23,16 @@
  * VITE_PRINT_EXPORT_ENABLED ("true"), which you set alongside the server secrets.
  * When unset the UI hides the feature (app unaffected). Rendering is decoupled from
  * publishing — this is called on demand, never as part of Generate.
+ *
+ * TWO entry points share that pipeline:
+ *   - requestPrintPdf      — the production export of a PUBLISHED project IM. Recorded in
+ *                            im_print_renders, stored permanently, gated on published
+ *                            languages and on having no unresolved values.
+ *   - requestDraftPrintPdf — a THROWAWAY render of a template being authored, with no
+ *                            project in existence. Same builder and same house typography,
+ *                            but fed from manuals the browser resolved, recorded nowhere,
+ *                            and returned as a blob whose server-side copy is deleted
+ *                            immediately. See its own section header at the bottom.
  */
 
 import { auth, db, orEmpty, storage, type Row } from '../../data';
@@ -300,6 +310,90 @@ const postJsonWithRetry = async <T>(
   }
 };
 
+/** What `render-print-prepare` reports back before any PDFShift credit is spent. */
+interface PreparedJob {
+  partsTotal: number;
+  labels: string[];
+  /** Advisory notes (draft renders only) — see render-print-prepare's token gate. */
+  warnings?: string[];
+}
+
+/**
+ * Run one render job end to end: prepare → part(s) → merge → cleanup.
+ *
+ * `afterMerge` runs INSIDE the try, i.e. BEFORE cleanup deletes the job's temp prefix —
+ * which is what lets a draft render pull its throwaway PDF into a blob while the object
+ * still exists. Shared by the production and draft entry points below so the two provably
+ * agree on part ordering, retry policy and concurrency; only their inputs and what they do
+ * with the merged result differ.
+ */
+const runRenderJob = async <T>(
+  base: Record<string, unknown> & { projectId: string; templateType: IMTemplateType },
+  token: string,
+  jobId: string,
+  onProgress: RequestPrintPdfParams['onProgress'],
+  beforePrepare: (() => Promise<void>) | undefined,
+  afterMerge: (merged: PrintPdfResult & { render?: unknown }, prep: PreparedJob) => Promise<T>,
+): Promise<T> => {
+  let cleanupNeeded = false;
+  try {
+    // A draft uploads its resolved manuals into the job prefix here — so cleanup must run
+    // even if prepare never gets that far, hence the flag is set before the hook.
+    if (beforePrepare) {
+      cleanupNeeded = true;
+      await beforePrepare();
+    }
+
+    // 1. Prepare — cheap; resolves the manifest and reports how many parts to render.
+    onProgress?.('Preparing…', 0, 1);
+    const prep = await postJsonWithRetry<PreparedJob>('render-print-prepare', base, token, 3, 20_000);
+    if (!prep.partsTotal) throw new Error('Nothing to render for the selected languages.');
+    cleanupNeeded = true;
+    const total = prep.partsTotal;
+
+    // 2. Render every part independently — small concurrency pool, so no single function
+    // invocation ever has to do more than ONE PDFShift conversion (this is what removes the
+    // per-invocation time ceiling that made large multi-language manuals fail before).
+    let done = 0;
+    const CONCURRENCY = 3;
+    let cursor = 0;
+    // Set as soon as ANY part fails for good: sibling workers stop picking up new parts,
+    // so a doomed job doesn't keep spending PDFShift credits on output that cleanup will
+    // delete. (Parts already in flight still finish — aborting them mid-request isn't
+    // worth the plumbing; the point is not to START more.)
+    let jobFailed = false;
+    const renderOne = async () => {
+      while (!jobFailed && cursor < total) {
+        const index = cursor++;
+        try {
+          await postJsonWithRetry('render-print-part', { ...base, jobId, partIndex: index }, token, 3, 45_000);
+        } catch (e) {
+          jobFailed = true;
+          throw e;
+        }
+        done += 1;
+        onProgress?.(prep.labels[index]?.toUpperCase() ?? `part ${index + 1}`, done, total);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, renderOne));
+
+    // 3. Merge — downloads the rendered parts, stamps page numbers/footers/edge tabs, uploads
+    // the final PDF, and records the render.
+    onProgress?.('Merging…', total, total);
+    const merged = await postJsonWithRetry<PrintPdfResult & { render?: unknown }>(
+      'render-print-merge', { ...base, jobId }, token, 2, 25_000,
+    );
+    return await afterMerge(merged, prep);
+  } finally {
+    // Always attempt cleanup once a job has left temp files behind, whether it
+    // succeeded or failed — never let it block/throw on the caller's result.
+    if (cleanupNeeded) {
+      postJson('render-print-cleanup', { projectId: base.projectId, templateType: base.templateType, jobId }, token, 15_000)
+        .catch((e) => console.warn('[print-export] Temp-file cleanup failed (non-fatal).', e));
+    }
+  }
+};
+
 /**
  * Ask the render pipeline to build a combined print PDF and return its public URL.
  * Throws if no language is selected or the render fails. See file header for the
@@ -327,57 +421,179 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     mergeToc: params.mergeToc,
   };
 
-  const jobId = generateUUID();
-  let cleanupNeeded = false;
+  return runRenderJob(base, token, generateUUID(), params.onProgress, undefined, async (merged) => ({
+    ...merged,
+    render: merged.render ? mapRender(merged.render) : null,
+  }));
+};
+
+// ===========================================================================
+// Draft renders — "how does this template actually print?", before a project exists
+//
+// The template editor has an on-screen preview, but the thing that decides whether a
+// template is publishable is the PRINTED page: where sections break, how tables set at
+// 6pt, whether the leaflet still fits its sheet. That answer used to require creating a
+// project, generating an IM, publishing it and exporting — so template work was tuned
+// against the HTML preview and the surprises arrived at the end.
+//
+// A draft render is the SAME pipeline (same HTML builder, same global typography, same
+// stamping and merging, same page size) fed from manuals the editor resolves in the
+// browser instead of from a published manifest. What it deliberately does NOT do is
+// persist: no im_print_renders row, no permanent object, no project. The PDF comes back
+// as an in-browser blob and the server-side copy is deleted by the job's own cleanup.
+// ===========================================================================
+
+/** One language's resolved manual, serialized exactly as publish would have written it. */
+export interface DraftManualInput {
+  language: string;
+  /** `JSON.stringify(resolveManual(...))` — the same artifact shape publish uploads. */
+  json: string;
+}
+
+export interface RequestDraftPrintPdfParams {
+  /**
+   * The template being previewed. Only namespaces the throwaway job's storage prefix —
+   * a draft never touches a project row, so no project id is needed or accepted.
+   */
+  templateId: string;
+  templateType: IMTemplateType;
+  /** Resolved manuals in booklet order; their languages become the booklet's languages. */
+  manuals: DraftManualInput[];
+  pageSize: 'a4' | 'a5';
+  cover: PrintCoverInput;
+  back: PrintBackInput;
+  /** The global print typography (Admin → IM Print) for this template type + page size. */
+  typography?: PrintTypography;
+  /** Continue the first section on the TOC page (full manuals only). */
+  mergeToc?: boolean;
+  onProgress?: (label: string, done: number, total: number) => void;
+}
+
+export interface DraftPrintPdfResult {
+  /**
+   * Blob URL of the PDF, held only by this browser tab. The server-side object is already
+   * gone by the time this resolves, which is the point — a draft is discardable by
+   * construction rather than by remembering to delete it. Revoke it when done.
+   */
+  blobUrl: string;
+  /** Filename to save it under — the same "SKU - Name - Instruction Manual.pdf" the real export uses. */
+  filename: string;
+  bytes: number;
+  pages?: number;
+  pagesByLanguage?: Record<string, number>;
+  preflight?: PrintPreflightReport;
+  /**
+   * Advisory notes from the prepare step — chiefly the unresolved `{{tokens}}` a project
+   * would fill in. These BLOCK a production export and only warn here: a bare template is
+   * missing per-project values by definition, so refusing would refuse every draft.
+   */
+  warnings: string[];
+}
+
+/**
+ * Storage namespace for a draft job. Not a project id — `draft-` prefixed so it can never
+ * collide with the real `{projectId}/…` trees in this bucket, and so an orphaned temp file
+ * is identifiable at a glance.
+ */
+const draftNamespace = (templateId: string): string => `draft-${templateId}`;
+
+/**
+ * Where the editor puts one language's manual for the render functions to read.
+ *
+ * MUST match `draftManualPath` in netlify/functions/lib/print-render-shared.ts — the two
+ * sides never see each other's code, and a disagreement here fails every draft render with
+ * a "draft manual is missing" that points nowhere useful. Exported so a test can hold the
+ * two builders against each other; not part of the module's real API.
+ */
+export const draftManualStoragePath = (
+  templateId: string,
+  templateType: IMTemplateType,
+  jobId: string,
+  language: string,
+): string => `tmp/${draftNamespace(templateId)}/${templateType}/${jobId}/manual-${language}.json`;
+
+/** The `?download=` name the merge step attached, so a blob save keeps the real filename. */
+const downloadNameFromUrl = (url: string, fallback: string): string => {
   try {
-    // 1. Prepare — cheap; resolves the manifest and reports how many parts to render.
-    params.onProgress?.('Preparing…', 0, 1);
-    const prep = await postJsonWithRetry<{ partsTotal: number; labels: string[] }>(
-      'render-print-prepare', base, token, 3, 20_000,
-    );
-    if (!prep.partsTotal) throw new Error('Nothing to render for the selected languages.');
-    cleanupNeeded = true;
-    const total = prep.partsTotal;
-
-    // 2. Render every part independently — small concurrency pool, so no single function
-    // invocation ever has to do more than ONE PDFShift conversion (this is what removes the
-    // per-invocation time ceiling that made large multi-language manuals fail before).
-    let done = 0;
-    const CONCURRENCY = 3;
-    let cursor = 0;
-    // Set as soon as ANY part fails for good: sibling workers stop picking up new parts,
-    // so a doomed job doesn't keep spending PDFShift credits on output that cleanup will
-    // delete. (Parts already in flight still finish — aborting them mid-request isn't
-    // worth the plumbing; the point is not to START more.)
-    let jobFailed = false;
-    const renderOne = async () => {
-      while (!jobFailed && cursor < total) {
-        const index = cursor++;
-        try {
-          await postJsonWithRetry('render-print-part', { ...base, jobId, partIndex: index }, token, 3, 45_000);
-        } catch (e) {
-          jobFailed = true;
-          throw e;
-        }
-        done += 1;
-        params.onProgress?.(prep.labels[index]?.toUpperCase() ?? `part ${index + 1}`, done, total);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, renderOne));
-
-    // 3. Merge — downloads the rendered parts, stamps page numbers/footers/edge tabs, uploads
-    // the final PDF, and records the render.
-    params.onProgress?.('Merging…', total, total);
-    const merged = await postJsonWithRetry<PrintPdfResult & { render?: unknown }>(
-      'render-print-merge', { ...base, jobId }, token, 2, 25_000,
-    );
-    return { ...merged, render: merged.render ? mapRender(merged.render) : null };
-  } finally {
-    // Always attempt cleanup once a job has left temp files behind, whether it
-    // succeeded or failed — never let it block/throw on the caller's result.
-    if (cleanupNeeded) {
-      postJson('render-print-cleanup', { projectId: base.projectId, templateType: base.templateType, jobId }, token, 15_000)
-        .catch((e) => console.warn('[print-export] Temp-file cleanup failed (non-fatal).', e));
-    }
+    return new URL(url).searchParams.get('download') || fallback;
+  } catch {
+    return fallback;
   }
+};
+
+/**
+ * Render a throwaway print PDF of an unsaved/unpublished template. See the section header
+ * above for why this exists and what it deliberately does not persist.
+ *
+ * Costs exactly what a real export costs (one PDFShift conversion per part) — callers must
+ * say so in the UI rather than presenting it as free.
+ */
+export const requestDraftPrintPdf = async (
+  params: RequestDraftPrintPdfParams,
+): Promise<DraftPrintPdfResult> => {
+  if (!params.manuals.length) throw new Error('Select at least one language.');
+
+  const session = await auth.getSession();
+  const token = session?.accessToken;
+  if (!token) throw new Error('You must be signed in to generate a print PDF.');
+
+  const jobId = generateUUID();
+  const languages = params.manuals.map((m) => m.language);
+  const base = {
+    // Namespace, not a project — nothing is recorded against it (see RenderRequestBase.draft).
+    projectId: draftNamespace(params.templateId),
+    templateType: params.templateType,
+    draft: true,
+    jobId,
+    languages,
+    pageSize: params.pageSize,
+    cover: params.cover,
+    back: params.back,
+    typography: params.typography,
+    mergeToc: params.mergeToc,
+  };
+
+  // Upload the manuals into the job's own temp prefix, where cleanup will remove them
+  // alongside the rendered parts. Sent via storage rather than in the request body on
+  // purpose: a multi-language book's manuals would blow past the function's body limit,
+  // and every step of the pipeline needs to read them, not just the first.
+  const uploadManuals = async () => {
+    params.onProgress?.('Uploading draft…', 0, params.manuals.length);
+    let uploaded = 0;
+    await Promise.all(
+      params.manuals.map(async (m) => {
+        const path = draftManualStoragePath(params.templateId, params.templateType, jobId, m.language);
+        try {
+          await storage.upload(BUCKET, path, m.json, {
+            upsert: true,
+            contentType: 'application/json',
+            cacheControl: '0',
+          });
+        } catch (e) {
+          throw new Error(`Could not stage the ${m.language.toUpperCase()} draft: ${(e as Error).message}`);
+        }
+        uploaded += 1;
+        params.onProgress?.('Uploading draft…', uploaded, params.manuals.length);
+      }),
+    );
+  };
+
+  return runRenderJob(base, token, jobId, params.onProgress, uploadManuals, async (merged, prep) => {
+    // Pull the bytes in NOW: this runs before the job's cleanup deletes the temp object,
+    // and the blob is the only copy that outlives this call.
+    params.onProgress?.('Downloading…', 1, 1);
+    const res = await fetch(merged.url);
+    if (!res.ok) throw new Error(`Could not download the draft PDF (${res.status}).`);
+    const blob = await res.blob();
+    const fallback = `${params.templateType === 'warning_leaflet' ? 'Warning Leaflet' : 'Instruction Manual'} (draft).pdf`;
+    return {
+      blobUrl: URL.createObjectURL(blob),
+      filename: downloadNameFromUrl(merged.url, fallback),
+      bytes: blob.size,
+      pages: merged.pages,
+      pagesByLanguage: merged.pagesByLanguage,
+      preflight: merged.preflight,
+      warnings: prep.warnings ?? [],
+    };
+  });
 };

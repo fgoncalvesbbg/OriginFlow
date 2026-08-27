@@ -15,7 +15,7 @@ import {
   RenderRequestBase,
   isValidBase,
   json,
-  fetchManifestAndManuals,
+  loadManuals,
   buildParts,
   renderPartPdf,
   marginFor,
@@ -63,7 +63,7 @@ export const handler = async (event: NetlifyEvent) => {
     const { error: authErr } = await supabase.auth.getUser(token);
     if (authErr) throw new AuthError('Invalid or expired session.');
 
-    const { manuals } = await fetchManifestAndManuals(supabaseUrl, req);
+    const { manuals } = await loadManuals(supabase, supabaseUrl, req);
     const { parts } = buildParts(manuals, req);
     if (req.partIndex >= parts.length) {
       return json(400, { error: `partIndex ${req.partIndex} out of range (0..${parts.length - 1}).` });

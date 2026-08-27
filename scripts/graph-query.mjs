@@ -8,7 +8,7 @@
  *
  *   node scripts/graph-query.mjs help
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -300,6 +300,14 @@ commands.stale = (ctx) => {
   console.log(`${unique.length} files changed since then`);
   list('changed AND in the graph — its edges for these are suspect', stale);
   list('changed but never graphed — no edges exist for these', fresh);
+
+  // The post-commit hook rebuilds graph.json but not GRAPH_INDEX.md, so the
+  // community map drifts silently behind the edges it claims to summarise.
+  const index = resolve(OUT, 'GRAPH_INDEX.md');
+  if (existsSync(index) && statSync(index).mtimeMs < statSync(GRAPH).mtimeMs) {
+    console.log('\nGRAPH_INDEX.md is older than graph.json — its community map is out of date.');
+    console.log('  node scripts/graph-query.mjs index --write');
+  }
 };
 
 /** Regenerate the compact index that gets read instead of GRAPH_REPORT.md. */

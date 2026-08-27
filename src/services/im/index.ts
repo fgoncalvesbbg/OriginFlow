@@ -83,6 +83,7 @@ export { getPublishDiff, diffResolvedSections } from './im-publish-diff.service'
 export type { PublishDiff, PublishDiffEntry } from './im-publish-diff.service';
 export {
   requestPrintPdf,
+  requestDraftPrintPdf,
   getPrintPdfUrl,
   getPrintRenders,
   getLatestRendersByManual,
@@ -94,6 +95,10 @@ export type {
   PrintCoverInput,
   PrintBackInput,
   PrintRender,
+  PrintPreflightReport,
+  RequestDraftPrintPdfParams,
+  DraftPrintPdfResult,
+  DraftManualInput,
 } from './im-print-export.service';
 // Leaflet coverage — which SKUs a leaflet PDF answers for (migration 132). Generic
 // per-category leaflets and SKU-specific ones resolve through the same read model.

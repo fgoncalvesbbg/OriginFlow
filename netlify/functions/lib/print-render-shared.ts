@@ -70,6 +70,30 @@ export interface RenderRequestBase {
    * page counts.
    */
   mergeToc?: boolean;
+  /**
+   * DRAFT mode — a throwaway render straight from the template editor, before any project
+   * exists. Three things change; everything else (HTML builder, typography, stamping,
+   * merging, page size) is byte-for-byte the production path, which is the whole point:
+   *
+   *   1. The manuals come from `manual-<lang>.json` files the editor uploaded into this
+   *      job's tmp prefix, NOT from a published manifest (there is nothing published).
+   *   2. `projectId` is a namespace string (`draft-<templateId>`), not a real project id.
+   *      Nothing is written to im_print_renders, so it is never used as a foreign key.
+   *   3. The merged PDF lands inside the job's tmp prefix, so the existing cleanup call
+   *      deletes it — a draft leaves no artifact and no history row behind.
+   *
+   * Trusted from the client the same way `cover`/`typography` already are: this is an
+   * internal, authenticated tool, and the only thing `draft` can do is produce a PDF that
+   * is NOT recorded. It cannot read another project's data (the manuals are supplied, not
+   * fetched) and it cannot overwrite a real render (tmp path).
+   */
+  draft?: boolean;
+  /**
+   * The client-generated job id. Carried on EVERY call in the pipeline — `part` and `merge`
+   * have always needed it for their temp paths, and a draft `prepare` needs it too, since
+   * that is where the uploaded manuals live. Still validated as required by part/merge.
+   */
+  jobId?: string;
 }
 
 export const BUCKET = 'im-print';
@@ -99,7 +123,9 @@ export const isValidBase = (b: unknown): b is RenderRequestBase => {
     typeof r.cover === 'object' &&
     typeof r.back === 'object' &&
     (r.typography === undefined || (typeof r.typography === 'object' && r.typography !== null)) &&
-    (r.mergeToc === undefined || typeof r.mergeToc === 'boolean')
+    (r.mergeToc === undefined || typeof r.mergeToc === 'boolean') &&
+    (r.draft === undefined || typeof r.draft === 'boolean') &&
+    (r.jobId === undefined || typeof r.jobId === 'string')
   );
 };
 
@@ -226,3 +252,65 @@ export const tempPartPath = (projectId: string, templateType: string, jobId: str
 
 export const tempJobPrefix = (projectId: string, templateType: string, jobId: string): string =>
   `tmp/${projectId}/${templateType}/${jobId}`;
+
+// ---------------------------------------------------------------------------
+// Draft renders (template editor). See RenderRequestBase.draft.
+//
+// A draft's inputs and output both live INSIDE the job's tmp prefix, which is what
+// makes it discardable for free: the cleanup call every job already makes in a
+// `finally` block lists that one prefix and removes everything in it — the uploaded
+// manuals and the merged PDF alike. No new cleanup path, no orphan sweeper.
+// ---------------------------------------------------------------------------
+
+/** Where the editor uploads one language's resolved manual for a draft render. */
+export const draftManualPath = (
+  projectId: string,
+  templateType: string,
+  jobId: string,
+  language: string,
+): string => `${tempJobPrefix(projectId, templateType, jobId)}/manual-${language}.json`;
+
+/** Where a draft's merged PDF is written — inside the job prefix, so cleanup deletes it. */
+export const draftPdfPath = (projectId: string, templateType: string, jobId: string): string =>
+  `${tempJobPrefix(projectId, templateType, jobId)}/draft.pdf`;
+
+/**
+ * A draft job's manuals, read back from the files the editor uploaded. Order is the
+ * client's requested language order verbatim — unlike the published path there is no
+ * manifest to intersect against, so nothing can be silently dropped.
+ */
+export const fetchDraftManuals = async (
+  supabase: SupabaseClient,
+  req: RenderRequestBase,
+): Promise<{ manuals: PrintManual[]; ordered: string[] }> => {
+  if (!req.jobId) throw new PermanentError('A draft render requires a jobId.');
+  const manuals: PrintManual[] = [];
+  for (const lang of req.languages) {
+    const path = draftManualPath(req.projectId, req.templateType, req.jobId, lang);
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if (error || !data) {
+      throw new PermanentError(
+        `The draft manual for ${lang.toUpperCase()} is missing (${path}). Every selected language ` +
+        'must be uploaded before rendering — close the dialog and try again.',
+      );
+    }
+    try {
+      manuals.push(JSON.parse(await data.text()) as PrintManual);
+    } catch (e) {
+      throw new PermanentError(`The draft manual for ${lang.toUpperCase()} is not valid JSON: ${(e as Error).message}`);
+    }
+  }
+  return { manuals, ordered: [...req.languages] };
+};
+
+/**
+ * The manuals this request renders — a draft job's uploaded ones, or the published
+ * manifest's. Every step of the pipeline goes through here so draft and production
+ * renders provably share the builder, the typography and the stamping below it.
+ */
+export const loadManuals = async (
+  supabase: SupabaseClient,
+  supabaseUrl: string,
+  req: RenderRequestBase,
+): Promise<{ manuals: PrintManual[]; ordered: string[] }> =>
+  req.draft ? fetchDraftManuals(supabase, req) : fetchManifestAndManuals(supabaseUrl, req);

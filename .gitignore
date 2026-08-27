@@ -30,3 +30,11 @@ dist-ssr
 
 # Local Netlify folder
 .netlify
+
+# graphify: per-rebuild artifacts, not the graph itself.
+# The graph (graph.json, graph.html, GRAPH_REPORT.md, GRAPH_INDEX.md, manifest.json,
+# cache/) stays tracked — these are the churn the post-commit hook generates.
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+graphify-out/converted/
+graphify-out/.graphify_incremental.json
+graphify-out/.graphify_detect.json

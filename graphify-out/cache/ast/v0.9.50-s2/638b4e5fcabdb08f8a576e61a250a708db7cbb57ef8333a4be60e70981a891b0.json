@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_db_migrations_51_add_product_images_attribute_group_sql", "label": "51_add_product_images_attribute_group.sql", "file_type": "code", "source_file": "db_migrations/51_add_product_images_attribute_group.sql", "source_location": null}], "edges": []}
