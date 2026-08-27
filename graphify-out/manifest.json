@@ -1230,9 +1230,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/IMTemplateEditor.tsx": {
-    "mtime": 1787843407.9418476,
-    "seen": 1787843431.5582845,
-    "ast_hash": "c0976756e601ebb579840ffe60ff7e58",
+    "mtime": 1787843837.3881876,
+    "seen": 1787846808.3416846,
+    "ast_hash": "e4bd2e76b6a7ed23e8d0c9be9e161b0b",
     "semantic_hash": ""
   },
   "src/pages/im/IMViewerTab.tsx": {
@@ -1302,9 +1302,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/PrintExportDialog.tsx": {
-    "mtime": 1787843289.2929435,
-    "seen": 1787843364.6747382,
-    "ast_hash": "842765d827e069fcae69236af15953f9",
+    "mtime": 1787843522.7234116,
+    "seen": 1787846808.341762,
+    "ast_hash": "79f47b429d62cfc59e69bc3e1f00912b",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/im-content.utils.test.ts": {
@@ -1518,9 +1518,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-print-export.service.ts": {
-    "mtime": 1787843188.8520439,
-    "seen": 1787843281.244368,
-    "ast_hash": "2da70c142418e518457572ab25080df8",
+    "mtime": 1787843996.3940172,
+    "seen": 1787846808.341956,
+    "ast_hash": "0b82d92bf3e85d6bd6ee7af0ca09ff80",
     "semantic_hash": ""
   },
   "src/services/im/im-print-html.test.ts": {
@@ -2310,9 +2310,9 @@
     "semantic_hash": ""
   },
   "scripts/graph-query.mjs": {
-    "mtime": 1787509288.317944,
-    "seen": 1787843281.2440557,
-    "ast_hash": "c4725369e95f1cd30a9de738c30adc7e",
+    "mtime": 1787843466.0354183,
+    "seen": 1787846808.3414114,
+    "ast_hash": "8cd0a4335564a2df4ff8ec2b32967660",
     "semantic_hash": ""
   },
   "scripts/woff-to-ttf.mjs": {
@@ -3318,9 +3318,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1787843262.9310095,
-    "seen": 1787843281.2446184,
-    "ast_hash": "ed3458c136764a05d6a1f5ffb19320da",
+    "mtime": 1787843493.946275,
+    "seen": 1787846808.3424313,
+    "ast_hash": "de15ca20c966ffe9bc4d85657af1df3b",
     "semantic_hash": ""
   },
   "docs/im-import/future-in-app-diff.md": {
@@ -3558,9 +3558,21 @@
     "semantic_hash": ""
   },
   "src/pages/im/editor/DraftPrintExportDialog.tsx": {
-    "mtime": 1787843367.5230885,
-    "seen": 1787843431.5583088,
-    "ast_hash": "8c0dc6c0f9e758f06e801f16d0e1a4c3",
+    "mtime": 1787843755.236288,
+    "seen": 1787846808.3417141,
+    "ast_hash": "350160c2424938f2382e23cf0760d097",
+    "semantic_hash": ""
+  },
+  "src/pages/im/editor/TypographySummary.tsx": {
+    "mtime": 1787843466.320343,
+    "seen": 1787846808.3417215,
+    "ast_hash": "ba54b6743f7e0a5ced5da26426a5171f",
+    "semantic_hash": ""
+  },
+  "src/services/im/im-print-draft.test.ts": {
+    "mtime": 1787843598.5272844,
+    "seen": 1787846808.3419535,
+    "ast_hash": "d1a6fb04db68dce3fc70e99f4c2514ac",
     "semantic_hash": ""
   }
 }
