@@ -138,6 +138,7 @@ export {
   getCategoryAttributes,
   saveCategoryAttribute,
   importCategoryAttributes,
+  replaceCategoryAttributes,
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
@@ -146,7 +147,7 @@ export {
   ATTRIBUTE_GROUPS,
   PREDEFINED_ATTRIBUTE_GROUPS
 } from './compliance';
-export type { ImportAttributesResult } from './compliance';
+export type { ImportAttributesResult, ReplaceAttributesResult } from './compliance';
 
 export {
   getProductToolkitDefinitions,

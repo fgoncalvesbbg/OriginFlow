@@ -7,7 +7,7 @@ import {
   getCategories, getCategoryTree, saveCategory,
   deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
-  importCategoryAttributes,
+  importCategoryAttributes, replaceCategoryAttributes,
   getProductToolkitDefinitions, getProductToolkitDefinition, mapProductToolkitAttributes,
   ProductToolkitUnavailableError,
   unassignAttributeFromCategory, makeAttributeGlobal, assignAttributeToCategory,
@@ -19,7 +19,7 @@ import {
   getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim,
   getIMMarkets, saveIMMarket, deleteIMMarket
 } from '../services';
-import type { IMMarket } from '../services';
+import type { IMMarket, ReplaceAttributesResult } from '../services';
 import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../utils';
 import type { ParsedAttributeRow } from '../utils';
 import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
@@ -312,6 +312,9 @@ const AdminDashboard: React.FC = () => {
   // ProductToolkit categories that match no OriginFlow category by name. Worth surfacing:
   // a definition nobody can reach is invisible otherwise.
   const [ptUnmatched, setPtUnmatched] = useState<string[] | null>(null);
+  // 'add' leaves what is already here alone; 'replace' treats the source as the truth and
+  // clears this category's own attributes first. See replaceCategoryAttributes.
+  const [importMode, setImportMode] = useState<'add' | 'replace'>('add');
 
   // Bulk grid editor for the open category's attributes.
   const [attrView, setAttrView] = useState<'list' | 'grid'>('list');
@@ -615,6 +618,7 @@ const AdminDashboard: React.FC = () => {
     setImportError(null);
     setImporting(false);
     setImportSource('csv');
+    setImportMode('add');
     setPtNotice(null);
     setPtUnmatched(null);
     setImportModalOpen(true);
@@ -744,13 +748,36 @@ const AdminDashboard: React.FC = () => {
     if (!selectedCategoryDetail) return;
     const included = importRows.filter((_, i) => importIncluded[i]);
     if (included.length === 0) return;
+    if (importMode === 'replace') {
+      const owned = attributes.filter(a => a.categoryId === selectedCategoryDetail);
+      const shared = attributes.filter(a => a.categoryId !== null && a.categoryId !== selectedCategoryDetail && (a.assignedCategoryIds ?? []).includes(selectedCategoryDetail));
+      const ok = window.confirm(
+        `Replace the attributes of "${categories.find(c => c.id === selectedCategoryDetail)?.name}"?
+
+` +
+        `• ${owned.length} attribute(s) owned by this category will be DELETED
+` +
+        `• ${shared.length} shared attribute(s) will be removed from this category (kept for their owner)
+` +
+        `• Global attributes are not touched
+
+` +
+        `Any SKU values captured against the deleted attributes stop resolving and are not migrated. This cannot be undone.`,
+      );
+      if (!ok) return;
+    }
     setImporting(true);
     setImportError(null);
     try {
-      const res = await importCategoryAttributes(selectedCategoryDetail, included);
+      const res = importMode === 'replace'
+        ? await replaceCategoryAttributes(selectedCategoryDetail, included)
+        : await importCategoryAttributes(selectedCategoryDetail, included);
       await loadData();
       setImportModalOpen(false);
-      alert(`Import complete: ${res.created} created, ${res.linked} linked${res.skipped ? `, ${res.skipped} already present` : ''}.`);
+      const removed = importMode === 'replace'
+        ? `${(res as ReplaceAttributesResult).deleted} deleted, ${(res as ReplaceAttributesResult).unshared} un-shared, `
+        : '';
+      alert(`Import complete: ${removed}${res.created} created, ${res.linked} linked${res.skipped ? `, ${res.skipped} already present` : ''}.`);
     } catch (e: any) {
       setImportError(`Import failed: ${e.message}`);
     } finally {
@@ -1130,7 +1157,7 @@ const AdminDashboard: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {gridRows.length === 0 ? (
-                <tr><td colSpan={COLS} className="px-4 py-8 text-center text-gray-400 italic">No attributes yet. Click <strong>Add attribute</strong> or import a CSV.</td></tr>
+                <tr><td colSpan={COLS} className="px-4 py-8 text-center text-gray-400 italic">No attributes yet. Click <strong>Add attribute</strong>, or import from a CSV or ProductToolkit.</td></tr>
               ) : grouped.map(({ group, rows }) => (
                 <React.Fragment key={group}>
                   <tr>
@@ -1188,7 +1215,7 @@ const AdminDashboard: React.FC = () => {
                             onClick={openImportModal}
                             className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-50 text-sm font-medium shadow-sm"
                         >
-                            <Upload size={16} /> Import from CSV
+                            <Upload size={16} /> Import attributes
                         </button>
                         <button
                             onClick={openLinkModal}
@@ -2655,6 +2682,27 @@ const AdminDashboard: React.FC = () => {
                 <span className="font-medium text-indigo-600"> Global</span> rows are shared across every category.
                 Change any row's <strong>Group</strong> below before importing to move it between scopes. Re-importing updates existing rows instead of duplicating them.
               </p>
+
+              <div className="flex items-center gap-4 mb-3 text-xs">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" checked={importMode === 'add'} onChange={() => setImportMode('add')} />
+                  <span className={importMode === 'add' ? 'font-semibold text-gray-800' : 'text-gray-600'}>Add missing only</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
+                  <span className={importMode === 'replace' ? 'font-semibold text-rose-700' : 'text-gray-600'}>Replace this category's attributes</span>
+                </label>
+              </div>
+              {importMode === 'replace' && (
+                <div className="mb-4 flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  <span>
+                    The source is treated as the truth: attributes owned by this category are <strong>deleted</strong> and
+                    shared-in ones are removed from it before importing. Global attributes are left alone. SKU values
+                    captured against a deleted attribute stop resolving and are not migrated.
+                  </span>
+                </div>
+              )}
 
               <div className="flex items-center gap-1 mb-4 border-b border-gray-100">
                 {([['csv', 'CSV file'], ['producttoolkit', 'ProductToolkit']] as const).map(([key, label]) => (

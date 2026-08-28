@@ -289,6 +289,56 @@ export const importCategoryAttributes = async (
     return result;
 };
 
+export interface ReplaceAttributesResult extends ImportAttributesResult {
+    /** Attributes owned by this category that were deleted outright. */
+    deleted: number;
+    /** Attributes owned elsewhere that were un-shared from this category rather than deleted. */
+    unshared: number;
+    /** Deleted rows, kept so the caller can report (and a human can reverse) what went. */
+    removed: { id: string; name: string; akeneoId?: string }[];
+}
+
+/**
+ * Replace a category's attribute set with `rows` — the "the source of truth is upstream,
+ * what's here is wrong" import, as opposed to the additive `importCategoryAttributes`.
+ *
+ * What it clears is deliberately narrower than "everything visible on this category":
+ *  - Attributes OWNED by this category (category_id = categoryId) are deleted.
+ *  - Attributes owned by another category but SHARED into this one are un-shared, not
+ *    deleted — the owning category still needs them.
+ *  - GLOBAL attributes (category_id IS NULL, the predefined groups) are left completely
+ *    alone. They apply to every category, so deleting one here would silently strip it from
+ *    all of them. If the incoming rows carry those codes they resolve as "already here".
+ *
+ * DESTRUCTIVE AND NOT TRANSACTIONAL. Deletes go through the same per-row REST calls as the
+ * rest of this service, so a mid-run failure can leave the category partly cleared — the
+ * fix is to re-run, since the import half is idempotent. Values already captured against a
+ * deleted attribute are NOT migrated: project_skus.attribute_values entries reference
+ * attributeId, there is no foreign key, and a re-import mints new ids. Check a category has
+ * no SKU values riding on its attributes before replacing it.
+ */
+export const replaceCategoryAttributes = async (
+    categoryId: string,
+    rows: ParsedAttributeRow[],
+): Promise<ReplaceAttributesResult> => {
+    const existing = await getCategoryAttributes();
+    const owned = existing.filter(a => a.categoryId === categoryId);
+    const sharedIn = existing.filter(
+        a => a.categoryId !== null && a.categoryId !== categoryId && (a.assignedCategoryIds ?? []).includes(categoryId),
+    );
+
+    for (const a of owned) await deleteCategoryAttribute(a.id);
+    for (const a of sharedIn) await unassignAttributeFromCategory(a.id, categoryId);
+
+    const imported = await importCategoryAttributes(categoryId, rows);
+    return {
+        ...imported,
+        deleted: owned.length,
+        unshared: sharedIn.length,
+        removed: owned.map(a => ({ id: a.id, name: a.name, akeneoId: a.akeneoId })),
+    };
+};
+
 /**
  * Delete a category attribute
  */

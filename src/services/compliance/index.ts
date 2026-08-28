@@ -35,12 +35,13 @@ export {
   getCategoryAttributes,
   saveCategoryAttribute,
   importCategoryAttributes,
+  replaceCategoryAttributes,
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
   makeAttributeGlobal
 } from './compliance-requirement.service';
-export type { ImportAttributesResult } from './compliance-requirement.service';
+export type { ImportAttributesResult, ReplaceAttributesResult } from './compliance-requirement.service';
 
 export {
   getProductToolkitDefinitions,
