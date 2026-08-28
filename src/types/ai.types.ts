@@ -46,6 +46,16 @@ export interface TranslationVerbatim {
   note?: string;
   /** Language code → officially approved wording for that language. */
   translations: Record<string, string>;
+  /**
+   * The regulation that mandates this wording, as it is cited in a manual
+   * (`regulations.reference_code`, e.g. "(EU) 2019/2016"). Free text, not an FK — a
+   * phrase can be mandated by a standard that is not in the library yet.
+   *
+   * This is what tags a translation-memory segment as regulation-derived, which in turn
+   * restricts its automatic reuse to an identical domain AND context
+   * (see `evaluateCandidate` in im-tm-lookup.service.ts).
+   */
+  regulatoryRef?: string;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;

@@ -12,6 +12,7 @@
  */
 import * as XLSX from 'xlsx';
 import type { AttributeDataType } from '../types';
+import { ATTRIBUTE_GROUPS } from '../config/compliance.constants';
 
 /** A single parsed CSV row, mapped to app concepts and flagged for review. */
 export interface ParsedAttributeRow {
@@ -24,6 +25,8 @@ export interface ParsedAttributeRow {
   enumOptions?: string[];
   /** Unit pulled from the label, numeric attributes only (e.g. "L", "°C", "cm"). */
   unit?: string;
+  /** Marked mandatory by the source. Only ProductToolkit sets this; the CSV format has no such column. */
+  required?: boolean;
   /** Non-fatal issues the user should eyeball in the preview. */
   flags: string[];
   /** The raw "Type" cell, kept for the preview/debugging. */
@@ -63,9 +66,20 @@ function normalize(s: string): string {
     .toLowerCase();
 }
 
-function mapGroup(rawGroup: string): { group: string; unmapped: boolean } {
+/**
+ * Source grouping label → canonical ATTRIBUTE_GROUPS value.
+ *
+ * Shared with the ProductToolkit importer (producttoolkit-attributes.service.ts), whose
+ * free-text `cluster` is the same idea under another name and carries the same leading
+ * numbering ("2. Standard Electric Specs") that `normalize` strips. Aliases win first; a
+ * label that is already a canonical group name is then taken as-is, so groups with no alias
+ * ('Accessories', 'Product Images') map without needing one.
+ */
+export function mapGroupName(rawGroup: string): { group: string; unmapped: boolean } {
   const key = normalize(rawGroup);
-  const mapped = GROUP_MAP[key];
+  const mapped =
+    GROUP_MAP[key] ??
+    (ATTRIBUTE_GROUPS as readonly string[]).find(g => normalize(g) === key);
   return mapped ? { group: mapped, unmapped: false } : { group: 'Category Specific', unmapped: true };
 }
 
@@ -148,7 +162,7 @@ export function parseAttributeCsv(input: ArrayBuffer | Uint8Array | string): Par
     const rawOptions = String(idxOptions >= 0 ? row[idxOptions] ?? '' : '').trim();
 
     const flags: string[] = [];
-    const { group, unmapped: groupUnmapped } = mapGroup(rawGroup);
+    const { group, unmapped: groupUnmapped } = mapGroupName(rawGroup);
     if (groupUnmapped) flags.push(`Unrecognized group "${rawGroup}" → Category Specific`);
 
     const { dataType, unmapped: typeUnmapped } = mapDataType(rawDataType);

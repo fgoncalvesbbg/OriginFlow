@@ -20,7 +20,11 @@ import { imgStyleFor, imgTag, readImgAlign, readImgBorder, readImgValign, IMG_VA
 import { imContentVars } from './im-content-style';
 import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns, QrCode } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
+import { planTmTranslation, translateFragmentWithMemory, getProtectedPhrases, getProtectedPhraseRefs, type TmPlanContext } from '../../../services/im/im-tm-translate';
+import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../../services/im/im-tm-write.service';
+import { generateUUID } from '../../../utils/uuid.utils';
 import { markTranslatedFromEn, translationStaleAgainstEn } from '../../../services/im/im-translation-marker';
+import { refFragmentId } from '../../../services/im/im-translation-fragments';
 import { getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim } from '../../../services/ai/translation-verbatim.service';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
 import { getCalloutTitle } from '../../../services/im/callout-titles.i18n';
@@ -2206,12 +2210,121 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
 // Mirrors the Block Library editor: each inline row lets you author content for
 // every enabled language directly, instead of following the section-level
 // language tab. Switching the row tab edits/saves that language independently.
+// --- Translation memory for the per-row translate buttons --------------------
+//
+// The row buttons used to call `translateHtml` directly, so every per-row translation
+// was paid for at full price and never entered the memory — which also starved the bulk
+// template path, because the corpus only ever grew from bulk runs.
+//
+// The row supplies the RUN half of the context itself (runId, protected phrases) and the
+// consumer supplies the IDENTITY half, because only the consumer knows whether this row
+// belongs to a template, a project manual or a shared block.
+
+/**
+ * Identity half of a translation-memory context, supplied by whoever renders the row.
+ *
+ * Without it a row cannot say what it belongs to, so it degrades to the plain engine
+ * call rather than writing an unattributable run into the audit log.
+ */
+export type TmRowContext = Pick<
+  TmPlanContext,
+  'scope' | 'templateId' | 'blockId' | 'projectId' | 'templateType' | 'domainCategoryId' | 'domainContentType'
+>;
+
+interface RowTmRun {
+  /** Translate into one target, preferring approved memory over an engine call. */
+  translate: (target: string) => Promise<string>;
+  /** Write the log, the usage counters and the new segments. Best-effort. */
+  flush: () => Promise<void>;
+  /** Targets served entirely from memory, with no engine call at all. */
+  reusedFromMemory: () => number;
+}
+
+/**
+ * Plan one row's translation run.
+ *
+ * Planning happens once for all targets — decomposition is per fragment, not per
+ * language — and the returned `translate` is safe to call concurrently, which is what
+ * the translate-to-all pool does.
+ */
+const beginRowTmRun = async (
+  source: string,
+  targets: readonly string[],
+  rowCtx: TmRowContext | undefined,
+  fragmentId: string,
+  label?: string,
+): Promise<RowTmRun> => {
+  const writeBack: RecordTmSegmentInput[] = [];
+  const events: TmReuseEvent[] = [];
+  const applied: string[] = [];
+  let reused = 0;
+
+  let plan: Awaited<ReturnType<typeof planTmTranslation>> | undefined;
+  let ctx: TmPlanContext | undefined;
+  if (rowCtx) {
+    try {
+      ctx = {
+        ...rowCtx,
+        sourceLocale: 'en',
+        protectedPhrases: await getProtectedPhrases(),
+        regulatoryRefsByPhrase: await getProtectedPhraseRefs(),
+        runId: generateUUID(),
+        runKind: 'ai',
+      };
+      plan = await planTmTranslation([{ id: fragmentId, sourceHtml: source, label }], targets, ctx);
+    } catch (e) {
+      console.warn('[InlineBlockEditor] translation memory unavailable; translating everything.', e);
+      plan = undefined;
+    }
+  }
+
+  return {
+    reusedFromMemory: () => reused,
+    translate: async (target: string) => {
+      if (!plan || !ctx) return translateHtml(source, 'en', target);
+      const out = await translateFragmentWithMemory(
+        fragmentId, source, target, plan, ctx,
+        h => translateHtml(h, 'en', target),
+      );
+      if (out.fromMemory) reused += 1;
+      writeBack.push(...out.writeBack);
+      events.push(...out.reuseEvents);
+      applied.push(...out.appliedSegmentIds);
+      return out.html;
+    },
+    flush: async () => {
+      // All best-effort: the translation is already in the editor, so a lost memory
+      // write must never surface as a failed translation.
+      if (events.length) void logTmReuse(events);
+      if (applied.length) void noteTmSegmentsUsed(applied);
+      if (!writeBack.length) return;
+      try {
+        const recorded = await recordTmSegments(writeBack);
+        if (recorded.divergences.length) {
+          console.warn(
+            `[InlineBlockEditor] ${recorded.divergences.length} translation(s) disagreed with `
+            + 'approved translation memory and were NOT stored.',
+            recorded.divergences,
+          );
+        }
+      } catch (e) {
+        console.warn('[InlineBlockEditor] could not record translations to the memory.', e);
+      }
+    },
+  };
+};
+
 interface InlineHtmlRowProps {
   content: Record<string, string>;
   variant?: CalloutVariant;
   languages: { code: string; label: string }[];
   sectionId: string;
   index: number;
+  /**
+   * Where this row lives, so its per-row translations can read and write the shared
+   * translation memory. Omitted = the row falls back to a plain engine call.
+   */
+  tmContext?: TmRowContext;
   onChange: (lang: string, html: string) => void;
   onVariantChange: (variant: CalloutVariant | undefined) => void;
   onInsertPlaceholder: (type: 'text' | 'image') => void;
@@ -2248,7 +2361,7 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const placeholderChipRe = (id: string) =>
   new RegExp(`<span[^>]*class="[^"]*im-placeholder[^"]*"[^>]*data-id="${escapeRegExp(id)}"[^>]*>[^<]*</span>`, 'g');
 
-export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes, focusLang, focusToken, printTemplateType, printPageSize }) => {
+export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, languages, sectionId, index, tmContext, onChange, onVariantChange, onInsertPlaceholder, onInsertCondition, enableTranslate, attributes, focusLang, focusToken, printTemplateType, printPageSize }) => {
   const [rowLang, setRowLang] = useState(focusLang ?? 'en');
   // Print density vars for the row's read-only English-reference pane (cached per profile).
   const rowGeometry = usePrintColumn(printTemplateType, printPageSize);
@@ -2281,6 +2394,9 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
   const contentRef = useRef(content); contentRef.current = content;
   const languagesRef = useRef(languages); languagesRef.current = languages;
   const activeCodeRef = useRef(activeCode); activeCodeRef.current = activeCode;
+  // Mirrored like the others: consumers pass a fresh object literal every render, so a
+  // closure dependency would rebuild both translate handlers on each keystroke.
+  const tmContextRef = useRef(tmContext); tmContextRef.current = tmContext;
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
 
   /** True when `html` already contains a placeholder chip with this `data-id`. */
@@ -2363,16 +2479,20 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     setTranslateErr(null);
     setTranslating(true);
     try {
-      const out = await translateHtml(source, 'en', target);
+      const run = await beginRowTmRun(
+        source, [target], tmContextRef.current, refFragmentId(sectionId, 'inline', index),
+      );
+      const out = await run.translate(target);
       // Marked with the EN source hash so the tab dot can flag this translation as
       // stale if English is edited later (see im-translation-marker.ts).
       onChangeRef.current(target, markTranslatedFromEn(out, source));
+      await run.flush();
     } catch (e: any) {
       setTranslateErr(e?.message || 'Translation failed');
     } finally {
       setTranslating(false);
     }
-  }, [translating]);
+  }, [translating, sectionId, index]);
 
   // Per-box "translate to ALL languages": one click re-translates JUST this row from
   // English into every other enabled language (overwriting stale translations — the
@@ -2389,11 +2509,16 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
     const failed: string[] = [];
     let done = 0;
     let cursor = 0;
+    // Planned once for every target before the pool starts — segmentation is per
+    // fragment, so N languages cost one decomposition and one memory read.
+    const run = await beginRowTmRun(
+      source, targets, tmContextRef.current, refFragmentId(sectionId, 'inline', index),
+    );
     const runner = async () => {
       while (cursor < targets.length) {
         const t = targets[cursor++];
         try {
-          const out = await translateHtml(source, 'en', t);
+          const out = await run.translate(t);
           onChangeRef.current(t, markTranslatedFromEn(out, source));
         } catch { failed.push(t.toUpperCase()); }
         done += 1;
@@ -2401,9 +2526,12 @@ export const InlineHtmlRow: React.FC<InlineHtmlRowProps> = ({ content, variant, 
       }
     };
     await Promise.all(Array.from({ length: Math.min(3, targets.length) }, runner));
+    await run.flush();
     setTranslatingAll(null);
+    const reused = run.reusedFromMemory();
     if (failed.length) setTranslateErr(`Translation failed for ${failed.join(', ')} — those languages were left unchanged. Try again.`);
-  }, [translating, translatingAll]);
+    else if (reused > 0) console.info(`[InlineBlockEditor] ${reused} of ${targets.length} language(s) came from approved memory — no AI call.`);
+  }, [translating, translatingAll, sectionId, index]);
 
   return (
     <div className="flex flex-col gap-2 p-3 resize-y overflow-hidden min-h-[280px]">
@@ -2860,6 +2988,11 @@ interface InlineBlockEditorProps {
   attributes: CategoryAttribute[];
   /** Stable id used for editor React keys (e.g. the addition / section id). */
   rowKey: string;
+  /**
+   * Where this row lives, so its per-row translations read and write the shared
+   * translation memory. Omitted = plain engine call, nothing logged or remembered.
+   */
+  tmContext?: TmRowContext;
   onChange: (lang: string, html: string) => void;
   onVariantChange: (variant: CalloutVariant | undefined) => void;
   /** Per-box AI translation: "Translate from EN" on non-English tabs, "Translate to all" on EN. */
@@ -2876,7 +3009,7 @@ interface InlineBlockEditorProps {
   printPageSize?: PrintPageSizeKey;
 }
 
-export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, onChange, onVariantChange, enableTranslate, focusLang, focusToken, printTemplateType, printPageSize }) => {
+export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, variant, languages, attributes, rowKey, tmContext, onChange, onVariantChange, enableTranslate, focusLang, focusToken, printTemplateType, printPageSize }) => {
   const [placeholderType, setPlaceholderType] = useState<'text' | 'image' | null>(null);
   const [conditionOpen, setConditionOpen] = useState(false);
 
@@ -2888,6 +3021,7 @@ export const InlineBlockEditor: React.FC<InlineBlockEditorProps> = ({ content, v
         languages={languages}
         sectionId={rowKey}
         index={0}
+        tmContext={tmContext}
         onChange={onChange}
         onVariantChange={onVariantChange}
         enableTranslate={enableTranslate}

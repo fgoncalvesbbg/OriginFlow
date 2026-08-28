@@ -8,6 +8,8 @@ import {
   deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   importCategoryAttributes,
+  getProductToolkitDefinitions, getProductToolkitDefinition, mapProductToolkitAttributes,
+  ProductToolkitUnavailableError,
   unassignAttributeFromCategory, makeAttributeGlobal, assignAttributeToCategory,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
@@ -302,6 +304,14 @@ const AdminDashboard: React.FC = () => {
   const [importFileName, setImportFileName] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  // Where the preview rows came from. Both sources produce ParsedAttributeRow[] and share
+  // the preview grid and the importCategoryAttributes write path below.
+  const [importSource, setImportSource] = useState<'csv' | 'producttoolkit'>('csv');
+  const [ptLoading, setPtLoading] = useState(false);
+  const [ptNotice, setPtNotice] = useState<string | null>(null);
+  // ProductToolkit categories that match no OriginFlow category by name. Worth surfacing:
+  // a definition nobody can reach is invisible otherwise.
+  const [ptUnmatched, setPtUnmatched] = useState<string[] | null>(null);
 
   // Bulk grid editor for the open category's attributes.
   const [attrView, setAttrView] = useState<'list' | 'grid'>('list');
@@ -604,7 +614,79 @@ const AdminDashboard: React.FC = () => {
     setImportFileName('');
     setImportError(null);
     setImporting(false);
+    setImportSource('csv');
+    setPtNotice(null);
+    setPtUnmatched(null);
     setImportModalOpen(true);
+  };
+
+  const switchImportSource = (source: 'csv' | 'producttoolkit') => {
+    setImportSource(source);
+    setImportRows([]);
+    setImportIncluded([]);
+    setImportFileName('');
+    setImportError(null);
+    setPtNotice(null);
+  };
+
+  /**
+   * Pull the ProductToolkit definition for the open category into the same preview grid the
+   * CSV import uses.
+   *
+   * Matching is by exact category name: ProductToolkit's `l3` is an opaque identifier (it is
+   * the deepest level a category reaches, which may be an L1 or L2), so it is compared to the
+   * OriginFlow leaf name as a whole string rather than being parsed for depth. Definitions
+   * that match nothing are listed rather than dropped silently.
+   *
+   * Three outcomes are all normal, not failures: unreachable (off the internal network), no
+   * definition loaded for this category (most categories have none), and an empty list.
+   */
+  const handleLoadFromProductToolkit = async () => {
+    const target = categories.find(c => c.id === selectedCategoryDetail);
+    if (!target) return;
+    setPtLoading(true);
+    setImportError(null);
+    setPtNotice(null);
+    try {
+      const [summaries, attrs] = await Promise.all([
+        // Only for the unmatched report — a failure here must not block the import itself.
+        getProductToolkitDefinitions().catch(() => null),
+        getProductToolkitDefinition(target.name),
+      ]);
+
+      if (summaries) {
+        const known = new Set(categories.map(c => c.name));
+        setPtUnmatched(summaries.map(d => d.l3).filter(l3 => !known.has(l3)).sort());
+      }
+
+      if (attrs === null) {
+        setImportRows([]);
+        setImportIncluded([]);
+        setPtNotice(
+          `ProductToolkit has no definition loaded for "${target.name}". Most categories don't ` +
+          `have one yet — it appears once someone uploads that category's CSV there.`,
+        );
+        return;
+      }
+
+      const rows = mapProductToolkitAttributes(attrs);
+      setImportRows(rows);
+      setImportIncluded(rows.map(() => true));
+      setImportFileName(`ProductToolkit · ${target.name}`);
+      if (rows.length === 0) {
+        setPtNotice(`The ProductToolkit definition for "${target.name}" is empty — no attributes to import.`);
+      }
+    } catch (err: any) {
+      setImportRows([]);
+      setImportIncluded([]);
+      setImportError(
+        err instanceof ProductToolkitUnavailableError
+          ? err.message
+          : `Could not load the ProductToolkit definition: ${err.message}`,
+      );
+    } finally {
+      setPtLoading(false);
+    }
   };
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -639,10 +721,16 @@ const AdminDashboard: React.FC = () => {
   //  'exists' → already applies here (global / owned / already shared); nothing to do.
   const importRowStatus = (row: ParsedAttributeRow): 'new' | 'link' | 'exists' => {
     const norm = (s?: string) => (s ?? '').trim().toLowerCase();
+    // Mirror importCategoryAttributes exactly: an Akeneo code is the GLOBAL identity, so a
+    // coded row matches across every group; only an uncoded row is scoped to its own group.
+    // (Matching a coded row within its group would show "New" for a row the import will
+    // actually link or skip — which ProductToolkit rows hit often, since their cluster need
+    // not agree with the group the attribute already sits in here.)
     const code = norm(row.akeneoId);
     const match = attributes.find(a =>
-      a.group === row.group &&
-      (code ? norm(a.akeneoId) === code : norm(a.name) === norm(row.name)),
+      code
+        ? norm(a.akeneoId) === code
+        : a.group === row.group && norm(a.name) === norm(row.name),
     );
     if (!match) return 'new';
     const appliesHere =
@@ -2558,23 +2646,70 @@ const AdminDashboard: React.FC = () => {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl p-6 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[88vh]">
               <div className="flex justify-between items-center mb-1">
-                <h3 className="font-bold text-lg text-gray-800">Import Attributes from CSV</h3>
+                <h3 className="font-bold text-lg text-gray-800">Import Attributes</h3>
                 <button onClick={() => setImportModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
               </div>
               <p className="text-xs text-muted mb-4">
-                Bulk-create attributes for <span className="font-semibold text-gray-700">{targetName}</span> from a spreadsheet.
+                Bulk-create attributes for <span className="font-semibold text-gray-700">{targetName}</span>.
                 <span className="font-medium text-slate-600"> Category</span> rows are added only to this category;
                 <span className="font-medium text-indigo-600"> Global</span> rows are shared across every category.
                 Change any row's <strong>Group</strong> below before importing to move it between scopes. Re-importing updates existing rows instead of duplicating them.
               </p>
 
-              <div className="flex items-center gap-3 mb-4">
-                <label className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow cursor-pointer">
-                  <Upload size={16} /> Choose CSV file
-                  <input type="file" accept=".csv,text/csv,application/vnd.ms-excel,.xlsx" onChange={handleImportFile} className="hidden" />
-                </label>
-                {importFileName && <span className="text-sm text-gray-600 truncate">{importFileName}</span>}
+              <div className="flex items-center gap-1 mb-4 border-b border-gray-100">
+                {([['csv', 'CSV file'], ['producttoolkit', 'ProductToolkit']] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => switchImportSource(key)}
+                    className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${importSource === key ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
+
+              {importSource === 'csv' ? (
+                <div className="flex items-center gap-3 mb-4">
+                  <label className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow cursor-pointer">
+                    <Upload size={16} /> Choose CSV file
+                    <input type="file" accept=".csv,text/csv,application/vnd.ms-excel,.xlsx" onChange={handleImportFile} className="hidden" />
+                  </label>
+                  {importFileName && <span className="text-sm text-gray-600 truncate">{importFileName}</span>}
+                </div>
+              ) : (
+                <div className="mb-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleLoadFromProductToolkit}
+                      disabled={ptLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow disabled:opacity-50"
+                    >
+                      {ptLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                      {ptLoading ? 'Loading…' : `Load definition for "${targetName}"`}
+                    </button>
+                    {importFileName && <span className="text-sm text-gray-600 truncate">{importFileName}</span>}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-2">
+                    Reads the product team's curated definition for this category, matched by exact name.
+                    It is served only on the internal network, so this needs the VPN. The definition is what the
+                    team decided the category should have — it is not a live read of Akeneo, so review the rows before importing.
+                  </p>
+                  {ptUnmatched !== null && ptUnmatched.length > 0 && (
+                    <details className="mt-2 text-[11px] text-gray-500">
+                      <summary className="cursor-pointer hover:text-gray-700">
+                        {ptUnmatched.length} ProductToolkit {ptUnmatched.length === 1 ? 'category matches' : 'categories match'} no OriginFlow category
+                      </summary>
+                      <div className="mt-1 pl-3 text-gray-400 max-h-24 overflow-auto">{ptUnmatched.join(' · ')}</div>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {ptNotice && (
+                <div className="mb-3 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" /> <span>{ptNotice}</span>
+                </div>
+              )}
 
               {importError && (
                 <div className="mb-3 flex items-start gap-2 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
@@ -2617,7 +2752,12 @@ const AdminDashboard: React.FC = () => {
                                   onChange={() => setImportIncluded(prev => prev.map((v, j) => j === i ? !v : v))}
                                 />
                               </td>
-                              <td className="px-2 py-1.5 font-medium text-gray-800">{r.name}</td>
+                              <td className="px-2 py-1.5 font-medium text-gray-800">
+                                {r.name}
+                                {r.required && (
+                                  <span className="ml-1 text-rose-500" title="Marked mandatory by the source — imported as a required attribute">*</span>
+                                )}
+                              </td>
                               <td className="px-2 py-1.5">
                                 <div className="flex items-center gap-1">
                                   <select

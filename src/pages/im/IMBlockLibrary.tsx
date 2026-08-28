@@ -12,6 +12,9 @@ import {
   Code, Bold, Italic, Underline, Languages as LanguagesIcon, QrCode
 } from 'lucide-react';
 import { translateHtml } from '../../services/ai/translation.service';
+import { planTmTranslation, translateFragmentWithMemory, getProtectedPhrases, getProtectedPhraseRefs, type TmPlanResult, type TmPlanContext } from '../../services/im/im-tm-translate';
+import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../services/im/im-tm-write.service';
+import { generateUUID } from '../../utils/uuid.utils';
 import { QR_SKU_PLACEHOLDER_ID } from '../../config/im.constants';
 import { AssetLibraryPanel } from './editor/AssetLibraryPanel';
 // Shared blocks are edited outside any one template, so model the HOUSE DEFAULT
@@ -220,10 +223,66 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
     const failures: string[] = [];
     let firstError = '';
     let idx = 0, done = 0;
+
+    // Translation memory. Planned once for the whole run — decomposition is per
+    // fragment, not per language — then consulted per target inside the workers.
+    //
+    // scope='block' with domainCategoryId null on purpose: a shared block is authored
+    // outside any one category, so scoping its segments to a domain would both mislabel
+    // them and narrow the fuzzy recall that makes cross-category boilerplate pay.
+    // blockId stays null until the block exists, because im_tm_reuse_log.block_id is a
+    // real FK and a draft id would fail the insert.
+    const tmFragmentId = 'block:' + (initial.id ?? 'new') + ':content';
+    const tmWriteBack: RecordTmSegmentInput[] = [];
+    const tmEvents: TmReuseEvent[] = [];
+    const tmApplied: string[] = [];
+    let reusedFromMemory = 0;
+    let tmPlan: TmPlanResult | undefined;
+    let tmCtx: TmPlanContext | undefined;
+    try {
+      tmCtx = {
+        sourceLocale: 'en',
+        protectedPhrases: await getProtectedPhrases(),
+        regulatoryRefsByPhrase: await getProtectedPhraseRefs(),
+        // A shared block declares the regulations it exists to satisfy, and that claim is
+        // true of the whole block — so it applies to every segment, not just the ones
+        // carrying a mandated phrase.
+        regulatoryRefs: draft.regulationRefs ?? [],
+        domainCategoryId: null,
+        domainContentType: draft.blockType ?? 'content',
+        runId: generateUUID(),
+        runKind: 'ai',
+        scope: 'block',
+        blockId: isNew ? null : (initial.id ?? null),
+      };
+      tmPlan = await planTmTranslation(
+        [{ id: tmFragmentId, sourceHtml: source, label: draft.title || draft.slug }],
+        targets,
+        tmCtx,
+      );
+    } catch (e) {
+      console.warn('[IMBlockLibrary] translation memory unavailable; translating everything.', e);
+      tmPlan = undefined;
+    }
+
     const worker = async () => {
       while (idx < targets.length) {
         const code = targets[idx++];
-        try { nextContent[code] = await translateHtml(source, 'en', code); }
+        try {
+          if (tmPlan && tmCtx) {
+            const out = await translateFragmentWithMemory(
+              tmFragmentId, source, code, tmPlan, tmCtx,
+              h => translateHtml(h, 'en', code),
+            );
+            nextContent[code] = out.html;
+            if (out.fromMemory) reusedFromMemory += 1;
+            tmWriteBack.push(...out.writeBack);
+            tmEvents.push(...out.reuseEvents);
+            tmApplied.push(...out.appliedSegmentIds);
+          } else {
+            nextContent[code] = await translateHtml(source, 'en', code);
+          }
+        }
         catch (e: any) {
           failures.push(code.toUpperCase());
           // Keep the first message: a whole run failing is nearly always ONE cause
@@ -239,14 +298,37 @@ const BlockModal: React.FC<BlockModalProps> = ({ block: initial, categories, all
       set({ content: nextContent });
       // Reseed the visual surface if the currently-shown language was translated.
       if (contentMode === 'visual' && visualRef.current) visualRef.current.innerHTML = sanitizeHtml(nextContent[activeLang] ?? '');
+
+      // Flush the memory AFTER the content is in the draft. All best-effort: the
+      // translations are already in state, so a lost log row must never read as a
+      // failed translation run.
+      if (tmEvents.length) void logTmReuse(tmEvents);
+      if (tmApplied.length) void noteTmSegmentsUsed(tmApplied);
+      if (tmWriteBack.length) {
+        try {
+          const recorded = await recordTmSegments(tmWriteBack);
+          if (recorded.divergences.length) {
+            console.warn(
+              `[IMBlockLibrary] ${recorded.divergences.length} translation(s) disagreed with `
+              + 'approved translation memory and were NOT stored.',
+              recorded.divergences,
+            );
+          }
+        } catch (e) {
+          console.warn('[IMBlockLibrary] could not record translations to the memory.', e);
+        }
+      }
+
       const translated = targets.length - failures.length;
+      const reuseNote = reusedFromMemory > 0
+        ? ` ${reusedFromMemory} came from approved memory (no AI call).` : '';
       setTranslateStatus(failures.length
         ? {
             tone: 'warn',
             text: `Translated ${translated} of ${targets.length}. Failed: ${failures.join(', ')} (left unchanged)` +
-              `${firstError ? ` — ${firstError}` : ''}`,
+              `${firstError ? ` — ${firstError}` : ''}${reuseNote}`,
           }
-        : { tone: 'ok', text: `Translated ${translated} language(s) — review the tabs, then Save.` });
+        : { tone: 'ok', text: `Translated ${translated} language(s) — review the tabs, then Save.${reuseNote}` });
     } finally {
       setTranslating(false);
     }

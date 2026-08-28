@@ -148,6 +148,14 @@ export {
 } from './compliance';
 export type { ImportAttributesResult } from './compliance';
 
+export {
+  getProductToolkitDefinitions,
+  getProductToolkitDefinition,
+  mapProductToolkitAttributes,
+  ProductToolkitUnavailableError,
+} from './compliance';
+export type { PtDefinitionSummary, PtAttribute } from './compliance';
+
 // IM module
 export {
   getIMTemplates,

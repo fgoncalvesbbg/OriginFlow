@@ -42,4 +42,12 @@ export {
 } from './compliance-requirement.service';
 export type { ImportAttributesResult } from './compliance-requirement.service';
 
+export {
+  getProductToolkitDefinitions,
+  getProductToolkitDefinition,
+  mapProductToolkitAttributes,
+  ProductToolkitUnavailableError,
+} from './producttoolkit-attributes.service';
+export type { PtDefinitionSummary, PtAttribute } from './producttoolkit-attributes.service';
+
 export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';

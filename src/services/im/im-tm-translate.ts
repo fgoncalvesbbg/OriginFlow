@@ -23,6 +23,7 @@
 
 import { DEFAULT_SOURCE_LOCALE, normalizeLocale } from '../../config/im-locales';
 import { getTranslationVerbatims } from '../ai/translation-verbatim.service';
+import type { TranslationVerbatim } from '../../types';
 import { alignTargetToSource, type AlignmentRejection } from './im-tm-align';
 import { buildTmSourceUnits, type TmSourceUnit } from './im-tm-core';
 import { prefetchTmForRun, type TmLookupRequest, type TmMatch } from './im-tm-lookup.service';
@@ -53,6 +54,26 @@ export interface TmPlanContext {
   sourceLocale?: string;
   /** Mandated regulation wording a sentence boundary must not cut through. */
   protectedPhrases?: string[];
+  /**
+   * Mandated phrase → the regulation reference(s) mandating it, from
+   * `getProtectedPhraseRefs()`. A written-back segment is tagged with the refs of the
+   * phrases it ACTUALLY contains, which is what makes the regulatory carve-out in
+   * `evaluateCandidate` fire: regulation-derived text auto-applies only in an identical
+   * domain and context, never across categories.
+   *
+   * Keyed on the phrase exactly as `protectedPhrases` lists it.
+   */
+  regulatoryRefsByPhrase?: Record<string, string[]>;
+  /**
+   * Refs that apply to EVERY segment of these fragments, for content authored to satisfy
+   * a regulation as a whole (a shared block's `regulationRefs`).
+   *
+   * Pass this only when it is really true of the whole fragment. Tagging ordinary prose
+   * costs real leverage: the `exact` tier deliberately crosses domains because
+   * cross-category boilerplate is where most of the reuse lives, and a ref switches that
+   * off for the segment.
+   */
+  regulatoryRefs?: string[];
   /** Brand and product names to protect. Never guessed — supply them or get none. */
   brands?: string[];
   domainCategoryId?: string | null;
@@ -136,22 +157,49 @@ export const planKey = (fragmentId: string, targetLocale: string): string =>
  * slightly more aggressive segmentation, not incorrect output, and the verbatim
  * protection itself is enforced separately at engine-call and publish time.
  */
-let protectedPhrasesPromise: Promise<string[]> | null = null;
-export const getProtectedPhrases = (): Promise<string[]> => {
-  if (!protectedPhrasesPromise) {
-    protectedPhrasesPromise = getTranslationVerbatims()
-      .then((vs) => vs.map((v) => v.phrase).filter((p) => p && p.trim()))
-      .catch((e) => {
-        console.warn('[im-tm-translate] could not load protected phrases; continuing without.', e);
-        return [];
-      });
+let verbatimsPromise: Promise<TranslationVerbatim[]> | null = null;
+const loadVerbatims = (): Promise<TranslationVerbatim[]> => {
+  if (!verbatimsPromise) {
+    verbatimsPromise = getTranslationVerbatims().catch((e) => {
+      console.warn('[im-tm-translate] could not load protected phrases; continuing without.', e);
+      return [];
+    });
   }
-  return protectedPhrasesPromise;
+  return verbatimsPromise;
 };
+
+export const getProtectedPhrases = (): Promise<string[]> =>
+  loadVerbatims().then((vs) => vs.map((v) => v.phrase).filter((p) => p && p.trim()));
+
+/**
+ * Mandated phrase → the regulation reference(s) that mandate it.
+ *
+ * Derived from the SAME fetch as `getProtectedPhrases`, so the two can never disagree
+ * about which phrases exist. Phrases with no `regulatoryRef` are absent from the map
+ * rather than present with an empty array: "protected" and "regulation-derived" are
+ * different claims, and only the second one restricts reuse.
+ *
+ * Deliberately NOT filtered by the live `is_active` column. The phrase list drives
+ * sentence segmentation, so narrowing it would re-key the whole corpus — that is a
+ * migration, not a redeploy (see the version constants in im-tm-key.ts).
+ */
+export const getProtectedPhraseRefs = (): Promise<Record<string, string[]>> =>
+  loadVerbatims().then((vs) => {
+    const map: Record<string, string[]> = {};
+    for (const v of vs) {
+      const phrase = v.phrase?.trim();
+      const ref = v.regulatoryRef?.trim();
+      if (!phrase || !ref) continue;
+      // One phrase can be mandated by more than one regulation; keep them all.
+      const prior = map[v.phrase] ?? [];
+      if (!prior.includes(ref)) map[v.phrase] = [...prior, ref];
+    }
+    return map;
+  });
 
 /** Test seam: forget the cached phrase list. */
 export const resetProtectedPhrasesCache = (): void => {
-  protectedPhrasesPromise = null;
+  verbatimsPromise = null;
 };
 
 const requestKey = (fragmentId: string, segmentIndex: number, targetLocale: string): string =>
@@ -348,6 +396,35 @@ export const planTmTranslation = async (
   };
 };
 
+/**
+ * Which regulations mandate the wording of ONE segment.
+ *
+ * Phrase matching is case-sensitive exact substring, longest phrase first — the same
+ * rule `protectedRangesIn` (im-tm-segment.ts) and `freezeVerbatims` (im-chip-freeze.ts)
+ * already use. Matching them matters: a segment that the freezer protects but this
+ * function does not recognise would be stored as ordinary prose and then auto-applied
+ * across domains, which is exactly the case the carve-out exists to prevent.
+ *
+ * Tested against the RAW segment text, because that is what the freezer sees; a phrase
+ * broken up by inline tags is not matched by either, consistently.
+ *
+ * Returns a deduped, sorted array so re-recording an unchanged segment produces an
+ * unchanged value rather than churning the row.
+ */
+const regulatoryRefsFor = (unit: TmSourceUnit, ctx: TmPlanContext): string[] => {
+  const refs = new Set<string>(ctx.regulatoryRefs ?? []);
+  const byPhrase = ctx.regulatoryRefsByPhrase;
+  if (byPhrase) {
+    const text = unit.segment.rawText;
+    const phrases = Object.keys(byPhrase).sort((a, b) => b.length - a.length);
+    for (const phrase of phrases) {
+      if (!phrase || !text.includes(phrase)) continue;
+      for (const ref of byPhrase[phrase]) if (ref?.trim()) refs.add(ref.trim());
+    }
+  }
+  return [...refs].sort();
+};
+
 export interface TmTranslateFragmentResult {
   html: string;
   /** True when the memory supplied the whole fragment and NO engine call was made. */
@@ -429,6 +506,7 @@ export const translateFragmentWithMemory = async (
 
   const sourceLocale = normalizeLocale(ctx.sourceLocale ?? DEFAULT_SOURCE_LOCALE);
   const writeBack: RecordTmSegmentInput[] = alignment.aligned.map(({ unit, targetText }) => ({
+    regulatoryRefs: regulatoryRefsFor(unit, ctx),
     sourceLocale,
     targetLocale: locale,
     sourceKey: unit.keys.segmentKey,
@@ -550,6 +628,9 @@ export const recordImportedTranslations = async (
         domainCategoryId: ctx.domainCategoryId ?? null,
         domainContentType: ctx.domainContentType ?? null,
         origin: 'imported',
+        // Same derivation as the AI path. A vendor's rendering of mandated wording is if
+        // anything the case where cross-domain auto-apply is least acceptable.
+        regulatoryRefs: regulatoryRefsFor(unit, ctx),
         sourceRef: ctx.sourceRef ?? null,
       });
     }

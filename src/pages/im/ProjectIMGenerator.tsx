@@ -4,7 +4,7 @@
  * template + the project's data into a previewable, publishable IM and exports it (PDF/JSON/XML).
  * Sub-components and pure helpers live under ./project-im-generator/.
  */
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
@@ -29,6 +29,9 @@ import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
 import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
 import { translateHtml } from '../../services/ai/translation.service';
+import { planTmTranslation, translateFragmentWithMemory, getProtectedPhrases, getProtectedPhraseRefs, type TmPlanContext } from '../../services/im/im-tm-translate';
+import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../services/im/im-tm-write.service';
+import { generateUUID } from '../../utils/uuid.utils';
 import { markTranslatedFromEn } from '../../services/im/im-translation-marker';
 import { IM_LANGUAGE_NAMES, IM_LANGUAGE_CODES, IM_TEMPLATE_LANGUAGE_OPTIONS, orderIMLanguages } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
@@ -39,7 +42,7 @@ import type { PublishResult, PrintPdfResult, PrintRender } from '../../services'
 import { printedManualStatusOf, MANUAL_STATUS_META } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2 } from 'lucide-react';
-import { InlineBlockEditor, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { InlineBlockEditor, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
 import EditorToolbarMenu, { type ToolbarMenuItem } from './editor/EditorToolbarMenu';
@@ -2899,7 +2902,18 @@ const ProjectIMGenerator: React.FC = () => {
   // pre-translated from the template editor and are never touched. English is the
   // source. Returns display gaps + deferred translate tasks that mutate fresh working
   // copies (committed only after the run) plus those copies for persistence.
-  const buildTranslationPlan = (langs: string[], skipExisting: boolean) => {
+  //
+  // `tmHook` is the translation-memory seam. The tasks are DEFERRED, so the caller can
+  // hand in an empty holder, read `fragments` off the returned plan, plan the memory
+  // against it, and only then set `tmHook.translate` — before any task runs. That is
+  // what lets one synchronous walk serve both the real run (memory-backed) and the
+  // display-only gap count at the bottom of this file (which must stay cheap and must
+  // not touch the memory at all).
+  const buildTranslationPlan = (
+    langs: string[],
+    skipExisting: boolean,
+    tmHook?: { translate?: (fragmentId: string, html: string, lang: string) => Promise<string> },
+  ) => {
     // Deep-ish copies so a mid-run failure never leaves torn state.
     const wAdditions: Record<string, ProjectBlockAddition[]> = {};
     for (const [sid, adds] of Object.entries(sectionAdditions)) {
@@ -2929,35 +2943,51 @@ const ProjectIMGenerator: React.FC = () => {
     // A fragment is translatable when it has English prose; it's a gap for `lang`
     // when the target is blank (or always, in overwrite mode). Mirrors the template
     // editor's `needs(...)`.
+    // Every fragment the walk found, for the memory to plan against. Collected even
+    // when a fragment is a gap in only some languages — planning is per fragment and
+    // the per-language filtering already happened in `tasksByLang`.
+    const fragments: Array<{ id: string; sourceHtml: string; label?: string }> = [];
+
     const consider = (
       content: Record<string, string>,
       sectionId: string,
+      fragmentId: string,
       write: (lang: string, html: string) => void,
     ) => {
       const src = content?.['en'];
       if (!src || !src.trim()) return;
       const label = titleById.get(sectionId) ?? sectionId;
+      let queued = false;
       for (const lang of langs) {
         if (skipExisting && content[lang]?.trim()) continue;
         gapsByLang[lang].add(label);
+        queued = true;
         // Marked with the EN source hash so the editor's language tabs can flag the
         // translation as stale if English is edited later (im-translation-marker.ts).
-        tasksByLang[lang].push(async () => { write(lang, markTranslatedFromEn(await translateHtml(src, 'en', lang), src)); });
+        tasksByLang[lang].push(async () => {
+          const out = tmHook?.translate
+            ? await tmHook.translate(fragmentId, src, lang)
+            : await translateHtml(src, 'en', lang);
+          write(lang, markTranslatedFromEn(out, src));
+        });
       }
+      if (queued) fragments.push({ id: fragmentId, sourceHtml: src, label });
     };
 
     for (const [sid, adds] of Object.entries(wAdditions)) {
-      adds.forEach(a => consider(a.block.content, sid, (lang, html) => { a.block.content[lang] = html; }));
+      adds.forEach((a, i) => consider(a.block.content, sid, `${sid}#add:${i}`, (lang, html) => { a.block.content[lang] = html; }));
     }
     for (const [sid, refs] of Object.entries(wOverrides)) {
-      refs.forEach(r => consider(r.content, sid, (lang, html) => { r.content[lang] = html; }));
+      // Same positional form the template editor's bulk path uses for an inline ref,
+      // so a section's fragment ids stay comparable across the two scopes in the log.
+      refs.forEach((r, i) => consider(r.content, sid, `${sid}#inline:${i}`, (lang, html) => { r.content[lang] = html; }));
     }
     for (const [sid, byIdx] of Object.entries(wBlockOverrides)) {
-      Object.values(byIdx).forEach(r => consider(r.content, sid, (lang, html) => { r.content[lang] = html; }));
+      Object.entries(byIdx).forEach(([idx, r]) => consider(r.content, sid, `${sid}#bo:${idx}`, (lang, html) => { r.content[lang] = html; }));
     }
-    wExtras.forEach(ex => ex.blocks.forEach(b => { if (b.kind === 'inline') consider(b.content, ex.id, (lang, html) => { b.content[lang] = html; }); }));
+    wExtras.forEach(ex => ex.blocks.forEach((b, i) => { if (b.kind === 'inline') consider(b.content, ex.id, `${ex.id}#inline:${i}`, (lang, html) => { b.content[lang] = html; }); }));
 
-    return { tasksByLang, gapsByLang, working: { wAdditions, wOverrides, wBlockOverrides, wExtras } };
+    return { tasksByLang, gapsByLang, fragments, working: { wAdditions, wOverrides, wBlockOverrides, wExtras } };
   };
 
   // Upload any base64 images embedded in project-authored content to storage and
@@ -3010,7 +3040,8 @@ const ProjectIMGenerator: React.FC = () => {
     const targets = langs.filter(l => l !== 'en');
     if (!targets.length) return;
 
-    const { tasksByLang, working } = buildTranslationPlan(targets, translateSkipExisting);
+    const tmHook: { translate?: (fragmentId: string, html: string, lang: string) => Promise<string> } = {};
+    const { tasksByLang, fragments, working } = buildTranslationPlan(targets, translateSkipExisting, tmHook);
     const tasks = targets.flatMap(l => tasksByLang[l]);
     if (tasks.length === 0) {
       alert(translateSkipExisting
@@ -3023,6 +3054,43 @@ const ProjectIMGenerator: React.FC = () => {
     setTranslateProgress({ done: 0, total: tasks.length });
     const failures: string[] = [];
     let done = 0;
+
+    // --- Translation memory --------------------------------------------------
+    // Planned before the pool starts, so `tmHook.translate` is in place by the time the
+    // first deferred task runs. A memory that cannot be read degrades to the plain
+    // engine call — a translation run must never fail because the memory is down.
+    const tmWriteBack: RecordTmSegmentInput[] = [];
+    const tmEvents: TmReuseEvent[] = [];
+    const tmApplied: string[] = [];
+    let reusedFromMemory = 0;
+    try {
+      const tmCtx: TmPlanContext = {
+        sourceLocale: 'en',
+        protectedPhrases: await getProtectedPhrases(),
+        regulatoryRefsByPhrase: await getProtectedPhraseRefs(),
+        domainCategoryId: project?.categoryId ?? null,
+        runId: generateUUID(),
+        runKind: 'ai',
+        scope: 'project',
+        projectId,
+        templateId: selectedTemplateId,
+        templateType,
+      };
+      const tmPlan = await planTmTranslation(fragments, targets, tmCtx);
+      tmHook.translate = async (fragmentId, html, lang) => {
+        const out = await translateFragmentWithMemory(
+          fragmentId, html, lang, tmPlan, tmCtx,
+          h => translateHtml(h, 'en', lang),
+        );
+        if (out.fromMemory) reusedFromMemory += 1;
+        tmWriteBack.push(...out.writeBack);
+        tmEvents.push(...out.reuseEvents);
+        tmApplied.push(...out.appliedSegmentIds);
+        return out.html;
+      };
+    } catch (e) {
+      console.warn('[ProjectIMGenerator] translation memory unavailable; translating everything.', e);
+    }
     const CONCURRENCY = 4;
     let cursor = 0;
     const runner = async () => {
@@ -3067,8 +3135,34 @@ const ProjectIMGenerator: React.FC = () => {
         failures.push('Failed to save translations. Your work is backed up locally on this device.');
       }
 
+      // Flush the memory AFTER the content is safe. All best-effort: the translations
+      // are already committed and backed up, so losing a log row or a segment write
+      // must never look like a failed translation run.
+      if (tmEvents.length) void logTmReuse(tmEvents);
+      if (tmApplied.length) void noteTmSegmentsUsed(tmApplied);
+      if (tmWriteBack.length) {
+        try {
+          const recorded = await recordTmSegments(tmWriteBack);
+          if (recorded.divergences.length) {
+            // The model disagreed with wording a reviewer already approved. Nothing was
+            // overwritten; surfacing it is the point.
+            console.warn(
+              `[ProjectIMGenerator] ${recorded.divergences.length} translation(s) disagreed with `
+              + 'approved translation memory and were NOT stored.',
+              recorded.divergences,
+            );
+          }
+        } catch (e) {
+          console.warn('[ProjectIMGenerator] could not record translations to the memory.', e);
+        }
+      }
+
+      const reuseNote = reusedFromMemory > 0
+        ? `\n\n${reusedFromMemory} fragment(s) came from approved translation memory — no AI call.` : '';
       if (failures.length) {
-        alert(`Translated ${tasks.length - failures.length}/${tasks.length} fragment(s). ${failures.length} left untranslated:\n\n${failures.slice(0, 8).join('\n')}${failures.length > 8 ? '\n…' : ''}`);
+        alert(`Translated ${tasks.length - failures.length}/${tasks.length} fragment(s). ${failures.length} left untranslated:\n\n${failures.slice(0, 8).join('\n')}${failures.length > 8 ? '\n…' : ''}${reuseNote}`);
+      } else if (reusedFromMemory > 0) {
+        alert(`Translated ${tasks.length} fragment(s).${reuseNote}`);
       }
     } finally {
       setTranslating(false);
@@ -3079,6 +3173,17 @@ const ProjectIMGenerator: React.FC = () => {
   const projectAttributes = project?.categoryId
     ? getAttributesForCategory(allAttributes, project.categoryId)
     : allAttributes;
+
+  // What the per-row "Translate from EN" buttons report to the translation memory.
+  // Memoized because it is passed as a prop into every inline row: a fresh literal per
+  // render would churn the rows' translate handlers on each keystroke.
+  const rowTmContext = useMemo<TmRowContext>(() => ({
+    scope: 'project',
+    projectId: projectId ?? null,
+    templateId: selectedTemplateId ?? null,
+    templateType,
+    domainCategoryId: project?.categoryId ?? null,
+  }), [projectId, selectedTemplateId, templateType, project?.categoryId]);
 
   // --- Per-project required languages ------------------------------------------
   // A project produces a subset of the template's languages (English always
@@ -3687,6 +3792,7 @@ ${url}`);
       </div>
       <InlineBlockEditor printTemplateType={templateType} printPageSize={printPageSize}
         rowKey={opts.rowKey}
+        tmContext={rowTmContext}
         content={block.content}
         variant={block.variant}
         languages={editorLanguages}
@@ -4022,6 +4128,7 @@ ${url}`);
                       </div>
                       <InlineBlockEditor printTemplateType={templateType} printPageSize={printPageSize}
                         rowKey={`${section.id}-bo-${i}`}
+                        tmContext={rowTmContext}
                         content={getBlockOverride(section.id, i, ref)!.content}
                         variant={getBlockOverride(section.id, i, ref)!.variant}
                         languages={editorLanguages}

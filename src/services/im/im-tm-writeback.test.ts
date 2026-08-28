@@ -42,8 +42,11 @@ import {
   planTmTranslation,
   recordImportedTranslations,
   translateFragmentWithMemory,
+  getProtectedPhraseRefs,
+  resetProtectedPhrasesCache,
   type TmPlanContext,
 } from './im-tm-translate';
+import { getTranslationVerbatims } from '../ai/translation-verbatim.service';
 
 const CTX: TmPlanContext = {
   runId: '11111111-1111-1111-1111-111111111111',
@@ -140,6 +143,88 @@ describe('translateFragmentWithMemory', () => {
     const out = await translateFragmentWithMemory('frag-1', html, 'de', plan, CTX, engine);
     expect(engine).toHaveBeenCalledOnce();
     expect(out.writeBack).toHaveLength(0);
+  });
+});
+
+describe('regulatory refs on write-back', () => {
+  // The carve-out in evaluateCandidate (im-tm-lookup.service.ts) restricts a segment
+  // carrying any regulatory ref to same-domain, same-context auto-apply. It is only as
+  // good as what gets written here: a mandated sentence stored with no ref is a sentence
+  // the memory will happily reuse in an unrelated product category.
+  const PHRASE_MAP = { 'Do not immerse in water': ['EN 60335-1'] };
+
+  it('defaults to an empty array for ordinary prose', async () => {
+    const plan = await planTmTranslation([{ id: 'f', sourceHtml: ONE }], ['de'], CTX);
+    const out = await translateFragmentWithMemory(
+      'f', ONE, 'de', plan, CTX, async () => '<p>Nicht eintauchen.</p>',
+    );
+    // Not undefined: regulatory_refs is NOT NULL in the schema.
+    expect(out.writeBack[0].regulatoryRefs).toEqual([]);
+  });
+
+  it('tags only the segments that actually carry a mandated phrase', async () => {
+    const ctx: TmPlanContext = { ...CTX, regulatoryRefsByPhrase: PHRASE_MAP };
+    const plan = await planTmTranslation([{ id: 'f', sourceHtml: TWO }], ['de'], ctx);
+    const out = await translateFragmentWithMemory(
+      'f', TWO, 'de', plan, ctx,
+      async () => '<p>Nicht in Wasser eintauchen. Mit einem feuchten Tuch abwischen.</p>',
+    );
+    expect(out.writeBack).toHaveLength(2);
+    expect(out.writeBack[0].regulatoryRefs).toEqual(['EN 60335-1']);
+    // The damp-cloth sentence is not regulation-derived and must stay freely reusable.
+    expect(out.writeBack[1].regulatoryRefs).toEqual([]);
+  });
+
+  it('applies fragment-level refs to every segment and unions them with phrase refs', async () => {
+    const ctx: TmPlanContext = {
+      ...CTX,
+      regulatoryRefsByPhrase: PHRASE_MAP,
+      regulatoryRefs: ['(EU) 2019/2016'],
+    };
+    const plan = await planTmTranslation([{ id: 'f', sourceHtml: TWO }], ['de'], ctx);
+    const out = await translateFragmentWithMemory(
+      'f', TWO, 'de', plan, ctx,
+      async () => '<p>Nicht in Wasser eintauchen. Mit einem feuchten Tuch abwischen.</p>',
+    );
+    expect(out.writeBack[0].regulatoryRefs).toEqual(['(EU) 2019/2016', 'EN 60335-1']);
+    expect(out.writeBack[1].regulatoryRefs).toEqual(['(EU) 2019/2016']);
+  });
+
+  it('matches phrases case-sensitively, like the freezer does', async () => {
+    const ctx: TmPlanContext = {
+      ...CTX,
+      regulatoryRefsByPhrase: { 'DO NOT IMMERSE IN WATER': ['EN 60335-1'] },
+    };
+    const plan = await planTmTranslation([{ id: 'f', sourceHtml: TWO }], ['de'], ctx);
+    const out = await translateFragmentWithMemory(
+      'f', TWO, 'de', plan, ctx,
+      async () => '<p>Nicht in Wasser eintauchen. Mit einem feuchten Tuch abwischen.</p>',
+    );
+    expect(out.writeBack[0].regulatoryRefs).toEqual([]);
+  });
+
+  it('tags a vendor import the same way', async () => {
+    await recordImportedTranslations(
+      [{ fragmentId: 'f', sourceHtml: ONE, targetLocale: 'de', targetHtml: '<p>Nicht in Wasser eintauchen.</p>' }],
+      { ...CTX, runKind: 'xliff_import', regulatoryRefsByPhrase: { 'immerse the appliance in water': ['EN 60335-1'] } },
+    );
+    expect(insertedRows()[0].regulatory_refs).toEqual(['EN 60335-1']);
+  });
+});
+
+describe('getProtectedPhraseRefs', () => {
+  beforeEach(() => resetProtectedPhrasesCache());
+
+  it('maps a mandated phrase to its regulation and omits phrases without one', async () => {
+    vi.mocked(getTranslationVerbatims).mockResolvedValueOnce([
+      { id: '1', phrase: 'Do not immerse in water', translations: {}, regulatoryRef: 'EN 60335-1', createdAt: '', updatedAt: '' },
+      { id: '2', phrase: 'Keep out of reach of children', translations: {}, createdAt: '', updatedAt: '' },
+    ]);
+    const map = await getProtectedPhraseRefs();
+    expect(map).toEqual({ 'Do not immerse in water': ['EN 60335-1'] });
+    // "protected" and "regulation-derived" are different claims; only the second one
+    // restricts reuse, so an unattributed phrase must not appear at all.
+    expect(map['Keep out of reach of children']).toBeUndefined();
   });
 });
 

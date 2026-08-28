@@ -3,7 +3,7 @@
  * IMTemplateEditor — authoring UI for IM templates: section tree, block references, metadata,
  * per-language content, and live preview (with AI-assisted translation).
  */
-import React, { useEffect, useState, useRef, useCallback, useDeferredValue } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useDeferredValue, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { getIMTemplateByCategoryId, getIMSections, saveIMSection, deleteIMSection, getCategories, updateIMTemplate, deleteIMTemplate, getProjectIMCountForTemplate, getCategoryAttributes, getIMBlocks, resolveManual } from '../../services';
@@ -18,7 +18,7 @@ import { buildTranslationXliff, downloadTranslationXliff } from '../../services/
 import { parseTranslationXliff, applyTranslationImport, countTranslationOverwrites, countChangedPrefills, saveTranslationImportReport, ParseTranslationXliffResult } from '../../services/im/im-translation-import.service';
 import { collectTranslationFragments, refFragmentId, sectionFragmentId } from '../../services/im/im-translation-fragments';
 import { markTranslatedFromEn } from '../../services/im/im-translation-marker';
-import { planTmTranslation, translateFragmentWithMemory, recordImportedTranslations, getProtectedPhrases, reuseEventsOf, planKey, type TmPlanResult, type TmPlanContext } from '../../services/im/im-tm-translate';
+import { planTmTranslation, translateFragmentWithMemory, recordImportedTranslations, getProtectedPhrases, getProtectedPhraseRefs, reuseEventsOf, planKey, type TmPlanResult, type TmPlanContext } from '../../services/im/im-tm-translate';
 import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../services/im/im-tm-write.service';
 import { generateUUID } from '../../utils/uuid.utils';
 import { useAuth } from '../../context/AuthContext';
@@ -27,7 +27,7 @@ import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
-import { InlineHtmlRow, CALLOUT_VARIANTS } from './editor/InlineBlockEditor';
+import { InlineHtmlRow, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
 import { usePrintColumn } from './editor/usePrintColumn';
 import { imContentPrintScale } from './editor/im-content-style';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
@@ -1629,6 +1629,7 @@ const IMTemplateEditor: React.FC = () => {
         tmPlan = await planTmTranslation(fragments, exportTargets, {
           sourceLocale: 'en',
           protectedPhrases: await getProtectedPhrases(),
+          regulatoryRefsByPhrase: await getProtectedPhraseRefs(),
           domainCategoryId: categoryId ?? null,
           runId: generateUUID(),
           runKind: 'xliff_export',
@@ -1764,6 +1765,7 @@ const IMTemplateEditor: React.FC = () => {
           const recorded = await recordImportedTranslations(imported, {
             sourceLocale: 'en',
             protectedPhrases: await getProtectedPhrases(),
+            regulatoryRefsByPhrase: await getProtectedPhraseRefs(),
             domainCategoryId: categoryId ?? null,
             runId: generateUUID(),
             runKind: 'xliff_import',
@@ -1945,6 +1947,16 @@ const IMTemplateEditor: React.FC = () => {
     ...(categoryId ? getAttributesForCategory(categoryAttributes, categoryId) : []),
   ];
   const imThemeVars = getIMThemeVariables(metaSettings);
+  // What the per-row "Translate from EN" buttons report to the translation memory, so a
+  // single-row translation reads and writes the same corpus as the bulk run above.
+  // Memoized: it is a prop on every inline row, and a fresh literal per render would
+  // rebuild those rows' translate handlers on each keystroke.
+  const rowTmContext = useMemo<TmRowContext>(() => ({
+    scope: 'template',
+    templateId: template.id,
+    templateType,
+    domainCategoryId: categoryId ?? null,
+  }), [template.id, templateType, categoryId]);
   const unsavedCount = getDirtySections().length;
   // FINAL templates are read-only until explicitly unlocked (pre-released).
   const locked = template.isFinalized;
@@ -2369,6 +2381,7 @@ const IMTemplateEditor: React.FC = () => {
                                        languages={availableLangsForTabs}
                                        sectionId={currentSection.id}
                                        index={index}
+                                       tmContext={rowTmContext}
                                        onChange={(lang, html) => updateInlineRefContent(index, lang, html)}
                                        onVariantChange={(v) => updateInlineRefVariant(index, v)}
                                        onInsertPlaceholder={handleInsertPlaceholder}

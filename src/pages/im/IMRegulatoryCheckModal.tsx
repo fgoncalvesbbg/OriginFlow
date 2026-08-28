@@ -52,7 +52,7 @@ import type {
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { TemplateRegulationsPanel } from './IMTemplateRegulations';
-import { InlineBlockEditor } from './editor/InlineBlockEditor';
+import { InlineBlockEditor, type TmRowContext } from './editor/InlineBlockEditor';
 
 const SEVERITY_STYLE: Record<RegCheckSeverity, string> = {
   critical: 'bg-rose-100 text-rose-700 border-rose-200',
@@ -166,10 +166,12 @@ interface FixPanelProps {
   /** Print profile for the inline editor's WYSIWYG column (matches the template editor). */
   printTemplateType?: IMTemplate['templateType'];
   printPageSize?: 'a4' | 'a5';
+  /** Lets the fix editor's per-row translate button share the translation memory. */
+  tmContext?: TmRowContext;
 }
 
 const FixPanel: React.FC<FixPanelProps> = ({
-  location, languages, attributes, locked, onSave, onClose, printTemplateType, printPageSize,
+  location, languages, attributes, locked, onSave, onClose, printTemplateType, printPageSize, tmContext,
 }) => {
   const original = location.ref;
   const inlineOriginal = original && original.kind === 'inline' ? original : null;
@@ -259,6 +261,7 @@ const FixPanel: React.FC<FixPanelProps> = ({
               languages={languages}
               attributes={attributes}
               rowKey={`regcheck-${location.section.id}-${location.index}`}
+              tmContext={tmContext}
               onChange={(lang, html) =>
                 setDraft((d) => (d ? { ...d, content: { ...d.content, [lang]: html } } : d))}
               onVariantChange={(variant) => setDraft((d) => (d ? { ...d, variant } : d))}
@@ -318,11 +321,12 @@ interface FindingRowProps {
   onGoToSection?: (sectionId: string) => void;
   printTemplateType?: IMTemplate['templateType'];
   printPageSize?: 'a4' | 'a5';
+  tmContext?: TmRowContext;
 }
 
 const FindingRow: React.FC<FindingRowProps> = ({
   finding, status, statusBusy, onSetStatus, location, isEditing, onToggleEdit,
-  languages, attributes, locked, onSaveSection, onGoToSection, printTemplateType, printPageSize,
+  languages, attributes, locked, onSaveSection, onGoToSection, printTemplateType, printPageSize, tmContext,
 }) => {
   // A decided finding stays visible but recedes, so the undecided ones read first.
   const decided = Boolean(status);
@@ -407,6 +411,7 @@ const FindingRow: React.FC<FindingRowProps> = ({
           onClose={onToggleEdit}
           printTemplateType={printTemplateType}
           printPageSize={printPageSize}
+          tmContext={tmContext}
         />
       )}
     </div>
@@ -931,6 +936,12 @@ export const RegulatoryCheckModal: React.FC<Props> = ({
                               onGoToSection={onGoToSection}
                               printTemplateType={template.templateType}
                               printPageSize={template.metadata?.pageSize === 'a4' ? 'a4' : 'a5'}
+                              tmContext={{
+                                scope: 'template',
+                                templateId: template.id,
+                                templateType: template.templateType,
+                                domainCategoryId: template.categoryId ?? null,
+                              }}
                             />
                           ))}
                         </div>

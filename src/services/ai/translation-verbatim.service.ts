@@ -18,6 +18,7 @@ const mapRow = (row: any): TranslationVerbatim => ({
   phrase: row.phrase,
   note: row.note ?? undefined,
   translations: row.translations ?? {},
+  regulatoryRef: row.regulatory_ref?.trim() || undefined,
   createdBy: row.created_by ?? undefined,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
