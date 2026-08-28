@@ -18,6 +18,27 @@ export enum ComplianceResponseStatus {
   NOT_APPLICABLE = 'not_applicable'
 }
 
+/**
+ * The category tree is three levels: L1 (department) > L2 (family) > L3 (leaf).
+ * Only L3 is referenced by the rest of the app — projects, RFQs, compliance requests,
+ * requirements, product features, proposals and attributes all point at a categories_l3 id.
+ * L1/L2 exist to organise and filter that list, never to be selected as a category.
+ */
+export interface CategoryL1 {
+  id: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
+}
+
+export interface CategoryL2 {
+  id: string;
+  l1Id: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
+}
+
 export interface CategoryL3 {
   id: string;
   name: string;
@@ -26,6 +47,22 @@ export interface CategoryL3 {
   finalizedAt?: string | null;
   pmId?: string | null;    // PM assigned to own this category
   pmName?: string | null;  // Denormalised for display
+  /**
+   * Parent L2, or null for an uncategorised leaf. A leaf may legitimately sit outside the
+   * tree — legacy rows are parked there rather than deleted — so every consumer must treat
+   * null as "no parent yet", not as a bug.
+   */
+  l2Id?: string | null;
+  l2Name?: string | null;  // Denormalised from the tree for display and grouping
+  l1Id?: string | null;
+  l1Name?: string | null;
+  sortOrder?: number;
+}
+
+/** Convenience shape for the grouped pickers: one L1 with its L2s and their leaves. */
+export interface CategoryTree {
+  l1: CategoryL1[];
+  l2: CategoryL2[];
 }
 
 export interface ProductFeature {

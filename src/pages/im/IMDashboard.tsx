@@ -11,6 +11,7 @@ import {
 import type { StaleManual, ReviewRoundSummary } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
+import { distinctL1, distinctL2, filterCategories } from '../../utils/category-tree.utils';
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
   FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X,
@@ -655,10 +656,19 @@ interface TemplatesTabProps {
   onDuplicate: (t: IMTemplate) => void;
   onEditRegulations: (t: IMTemplate) => void;
   onImport: () => void;
+  // Filter state is owned by the dashboard so it survives tab switches.
+  search: string;
+  l1: string;
+  l2: string;
+  withTemplatesOnly: boolean;
+  onSearchChange: (v: string) => void;
+  onL1Change: (v: string) => void;
+  onL2Change: (v: string) => void;
+  onWithTemplatesOnlyChange: (v: boolean) => void;
 }
 
-// One row per template type within a category card.
-interface TemplateRowProps {
+// One table cell: the state of a single template type for a single category.
+interface TemplateCellProps {
   category: CategoryL3;
   type: IMTemplateType;
   template?: IMTemplate;
@@ -671,26 +681,21 @@ interface TemplateRowProps {
   onEditRegulations: (t: IMTemplate) => void;
 }
 
-const TemplateRow: React.FC<TemplateRowProps> = ({
+const TemplateCell: React.FC<TemplateCellProps> = ({
   category, type, template, creating, toggling, regulationCount,
   onCreate, onToggleFinalized, onDuplicate, onEditRegulations
 }) => {
-  const Icon = type === 'warning_leaflet' ? AlertTriangle : FileText;
-  const accent = type === 'warning_leaflet' ? 'text-amber-600' : 'text-indigo-600';
+  // The column header already names the template type, so the cell shows only state and
+  // actions — the type icon stays as a colour cue for scanning down a mixed column.
   return (
-    <div className="border border-gray-100 rounded-lg p-3 bg-light/50">
-      <div className="flex items-center justify-between gap-2">
-        <span className={`flex items-center gap-1.5 text-xs font-bold ${accent}`}>
-          <Icon size={13} /> {IM_TEMPLATE_TYPE_LABELS[type]}
+    <div className="flex items-center gap-2 flex-wrap">
+      {template?.isFinalized && (
+        <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1">
+          <CheckCircle2 size={10} /> FINAL
         </span>
-        {template?.isFinalized && (
-          <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1">
-            <CheckCircle2 size={10} /> FINAL
-          </span>
-        )}
-      </div>
+      )}
 
-      <div className="mt-2 flex items-center justify-between">
+      <div className="flex items-center gap-2 flex-wrap">
         {template ? (
           <>
             <span className="flex items-center gap-2">
@@ -748,8 +753,16 @@ const TemplateRow: React.FC<TemplateRowProps> = ({
 
 const TemplatesTab: React.FC<TemplatesTabProps> = ({
   categories, templates, creatingId, togglingId, regulationCounts,
-  onCreate, onToggleFinalized, onDuplicate, onEditRegulations, onImport
-}) => (
+  onCreate, onToggleFinalized, onDuplicate, onEditRegulations, onImport,
+  search, l1, l2, withTemplatesOnly,
+  onSearchChange, onL1Change, onL2Change, onWithTemplatesOnlyChange
+}) => {
+  const visibleCategories = filterCategories(categories, {
+    search, l1: l1 || undefined, l2: l2 || undefined, includeInactive: false,
+  }).filter(cat =>
+    !withTemplatesOnly || templates.some(t => t.categoryId === cat.id));
+
+  return (
   <div>
     <div className="flex items-center justify-between mb-4">
       <p className="text-xs text-gray-400">
@@ -762,41 +775,106 @@ const TemplatesTab: React.FC<TemplatesTabProps> = ({
         <FileJson size={13} /> Import from JSON
       </button>
     </div>
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {categories.map(cat => (
-        <div key={cat.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow flex flex-col hover:shadow-md transition-all">
-          <h3 className="text-lg font-bold text-gray-800 mb-3">{cat.name}</h3>
-          <div className="flex flex-col gap-2">
-            {TEMPLATE_TYPE_ORDER.map(type => {
-              const template = templates.find(t => t.categoryId === cat.id && t.templateType === type);
-              return (
-                <TemplateRow
-                  key={type}
-                  category={cat}
-                  type={type}
-                  template={template}
-                  creating={creatingId === `${cat.id}:${type}`}
-                  toggling={!!template && template.id === togglingId}
-                  regulationCount={template ? (regulationCounts[template.id] ?? 0) : 0}
-                  onCreate={onCreate}
-                  onToggleFinalized={onToggleFinalized}
-                  onDuplicate={onDuplicate}
-                  onEditRegulations={onEditRegulations}
-                />
-              );
-            })}
-          </div>
+    {/* A card per category no longer scales past ~130 leaves, so this is a table: one row
+        per category, one column per template type. The template cell keeps the same actions
+        the card row had, just laid out horizontally. */}
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-gray-200 bg-light">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={search}
+            onChange={e => onSearchChange(e.target.value)}
+            placeholder="Search any level…"
+            className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+          />
         </div>
-      ))}
+        <select
+          value={l1}
+          onChange={e => { onL1Change(e.target.value); onL2Change(''); }}
+          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+        >
+          <option value="">All L1</option>
+          {distinctL1(categories).map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <select
+          value={l2}
+          onChange={e => onL2Change(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+        >
+          <option value="">All L2</option>
+          {distinctL2(categories, l1 || undefined).map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none px-1">
+          <input
+            type="checkbox"
+            checked={withTemplatesOnly}
+            onChange={e => onWithTemplatesOnlyChange(e.target.checked)}
+            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          Has a template
+        </label>
+        <span className="text-xs text-muted ml-auto">{visibleCategories.length} categories</span>
+      </div>
 
-      {categories.length === 0 && (
-        <div className="col-span-3 text-center py-12 text-gray-400 bg-light border border-dashed border-gray-200 rounded-xl">
-          No product categories defined. Go to Admin Console to add categories.
-        </div>
-      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-light border-b border-gray-200 text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th className="text-left font-semibold px-4 py-2.5">L1</th>
+              <th className="text-left font-semibold px-3 py-2.5">L2</th>
+              <th className="text-left font-semibold px-3 py-2.5">L3 — Category</th>
+              {TEMPLATE_TYPE_ORDER.map(type => (
+                <th key={type} className="text-left font-semibold px-3 py-2.5 min-w-[230px]">
+                  {IM_TEMPLATE_TYPE_LABELS[type]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {visibleCategories.map(cat => (
+              <tr key={cat.id} className="hover:bg-light transition-colors align-top">
+                <td className="px-4 py-2 text-muted whitespace-nowrap">{cat.l1Name ?? '—'}</td>
+                <td className="px-3 py-2 text-muted whitespace-nowrap">{cat.l2Name ?? '—'}</td>
+                <td className="px-3 py-2 font-medium text-gray-800">{cat.name}</td>
+                {TEMPLATE_TYPE_ORDER.map(type => {
+                  const template = templates.find(t => t.categoryId === cat.id && t.templateType === type);
+                  return (
+                    <td key={type} className="px-3 py-2">
+                      <TemplateCell
+                        category={cat}
+                        type={type}
+                        template={template}
+                        creating={creatingId === `${cat.id}:${type}`}
+                        toggling={!!template && template.id === togglingId}
+                        regulationCount={template ? (regulationCounts[template.id] ?? 0) : 0}
+                        onCreate={onCreate}
+                        onToggleFinalized={onToggleFinalized}
+                        onDuplicate={onDuplicate}
+                        onEditRegulations={onEditRegulations}
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+
+            {visibleCategories.length === 0 && (
+              <tr>
+                <td colSpan={3 + TEMPLATE_TYPE_ORDER.length} className="text-center py-12 text-gray-400">
+                  {categories.length === 0
+                    ? 'No product categories defined. Go to Admin Console to add categories.'
+                    : 'No categories match these filters.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
-);
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Main dashboard
@@ -816,6 +894,12 @@ const IMDashboard: React.FC = () => {
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  // Category Templates table filters. Held here rather than in the tab so switching away
+  // and back does not silently reset the operator's place in ~130 categories.
+  const [tplSearch, setTplSearch] = useState('');
+  const [tplL1, setTplL1] = useState('');
+  const [tplL2, setTplL2] = useState('');
+  const [tplWithTemplatesOnly, setTplWithTemplatesOnly] = useState(false);
   // Assigned-regulation counts per template id, and the template whose regulation list
   // is open in the modal.
   const [regulationCounts, setRegulationCounts] = useState<Record<string, number>>({});
@@ -976,6 +1060,14 @@ const IMDashboard: React.FC = () => {
               onDuplicate={(t) => { setDupSource(t); setDupTargetCatId(''); }}
               onEditRegulations={setRegTarget}
               onImport={() => setShowImport(true)}
+              search={tplSearch}
+              l1={tplL1}
+              l2={tplL2}
+              withTemplatesOnly={tplWithTemplatesOnly}
+              onSearchChange={setTplSearch}
+              onL1Change={setTplL1}
+              onL2Change={setTplL2}
+              onWithTemplatesOnlyChange={setTplWithTemplatesOnly}
             />
       )}
       {activeTab === 'blocks' && <BlockLibraryContent />}

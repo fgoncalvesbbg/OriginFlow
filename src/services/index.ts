@@ -124,6 +124,7 @@ export {
   deleteComplianceRequest,
   checkComplianceDeadlines,
   getCategories,
+  getCategoryTree,
   saveCategory,
   deleteCategory,
   assignPMToCategory,

@@ -433,8 +433,10 @@ export interface ResolvedManual {
    * first SKU if unbound) — the same value the "SKU QR code" chip/token resolves to
    * (see QR_SKU_PLACEHOLDER_ID in im-resolver.ts). Carried at the top level too so a
    * renderer can place it automatically (e.g. the Warning Leaflet's print header) without
-   * requiring the chip to be authored anywhere in the content. Absent when the manual has
-   * no SKU to encode.
+   * requiring the chip to be authored anywhere in the content. Always set: when the manual
+   * has no SKU at all (e.g. a leaflet template assigned to every item in a category rather
+   * than to one bound SKU), it encodes the site root (use.berlin) instead of going blank.
+   * Optional only so older published manifests predating this field still type-check.
    */
   primarySkuQrSvg?: string;
 }

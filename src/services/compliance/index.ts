@@ -18,6 +18,7 @@ export {
 
 export {
   getCategories,
+  getCategoryTree,
   saveCategory,
   deleteCategory,
   assignPMToCategory

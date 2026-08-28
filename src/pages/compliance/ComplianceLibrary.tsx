@@ -11,8 +11,9 @@ import {
 } from '../../services';
 import { CategoryL3, ComplianceRequirement, CategoryAttribute, FeatureConditionFields } from '../../types';
 import { getAttributesForCategory } from '../../utils';
+import { distinctL1, distinctL2, filterCategories } from '../../utils/category-tree.utils';
 // Added comment above fix: Adding missing X icon to lucide-react imports
-import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe } from 'lucide-react';
+import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe, Search } from 'lucide-react';
 
 // Sentinel "category" id for the global requirements view — requirements stored with
 // categoryId = null apply to every category.
@@ -79,6 +80,11 @@ const ComplianceLibrary: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const [selectedCategoryForReqs, setSelectedCategoryForReqs] = useState<string | null>(null);
+
+  // Category-table filters for the requirements picker.
+  const [reqSearch, setReqSearch] = useState('');
+  const [reqL1, setReqL1] = useState('');
+  const [reqL2, setReqL2] = useState('');
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(COMPLIANCE_SECTIONS));
   
   const [editingItem, setEditingItem] = useState<any>(null);
@@ -274,55 +280,117 @@ const ComplianceLibrary: React.FC = () => {
 
   const renderRequirementsView = () => {
     if (!selectedCategoryForReqs) {
+      // A card grid does not survive ~130 categories, so this is a table: one row per L3
+      // with its L1/L2, filtered from above. Global Requirements stays pinned as a banner
+      // rather than becoming a row — it is not a category and must not sort among them.
+      const globalCount = requirements.filter(r => r.categoryId == null).length;
+      const l1Options = distinctL1(categories);
+      const l2Options = distinctL2(categories, reqL1 || undefined);
+      const visible = filterCategories(categories, {
+        search: reqSearch,
+        l1: reqL1 || undefined,
+        l2: reqL2 || undefined,
+        includeInactive: false,
+      });
+
       return (
         <div>
             <h3 className="text-lg font-bold text-gray-800 mb-4">Select a Category to Manage Requirements</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {(() => {
-                const globalCount = requirements.filter(r => r.categoryId == null).length;
-                return (
-                <div
-                    key={GLOBAL_VIEW}
-                    onClick={() => setSelectedCategoryForReqs(GLOBAL_VIEW)}
-                    className="p-6 rounded-xl border shadow cursor-pointer hover:shadow-md transition-all group relative overflow-hidden bg-amber-50 border-amber-200 hover:border-amber-400"
-                >
-                    <div className="absolute top-0 right-0 bg-amber-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg flex items-center gap-1">
-                        <Globe size={10} /> ALL CATEGORIES
+
+            <div
+                onClick={() => setSelectedCategoryForReqs(GLOBAL_VIEW)}
+                className="mb-4 p-4 rounded-xl border shadow-sm cursor-pointer hover:shadow-md transition-all group flex items-center justify-between bg-amber-50 border-amber-200 hover:border-amber-400"
+            >
+                <div className="flex items-center gap-3">
+                    <Globe size={18} className="text-amber-700" />
+                    <div>
+                        <h3 className="font-bold text-amber-900 group-hover:text-amber-700 transition-colors">Global Requirements</h3>
+                        <p className="text-amber-700/80 text-xs mt-0.5">
+                            {globalCount} Requirement{globalCount !== 1 ? 's' : ''} · applied to every category
+                        </p>
                     </div>
-                    <h3 className="font-bold text-lg text-amber-900 group-hover:text-amber-700 transition-colors flex items-center gap-2"><Globe size={18} /> Global Requirements</h3>
-                    <p className="text-amber-700/80 text-sm mt-2">{globalCount} Requirement{globalCount !== 1 ? 's' : ''} · applied to every category</p>
-                    <div className="mt-4 text-xs font-medium text-amber-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                </div>
+                <span className="text-xs font-medium text-amber-700 flex items-center gap-1">
                     Manage Global <ArrowLeft className="rotate-180" size={12} />
+                </span>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-gray-200 bg-light">
+                    <div className="relative flex-1 min-w-[180px]">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            value={reqSearch}
+                            onChange={e => setReqSearch(e.target.value)}
+                            placeholder="Search any level…"
+                            className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
                     </div>
+                    <select
+                        value={reqL1}
+                        onChange={e => { setReqL1(e.target.value); setReqL2(''); }}
+                        className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                        <option value="">All L1</option>
+                        {l1Options.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <select
+                        value={reqL2}
+                        onChange={e => setReqL2(e.target.value)}
+                        className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                        <option value="">All L2</option>
+                        {l2Options.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <span className="text-xs text-muted ml-auto">{visible.length} categories</span>
                 </div>
-                );
-            })()}
-            {categories.map(cat => {
-                const count = requirements.filter(r => r.categoryId === cat.id).length;
-                return (
-                <div 
-                    key={cat.id} 
-                    onClick={() => setSelectedCategoryForReqs(cat.id)}
-                    className={`p-6 rounded-xl border shadow cursor-pointer hover:shadow-md transition-all group relative overflow-hidden ${cat.isFinalized ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200 hover:border-indigo-400'}`}
-                >
-                    {cat.isFinalized && (
-                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">
-                        FINALIZED
-                    </div>
-                    )}
-                    <h3 className="font-bold text-lg text-primary group-hover:text-indigo-600 transition-colors">{cat.name}</h3>
-                    <p className="text-muted text-sm mt-2">{count} Requirement{count !== 1 ? 's' : ''}</p>
-                    <div className="mt-4 text-xs font-medium text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                    Manage Requirements <ArrowLeft className="rotate-180" size={12} />
-                    </div>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead className="bg-light border-b border-gray-200 text-xs uppercase tracking-wide text-muted">
+                            <tr>
+                                <th className="text-left font-semibold px-4 py-2.5">L1</th>
+                                <th className="text-left font-semibold px-3 py-2.5">L2</th>
+                                <th className="text-left font-semibold px-3 py-2.5">L3 — Category</th>
+                                <th className="text-right font-semibold px-3 py-2.5">Requirements</th>
+                                <th className="text-left font-semibold px-3 py-2.5">Status</th>
+                                <th className="px-4 py-2.5"></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {visible.map(cat => {
+                                const count = requirements.filter(r => r.categoryId === cat.id).length;
+                                return (
+                                <tr
+                                    key={cat.id}
+                                    onClick={() => setSelectedCategoryForReqs(cat.id)}
+                                    className={`cursor-pointer transition-colors group ${cat.isFinalized ? 'bg-indigo-50/50 hover:bg-indigo-50' : 'hover:bg-light'}`}
+                                >
+                                    <td className="px-4 py-2.5 text-muted whitespace-nowrap">{cat.l1Name ?? '—'}</td>
+                                    <td className="px-3 py-2.5 text-muted whitespace-nowrap">{cat.l2Name ?? '—'}</td>
+                                    <td className="px-3 py-2.5 font-medium text-primary group-hover:text-indigo-600">{cat.name}</td>
+                                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{count || '—'}</td>
+                                    <td className="px-3 py-2.5">
+                                        {cat.isFinalized && (
+                                            <span className="text-[10px] font-bold bg-indigo-600 text-white px-1.5 py-0.5 rounded">FINALIZED</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right">
+                                        <ArrowLeft className="rotate-180 inline text-gray-300 group-hover:text-indigo-600" size={14} />
+                                    </td>
+                                </tr>
+                                );
+                            })}
+                            {visible.length === 0 && !loading && (
+                                <tr>
+                                    <td colSpan={6} className="text-center py-12 text-gray-400">
+                                        {categories.length === 0 ? 'No categories found.' : 'No categories match these filters.'}
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-                );
-            })}
-            {categories.length === 0 && !loading && (
-                <div className="col-span-3 text-center py-12 bg-light rounded-xl border border-dashed">
-                    No categories found.
-                </div>
-            )}
             </div>
         </div>
       );

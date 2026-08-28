@@ -8,6 +8,7 @@ import {
   getProjectSkus, getAttributeRequestsByProject, getEffectiveSkuValue,
 } from '../../services';
 import { Project, Supplier, CategoryL3, ComplianceRequirement, CategoryAttribute } from '../../types';
+import { CategorySelect } from '../../components/common/CategorySelect';
 import { getAttributesForCategory } from '../../utils';
 import AttributeInput from '../../components/common/AttributeInput';
 import { AlertCircle, ArrowLeft, Loader2, Lock, GitBranch } from 'lucide-react';
@@ -247,10 +248,14 @@ const CreateComplianceRequest: React.FC = () => {
 
              <div>
                <label className="block text-sm font-medium text-gray-700 mb-1">Product Category</label>
-               <select required className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={categoryId} onChange={e => setCategoryId(e.target.value)}>
-                 <option value="">Select Category</option>
-                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-               </select>
+               <CategorySelect
+                 categories={categories}
+                 value={categoryId}
+                 onChange={setCategoryId}
+                 placeholder="Select Category"
+                 required
+                 className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+               />
                {categories.length === 0 && <p className="text-xs text-red-500 mt-1">No categories found. Please create one in Admin.</p>}
              </div>
 

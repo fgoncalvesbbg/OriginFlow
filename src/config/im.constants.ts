@@ -28,3 +28,9 @@ export const QR_SKU_PLACEHOLDER_ID = 'sys.qr_sku';
 
 /** Base URL the SKU QR code encodes: `${QR_SKU_URL_BASE}<skuNumber>`. */
 export const QR_SKU_URL_BASE = 'https://use.berlin/';
+
+/**
+ * Fallback destination for the SKU QR code when there's no specific SKU to link to — e.g. a
+ * Warning Leaflet template assigned to every item in a category rather than to one bound SKU.
+ */
+export const QR_ROOT_URL = 'https://use.berlin';

@@ -4,7 +4,7 @@ import Layout from '../components/Layout';
 import {
   getProfiles, updateUserRole,
   getSuppliers, createSupplier, ensureSupplierToken, updateSupplier,
-  getCategories, saveCategory,
+  getCategories, getCategoryTree, saveCategory,
   deleteCategory, assignPMToCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   importCategoryAttributes,
@@ -20,7 +20,8 @@ import {
 import type { IMMarket } from '../services';
 import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../utils';
 import type { ParsedAttributeRow } from '../utils';
-import { User, UserRole, Supplier, CategoryL3, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
+import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
+import { User, UserRole, Supplier, CategoryL3, CategoryTree, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
 import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
@@ -223,6 +224,16 @@ const AdminDashboard: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
+
+  // The L1/L2 parent levels, for the table filters and the category modal's parent picker.
+  const [categoryTree, setCategoryTree] = useState<CategoryTree>({ l1: [], l2: [] });
+
+  // Category table filters. At ~130 leaves the list is only navigable filtered, so these
+  // drive the table directly rather than being a cosmetic extra.
+  const [catSearch, setCatSearch] = useState('');
+  const [catL1, setCatL1] = useState('');
+  const [catL2, setCatL2] = useState('');
+  const [catShowInactive, setCatShowInactive] = useState(false);
   const [aiPrompts, setAIPrompts] = useState<AIPrompt[]>([]);
 
   // AI Prompt Editing State
@@ -304,10 +315,11 @@ const AdminDashboard: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    const [u, s, c, a, p, ai, lib, verbs] = await Promise.all([
+    const [u, s, c, tree, a, p, ai, lib, verbs] = await Promise.all([
       getProfiles(),
       getSuppliers(),
       getCategories(),
+      getCategoryTree(),
       getCategoryAttributes(),
       getProjects(),
       getAIPrompts(),
@@ -317,6 +329,7 @@ const AdminDashboard: React.FC = () => {
     setUsers(u);
     setSuppliers(s);
     setCategories(c);
+    setCategoryTree(tree);
     setAttributes(a);
     setProjects(p);
     setAIPrompts(ai);
@@ -453,7 +466,12 @@ const AdminDashboard: React.FC = () => {
   const openAddModal = (type: 'category' | 'attribute', group?: string) => {
     setModalType(type);
     if (type === 'category') {
-      setEditingItem({ name: '', active: true, isFinalized: false });
+      // Prefill the parent from the active L2 filter — adding a category is nearly always
+      // done from the family you are already looking at.
+      const filteredL2 = categoryTree.l2.find(l2 =>
+        l2.name === catL2 &&
+        (!catL1 || categoryTree.l1.find(l1 => l1.id === l2.l1Id)?.name === catL1));
+      setEditingItem({ name: '', active: true, isFinalized: false, l2Id: filteredL2?.id ?? null });
     } else {
         if (!selectedCategoryDetail) return;
         const isPredefined = !!group && PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
@@ -1183,11 +1201,32 @@ const AdminDashboard: React.FC = () => {
         );
     }
 
-    // Categories List
+    // Categories table.
+    //
+    // A card per category stopped working once the tree was seeded (~130 leaves), so this is
+    // a dense table: one row per L3, with the L1/L2 columns carrying the hierarchy and the
+    // filters above narrowing it. Rows repeat their L1/L2 rather than using rowspan groups —
+    // repetition survives filtering and sorting, a spanned cell does not.
+    const pmUsers = users.filter(u => u.role === UserRole.PM);
+    const l1Options = distinctL1(categories);
+    const l2Options = distinctL2(categories, catL1 || undefined);
+    const visibleCategories = filterCategories(categories, {
+        search: catSearch,
+        l1: catL1 || undefined,
+        l2: catL2 || undefined,
+        includeInactive: catShowInactive,
+    });
+    const inactiveCount = categories.filter(c => !c.active).length;
+
     return (
         <div>
-            <div className="flex justify-between items-center px-6 py-4 bg-light border-b border-gray-200">
-                <h3 className="font-bold text-gray-800">Product Categories</h3>
+            <div className="flex flex-wrap justify-between items-center gap-3 px-6 py-4 bg-light border-b border-gray-200">
+                <div>
+                    <h3 className="font-bold text-gray-800">Product Categories</h3>
+                    <p className="text-xs text-muted mt-0.5">
+                        {visibleCategories.length} of {categories.length} shown
+                    </p>
+                </div>
                 <div className="flex items-center gap-2">
                     <button onClick={openAssignModal} className="flex items-center gap-2 px-4 py-2 bg-white text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 text-sm font-medium shadow-sm">
                         <LinkIcon size={16} /> Assign Existing
@@ -1197,96 +1236,159 @@ const AdminDashboard: React.FC = () => {
                     </button>
                 </div>
             </div>
-            <div className="divide-y divide-slate-100">
-                {categories.map(c => {
-                    const attrCount = getAttributesForCategory(attributes, c.id).length;
-                    const pmUsers = users.filter(u => u.role === UserRole.PM);
-                    return (
-                        <div key={c.id} className="p-4 hover:bg-light px-6 transition-colors">
-                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                <div className="flex-1">
-                                    <div className="font-medium text-primary flex items-center gap-2 text-lg">
-                                        {c.name}
-                                        {c.isFinalized && (
-                                            <span title="Finalized (Requirements Locked)" className="text-indigo-600">
-                                                <CheckCircle size={18} />
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-3 text-xs text-muted mt-1 items-center flex-wrap">
-                                        <span className="bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{attrCount} Attributes</span>
-                                        <span className={`px-2 py-0.5 rounded font-medium ${c.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
+
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-b border-gray-200 bg-white">
+                <div className="relative flex-1 min-w-[200px]">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                        value={catSearch}
+                        onChange={e => setCatSearch(e.target.value)}
+                        placeholder="Search any level…"
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                </div>
+                <select
+                    value={catL1}
+                    // Changing L1 clears L2: the old L2 almost certainly belongs to another
+                    // department, and leaving it set would show an empty table.
+                    onChange={e => { setCatL1(e.target.value); setCatL2(''); }}
+                    className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                    <option value="">All L1</option>
+                    {l1Options.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <select
+                    value={catL2}
+                    onChange={e => setCatL2(e.target.value)}
+                    className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                    <option value="">All L2</option>
+                    {l2Options.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none px-2">
+                    <input
+                        type="checkbox"
+                        checked={catShowInactive}
+                        onChange={e => setCatShowInactive(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Show inactive{inactiveCount > 0 ? ` (${inactiveCount})` : ''}
+                </label>
+                {(catSearch || catL1 || catL2) && (
+                    <button
+                        onClick={() => { setCatSearch(''); setCatL1(''); setCatL2(''); }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50"
+                    >
+                        Clear
+                    </button>
+                )}
+            </div>
+
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="bg-light border-b border-gray-200 text-xs uppercase tracking-wide text-muted">
+                        <tr>
+                            <th className="text-left font-semibold px-6 py-2.5">L1</th>
+                            <th className="text-left font-semibold px-3 py-2.5">L2</th>
+                            <th className="text-left font-semibold px-3 py-2.5">L3 — Category</th>
+                            <th className="text-right font-semibold px-3 py-2.5">Attrs</th>
+                            <th className="text-left font-semibold px-3 py-2.5">PM</th>
+                            <th className="text-left font-semibold px-3 py-2.5">Status</th>
+                            <th className="text-right font-semibold px-6 py-2.5">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {visibleCategories.map(c => {
+                            const attrCount = getAttributesForCategory(attributes, c.id).length;
+                            return (
+                                <tr key={c.id} className={`hover:bg-light transition-colors ${c.active ? '' : 'opacity-60'}`}>
+                                    <td className="px-6 py-2.5 text-muted whitespace-nowrap">
+                                        {c.l1Name ?? <span className="italic text-amber-600">{UNCATEGORISED_LABEL}</span>}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-muted whitespace-nowrap">{c.l2Name ?? '—'}</td>
+                                    <td className="px-3 py-2.5">
+                                        <span className="font-medium text-primary flex items-center gap-1.5">
+                                            {c.name}
+                                            {c.isFinalized && (
+                                                <span title="Finalized (Requirements Locked)" className="text-indigo-600">
+                                                    <CheckCircle size={14} />
+                                                </span>
+                                            )}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{attrCount || '—'}</td>
+                                    <td className="px-3 py-2.5">
+                                        <select
+                                            value={c.pmId ?? ''}
+                                            onChange={async (e) => {
+                                                await assignPMToCategory(c.id, e.target.value || null);
+                                                loadData();
+                                            }}
+                                            className="text-xs border border-gray-200 rounded px-2 py-1 text-gray-700 bg-white focus:ring-2 focus:ring-indigo-500 outline-none max-w-[140px]"
+                                            title="Assign PM to this category"
+                                        >
+                                            <option value="">— No PM —</option>
+                                            {pmUsers.map(pm => (
+                                                <option key={pm.id} value={pm.id}>{pm.name}</option>
+                                            ))}
+                                        </select>
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${c.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
                                             {c.active ? 'Active' : 'Inactive'}
                                         </span>
-                                        {c.pmName && (
-                                            <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded flex items-center gap-1">
-                                                <Users size={10} /> {c.pmName}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    {/* Inline PM assignment */}
-                                    <select
-                                        value={c.pmId ?? ''}
-                                        onChange={async (e) => {
-                                            const pmId = e.target.value || null;
-                                            await assignPMToCategory(c.id, pmId);
-                                            loadData();
-                                        }}
-                                        className="text-xs border border-gray-200 rounded px-2 py-1.5 text-gray-700 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                                        title="Assign PM to this category"
-                                    >
-                                        <option value="">— No PM —</option>
-                                        {pmUsers.map(pm => (
-                                            <option key={pm.id} value={pm.id}>{pm.name}</option>
-                                        ))}
-                                    </select>
-
-                                    <div className="h-6 w-px bg-gray-200 mx-1"></div>
-
-                                    <button
-                                        onClick={() => setSelectedCategoryDetail(c.id)}
-                                        className="text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded border border-transparent hover:border-indigo-100 flex items-center gap-1"
-                                    >
-                                        <SlidersHorizontal size={14} /> Configure
-                                    </button>
-
-                                    <button
-                                        onClick={() => toggleCategoryFinalized(c)}
-                                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border transition-colors ${
-                                            c.isFinalized
-                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                                            : 'bg-white text-muted border-gray-200 hover:bg-light hover:text-gray-700'
-                                        }`}
-                                        title="Finalizing signals that requirements are complete"
-                                    >
-                                        {c.isFinalized ? 'Finalized' : 'Mark Final'}
-                                    </button>
-
-                                    <button
-                                        onClick={() => handleEditItem(c, 'category')}
-                                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full"
-                                    >
-                                        <Edit2 size={16} />
-                                    </button>
-
-                                    <button
-                                        onClick={() => handleDeleteCategory(c.id)}
-                                        className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-full"
-                                        title="Delete Category"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
-                {categories.length === 0 && (
-                    <div className="p-8 text-center text-gray-400">No categories found.</div>
-                )}
+                                    </td>
+                                    <td className="px-6 py-2.5">
+                                        <div className="flex items-center justify-end gap-1">
+                                            <button
+                                                onClick={() => setSelectedCategoryDetail(c.id)}
+                                                className="text-xs font-medium text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded flex items-center gap-1"
+                                                title="Configure attributes"
+                                            >
+                                                <SlidersHorizontal size={13} /> Configure
+                                            </button>
+                                            <button
+                                                onClick={() => toggleCategoryFinalized(c)}
+                                                className={`text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap ${
+                                                    c.isFinalized
+                                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                                                    : 'bg-white text-muted border-gray-200 hover:bg-light hover:text-gray-700'
+                                                }`}
+                                                title="Finalizing signals that requirements are complete"
+                                            >
+                                                {c.isFinalized ? 'Finalized' : 'Mark Final'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleEditItem(c, 'category')}
+                                                className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                                                title="Edit category"
+                                            >
+                                                <Edit2 size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteCategory(c.id)}
+                                                className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded"
+                                                title="Delete Category"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                        {visibleCategories.length === 0 && (
+                            <tr>
+                                <td colSpan={7} className="p-8 text-center text-gray-400">
+                                    {categories.length === 0
+                                        ? 'No categories found.'
+                                        : 'No categories match these filters.'}
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
             </div>
         </div>
     );
@@ -1693,9 +1795,39 @@ const AdminDashboard: React.FC = () => {
                   className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
                   value={editingItem.name} 
                   onChange={e => setEditingItem({...editingItem, name: e.target.value})} 
-                  placeholder={`e.g. ${modalType === 'category' ? 'Home Audio' : modalType === 'attribute' ? 'Power' : 'Supplier Name'}`}
+                  placeholder={`e.g. ${modalType === 'category' ? 'Tower Fans' : modalType === 'attribute' ? 'Power' : 'Supplier Name'}`}
                 />
               </div>
+
+              {/* Parent picker. Deliberately not required: leaving it unset parks the leaf in
+                  the Uncategorised bucket, which is how legacy rows that predate the tree are
+                  kept usable until someone files them. */}
+              {modalType === 'category' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Parent (L1 › L2)
+                  </label>
+                  <select
+                    value={editingItem.l2Id ?? ''}
+                    onChange={e => setEditingItem({ ...editingItem, l2Id: e.target.value || null })}
+                    className="w-full border border-gray-300 p-2.5 rounded-md text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">— Uncategorised —</option>
+                    {categoryTree.l1.map(l1 => (
+                      <optgroup key={l1.id} label={l1.name}>
+                        {categoryTree.l2
+                          .filter(l2 => l2.l1Id === l1.id)
+                          .map(l2 => (
+                            <option key={l2.id} value={l2.id}>{l2.name}</option>
+                          ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-muted mt-1">
+                    Where this category sits in the tree. Leave unset to file it later.
+                  </p>
+                </div>
+              )}
 
               {modalType === 'attribute' && (
                   <>

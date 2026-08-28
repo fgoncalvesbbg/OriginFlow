@@ -27,7 +27,10 @@ export type {
 // Compliance types
 export { ComplianceRequestStatus, ComplianceResponseStatus } from './compliance.types';
 export type {
+  CategoryL1,
+  CategoryL2,
   CategoryL3,
+  CategoryTree,
   ProductFeature,
   ComplianceRequirement,
   ComplianceResponseItem,

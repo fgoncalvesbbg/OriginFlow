@@ -871,11 +871,11 @@ describe('resolveManual — SKU QR code chip', () => {
     expect(html).toContain('<svg');
   });
 
-  it('falls back to the chip label when the manual has no SKU at all', () => {
+  it('falls back to the site root — never blank — when the manual has no SKU at all (e.g. a category-wide leaflet)', () => {
     const result = resolveManual(baseTemplate, [section], {}, mkIM([]), 'en', []);
     const html = (result.sections[0].nodes[0] as any).html;
-    expect(html).toContain('QR Code');
-    expect(html).not.toContain('<svg');
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('[QR Code]');
   });
 
   it('never mutates the caller-supplied placeholderData object', () => {
@@ -894,9 +894,9 @@ describe('resolveManual — SKU QR code chip', () => {
     expect(result.primarySkuQrSvg).toContain('width:12mm');
   });
 
-  it('omits primarySkuQrSvg when the manual has no SKU at all', () => {
+  it('primarySkuQrSvg still renders (pointing at the site root) when the manual has no SKU at all', () => {
     const result = resolveManual(baseTemplate, [section], {}, mkIM([]), 'en', []);
-    expect(result.primarySkuQrSvg).toBeUndefined();
+    expect(result.primarySkuQrSvg).toContain('<svg');
   });
 
   it('resolves the {{sys.qr_sku}} text-token form used by shared blocks', () => {

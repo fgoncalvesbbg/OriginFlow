@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Loader2, Layers, Image as ImageIcon, Upload, FileText } from 'lucide-react';
 import { createEnhancedSupplierProposal, getCategories, getCategoryAttributes } from '../../services';
 import { CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachment } from '../../types';
+import { CategorySelect } from '../common/CategorySelect';
 import { useToast } from '../../hooks';
 import AttributeInput from '../common/AttributeInput';
 import { validateAttributeValue, getAttributesForCategory } from '../../utils';
@@ -270,17 +271,14 @@ const SubmitProposalModal: React.FC<SubmitProposalModalProps> = ({ isOpen, onClo
             <label className="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
               <Layers size={16} className="text-indigo-600" /> Product Category (Optional)
             </label>
-            <select
-              className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+            <CategorySelect
+              categories={categories}
               value={selectedCategory}
-              onChange={(e) => handleCategoryChange(e.target.value)}
+              onChange={handleCategoryChange}
+              placeholder="-- Select a Category (Optional) --"
               disabled={submitting}
-            >
-              <option value="">-- Select a Category (Optional) --</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none bg-white disabled:bg-gray-50"
+            />
 
             {currentCatAttributes.length > 0 && (
               <div className="mt-4 space-y-4 pt-4 border-t border-indigo-200">

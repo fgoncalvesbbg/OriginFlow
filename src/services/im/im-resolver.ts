@@ -351,9 +351,11 @@ const resolveSkuSlotRef = (
  * @param projectSkus   The project's SKUs (id + number), used to turn a chapter's
  *                      sectionSkus scope into the "Applies to: …" header numbers, to
  *                      hide a chapter whose scope doesn't intersect the bound SKUs, and to
- *                      pick the SKU the "SKU QR code" chip (QR_SKU_PLACEHOLDER_ID) encodes
- *                      (always the first bound SKU, or the first project SKU if unbound).
- *                      Defaults to [] (no SKU headers, no scope-based hiding, no QR code).
+ *                      pick the SKU the "SKU QR code" chip (QR_SKU_PLACEHOLDER_ID) and
+ *                      ResolvedManual.primarySkuQrSvg encode (always the first bound SKU, or
+ *                      the first project SKU if unbound). Defaults to [] (no SKU headers, no
+ *                      scope-based hiding, and the QR code encodes the site root instead of
+ *                      a SKU).
  */
 export const resolveManual = (
   template: IMTemplate,
@@ -401,15 +403,16 @@ export const resolveManual = (
 
   // "SKU QR code" chip (see QR_SKU_PLACEHOLDER_ID) and the manual's `primarySkuQrSvg` —
   // always the first bound SKU, so it's unambiguous even for a leaflet template shared
-  // across a multi-SKU family. Both stay undefined (chip falls back to its own label; no
-  // top-level field) when the manual has no SKU at all.
+  // across a multi-SKU family. Falls back to the site root (buildSkuQrSvg/skuQrUrl) rather
+  // than going blank when the manual has no SKU at all — e.g. a leaflet template assigned
+  // to every item in a category rather than to one bound SKU.
   const qrSkuId = boundSkuIds[0] ?? projectSkus[0]?.id;
   const qrSkuNumber = qrSkuId ? skuNumberById.get(qrSkuId) : undefined;
-  if (qrSkuNumber) placeholderData[QR_SKU_PLACEHOLDER_ID] = buildSkuQrSvg(qrSkuNumber);
+  placeholderData[QR_SKU_PLACEHOLDER_ID] = buildSkuQrSvg(qrSkuNumber);
   // 12mm — placed automatically into the Warning Leaflet's header band (not spliced into
   // body prose, so it isn't tied to the logo's own 8mm height). Sized for reliable scanning
   // rather than to match the logo; buildLeafletHeader below gives the header room to grow.
-  const primarySkuQrSvg = qrSkuNumber ? buildSkuQrSvg(qrSkuNumber, 12) : undefined;
+  const primarySkuQrSvg = buildSkuQrSvg(qrSkuNumber, 12);
   // Resolve a section's SKU scope against the bound SKUs. Returns:
   //   { hidden: true }            → scoped to SKUs, none of which are bound → drop section
   //   { labels: string[] }        → scoped to bound SKUs → render "Applies to: …" numbers
@@ -582,6 +585,6 @@ export const resolveManual = (
     sections: resolvedSections,
     searchIndex,
     warnings,
-    ...(primarySkuQrSvg ? { primarySkuQrSvg } : {}),
+    primarySkuQrSvg,
   };
 };
