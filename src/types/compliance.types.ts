@@ -159,4 +159,10 @@ export interface CategoryAttribute {
   validationRules?: AttributeValidationRules;
   group?: string;
   akeneoId?: string;
+  /**
+   * false = internal only: never rendered in a supplier-facing attribute list.
+   * Defaults to true (visible) so an attribute is only hidden when someone says so.
+   * Presentation filter, not access control — see db_migrations/134.
+   */
+  supplierVisible?: boolean;
 }

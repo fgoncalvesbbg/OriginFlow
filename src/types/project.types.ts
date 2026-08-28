@@ -104,6 +104,9 @@ export interface ProjectAttributeRequest {
   copiedFromSku?: string | null;  // sibling SKU the prefilled values came from, if any
   createdAt: string;
   submittedAt?: string | null;
+  /** Shared by every request created in one bulk-send action; null for a single-SKU send.
+   *  A batch is filled and submitted together on one page — see SupplierAttributeBatchPortal. */
+  batchToken?: string | null;
 }
 
 export interface SkuAttributeValue {

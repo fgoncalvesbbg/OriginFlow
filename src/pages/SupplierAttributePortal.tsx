@@ -1,12 +1,13 @@
 /** Token-based supplier portal for submitting requested project attribute values. */
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getAttributeRequestByToken, submitAttributeRequest, getCategoryAttributes } from '../services';
+import { getAttributeRequestByToken, getSiblingAttributeRequests, submitAttributeRequest, getCategoryAttributes } from '../services';
+import type { SiblingAttributeRequest } from '../services';
 import { ProjectAttributeRequest, CategoryAttribute } from '../types';
-import { getAttributesForCategory, validateAttributeValue } from '../utils';
+import { getSupplierVisibleAttributes, validateAttributeValue } from '../utils';
 import AttributeInput from '../components/common/AttributeInput';
 import * as XLSX from 'xlsx';
-import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, Copy, Download, Printer } from 'lucide-react';
+import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, Copy, Download, Printer, Layers, Check } from 'lucide-react';
 
 type SubmittedRow = { attributeId: string; name: string; value: string; type?: string };
 
@@ -32,21 +33,32 @@ const SupplierAttributePortal: React.FC = () => {
   // but once set only a PM can replace it (locked read-only here).
   const [lockedImageIds, setLockedImageIds] = useState<Set<string>>(new Set());
 
+  // Other requests created together with this one (same project + category + step).
+  // Populated even for a lone SKU (then empty) — see getSiblingAttributeRequests.
+  const [siblings, setSiblings] = useState<SiblingAttributeRequest[]>([]);
+  // Attributes the supplier has marked identical across the batch. Only ever offered when
+  // there is at least one PENDING sibling to actually copy into.
+  const [sharedAttrIds, setSharedAttrIds] = useState<Set<string>>(new Set());
+  // Sibling SKUs the just-completed submit copied values into, for the confirmation screen.
+  const [appliedTo, setAppliedTo] = useState<SiblingAttributeRequest[]>([]);
+
   useEffect(() => {
     if (!token) { setError('Invalid link.'); setLoading(false); return; }
     (async () => {
       try {
-        const [req, attrs] = await Promise.all([
+        const [req, attrs, sibs] = await Promise.all([
           getAttributeRequestByToken(token),
-          getCategoryAttributes()
+          getCategoryAttributes(),
+          getSiblingAttributeRequests(token),
         ]);
         if (!req) { setError('Request not found or link expired.'); return; }
         setRequest(req);
         setAllAttributes(attrs);
+        setSiblings(sibs);
 
         if (req.status === 'submitted') { setSubmitted(true); return; }
 
-        const catAttrs = getAttributesForCategory(attrs, req.categoryId ?? '');
+        const catAttrs = getSupplierVisibleAttributes(attrs, req.categoryId ?? '');
         const initValues: Record<string, string> = {};
         const initTypes: Record<string, 'fixed' | 'range' | 'text'> = {};
         catAttrs.forEach(a => {
@@ -77,8 +89,18 @@ const SupplierAttributePortal: React.FC = () => {
     })();
   }, [token]);
 
-  const catAttrs = request ? getAttributesForCategory(allAttributes, request.categoryId ?? '') : [];
+  const catAttrs = request ? getSupplierVisibleAttributes(allAttributes, request.categoryId ?? '') : [];
   const errorCount = Object.values(errors).filter(Boolean).length;
+  // Siblings that can actually receive a copied value — a submitted one is locked.
+  const pendingSiblings = siblings.filter(s => s.status === 'pending');
+
+  const toggleShared = (attrId: string) => {
+    setSharedAttrIds(prev => {
+      const next = new Set(prev);
+      if (next.has(attrId)) next.delete(attrId); else next.add(attrId);
+      return next;
+    });
+  };
 
   // Relative due-date label, matching the colouring the compliance portal already uses.
   const dueLabel = (() => {
@@ -127,8 +149,13 @@ const SupplierAttributePortal: React.FC = () => {
       const payload = catAttrs
         .filter(a => values[a.id])
         .map(a => ({ attributeId: a.id, name: a.name, value: values[a.id], type: types[a.id] }));
-      await submitAttributeRequest(token, payload);
+      // Only ids the supplier both marked AND actually filled in reach the server — an
+      // empty marked field has nothing to copy.
+      const sharedIds = Array.from(sharedAttrIds).filter(id => payload.some(p => p.attributeId === id));
+      const pending = siblings.filter(s => s.status === 'pending');
+      await submitAttributeRequest(token, payload, sharedIds);
       setSubmittedValues(payload);
+      setAppliedTo(sharedIds.length > 0 ? pending : []);
       setSubmitted(true);
     } catch (e: any) {
       alert('Error submitting: ' + (e.message || 'Unknown error'));
@@ -193,6 +220,14 @@ const SupplierAttributePortal: React.FC = () => {
             {request?.submittedAt && (
               <p className="text-xs text-gray-400 mt-2">
                 Submitted {new Date(request.submittedAt).toLocaleString()}
+              </p>
+            )}
+            {appliedTo.length > 0 && (
+              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 mt-4 inline-flex items-center gap-1.5">
+                <Copy size={13} />
+                The values you marked "same for all" were also copied to{' '}
+                {appliedTo.map(s => s.skuNumber).join(', ')}. Please still open each of those
+                and submit — only this SKU is finalized so far.
               </p>
             )}
           </div>
@@ -303,6 +338,47 @@ const SupplierAttributePortal: React.FC = () => {
       </div>
 
       <div className="max-w-2xl mx-auto p-4 pt-6">
+        {/* This SKU was requested together with others. Offer to copy identical fields
+            across the batch instead of making the supplier retype them on every SKU. */}
+        {request?.status === 'pending' && pendingSiblings.length > 0 && (
+          <div className="mb-6 bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm text-violet-900">
+            <div className="flex gap-3">
+              <Layers size={18} className="shrink-0 mt-0.5 text-violet-600" />
+              <div className="flex-1">
+                <strong className="block mb-0.5">
+                  Part of a batch of {pendingSiblings.length + 1} SKUs
+                </strong>
+                <p className="text-violet-800">
+                  Requested together with {pendingSiblings.map(s => s.skuNumber).join(', ')}.
+                  For any field that is the same across all of them, tick <strong>Same for all</strong> next
+                  to it — we'll copy the value into the others when you submit, so you only type it once.
+                  You'll still open each SKU to submit it, but the shared fields will already be filled in.
+                </p>
+                <div className="flex items-center gap-3 mt-3">
+                  {sharedAttrIds.size < catAttrs.length && (
+                    <button
+                      type="button"
+                      onClick={() => setSharedAttrIds(new Set(catAttrs.map(a => a.id)))}
+                      className="text-xs font-medium text-violet-700 hover:text-violet-900 underline"
+                    >
+                      Mark all as same
+                    </button>
+                  )}
+                  {sharedAttrIds.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSharedAttrIds(new Set())}
+                      className="text-xs font-medium text-violet-700 hover:text-violet-900 underline"
+                    >
+                      Clear all ({sharedAttrIds.size} marked)
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Values seeded from a sibling regional variant. Say so explicitly — otherwise
             the supplier cannot tell prefilled guesses from confirmed data for this SKU. */}
         {request?.status === 'pending' && request.copiedFromSku && (
@@ -348,11 +424,28 @@ const SupplierAttributePortal: React.FC = () => {
                 <div className="p-4 space-y-5">
                   {attrs.map(attr => (
                     <div key={attr.id} ref={el => { fieldRefs.current[attr.id] = el; }} className="scroll-mt-24">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        {attr.name}
-                        {attr.validationRules?.required && <span className="text-rose-500 ml-1">*</span>}
-                        {attr.validationRules?.unit && <span className="text-gray-400 ml-1 text-xs">({attr.validationRules.unit})</span>}
-                      </label>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <label className="block text-sm font-medium text-gray-700">
+                          {attr.name}
+                          {attr.validationRules?.required && <span className="text-rose-500 ml-1">*</span>}
+                          {attr.validationRules?.unit && <span className="text-gray-400 ml-1 text-xs">({attr.validationRules.unit})</span>}
+                        </label>
+                        {pendingSiblings.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleShared(attr.id)}
+                            title={`Copy this value to ${pendingSiblings.map(s => s.skuNumber).join(', ')} on submit`}
+                            className={`shrink-0 flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                              sharedAttrIds.has(attr.id)
+                                ? 'bg-violet-600 border-violet-600 text-white'
+                                : 'bg-white border-gray-200 text-gray-400 hover:border-violet-300 hover:text-violet-600'
+                            }`}
+                          >
+                            {sharedAttrIds.has(attr.id) ? <Check size={11} /> : <Layers size={11} />}
+                            Same for all
+                          </button>
+                        )}
+                      </div>
                       <AttributeInput
                         attribute={attr}
                         value={values[attr.id] || ''}

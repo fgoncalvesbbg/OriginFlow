@@ -51,7 +51,10 @@ export {
   getAttributeRequestsByProjectPublic,
   getAttributeRequestsForSupplier,
   getAttributeRequestByToken,
+  getSiblingAttributeRequests,
+  getAttributeRequestsByBatchToken,
   submitAttributeRequest,
+  submitAttributeBatch,
   updateAttributeRequestData,
   deleteAttributeRequest,
   MAX_SKUS_PER_PROJECT,
@@ -77,6 +80,7 @@ export {
   getSkuChangeLog
 } from './project';
 export type { CategorySku } from './project';
+export type { SiblingAttributeRequest } from './project';
 export type { ParsedSkuRow, BulkUpsertSkuResult, ChangeActor, SkuFieldChange } from './project';
 
 // Supplier module
@@ -145,7 +149,8 @@ export {
   makeAttributeGlobal,
   COMPLIANCE_SECTIONS,
   ATTRIBUTE_GROUPS,
-  PREDEFINED_ATTRIBUTE_GROUPS
+  PREDEFINED_ATTRIBUTE_GROUPS,
+  attributeGroupRank
 } from './compliance';
 export type { ImportAttributesResult, ReplaceAttributesResult } from './compliance';
 

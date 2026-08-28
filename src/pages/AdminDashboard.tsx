@@ -13,7 +13,7 @@ import {
   unassignAttributeFromCategory, makeAttributeGlobal, assignAttributeToCategory,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
-  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS,
+  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS, attributeGroupRank,
   getAIPrompts, updateAIPrompt,
   getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry,
   getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim,
@@ -673,7 +673,7 @@ const AdminDashboard: React.FC = () => {
         return;
       }
 
-      const rows = mapProductToolkitAttributes(attrs);
+      const rows = orderImportRows(mapProductToolkitAttributes(attrs));
       setImportRows(rows);
       setImportIncluded(rows.map(() => true));
       setImportFileName(`ProductToolkit · ${target.name}`);
@@ -693,6 +693,12 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Preview rows are sectioned like every other attribute list: Global first, then the rest
+  // in ATTRIBUTE_GROUPS order. Sort is stable, so the source file's order survives within a
+  // group. Applied where rows ENTER state, so the parallel importIncluded array stays aligned.
+  const orderImportRows = (rows: ParsedAttributeRow[]) =>
+    [...rows].sort((a, b) => attributeGroupRank(a.group) - attributeGroupRank(b.group));
+
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -700,7 +706,7 @@ const AdminDashboard: React.FC = () => {
     setImportFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
-      const rows = parseAttributeCsv(buf);
+      const rows = orderImportRows(parseAttributeCsv(buf));
       setImportRows(rows);
       setImportIncluded(rows.map(() => true));
       if (rows.length === 0) {
@@ -725,17 +731,16 @@ const AdminDashboard: React.FC = () => {
   //  'exists' → already applies here (global / owned / already shared); nothing to do.
   const importRowStatus = (row: ParsedAttributeRow): 'new' | 'link' | 'exists' => {
     const norm = (s?: string) => (s ?? '').trim().toLowerCase();
-    // Mirror importCategoryAttributes exactly: an Akeneo code is the GLOBAL identity, so a
-    // coded row matches across every group; only an uncoded row is scoped to its own group.
-    // (Matching a coded row within its group would show "New" for a row the import will
-    // actually link or skip — which ProductToolkit rows hit often, since their cluster need
-    // not agree with the group the attribute already sits in here.)
+    // Mirror importCategoryAttributes exactly, or the preview lies about what will happen.
+    // A global row (every group but 'Category Specific') resolves to one shared attribute:
+    // name within the group first, then the Akeneo code. A category-scoped row uses the code
+    // as identity across all groups, falling back to the name within its group.
     const code = norm(row.akeneoId);
-    const match = attributes.find(a =>
-      code
-        ? norm(a.akeneoId) === code
-        : a.group === row.group && norm(a.name) === norm(row.name),
-    );
+    const byName = (a: CategoryAttribute) => a.group === row.group && norm(a.name) === norm(row.name);
+    const byCode = (a: CategoryAttribute) => !!code && norm(a.akeneoId) === code;
+    const match = PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group)
+      ? (attributes.find(byName) ?? attributes.find(byCode))
+      : attributes.find(a => (code ? byCode(a) : byName(a)));
     if (!match) return 'new';
     const appliesHere =
       match.categoryId === null ||
@@ -830,6 +835,7 @@ const AdminDashboard: React.FC = () => {
       dataType: 'text',
       validationRules: {},
       group: 'Category Specific',
+      supplierVisible: true,
     };
     setGridRows(prev => [...prev, row]);
     setGridOptionsText(prev => ({ ...prev, [id]: '' }));
@@ -1022,7 +1028,7 @@ const AdminDashboard: React.FC = () => {
 
   const renderAttributeGrid = () => {
     const dirtyCount = gridRows.filter(r => gridDirty.has(r.id)).length;
-    const COLS = 8;
+    const COLS = 9;
     // Section the working rows by their group, in ATTRIBUTE_GROUPS order.
     const grouped = (ATTRIBUTE_GROUPS as readonly string[])
       .map(group => ({ group, rows: gridRows.filter(r => (r.group ?? 'Category Specific') === group) }))
@@ -1106,6 +1112,17 @@ const AdminDashboard: React.FC = () => {
             />
           </td>
           <td className="px-2 py-1.5 text-center">
+            {/* Only an explicit false hides it, so an undefined flag reads as visible. */}
+            <input
+              type="checkbox"
+              checked={r.supplierVisible !== false}
+              onChange={e => updateGridRow(r.id, { supplierVisible: e.target.checked })}
+              title={r.supplierVisible === false
+                ? 'Internal only — hidden from supplier forms'
+                : 'Shown to suppliers'}
+            />
+          </td>
+          <td className="px-2 py-1.5 text-center">
             <button
               onClick={() => removeGridRow(r.id)}
               className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
@@ -1152,6 +1169,7 @@ const AdminDashboard: React.FC = () => {
                 <th className="px-2 py-2 min-w-[220px]">Options (enum)</th>
                 <th className="px-2 py-2 min-w-[80px]">Unit</th>
                 <th className="px-2 py-2 text-center">Req</th>
+                <th className="px-2 py-2 text-center" title="Shown to external suppliers in the attribute portal, proposal form and RFQ">Supplier</th>
                 <th className="px-2 py-2 w-8"></th>
               </tr>
             </thead>
@@ -1271,6 +1289,12 @@ const AdminDashboard: React.FC = () => {
                                                         {a.name}
                                                         {isShared && (
                                                             <span className="text-[10px] font-bold text-violet-500 bg-violet-50 border border-violet-100 px-1.5 py-0.5 rounded uppercase tracking-wide">Shared</span>
+                                                        )}
+                                                        {a.supplierVisible === false && (
+                                                            <span
+                                                                className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded uppercase tracking-wide"
+                                                                title="Internal only — never shown in the supplier portal, proposal form or RFQ"
+                                                            >Internal</span>
                                                         )}
                                                     </div>
                                                     <div className="text-xs text-muted mt-0.5 capitalize">
@@ -2078,6 +2102,23 @@ const AdminDashboard: React.FC = () => {
                         <p className="text-xs text-gray-500 mt-1">Supplier will see a dropdown with only these choices.</p>
                       </div>
                     )}
+
+                    <div className="flex items-start gap-2 border-t border-gray-100 pt-3">
+                      <input
+                        type="checkbox"
+                        id="attrSupplierVisible"
+                        className="w-4 h-4 mt-0.5 text-indigo-600 rounded"
+                        checked={editingItem.supplierVisible !== false}
+                        onChange={e => setEditingItem({ ...editingItem, supplierVisible: e.target.checked })}
+                      />
+                      <label htmlFor="attrSupplierVisible" className="text-xs text-gray-700 select-none">
+                        <span className="font-medium">Ask suppliers for this</span>
+                        <span className="block text-gray-500 mt-0.5">
+                          Unticked, it stays internal: never shown in the supplier attribute portal, the
+                          proposal form or an RFQ. It is still visible to your team everywhere.
+                        </span>
+                      </label>
+                    </div>
                   </>
               )}
 

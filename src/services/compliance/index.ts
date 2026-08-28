@@ -51,4 +51,4 @@ export {
 } from './producttoolkit-attributes.service';
 export type { PtDefinitionSummary, PtAttribute } from './producttoolkit-attributes.service';
 
-export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';
+export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS, attributeGroupRank } from '../../config/compliance.constants';

@@ -32,3 +32,12 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# Outbound SKU read API for ProductToolkit / Akeneo-code consumers. A friendly path in front
+# of the function; the handler also accepts ?sku= directly. Requires SKU_API_TOKEN (server
+# env, no VITE_ prefix) — the function refuses every request when it is unset, because this
+# host is on the public internet and serves unreleased product data.
+[[redirects]]
+  from = "/api/skus/*"
+  to = "/.netlify/functions/sku-attributes/:splat"
+  status = 200

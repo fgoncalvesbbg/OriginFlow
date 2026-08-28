@@ -21,17 +21,14 @@ import {
   upsertSkuAttributeFlag,
   setSkuAttributeFlagResolved,
   deleteSkuAttributeFlag,
-  ATTRIBUTE_GROUPS,
+  attributeGroupRank,
 } from '../../services';
 import { getAttributesForCategory } from '../../utils/attribute-validation.utils';
 import SkuAttributeCellDrawer from '../../components/products/SkuAttributeCellDrawer';
 import { Search, Flag, Plus, X, Loader2, Table2 } from 'lucide-react';
 
 const cellKey = (skuId: string, attrId: string) => `${skuId}::${attrId}`;
-const groupRank = (group?: string) => {
-  const i = (ATTRIBUTE_GROUPS as readonly string[]).indexOf(group ?? 'Category Specific');
-  return i === -1 ? ATTRIBUTE_GROUPS.length : i;
-};
+
 
 const AttributeViewer: React.FC = () => {
   const { user } = useAuth();
@@ -116,7 +113,7 @@ const AttributeViewer: React.FC = () => {
       }
     }
     return Array.from(byId.values()).sort(
-      (a, b) => groupRank(a.group) - groupRank(b.group) || a.name.localeCompare(b.name),
+      (a, b) => attributeGroupRank(a.group) - attributeGroupRank(b.group) || a.name.localeCompare(b.name),
     );
   }, [allAttrs, categoryId, skus]);
 

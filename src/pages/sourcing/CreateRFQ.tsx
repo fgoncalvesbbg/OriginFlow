@@ -8,7 +8,7 @@ import { Supplier, CategoryL3, CategoryAttribute, RFQAttributeValue, RFQAttachme
 import { ArrowLeft, Loader2, Users, Layers, Image as ImageIcon, Upload, Paperclip, X, FileText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import AttributeInput from '../../components/common/AttributeInput';
-import { validateAttributeValue, getAttributesForCategory } from '../../utils';
+import { validateAttributeValue, getSupplierVisibleAttributes } from '../../utils';
 
 const CreateRFQ: React.FC = () => {
   const navigate = useNavigate();
@@ -64,7 +64,7 @@ const CreateRFQ: React.FC = () => {
 
   const handleCategoryChange = (catId: string) => {
       setSelectedCategory(catId);
-      const catAttrs = getAttributesForCategory(allAttributes, catId);
+      const catAttrs = getSupplierVisibleAttributes(allAttributes, catId);
       const initialTypes: Record<string, 'fixed' | 'range' | 'text' | 'multi-select'> = {};
       const initialValues: Record<string, string> = {};
       const initialMultiValues: Record<string, string[]> = {};
@@ -131,7 +131,7 @@ const CreateRFQ: React.FC = () => {
           return;
       }
 
-      const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
+      const currentCatAttributes = getSupplierVisibleAttributes(allAttributes, selectedCategory);
 
       // Validate attributes before submit — all attributes are optional in RFQ context
       const newErrors: Record<string, string> = {};
@@ -207,7 +207,7 @@ const CreateRFQ: React.FC = () => {
       }
   };
 
-  const currentCatAttributes = getAttributesForCategory(allAttributes, selectedCategory);
+  const currentCatAttributes = getSupplierVisibleAttributes(allAttributes, selectedCategory);
 
   if (loading) return <Layout><div>Loading...</div></Layout>;
 

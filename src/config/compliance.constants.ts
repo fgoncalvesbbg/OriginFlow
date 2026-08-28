@@ -21,6 +21,10 @@ export const skuSyntheticAttribute = (): CategoryAttribute => ({
 });
 
 export const ATTRIBUTE_GROUPS = [
+    // Order here IS the display order: every list, grid and picker sections attributes by
+    // indexOf on this array (see attributeGroupRank). 'Global' is deliberately first so
+    // cross-category attributes always sit at the top.
+    'Global',
     // 'Category Specific' is the only category-scoped group (carries a real category_id).
     'Category Specific',
     // Global/predefined groups (category_id = null, shared across every category).
@@ -39,6 +43,9 @@ export const ATTRIBUTE_GROUPS = [
 // list — everything except 'Category Specific'. 'Product Images' is additionally seeded by
 // db_migrations/51_add_product_images_attribute_group.sql.
 export const PREDEFINED_ATTRIBUTE_GROUPS = [
+    // 'Global' is the catch-all for attributes that belong to every category without
+    // fitting one of the named groups below (SKU, Product Name, Project ID...).
+    'Global',
     'Segmentation',
     'Variation Axes',
     'Standard Electric Specs',
@@ -48,6 +55,16 @@ export const PREDEFINED_ATTRIBUTE_GROUPS = [
     'Accessories',
     'Product Images',
 ] as unknown as string[];
+
+/**
+ * Sort key for an attribute's group — its position in ATTRIBUTE_GROUPS, with anything
+ * unrecognised sorted last. Single source of the section order shared by the admin list and
+ * grid, the SKU catalog, the attribute viewer and the import preview.
+ */
+export const attributeGroupRank = (group?: string): number => {
+    const i = (ATTRIBUTE_GROUPS as readonly string[]).indexOf(group ?? 'Category Specific');
+    return i === -1 ? ATTRIBUTE_GROUPS.length : i;
+};
 
 export const COMPLIANCE_SECTIONS = [
     'General Requirements',

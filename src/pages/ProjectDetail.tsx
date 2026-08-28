@@ -52,7 +52,7 @@ import {
   getEffectiveSkuValue,
   MAX_SKUS_PER_PROJECT
 } from '../services';
-import { getAttributesForCategory } from '../utils';
+import { getAttributesForCategory, generateUUID } from '../utils';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, IMTemplate, ProductionUpdate, ProductionDelayReason,
@@ -164,7 +164,8 @@ const ProjectDetail: React.FC = () => {
   // Sending a defined SKU (from the Attributes tab) to the supplier for review.
   const [sendingSkuId, setSendingSkuId] = useState<string | null>(null);
   const [sendingAllSkus, setSendingAllSkus] = useState(false);
-  const [attrLinkModal, setAttrLinkModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
+  // `count` distinguishes a single-SKU link from a batch link in the modal's copy below.
+  const [attrLinkModal, setAttrLinkModal] = useState<{ open: boolean; url: string; count?: number }>({ open: false, url: '' });
   const [attrLinkCopied, setAttrLinkCopied] = useState(false);
   const [expandedAttrRequestId, setExpandedAttrRequestId] = useState<string | null>(null);
   const [attrReqRefreshing, setAttrReqRefreshing] = useState(false);
@@ -835,6 +836,9 @@ const ProjectDetail: React.FC = () => {
     if (!toCreate.length) { showNotification('All SKUs already have production requests.', 'error'); return; }
     setAttrReqSendingAll(true);
     try {
+      // One token for the whole send: multiple SKUs going out together get ONE link and one
+      // side-by-side grid to fill, instead of a separate page per SKU.
+      const batchToken = toCreate.length > 1 ? generateUUID() : null;
       const newReqs = await Promise.all(toCreate.map(s2 => {
         let prefill = s2.status === 'submitted' && s2.submittedData?.length ? s2.submittedData : undefined;
         let copiedFrom: string | null = null;
@@ -850,11 +854,18 @@ const ProjectDetail: React.FC = () => {
           undefined,
           prefill,
           null,
-          copiedFrom
+          copiedFrom,
+          batchToken
         );
       }));
       setAttrRequests(prev => [...newReqs, ...prev]);
-      showNotification(`${newReqs.length} production request(s) created.`, 'success');
+      if (batchToken) {
+        const url = `${window.location.origin}/#/attribute-request-batch/${batchToken}`;
+        setAttrLinkCopied(false);
+        setAttrLinkModal({ open: true, url, count: newReqs.length });
+      } else {
+        showNotification(`${newReqs.length} production request(s) created.`, 'success');
+      }
     } catch (e: any) {
       showNotification('Failed to create production requests: ' + e.message, 'error');
     } finally {
@@ -907,6 +918,9 @@ const ProjectDetail: React.FC = () => {
     try {
       const categoryId = project.categoryId || complianceRequests[0]?.categoryId || null;
       const cat = categories.find(c => c.id === categoryId);
+      // One token for the whole send: multiple SKUs going out together get ONE link and one
+      // side-by-side grid to fill, instead of a separate page per SKU.
+      const batchToken = toSend.length > 1 ? generateUUID() : null;
       const newReqs = await Promise.all(toSend.map(sku => {
         let prefill: SkuAttributeValue[] | undefined = sku.attributeValues?.filter(v => v.value) ?? [];
         let copiedFrom: string | null = null;
@@ -922,11 +936,18 @@ const ProjectDetail: React.FC = () => {
           undefined,
           prefill.length ? prefill : undefined,
           null,
-          copiedFrom
+          copiedFrom,
+          batchToken
         );
       }));
       setAttrRequests(prev => [...newReqs, ...prev]);
-      showNotification(`${newReqs.length} SKU(s) sent for supplier review.`, 'success');
+      if (batchToken) {
+        const url = `${window.location.origin}/#/attribute-request-batch/${batchToken}`;
+        setAttrLinkCopied(false);
+        setAttrLinkModal({ open: true, url, count: newReqs.length });
+      } else {
+        showNotification(`${newReqs.length} SKU(s) sent for supplier review.`, 'success');
+      }
     } catch (e: any) {
       showNotification('Failed to send SKUs: ' + e.message, 'error');
     } finally {
@@ -2856,10 +2877,17 @@ const ProjectDetail: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-lg flex items-center gap-2"><CheckCircle2 size={18} className="text-emerald-600"/> Request Created!</h3>
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <CheckCircle2 size={18} className="text-emerald-600"/>
+                {attrLinkModal.count ? `${attrLinkModal.count} Requests Created!` : 'Request Created!'}
+              </h3>
               <button onClick={() => setAttrLinkModal({ open: false, url: '' })}><X size={18} className="text-gray-400"/></button>
             </div>
-            <p className="text-sm text-gray-500 mb-4">Share this link with the supplier. They will see the attribute form and submit their data directly.</p>
+            <p className="text-sm text-gray-500 mb-4">
+              {attrLinkModal.count
+                ? `One link for all ${attrLinkModal.count} SKUs. The supplier fills them side by side on one page and submits together.`
+                : 'Share this link with the supplier. They will see the attribute form and submit their data directly.'}
+            </p>
             <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
               <span className="text-xs text-gray-700 font-mono truncate flex-1 select-all">{attrLinkModal.url}</span>
               <button

@@ -1,0 +1,2344 @@
+[
+ {
+  "id": "011e97de-4afd-4d65-9cb7-87c6411145d2",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Number of shelfs",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "NEW3"
+ },
+ {
+  "id": "02678cac-2670-44db-9d67-162d4cbc86ef",
+  "category_id": null,
+  "name": "Variation 2 - Value",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Black",
+    "Black/White",
+    "Silver",
+    "Silver/Black",
+    "Black/Black",
+    "White",
+    "Silver/White",
+    "Copper/Black",
+    "Light Grey",
+    "Printing",
+    "Red",
+    "Cream"
+   ]
+  },
+  "group": "Variation Axes",
+  "assigned_category_ids": [],
+  "akeneo_id": "VARIATION 2 - VALUE"
+ },
+ {
+  "id": "04b3f97f-486d-4fec-a0b7-f6c75895b18f",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Power Consumption Standby Mode",
+  "data_type": "decimal",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "standby_power_consumption"
+ },
+ {
+  "id": "07f3bed7-ebb7-4b62-861b-e7bb893daa11",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Display (Yes/No)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "N/A",
+    "No",
+    "Yes"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "display"
+ },
+ {
+  "id": "08a8192f-4e32-4152-9750-8c4d27ef41f2",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "No. of Bottles",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "bottle_capacity_zone_1"
+ },
+ {
+  "id": "08e6bfdd-fb6c-4dbb-9a03-7844f13cee89",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Time to Reach Full Heat (sec or min)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "10 min",
+    "15 min",
+    "20 min",
+    "30 min",
+    "5 min"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "time_to_reach_full_heat"
+ },
+ {
+  "id": "0bc7cfb3-f6e5-4e7d-ac5d-4d5795603b09",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Installation Type [Freestanding/Built in]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Freestanding",
+    "Built-in"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "installation_type"
+ },
+ {
+  "id": "0c5fa116-b2b3-4ae4-9c49-b5b994804fbb",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Can the remote control two units at the same time? (Yes/No)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "N/A",
+    "No",
+    "Yes"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "remote_controls_two_units"
+ },
+ {
+  "id": "0c73a72e-4d8e-454c-8db0-a9707e384c82",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Airflow (m\u00c2\u00b3/h) Booster",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "air_volume_flow_boost"
+ },
+ {
+  "id": "0ee2a24d-5464-4ad3-a87c-83b4a5806107",
+  "category_id": null,
+  "name": "Weight of one battery main unit",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "g"
+  },
+  "group": "Battery Information",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "weight_of_batteries"
+ },
+ {
+  "id": "10530882-9dc9-4993-b7f9-495a836487bf",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Integrated Light (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "integrated_light"
+ },
+ {
+  "id": "11238289-1585-45ee-9957-497f821fed1b",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Noise emission (dB) at Boost level",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "boost_noise_level"
+ },
+ {
+  "id": "113a0b4d-0457-43f4-b051-16f65b90b70e",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Number of filter layers",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "number_of_layers_filter_1"
+ },
+ {
+  "id": "137020e6-6fee-464c-9ce2-0b251bd7cef9",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Mounting Material Included (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "mounting_material_included"
+ },
+ {
+  "id": "1576d881-b1ef-47cb-9f2e-55fd37b80667",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Fan speed levels (w/o boosters)",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "fan_wind_speed_lvl"
+ },
+ {
+  "id": "164c52cb-f69c-4c46-aced-601ad39f4633",
+  "category_id": null,
+  "name": "IoT/Smart",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "app_control"
+ },
+ {
+  "id": "16c53d38-8003-4db4-9848-026b7d4361f4",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Type of Thermostat (Mechanical / Electric)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Electric",
+    "Mechanical",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "thermostat_type"
+ },
+ {
+  "id": "1847b4f2-20cb-4425-ba59-3f1aa5580d77",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Lighting Type (LED / RGB / Ambient)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Ambient",
+    "LED",
+    "N/A",
+    "No"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "lighting_type"
+ },
+ {
+  "id": "18a54460-ab5a-402f-bc3d-7f87f68a657b",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Adjustable Power Settings",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "adjustable_power_settings"
+ },
+ {
+  "id": "19436bce-0738-4c7c-8ee5-0c08d67c9843",
+  "category_id": null,
+  "name": "Product Height",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "cm"
+  },
+  "group": "Product Dimensions",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "hoehe"
+ },
+ {
+  "id": "19d56801-3554-44b2-b9e4-ed24ffe6d685",
+  "category_id": null,
+  "name": "Accessory 5 - SKU",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Accessories",
+  "assigned_category_ids": [],
+  "akeneo_id": "item_5_accessories"
+ },
+ {
+  "id": "1b5686df-b983-4234-8d35-61b2f7051110",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Adjustable Brightness (Dimmable)",
+  "data_type": "boolean",
+  "validation_rules": {
+   "enumOptions": [
+    "No",
+    "Yes"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "is_light_dimmable"
+ },
+ {
+  "id": "1ddfe053-f19b-4b91-9c9d-78af5207f061",
+  "category_id": null,
+  "name": "IEC protection class [Schutzklasse]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "I (only value observed",
+    "standard set is I, II, III)"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "iec_protection_class"
+ },
+ {
+  "id": "1e94765d-f0ca-4aaa-8966-4711309b444f",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Door Open Alarm [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "warning_signal_when_the_door_is_open"
+ },
+ {
+  "id": "1f5b94af-c332-481e-b8bf-7f7f831fd088",
+  "category_id": null,
+  "name": "Variation 3",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Energy Class",
+    "Frame Color"
+   ]
+  },
+  "group": "Variation Axes",
+  "assigned_category_ids": [],
+  "akeneo_id": "VARIATION 3"
+ },
+ {
+  "id": "1fb486e1-e514-4396-83f7-841c2694e828",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Size Cluster",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "30",
+    "35",
+    "38",
+    "40",
+    "41",
+    "44",
+    "45",
+    "50",
+    "52",
+    "55",
+    "60",
+    "70",
+    "72",
+    "75",
+    "77",
+    "80",
+    "83",
+    "85",
+    "90",
+    "110",
+    "120",
+    "80 Slim",
+    "90 Slim"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "size_name"
+ },
+ {
+  "id": "20fb3896-9937-4604-ab73-efea74ede084",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Tip-over Protection (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "tip_over_protection"
+ },
+ {
+  "id": "21b2ca7f-1471-4009-86da-bdeaf55c633b",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Boost Levels",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "boost_levels"
+ },
+ {
+  "id": "220193f9-0d44-4e6c-83b5-72122c8fb11a",
+  "category_id": "65b04d08-2068-4b7f-b734-12b8ed0b1d26",
+  "name": "Size(40, 60, 90, 120 etc.)",
+  "data_type": "enum",
+  "validation_rules": {
+   "required": true,
+   "enumOptions": [
+    "35",
+    "40",
+    "45",
+    "60",
+    "70",
+    "90",
+    "120",
+    "Other"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "243710f0-e494-4b47-91d0-ba9c5cc4682f",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Color Temperature max.",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "6000K",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "max_color_temp"
+ },
+ {
+  "id": "24d1a808-b71c-4905-84a0-4173b5ba5075",
+  "category_id": null,
+  "name": "Power",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "W"
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "total_power"
+ },
+ {
+  "id": "25b5d37c-7041-4306-9e25-e92640f9cd04",
+  "category_id": null,
+  "name": "Box 3 - Content [what's inside?]",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Packaging",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "package_1_contents"
+ },
+ {
+  "id": "2a26cb54-b2d4-40fd-8777-ba26c185149a",
+  "category_id": null,
+  "name": "Special Attribute 1",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "special_1"
+ },
+ {
+  "id": "2b4706c4-ca08-41f4-8f1c-359577a0dacc",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Duct outlet (mm)",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "duct_outlet"
+ },
+ {
+  "id": "2b6f3902-1937-4739-bb6d-c094513e3913",
+  "category_id": null,
+  "name": "Product weight",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "kg"
+  },
+  "group": "Product Dimensions",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "gewicht"
+ },
+ {
+  "id": "2becdc91-fdc3-4874-9103-e7c3759bb52e",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Height chimney (max)",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "height_flue_duct_max"
+ },
+ {
+  "id": "2c2a1f4f-4118-47cf-a017-c9826f50758c",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Box 3 - Content [what's inside?]",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "package_3_contents"
+ },
+ {
+  "id": "2ccc62de-ef4e-4ea7-b8ee-296f0266ed79",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Interior lighting [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "interior_lighting"
+ },
+ {
+  "id": "2d3d7e79-3bef-4a32-9efc-a26a0a5c53e3",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Chimney Material",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Aluminum foil",
+    "Coated Steel",
+    "Stainless Steel"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "chimney_material"
+ },
+ {
+  "id": "2dd92491-dbe1-4734-acc8-eaf5a9eb5fa6",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Variation 1",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Color",
+    "Number of units",
+    "Power",
+    "Size"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "variant_size"
+ },
+ {
+  "id": "2f836d33-48d9-44cb-ab16-22f2b6beaaee",
+  "category_id": null,
+  "name": "Type of batteries main unit [type]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": []
+  },
+  "group": "Battery Information",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "battery_type"
+ },
+ {
+  "id": "34229672-22b5-400d-a9d2-326ee114e954",
+  "category_id": "65b04d08-2068-4b7f-b734-12b8ed0b1d26",
+  "name": "Air capacity/airflow (m\u00c2\u00b3/h) max",
+  "data_type": "integer",
+  "validation_rules": {
+   "max": 1000,
+   "min": 100,
+   "step": 1,
+   "unit": "m3/h",
+   "required": true
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "38dadcf5-16f5-40f4-a34c-359de85d01d5",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Type of Motor",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "AC",
+    "DC"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "type_of_motor"
+ },
+ {
+  "id": "3a5b72f3-1d86-4257-88ee-79a5f2174fb3",
+  "category_id": null,
+  "name": "Main Color",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Black",
+    "Silver",
+    "White",
+    "Copper",
+    "Light Gray",
+    "Printing",
+    "Red",
+    "Cream"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "main_color"
+ },
+ {
+  "id": "3c5dd894-ef10-4f50-a538-1c60eb5a0022",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Grease Filter dishwasher safe?",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "is_filter_dishwasher_safe"
+ },
+ {
+  "id": "3d2f0123-e2b9-4367-9844-17f881187746",
+  "category_id": null,
+  "name": "Variation 1 - Value",
+  "data_type": "decimal",
+  "validation_rules": null,
+  "group": "Variation Axes",
+  "assigned_category_ids": [],
+  "akeneo_id": "VARIATION 1 - VALUE"
+ },
+ {
+  "id": "3dc9d0c1-277e-4a7f-aa5a-d9f208c320f6",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Handle Type",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Recessed",
+    "Bar"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "handle_type"
+ },
+ {
+  "id": "3f104a2f-06a3-4507-8084-3902366e4e7d",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Mounting Type",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Ceiling",
+    "Standing",
+    "Wall",
+    "Wall & Ceiling",
+    "Wall & Standing",
+    "Wall Mounted"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "mounting_type"
+ },
+ {
+  "id": "3f3f30e3-1cbc-44fa-b136-971609c972a2",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Box 2 - Content [what's inside?]",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "package_2_contents"
+ },
+ {
+  "id": "41922a09-741e-425f-a162-3ecf78386e57",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Color Temperature min.",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "3000K",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "min_color_temp"
+ },
+ {
+  "id": "4391c0bf-a34c-4c9c-a578-c5f5cec4f5fe",
+  "category_id": null,
+  "name": "Type of plug",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Type E/F - 2 pin (German) - Schuko",
+    "Type C 16A - 2 pin (Europlug)"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "power_plug_type"
+ },
+ {
+  "id": "453346da-e616-46c5-91a9-c3c9ec464a11",
+  "category_id": null,
+  "name": "Accessory 1 - SKU",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Accessories",
+  "assigned_category_ids": [],
+  "akeneo_id": "item_1_accessories"
+ },
+ {
+  "id": "480688d4-f950-42cc-9d89-54254399ed61",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Automatic Switch Off",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_automatic_shutoff"
+ },
+ {
+  "id": "49614f74-e108-4681-abcc-15d12023e3b5",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Type of built-in work lights",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Bulb",
+    "LED"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "light_source_type"
+ },
+ {
+  "id": "498c647c-88e0-41a5-96b7-889cc8375f2b",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Overheating Protection (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_overheating_protection"
+ },
+ {
+  "id": "4af10e4b-d708-47ba-8ae2-fce1e58e41da",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Feet/Base Material (if applicable)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "ABS",
+    "Aluminium",
+    "Metal",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "material_feet"
+ },
+ {
+  "id": "4c574e5e-2583-49ef-bce0-7587cb865556",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Wheels (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_wheels"
+ },
+ {
+  "id": "4c9a9a17-6443-471f-b63d-2c9cf6bec0b6",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Timer Function (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_timer"
+ },
+ {
+  "id": "4ca93b65-dc03-4e20-ac5d-75c03a80d7ff",
+  "category_id": null,
+  "name": "Variation 2",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Color (axis name)"
+   ]
+  },
+  "group": "Variation Axes",
+  "assigned_category_ids": [],
+  "akeneo_id": "VARIATION 2"
+ },
+ {
+  "id": "4e161325-423d-47ff-8257-0b72c7a911e2",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Room Temperature Indicator (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "room_temp_indicator"
+ },
+ {
+  "id": "4eca15b4-102a-4d72-82a1-ac2dee74f30c",
+  "category_id": null,
+  "name": "Segment 5",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "0 (none)",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+   ]
+  },
+  "group": "Segmentation",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "segment_5"
+ },
+ {
+  "id": "55352743-38f3-48a0-87a6-70cc80b61160",
+  "category_id": null,
+  "name": "Annual energy consumption",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "kWh/year"
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [],
+  "akeneo_id": "energy_consumption_annum"
+ },
+ {
+  "id": "57d9780f-61c5-4e0c-a218-e1ef93253023",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Exhaust Hose Included?",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_exhaust_air_hose"
+ },
+ {
+  "id": "57fa966b-142f-45d8-8024-1ec13d75cfd3",
+  "category_id": "65b04d08-2068-4b7f-b734-12b8ed0b1d26",
+  "name": "Air capacity/airflow (m\u00c2\u00b3/h) Booster",
+  "data_type": "integer",
+  "validation_rules": {
+   "max": 1000,
+   "min": 100,
+   "step": 1,
+   "unit": "m3/h",
+   "required": false
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "58689e91-5965-4c07-ab33-0b46058c4b9a",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Type of Control",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Button",
+    "Button + Knob",
+    "Electronic Button",
+    "Knob",
+    "Knob (Illuminated)",
+    "Knob + Gesture",
+    "Knob + Touch",
+    "Push Button",
+    "Slider",
+    "Switch",
+    "Touch",
+    "Touch + Knob"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "variant_control_options"
+ },
+ {
+  "id": "59805cdf-9c42-4ad3-bf21-79d97c0e8a18",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Number of Power Settings",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "number_of_power_settings"
+ },
+ {
+  "id": "5b17671b-a03a-4a9b-b11d-3d3cc109ead8",
+  "category_id": null,
+  "name": "ISTA Level",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "ISTA 1A",
+    "Other"
+   ]
+  },
+  "group": "Packaging",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "ista_level"
+ },
+ {
+  "id": "5c061062-9aa2-4dd9-bdb6-d48d0655ed20",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Temperature alarm [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_temperature_alarm"
+ },
+ {
+  "id": "5c3324be-e067-4a40-a2d9-fab1b90d0fcf",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Number of batteries in accessories [qty]",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "number_of_batteries_in_accessories"
+ },
+ {
+  "id": "5d35704b-cb47-493d-8eba-7e55337e3192",
+  "category_id": null,
+  "name": "Total Power [W]",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [],
+  "akeneo_id": "power"
+ },
+ {
+  "id": "5ecaff98-76d5-4c0c-848d-03d4b996d4b6",
+  "category_id": null,
+  "name": "Power cord length [m]",
+  "data_type": "decimal",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [],
+  "akeneo_id": "Kabellaenge"
+ },
+ {
+  "id": "60d7f6db-5883-488e-b25a-97310f026200",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Safety lock [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "safety_lock"
+ },
+ {
+  "id": "60f7bbd3-2d27-406f-b62f-5014289dee3b",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Height chimney (min)",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "height_flue_duct"
+ },
+ {
+  "id": "630f34b0-8bde-46fd-99c2-0ffe2110d70e",
+  "category_id": null,
+  "name": "Accessory 2 - SKU",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Accessories",
+  "assigned_category_ids": [],
+  "akeneo_id": "item_2_accessories"
+ },
+ {
+  "id": "639e2760-4a78-4a6a-8f60-93efddae9320",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Refrigerant type",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "R600a",
+    "R290"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "coolant"
+ },
+ {
+  "id": "6441b860-1ef7-4a69-b848-7ccc0a5b0f9c",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Operation Indicator Light (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_display_light_on_off_function"
+ },
+ {
+  "id": "6578d5d0-f757-4f83-afe7-2a3b1b42386b",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Effective Heating Area (m\u00c3\u0082\u00c2\u00b2)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "10\u00c3\u00a2\u00c2\u0080\u00c2\u009319 m\u00c3\u0082\u00c2\u00b2",
+    "12\u00c3\u00a2\u00c2\u0080\u00c2\u009324 m\u00c3\u0082\u00c2\u00b2",
+    "13\u00c3\u00a2\u00c2\u0080\u00c2\u009325 m\u00c3\u0082\u00c2\u00b2",
+    "3\u00c3\u00a2\u00c2\u0080\u00c2\u00937 m\u00c3\u0082\u00c2\u00b2",
+    "4\u00c3\u00a2\u00c2\u0080\u00c2\u00938 m\u00c3\u0082\u00c2\u00b2",
+    "5\u00c3\u00a2\u00c2\u0080\u00c2\u009310 m\u00c3\u0082\u00c2\u00b2",
+    "5\u00c3\u00a2\u00c2\u0080\u00c2\u00939 m\u00c3\u0082\u00c2\u00b2",
+    "6\u00c3\u00a2\u00c2\u0080\u00c2\u009311 m\u00c3\u0082\u00c2\u00b2",
+    "6\u00c3\u00a2\u00c2\u0080\u00c2\u009312 m\u00c3\u0082\u00c2\u00b2",
+    "7\u00c3\u00a2\u00c2\u0080\u00c2\u009314 m\u00c3\u0082\u00c2\u00b2",
+    "8\u00c3\u00a2\u00c2\u0080\u00c2\u009315 m\u00c3\u0082\u00c2\u00b2",
+    "8\u00c3\u00a2\u00c2\u0080\u00c2\u009316 m\u00c3\u0082\u00c2\u00b2",
+    "9\u00c3\u00a2\u00c2\u0080\u00c2\u009317 m\u00c3\u0082\u00c2\u00b2",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "effective_heating_area"
+ },
+ {
+  "id": "65b6a43f-d0cf-4789-80ac-147d6ef2409e",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Remote Control Included (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "remote_control"
+ },
+ {
+  "id": "6706a3f1-425c-47da-a7f5-6d3e7a7f5ae4",
+  "category_id": null,
+  "name": "Accessory 4 - SKU",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Accessories",
+  "assigned_category_ids": [],
+  "akeneo_id": "item_4_accessories"
+ },
+ {
+  "id": "679d4c80-720a-4623-bc6e-8ca32c06124d",
+  "category_id": null,
+  "name": "Segment 4",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Solid",
+    "Glass",
+    "Metal",
+    "Mirrorred Glass"
+   ]
+  },
+  "group": "Segmentation",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "segment_4"
+ },
+ {
+  "id": "6819a400-01c1-4b04-990d-0243b0a1678b",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Refrigerant weight",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "g"
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "coolant_weight"
+ },
+ {
+  "id": "689d09a8-6213-4af3-aed8-499cfa370361",
+  "category_id": null,
+  "name": "Weight of one battery in accessories",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "g"
+  },
+  "group": "Battery Information",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "weight_of_batteries_in_accessories"
+ },
+ {
+  "id": "6a557a70-06ed-429c-8746-97c77467eb62",
+  "category_id": null,
+  "name": "Project ID",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Segmentation",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "project_number"
+ },
+ {
+  "id": "6ad89a3f-30bc-4fda-88c5-3ca530685aaa",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Heat Sensor (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "heat_sensor"
+ },
+ {
+  "id": "6b883467-35d8-49e9-a060-62b472b721df",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Motion Sensor (Auto On/Off) (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "motion_detection_sensor"
+ },
+ {
+  "id": "706a7eb2-1c43-4a91-8a18-0eeb53dd18bf",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Child Lock (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_safety_child_lock"
+ },
+ {
+  "id": "71bc2253-a44d-4128-a7cd-fce187301b03",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Finish (Matte / Shiny)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Matte",
+    "Shiny"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "finish"
+ },
+ {
+  "id": "72c6371f-20ee-4731-bb64-d11d210343aa",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Height adjustable feet [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "height_adjustable_feet"
+ },
+ {
+  "id": "7386c560-71ca-4597-9755-734fd31c2470",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Light power (W)",
+  "data_type": "decimal",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "light_total_power"
+ },
+ {
+  "id": "73a49062-b7d3-40da-9995-49369c544b22",
+  "category_id": null,
+  "name": "Segment 1",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Thermo",
+    "Compressor"
+   ]
+  },
+  "group": "Segmentation",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "segment_1"
+ },
+ {
+  "id": "743d654f-af45-4d8f-8428-5568ed44b06c",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Odor or Steam Sensor?",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "odor_steam_sensor"
+ },
+ {
+  "id": "75bd7ddb-5304-4053-86b0-1ac5f84d2cbf",
+  "category_id": "65b04d08-2068-4b7f-b734-12b8ed0b1d26",
+  "name": "Energy Efficiency",
+  "data_type": "enum",
+  "validation_rules": {
+   "required": true,
+   "enumOptions": [
+    "A+++",
+    "A++",
+    "A+",
+    "A",
+    "B",
+    "C",
+    "D"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "7a3642fd-cb65-49ac-b21d-1e0934a48897",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Integrated Thermostat (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "thermostat"
+ },
+ {
+  "id": "7bd790c9-2dde-4335-bd3a-2732317dc536",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Supplier Model Number",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "supplier_model"
+ },
+ {
+  "id": "7c13869f-b693-44bf-8dba-06587bbbf5e1",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "RGB",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_rgb_light"
+ },
+ {
+  "id": "7e7bf6f2-6847-4792-be5b-0d3eef5a4c37",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Adjustable Shelves Height [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_adjustable_shelves"
+ },
+ {
+  "id": "83dc087e-9b90-4ace-9bc0-729e2c816171",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Door hinge position [Right/Left]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Right",
+    "Top",
+    "Left",
+    "Bottom"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "door_hinge_position"
+ },
+ {
+  "id": "865240ef-862a-48f4-b1fe-ddd4a09e370e",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Infrared Heating Ratio (%)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "70",
+    "85",
+    "98",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "infrared_heating_ratio"
+ },
+ {
+  "id": "8d2575b5-b210-441f-8ae3-82e3ec4822d1",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Number of built-in work lights",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "number_of_lights"
+ },
+ {
+  "id": "91e5828e-9583-4bb7-8f23-8a08e55801e8",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Nominal capacity",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "L"
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "volume_capacity_name"
+ },
+ {
+  "id": "932ab4a7-bb9d-45aa-a5b5-ea28a58041f5",
+  "category_id": null,
+  "name": "Power cord length",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "m"
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "power_cord_length"
+ },
+ {
+  "id": "9330fdcf-1c9d-46ae-9f2b-b0878dc2471b",
+  "category_id": "65b04d08-2068-4b7f-b734-12b8ed0b1d26",
+  "name": "Width",
+  "data_type": "decimal",
+  "validation_rules": {
+   "max": 500,
+   "min": 5,
+   "unit": "cm"
+  },
+  "group": "Product Dimensions",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "942df849-f2f5-4aa1-a6ef-6b0c40af6814",
+  "category_id": "f1df6682-f7ec-4884-8867-3c2534a15809",
+  "name": "Installation Type - Hobs",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Built In",
+    "Standalone/Table Top"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "94ae7726-e410-416e-91d0-0ba57c66af36",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Frost Detection (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_frost_detection"
+ },
+ {
+  "id": "955e33ac-86ba-4b01-a151-7b8a3e33fb6b",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Carbon Filter Included?",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_activated_charcoal_carbon_filters"
+ },
+ {
+  "id": "957b241c-4f3d-4910-8144-2ddde0f52c06",
+  "category_id": null,
+  "name": "Variation 1",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Capacity (axis name)"
+   ]
+  },
+  "group": "Variation Axes",
+  "assigned_category_ids": [],
+  "akeneo_id": "VARIATION 1"
+ },
+ {
+  "id": "96657ff0-de15-4102-943e-367471d09cf4",
+  "category_id": null,
+  "name": "Family Name",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Segmentation",
+  "assigned_category_ids": [],
+  "akeneo_id": "item_family"
+ },
+ {
+  "id": "974674c2-5673-427e-a1f1-4dbf1a85215d",
+  "category_id": null,
+  "name": "How Many Boxes?",
+  "data_type": "integer",
+  "validation_rules": {
+   "unit": "qty"
+  },
+  "group": "Packaging",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "how_many_boxes___qty_"
+ },
+ {
+  "id": "98e934d6-5023-40a4-9ca0-07c1f4808035",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Housing Material",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Aluminium + Metal + PET",
+    "Aluminium+IR Ceramic Coating",
+    "Aluminium+Metal+PET",
+    "Ceramic",
+    "Glass",
+    "Glass+Metal",
+    "Marble Stone",
+    "Metal",
+    "Metal+Plastic",
+    "Steel"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "outer_material_type"
+ },
+ {
+  "id": "9a83dc69-8160-42e3-8e16-d4a57a574362",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Temperature Range (\u00c3\u0082\u00c2\u00b0C)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "0 - 37 \u00c3\u0082\u00c2\u00b0C",
+    "0 - 45 \u00c3\u0082\u00c2\u00b0C",
+    "0 - 55 \u00c3\u0082\u00c2\u00b0C",
+    "10 - 50 \u00c3\u0082\u00c2\u00b0C",
+    "5 - 32 \u00c3\u0082\u00c2\u00b0C",
+    "5 - 35 \u00c3\u0082\u00c2\u00b0C",
+    "5 - 50 \u00c3\u0082\u00c2\u00b0C",
+    "5 - 55 \u00c3\u0082\u00c2\u00b0C",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "temperature_range"
+ },
+ {
+  "id": "9b4121f5-9b17-4ba0-ae5f-15d506580fa9",
+  "category_id": null,
+  "name": "Noise Emission",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "dB"
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "max_noise_level"
+ },
+ {
+  "id": "9bf1878e-828d-4e53-ae2a-ea3d6a5bf238",
+  "category_id": null,
+  "name": "Energy efficiency class",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "A",
+    "A+",
+    "A++",
+    "A+++",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [],
+  "akeneo_id": "Energieeffizienzklasse"
+ },
+ {
+  "id": "9ccd7483-1e17-41cb-a6fb-200321c5c1d4",
+  "category_id": null,
+  "name": "Special Attribute 4",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "special_4"
+ },
+ {
+  "id": "9d038e37-c615-4e7d-a129-8f62b4877a95",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Type of cooling system [Compressor/Thermo]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Thermo",
+    "Compressor"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "cooling_system"
+ },
+ {
+  "id": "9d8ce4a4-9626-4647-a078-b04c50280ec8",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Air Blower",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_air_blower"
+ },
+ {
+  "id": "9f009f54-62fd-4f11-879c-67d6d29452d8",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Airflow (m\u00c2\u00b3/h) max",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "max_airflow_capacity__m__h_"
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000001",
+  "category_id": null,
+  "name": "Front",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000002",
+  "category_id": null,
+  "name": "Side",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000003",
+  "category_id": null,
+  "name": "Top",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000004",
+  "category_id": null,
+  "name": "Bottom",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000005",
+  "category_id": null,
+  "name": "Control Panel",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000006",
+  "category_id": null,
+  "name": "Remote",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1000000-0000-4000-8000-000000000007",
+  "category_id": null,
+  "name": "Others",
+  "data_type": "image",
+  "validation_rules": {},
+  "group": "Product Images",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "a1684b8d-ccd6-4a89-8fb9-f0a15d010d2d",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "LED/LCD Display Present (Yes/No)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "LCD",
+    "No",
+    "Yes"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "led_lcd_display"
+ },
+ {
+  "id": "a3cbc16f-e416-493a-a2e8-af387e2be565",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Mounting Orientation (Horizontal/Vertical/Both)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Horizontal",
+    "Horizontal+Vertical",
+    "N/A",
+    "Vertical"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "mounting_orientation"
+ },
+ {
+  "id": "a65a23b3-e45e-4fbe-a1f7-acaa482ba16e",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Light Color Options (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "light_color_options"
+ },
+ {
+  "id": "a697431c-0c6f-44e2-8ab8-81d66021f617",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Airflow (m\u00c2\u00b3/h) min",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "min_air_volume_flow"
+ },
+ {
+  "id": "a6b2af7c-924d-4e50-bab6-f6bbe875c35f",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Variation 2",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Color",
+    "Design",
+    "Number of units",
+    "Smart",
+    "Type"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "variant_design"
+ },
+ {
+  "id": "a81697ef-bb50-4f30-9200-04b7fb6357cb",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Timer Range (0-24h)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "0-24h",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "timer_range"
+ },
+ {
+  "id": "aa63638b-b1c9-4309-95ae-26093e2e459e",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Maximum Product Surface Temperature (\u00c3\u0082\u00c2\u00b0C)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "100",
+    "110",
+    "130",
+    "60",
+    "95",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "max_surface_temperature"
+ },
+ {
+  "id": "ad0fe2d1-438c-416c-b124-d8f6b9413319",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Usage (Indoor/Outdoor/Both)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Indoor"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "recommended_use_in_out"
+ },
+ {
+  "id": "afa442a1-1797-458a-aec3-e8becb17b017",
+  "category_id": null,
+  "name": "Variation 3 - Value",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "F",
+    "Black",
+    "Silver",
+    "C"
+   ]
+  },
+  "group": "Variation Axes",
+  "assigned_category_ids": [],
+  "akeneo_id": "VARIATION 3 - VALUE"
+ },
+ {
+  "id": "b07aae2e-a410-4239-a69d-549901ff8981",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "IP Rating",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "IP20",
+    "IP24",
+    "IP43",
+    "IP44",
+    "IP52",
+    "IPX0",
+    "IPX4"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "ipx_rating"
+ },
+ {
+  "id": "b0bf88b2-dc00-4312-b54d-3755af03aa38",
+  "category_id": null,
+  "name": "Voltage Range [V / Hz]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "220-240 V ~ 50/60 Hz",
+    "220-240V 50/60HZ"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [],
+  "akeneo_id": "power_supply"
+ },
+ {
+  "id": "b0c75777-e2b4-4808-a167-f14b3cabb907",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Lighting Efficiency",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "lighting_efficiency"
+ },
+ {
+  "id": "b2a620ed-4f55-493b-85d5-4df634334554",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Air Flow Efficiency",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "A",
+    "A++",
+    "B",
+    "C",
+    "D",
+    "E"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "air_flow_efficiency"
+ },
+ {
+  "id": "b2eba9cd-ef85-4f99-9aa2-edfa5a831d37",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Replacement of SKU No",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "sku_replacement"
+ },
+ {
+  "id": "b5d19e07-8d93-41ff-92c8-caea49672a3b",
+  "category_id": null,
+  "name": "Number of batteries main unit",
+  "data_type": "integer",
+  "validation_rules": {
+   "unit": "qty"
+  },
+  "group": "Battery Information",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "number_of_batteries"
+ },
+ {
+  "id": "b7aef88a-7d7c-45e0-b0ae-39d7bd5c9e06",
+  "category_id": null,
+  "name": "Accessory 3 - SKU",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Accessories",
+  "assigned_category_ids": [],
+  "akeneo_id": "item_3_accessories"
+ },
+ {
+  "id": "b832eabb-b6c8-4ed2-bd96-15677a4d05b5",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Door hinge changeable [Y/N]",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "door_hinge_changeable"
+ },
+ {
+  "id": "b85ab4d4-ad61-4c39-af4c-62352a1ba3e8",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Max temperature",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "\u00c2\u00b0C"
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "max_temperature"
+ },
+ {
+  "id": "b9eeb8b4-8887-4d83-878f-0ae4355c74b2",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Heating Element Type (Carbon, Quartz, Ceramic...)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Carbon",
+    "Carbon Crystal",
+    "Graphene",
+    "Heating Wire",
+    "MarboThermic",
+    "Silicon Heating Wire"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "heating_element_type"
+ },
+ {
+  "id": "bb8609f6-8f0d-432e-9c92-f135ab383ba9",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Open Window Detection (Yes/No)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "N/A",
+    "No",
+    "Yes"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "open_window_detection"
+ },
+ {
+  "id": "bc0dccd0-0f75-4cd2-9e2b-3d2c0ae7140b",
+  "category_id": null,
+  "name": "Product Depth",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "cm"
+  },
+  "group": "Product Dimensions",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "laenge"
+ },
+ {
+  "id": "bd1e258e-984e-4793-9497-cb1a1601e5fc",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Noise emission (dB) at MIN power level",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "min_noise_level"
+ },
+ {
+  "id": "bd2c64e7-25f1-4af2-a0be-7c1b6d8f4bf3",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Product Name",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "be05acbf-cc2c-45d9-9193-38fe12a2bd45",
+  "category_id": null,
+  "name": "Special Attribute 5",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [],
+  "akeneo_id": "special_5"
+ },
+ {
+  "id": "bf405c16-ffd9-4f81-99be-7dcbda633383",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Carry Handle (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_handle"
+ },
+ {
+  "id": "c21da4f6-43f8-4a41-a5a2-9d9ed11182ef",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "SKU",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": null
+ },
+ {
+  "id": "c6d861d7-63ea-4595-b186-21af234abe10",
+  "category_id": null,
+  "name": "Type of batteries in accessories [type]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": []
+  },
+  "group": "Battery Information",
+  "assigned_category_ids": [],
+  "akeneo_id": "battery_type_in_accessories"
+ },
+ {
+  "id": "c8228db8-3b26-4c54-ac98-4d4fe2ee7fb4",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Max Power Output (W)",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "max_power_output"
+ },
+ {
+  "id": "ca22bba0-0803-4912-b960-d60763673e7c",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Bathroom Usability",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "bathroom_usability"
+ },
+ {
+  "id": "ca3d1a5b-676e-4cb8-a7a8-fe7189d3025e",
+  "category_id": null,
+  "name": "Segment 2",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "XS (up to 30)",
+    "S (31-60)",
+    "M (61-90)",
+    "L (91-120)",
+    "XL (above 120)"
+   ]
+  },
+  "group": "Segmentation",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "segment_2"
+ },
+ {
+  "id": "ca942655-ad86-4858-bffa-7aff98e50f57",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Temperature control [Mechanic, Electronic]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Mechanic",
+    "Electronic"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "control"
+ },
+ {
+  "id": "cc2e60fd-cb53-430a-bfdc-3951b26a7d8c",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Door Material",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Solid",
+    "Glass",
+    "Metal",
+    "Mirrorred Glass",
+    "PVC"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "main_door_material"
+ },
+ {
+  "id": "d153b927-55ad-4cd9-baed-5f8321f780ba",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Grease Filtering Efficiency",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "grease_filtering_efficiency"
+ },
+ {
+  "id": "d2404f9a-ac31-4d4a-8613-cb5b27c3e0f3",
+  "category_id": null,
+  "name": "Segment 3",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Mechanic",
+    "Electronic"
+   ]
+  },
+  "group": "Segmentation",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "segment_3"
+ },
+ {
+  "id": "d547cff1-b9d0-4daf-8b17-e7c81d3b3631",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Air Cleaning/Purification System?",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_air_cleaning_function"
+ },
+ {
+  "id": "dc26b645-2a56-4aab-918b-a1ea4e937482",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Frame Material (if applicable)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Aluminium",
+    "Glass",
+    "Marble Stone",
+    "Metal",
+    "N/A"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "material_frame"
+ },
+ {
+  "id": "e0cdc292-7212-480a-8cfc-e5e2a7515093",
+  "category_id": null,
+  "name": "Energy efficiency class",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "energy_efficiency_scale"
+ },
+ {
+  "id": "e4530c0a-50c7-4458-b843-955db54fb8ab",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Energy-Saving/Eco-Mode (Yes/No)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "N/A",
+    "No",
+    "Yes"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "energy_saving_functions"
+ },
+ {
+  "id": "e60b8c29-8d78-4288-a4b3-38f7fc1c4d9d",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "On/Off Switch (Yes/No)",
+  "data_type": "boolean",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "has_on_off_switch"
+ },
+ {
+  "id": "e8bc6e76-edba-4915-b12d-f4a8cfe1e3f8",
+  "category_id": "d75a7122-a9d8-478c-b9d4-2a44188353b0",
+  "name": "Heating Technology (Infrared / Convection / Hybrid)",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Hybrid",
+    "Infrared"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "heating_technology"
+ },
+ {
+  "id": "ed9417e5-57f7-4ac1-8e29-d2f6adc768fd",
+  "category_id": null,
+  "name": "Voltage Range [V / Hz]",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "220-240 V ~ 50/60 Hz",
+    "220-240 V ~ 50Hz"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "voltage_range"
+ },
+ {
+  "id": "f01e3c87-63eb-4553-94ee-6b01d3ba9519",
+  "category_id": null,
+  "name": "Secondary Color",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "Black",
+    "White",
+    "Silver"
+   ]
+  },
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "secondary_color"
+ },
+ {
+  "id": "f142c3a1-4ee4-44eb-ac3d-fb45f51f5791",
+  "category_id": null,
+  "name": "Product Width",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "cm"
+  },
+  "group": "Product Dimensions",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "breite"
+ },
+ {
+  "id": "f1adf777-fb9a-4793-9cf6-bbe85ca12d5a",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Number of Carbon Filters Needed",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "number_of_carbon_filters"
+ },
+ {
+  "id": "f47d4bc9-fcb2-48ef-b2d4-87dca21d1404",
+  "category_id": null,
+  "name": "Special Attribute 2",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "special_2"
+ },
+ {
+  "id": "f4c286bd-ce3e-423f-8212-e2178e88cb3b",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Defrost Type",
+  "data_type": "enum",
+  "validation_rules": {
+   "enumOptions": [
+    "No Frost",
+    "Manual",
+    "Auto Defrost"
+   ]
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "defrost_system_type"
+ },
+ {
+  "id": "f79aefa5-03ec-481b-9a6a-0cc9db40aaeb",
+  "category_id": "7afe0dfb-86ce-48f3-b690-e57f866c1370",
+  "name": "Min temperature",
+  "data_type": "decimal",
+  "validation_rules": {
+   "unit": "\u00c2\u00b0C"
+  },
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "min_temperature"
+ },
+ {
+  "id": "f7ca2ba8-e33e-4360-b1ee-0dcac92edd1c",
+  "category_id": "afe42b9b-92ab-474b-859b-a73a0ca81459",
+  "name": "Motor Power",
+  "data_type": "integer",
+  "validation_rules": null,
+  "group": "Category Specific",
+  "assigned_category_ids": [],
+  "akeneo_id": "motor_power_W"
+ },
+ {
+  "id": "f9fc660c-9ae1-42d1-a29c-7ef799a335be",
+  "category_id": null,
+  "name": "Special Attribute 3",
+  "data_type": "text",
+  "validation_rules": null,
+  "group": "Standard Electric Specs",
+  "assigned_category_ids": [
+   "d75a7122-a9d8-478c-b9d4-2a44188353b0"
+  ],
+  "akeneo_id": "special_3"
+ }
+]

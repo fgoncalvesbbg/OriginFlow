@@ -1098,9 +1098,9 @@
     "semantic_hash": ""
   },
   "src/pages/AdminDashboard.tsx": {
-    "mtime": 1787930537.0197983,
-    "seen": 1787931266.2844923,
-    "ast_hash": "6ffd0ff13693993043345948f02b6b45",
+    "mtime": 1787932668.3968067,
+    "seen": 1787932909.7443109,
+    "ast_hash": "ea19892f1ec8021f498ac88699f4499e",
     "semantic_hash": ""
   },
   "src/pages/AdminTestEmail.tsx": {
@@ -1428,9 +1428,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/compliance-requirement.service.ts": {
-    "mtime": 1787930444.2446973,
-    "seen": 1787931266.284665,
-    "ast_hash": "12eedda0a3cce0ee8d4ceb0af95b6e74",
+    "mtime": 1787932561.696944,
+    "seen": 1787932909.7444596,
+    "ast_hash": "1f9c642b81dabbcc45df82a1dbbff6b0",
     "semantic_hash": ""
   },
   "src/services/compliance/compliance.service.ts": {
@@ -1440,9 +1440,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/index.ts": {
-    "mtime": 1787930459.571156,
-    "seen": 1787931266.284668,
-    "ast_hash": "79e73e6369ee44732996badf69d77fa2",
+    "mtime": 1787932601.2914271,
+    "seen": 1787932909.7444625,
+    "ast_hash": "dd06249ce3332286bf3167f96a1dd7dd",
     "semantic_hash": ""
   },
   "src/services/core/save-retry.test.ts": {
@@ -1638,9 +1638,9 @@
     "semantic_hash": ""
   },
   "src/services/index.ts": {
-    "mtime": 1787930459.571156,
-    "seen": 1787931266.2848287,
-    "ast_hash": "debf936577aed896832d511eb728dcf0",
+    "mtime": 1787932601.2924259,
+    "seen": 1787932909.7446117,
+    "ast_hash": "4d9e74914e9ec49b6e0896c1566494d0",
     "semantic_hash": ""
   },
   "src/services/manufacturing/index.ts": {
@@ -3609,6 +3609,12 @@
     "mtime": 1787930554.037969,
     "seen": 1787931266.2846715,
     "ast_hash": "bef3c3d39746e287eb1c2f27c5b933c7",
+    "semantic_hash": ""
+  },
+  "src/services/compliance/replace-category-attributes.test.ts": {
+    "mtime": 1787932743.511927,
+    "seen": 1787932909.7444677,
+    "ast_hash": "bf6b248b0796f5cc2c01ee539e06757b",
     "semantic_hash": ""
   }
 }

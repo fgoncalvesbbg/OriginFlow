@@ -52,6 +52,7 @@ import CreateRFQ from '../pages/sourcing/CreateRFQ';
 import RFQDetail from '../pages/sourcing/RFQDetail';
 import SupplierRFQPortal from '../pages/sourcing/SupplierRFQPortal';
 import SupplierAttributePortal from '../pages/SupplierAttributePortal';
+import SupplierAttributeBatchPortal from '../pages/SupplierAttributeBatchPortal';
 
 const AppContent: React.FC = () => {
   // Trigger background checks for deadlines on app mount
@@ -82,6 +83,7 @@ const AppContent: React.FC = () => {
           <Route path="/share/im/:token" element={<IMSharedManual />} />
           <Route path="/review/im/:token" element={<IMReviewPortal />} />
           <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
+          <Route path="/attribute-request-batch/:batchToken" element={<SupplierAttributeBatchPortal />} />
 
           {/* Protected PM Routes */}
           <Route path="/" element={

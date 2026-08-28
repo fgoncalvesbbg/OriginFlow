@@ -16,6 +16,25 @@ export function getAttributesForCategory(all: CategoryAttribute[], categoryId: s
   );
 }
 
+/**
+ * The attributes a category asks an EXTERNAL SUPPLIER for — `getAttributesForCategory`
+ * minus everything marked internal.
+ *
+ * Every supplier-facing list goes through this rather than filtering at the call site, so
+ * there is one place to audit and a new surface cannot forget the rule. Today that is the
+ * token attribute portal (form and its XLSX export), the supplier portal's proposal form,
+ * and the RFQ builder — a PM-facing screen, but what it builds is sent to suppliers.
+ *
+ * Only an explicit `false` hides an attribute: an undefined flag (an older row, or one read
+ * before migration 134) stays visible rather than silently disappearing from a supplier form.
+ *
+ * This governs what is DISPLAYED. It is not access control — category_attributes is still
+ * publicly readable under RLS, so an internal attribute is hidden, not protected.
+ */
+export function getSupplierVisibleAttributes(all: CategoryAttribute[], categoryId: string): CategoryAttribute[] {
+  return getAttributesForCategory(all, categoryId).filter(a => a.supplierVisible !== false);
+}
+
 export function validateAttributeValue(
   attr: CategoryAttribute,
   value: string,

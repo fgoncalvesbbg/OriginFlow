@@ -19,6 +19,10 @@ interface AttributeInputProps {
    *  the enum field renders as checkboxes instead of a single dropdown. */
   values?: string[];
   onValuesChange?: (vals: string[]) => void;
+  /** Suppress the label and the placeholder caption below the field. For a dense grid
+   *  (SupplierAttributeBatchPortal) where the label/hint is shown once per row instead of
+   *  once per cell. Every other caller keeps its own label + caption. */
+  hideCaption?: boolean;
 }
 
 const inputClass = 'w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-50';
@@ -35,6 +39,7 @@ const AttributeInput: React.FC<AttributeInputProps> = ({
   forceRange,
   values,
   onValuesChange,
+  hideCaption,
 }) => {
   const rules = attribute.validationRules;
   const [uploading, setUploading] = React.useState(false);
@@ -294,7 +299,7 @@ const AttributeInput: React.FC<AttributeInputProps> = ({
     <div>
       {renderToggle()}
       {renderInput()}
-      {rules?.placeholder && <p className="text-xs text-gray-400 mt-1">{rules.placeholder}</p>}
+      {!hideCaption && rules?.placeholder && <p className="text-xs text-gray-400 mt-1">{rules.placeholder}</p>}
       {error && <p className="text-xs text-rose-500 mt-1">{error}</p>}
     </div>
   );

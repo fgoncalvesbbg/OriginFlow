@@ -121,6 +121,8 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
         validationRules: a.validation_rules ?? undefined,
         group: a.group ?? 'Category Specific',
         akeneoId: a.akeneo_id ?? undefined,
+        // Absent column or NULL reads as visible: the flag only ever hides on purpose.
+        supplierVisible: a.supplier_visible !== false,
     }));
 };
 
@@ -150,6 +152,7 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         validation_rules: attr.validationRules ?? null,
         group: attr.group ?? 'Category Specific',
         akeneo_id: attr.akeneoId ?? null,
+        supplier_visible: attr.supplierVisible !== false,
     };
     await db.upsert('category_attributes', payload);
 };
@@ -209,9 +212,14 @@ export interface ImportAttributesResult {
  * Bulk-import parsed CSV rows as attributes for a category (see attribute-csv-import.utils).
  *
  * Never duplicates an attribute that already exists — existing definitions are reused as-is:
- *  - Match key: Akeneo code (case-insensitive) within the same group, else the normalized
- *    name. A given existing attribute is consumed at most once per run, so a file that reuses
- *    a code (e.g. package_1_contents ×3) still creates the distinct rows it needs.
+ *  - Match key depends on the scope. A GLOBAL row (any group but 'Category Specific')
+ *    matches on normalized name within its group first, then on the Akeneo code — it must
+ *    resolve to a single shared attribute, so it is never created twice however many
+ *    categories are imported. A 'Category Specific' row matches on Akeneo code across all
+ *    groups, else the normalized name within its group (that name match consumes at most one
+ *    existing attribute per run). Note an Akeneo code can only ever belong to ONE attribute:
+ *    saveCategoryAttribute enforces it, so sibling rows in a file that share a code all
+ *    resolve to the same attribute rather than becoming distinct rows.
  *  - If a match already applies to this category (a global attribute, an attribute owned by
  *    this category, or one already shared into it) → nothing to do (skipped).
  *  - If a match exists but only in ANOTHER category → it is SHARED into this category via
@@ -237,15 +245,35 @@ export const importCategoryAttributes = async (
         const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group);
         const code = row.akeneoId ? norm(row.akeneoId) : '';
 
-        // Match an existing attribute. Akeneo ID is the GLOBAL identity — if the row has a code,
-        // match by code across ALL attributes regardless of group (a code must map to one
-        // attribute). Without a code, fall back to name within the same group.
-        const match = existing.find(a =>
-            !consumedIds.has(a.id) &&
-            (code
-                ? norm(a.akeneoId ?? '') === code
-                : a.group === row.group && norm(a.name) === norm(row.name)),
-        );
+        // Match an existing attribute.
+        //
+        // Every group except 'Category Specific' is global: one attribute serves every
+        // category, so it must never be created twice. Those rows therefore match on name
+        // within the group FIRST, and only then on the Akeneo code:
+        //  - name-first means a coded incoming row still finds a code-less existing one
+        //    (OriginFlow has plenty — all of Product Images, for instance), which a
+        //    code-only match would miss and duplicate;
+        //  - the code fallback still catches an upstream rename, where the name moved but
+        //    the code did not;
+        //  - the name match deliberately ignores `consumedIds`, so a second mention of the
+        //    same global attribute in one file collapses onto it instead of creating a twin.
+        //
+        // 'Category Specific' rows keep the original rule — code is the identity across all
+        // groups, one existing attribute consumed per row — because those are genuinely
+        // per-category and a file may legitimately carry sibling rows sharing a code.
+        const byName = (a: CategoryAttribute) =>
+            a.group === row.group && norm(a.name) === norm(row.name);
+        const byCode = (a: CategoryAttribute) => !!code && norm(a.akeneoId ?? '') === code;
+
+        // The code match deliberately ignores `consumedIds` in BOTH branches.
+        // saveCategoryAttribute already enforces one-attribute-per-code (see
+        // reuseExistingByAkeneoId): a second row carrying a code that is already taken is
+        // silently not written. Letting such a row fall through to "create" therefore
+        // counted a row that never existed, so the reported totals overstated the import.
+        // Resolving it to the owning attribute instead makes the counts true.
+        const match = isGlobal
+            ? (existing.find(byName) ?? existing.find(byCode))
+            : (code ? existing.find(byCode) : existing.find(a => !consumedIds.has(a.id) && byName(a)));
 
         if (match) {
             consumedIds.add(match.id);
@@ -279,6 +307,9 @@ export const importCategoryAttributes = async (
             validationRules: Object.keys(validationRules).length ? validationRules : undefined,
             group: row.group,
             akeneoId: row.akeneoId,
+            // ProductToolkit definitions carry no notion of supplier visibility, so an
+            // imported attribute starts visible and is marked internal by hand.
+            supplierVisible: row.supplierVisible !== false,
         };
         await saveCategoryAttribute(created);
         existing.push(created); // so later rows in this run can match it (prevents in-file dupes)

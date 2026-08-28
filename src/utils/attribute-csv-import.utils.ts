@@ -27,6 +27,8 @@ export interface ParsedAttributeRow {
   unit?: string;
   /** Marked mandatory by the source. Only ProductToolkit sets this; the CSV format has no such column. */
   required?: boolean;
+  /** false = import as internal-only. No source sets this today; it defaults to visible. */
+  supplierVisible?: boolean;
   /** Non-fatal issues the user should eyeball in the preview. */
   flags: string[];
   /** The raw "Type" cell, kept for the preview/debugging. */

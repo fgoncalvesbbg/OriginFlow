@@ -35,6 +35,16 @@ describe('mapProductToolkitAttributes', () => {
     expect(mapProductToolkitAttributes([attr({ cluster: '9. Accessories' })])[0].group).toBe('Accessories');
   });
 
+  it("routes a cluster named Global into the Global group", () => {
+    // Nothing special-cases it: 'Global' is a canonical group name, so the shared
+    // mapGroupName picks it up like any other, numbering stripped.
+    for (const cluster of ['Global', '1. Global', ' global ']) {
+      const [row] = mapProductToolkitAttributes([attr({ cluster })]);
+      expect(row.group).toBe('Global');
+      expect(row.flags).toEqual([]);
+    }
+  });
+
   it('falls back to Category Specific and flags an unknown cluster', () => {
     const [row] = mapProductToolkitAttributes([attr({ cluster: '1. General' })]);
     expect(row.group).toBe('Category Specific');

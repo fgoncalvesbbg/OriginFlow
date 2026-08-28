@@ -9,6 +9,14 @@ import { generateUUID } from '../../utils';
 
 type SubmittedValue = { attributeId: string; name: string; value: string; type?: string };
 
+/** One other request in the same batch (same project + category + step). See migration 135. */
+export interface SiblingAttributeRequest {
+  token: string;
+  skuNumber: string;
+  skuTitle: string;
+  status: 'pending' | 'submitted';
+}
+
 const map = (r: any): ProjectAttributeRequest => ({
   id: r.id,
   projectId: r.project_id,
@@ -27,6 +35,7 @@ const map = (r: any): ProjectAttributeRequest => ({
   copiedFromSku: r.copied_from_sku ?? null,
   createdAt: r.created_at,
   submittedAt: r.submitted_at ?? null,
+  batchToken: r.batch_token ?? null,
 });
 
 export const createAttributeRequest = async (
@@ -41,7 +50,8 @@ export const createAttributeRequest = async (
   note?: string,
   prefillData?: SubmittedValue[],
   deadline?: string | null,
-  copiedFromSku?: string | null
+  copiedFromSku?: string | null,
+  batchToken?: string | null
 ): Promise<ProjectAttributeRequest> => {
   if (!isLive) throw new Error('Database not configured.');
 
@@ -61,6 +71,7 @@ export const createAttributeRequest = async (
     submitted_data: prefillData?.length ? prefillData : null,
     deadline: deadline || null,
     copied_from_sku: copiedFromSku || null,
+    batch_token: batchToken || null,
   });
   return map(created);
 };
@@ -125,6 +136,56 @@ export const getAttributeRequestByToken = async (token: string): Promise<Project
   }
 };
 
+/**
+ * The other requests in this request's batch (same project, category and step), so the
+ * portal can offer "same for all" before the supplier fills anything in. Read-only, scoped
+ * server-side by the token's own row — see get_sibling_attribute_requests_by_token.
+ */
+export const getSiblingAttributeRequests = async (token: string): Promise<SiblingAttributeRequest[]> => {
+  if (!isLive || !token) return [];
+  const rows = await orEmpty(
+    portalDb.rpc<Row[]>('get_sibling_attribute_requests_by_token', { p_token: token }),
+    'getSiblingAttributeRequests',
+  );
+  return (rows || []).map((r: any) => ({
+    token: r.token,
+    skuNumber: r.sku_number ?? '',
+    skuTitle: r.sku_title ?? '',
+    status: r.status,
+  }));
+};
+
+/**
+ * Every request in a batch (see migration 136), for the side-by-side grid page. Same trust
+ * model as getAttributeRequestByToken: holding the batch token is the credential, no login.
+ */
+export const getAttributeRequestsByBatchToken = async (batchToken: string): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive || !batchToken) return [];
+  const rows = await orEmpty(
+    portalDb.rpc<Row[]>('get_attribute_requests_by_batch_token', { p_batch_token: batchToken }),
+    'getAttributeRequestsByBatchToken',
+  );
+  return (rows || []).map(map);
+};
+
+/**
+ * Submit some or all rows of a batch in one call. Each entry only applies if its row token
+ * belongs to this batch AND is still pending — an already-submitted row (submitted
+ * individually, or by a concurrent duplicate call) is left untouched. Returns the batch's
+ * current state so the grid can render its confirmation straight from the result.
+ */
+export const submitAttributeBatch = async (
+  batchToken: string,
+  rows: { token: string; data: SubmittedValue[] }[],
+): Promise<ProjectAttributeRequest[]> => {
+  if (!isLive) throw new Error('Database not configured.');
+  const result = await portalDb.rpc<Row[]>('submit_attribute_batch_secure', {
+    p_batch_token: batchToken,
+    p_rows: rows,
+  });
+  return (result || []).map(map);
+};
+
 export const deleteAttributeRequest = async (id: string): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
   await db.delete('project_attribute_requests', { where: { id } });
@@ -141,12 +202,23 @@ export const updateAttributeRequestData = async (id: string, submittedData: Subm
   return map(updated);
 };
 
-export const submitAttributeRequest = async (token: string, submittedData: SubmittedValue[]): Promise<void> => {
+/**
+ * Submit a request's attribute data. When `sharedAttributeIds` names attributes the
+ * supplier marked "same for all", their just-submitted values are also copied into every
+ * still-pending sibling request in the same batch (same project/category/step) — see
+ * migration 135. Passing nothing behaves exactly as before: one SKU, no fan-out.
+ */
+export const submitAttributeRequest = async (
+  token: string,
+  submittedData: SubmittedValue[],
+  sharedAttributeIds?: string[],
+): Promise<void> => {
   if (!isLive) throw new Error('Database not configured.');
   // Submit via the submit_attribute_request_secure SECURITY DEFINER routine: the anon
   // portal client cannot UPDATE the table directly under row-level security.
   await portalDb.rpc('submit_attribute_request_secure', {
     p_token: token,
     p_data: submittedData,
+    p_shared_attribute_ids: sharedAttributeIds?.length ? sharedAttributeIds : [],
   });
 };
