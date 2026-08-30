@@ -29,6 +29,17 @@ export interface ParsedAttributeRow {
   required?: boolean;
   /** false = import as internal-only. No source sets this today; it defaults to visible. */
   supplierVisible?: boolean;
+  /** Order within the group. ProductToolkit supplies this; the CSV format has no such column. */
+  sortOrder?: number;
+  /** ProductToolkit's stable attribute id — the rename-safe join key. PT rows only. */
+  ptAttributeId?: number;
+  /** EPREL identifier carried by the definition. Reference only. */
+  eprelId?: string | null;
+  /** PT's own scope. Authoritative when present: it decides global vs category-scoped,
+   *  instead of inferring it from the group name. */
+  scope?: 'global' | 'category';
+  /** How many PT categories use this attribute — context for a scope change. */
+  usedByCategories?: number;
   /** Non-fatal issues the user should eyeball in the preview. */
   flags: string[];
   /** The raw "Type" cell, kept for the preview/debugging. */
@@ -79,10 +90,37 @@ function normalize(s: string): string {
  */
 export function mapGroupName(rawGroup: string): { group: string; unmapped: boolean } {
   const key = normalize(rawGroup);
-  const mapped =
+
+  // 1. Exact: an alias, or a canonical group name as-is.
+  const exact =
     GROUP_MAP[key] ??
     (ATTRIBUTE_GROUPS as readonly string[]).find(g => normalize(g) === key);
-  return mapped ? { group: mapped, unmapped: false } : { group: 'Category Specific', unmapped: true };
+  if (exact) return { group: exact, unmapped: false };
+
+  // 2. Contained: real ProductToolkit clusters carry qualifiers an exact match cannot survive
+  //    — "4. Battery Information - Mandatory for all items with batteries...",
+  //    "5. Packaging & What is included", "Category 5.0 & Segmentation". Each still NAMES its
+  //    group, so look for the longest known label appearing as whole words. Longest-first
+  //    matters: 'Category Specific' must win over a bare 'Category' were one ever added.
+  const candidates = [
+    ...Object.entries(GROUP_MAP).map(([k, g]) => [k, g] as const),
+    ...(ATTRIBUTE_GROUPS as readonly string[]).map(g => [normalize(g), g] as const),
+  ].sort((a, b) => b[0].length - a[0].length);
+
+  // Compare on word tokens rather than raw substrings, so 'packaging' cannot match inside an
+  // unrelated longer word and no label needs regex-escaping (several contain '&' and '.').
+  const words = (t: string) => t.split(/[^a-z0-9]+/).filter(Boolean);
+  const keyWords = words(key);
+  const containsSequence = (needle: string[]): boolean => {
+    if (needle.length === 0 || needle.length > keyWords.length) return false;
+    return keyWords.some((_, i) => needle.every((w, j) => keyWords[i + j] === w));
+  };
+
+  for (const [label, group] of candidates) {
+    if (containsSequence(words(label))) return { group, unmapped: false };
+  }
+
+  return { group: 'Category Specific', unmapped: true };
 }
 
 function mapDataType(rawType: string): { dataType: AttributeDataType; unmapped: boolean } {

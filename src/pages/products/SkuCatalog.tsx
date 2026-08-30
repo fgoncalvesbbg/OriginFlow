@@ -15,7 +15,7 @@ import type { SkuFieldChange } from '../../services';
 import { getAttributesForCategory, generateUUID, parseSkuCsv, parseSkuRoster, buildAkeneoRows } from '../../utils';
 import type { SkuCsvParseResult } from '../../utils';
 import { CatalogSku, CategoryAttribute, CategoryL3, SkuAttributeValue, SkuChangeLogEntry } from '../../types';
-import { ATTRIBUTE_GROUPS } from '../../config/compliance.constants';
+import { groupsInOrder } from '../../config/compliance.constants';
 import { useAuth } from '../../context/AuthContext';
 import * as XLSX from 'xlsx';
 import { Package, Upload, Plus, CheckCircle, Trash2, Search, X, AlertTriangle, Lock, Unlock, History, Download, ListPlus } from 'lucide-react';
@@ -84,11 +84,13 @@ const SkuCatalog: React.FC = () => {
 
   const reloadSkus = async () => setAllSkus(await getCatalogSkus());
 
-  // Attributes for the selected category, grouped by group in ATTRIBUTE_GROUPS order.
+  // Attributes for the selected category, sectioned by the groups actually present, in the
+  // order they appear once sorted — ProductToolkit clusters are groups too and are not on
+  // any fixed list, so iterating ATTRIBUTE_GROUPS here would drop them entirely.
   const groupedAttrs = useMemo(() => {
     if (!selectedCategory) return [] as { group: string; attrs: CategoryAttribute[] }[];
     const attrs = getAttributesForCategory(allAttrs, selectedCategory);
-    return (ATTRIBUTE_GROUPS as readonly string[])
+    return groupsInOrder(attrs)
       .map(group => ({
         group,
         attrs: attrs

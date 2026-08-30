@@ -21,7 +21,6 @@
  * person confirms them.
  */
 import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
-import { mapGroupName } from '../../utils/attribute-csv-import.utils';
 import type { AttributeDataType } from '../../types';
 
 /** Production is the internal nginx host; point VITE_PRODUCTTOOLKIT_URL at a dev instance to override. */
@@ -47,16 +46,33 @@ export interface PtDefinitionSummary {
   pendingCount?: number;
 }
 
-/** One attribute of GET /definitions/{l3}. */
+/**
+ * One attribute of GET /definitions/{l3}.
+ *
+ * Verified against the live endpoint (Angled Hoods, 71 attributes): every field below is
+ * actually served. `updatedAt` is documented by the ProductToolkit team but is NOT present
+ * on the deployed response yet, so it is optional and nothing depends on it.
+ */
 export interface PtAttribute {
+  /** Stable numeric id. Survives a rename of BOTH displayName and akeneoCode, which makes it
+   *  the only safe join key for a re-sync — see planAttributeSync. */
+  attributeId?: number;
   akeneoCode: string;
   displayName?: string;
   fieldType?: string;
   cluster?: string;
   options?: string[];
+  unit?: string | null;
   eprelId?: string | null;
+  /** 'global' = shared across categories, 'category' = owned by this one. Authoritative. */
+  scope?: 'global' | 'category' | string;
+  supplierVisible?: boolean;
   required?: boolean;
   sortOrder?: number;
+  /** How many PT categories use it — context when a scope change is proposed. */
+  usedByCategories?: number;
+  /** Not served yet; present in the team's spec for incremental sync. */
+  updatedAt?: string;
 }
 
 /**
@@ -142,8 +158,9 @@ const mapFieldType = (raw?: string): { dataType: AttributeDataType; unmapped: bo
  * Pure and dependency-free on purpose — the network half above is what needs the VPN, this
  * half is unit-testable.
  *
- * Dropped on the way through, because `category_attributes` has nowhere to put them:
- * `sortOrder` (OriginFlow orders by group then name) and `eprelId`.
+ * Nothing is dropped any more: `sortOrder` lands in sort_order (migration 137), and
+ * `attributeId` / `eprelId` in pt_attribute_id / eprel_id (migration 138). `scope` and
+ * `supplierVisible` come through as first-class fields rather than being inferred.
  */
 export const mapProductToolkitAttributes = (attrs: PtAttribute[]): ParsedAttributeRow[] =>
   attrs.map(a => {
@@ -159,21 +176,20 @@ export const mapProductToolkitAttributes = (attrs: PtAttribute[]): ParsedAttribu
       flags.push('Multi-select is stored as an enum; OriginFlow decides single vs multi at entry time.');
     }
 
-    // Reuse the CSV importer's cluster→group table so one mapping serves both sources. It
-    // also strips ProductToolkit's leading numbering ("2. Standard Electric Specs").
-    const { group, unmapped: groupUnmapped } = mapGroupName(rawCluster);
-    if (groupUnmapped) {
-      flags.push(
-        `Cluster "${rawCluster || '(blank)'}" has no matching group — filed under Category Specific. ` +
-        `Change the Group in the preview if it belongs elsewhere.`,
-      );
-    }
+    // ProductToolkit's cluster IS the group — used verbatim, not mapped onto OriginFlow's own
+    // ATTRIBUTE_GROUPS list. PT owns the taxonomy, so translating it here only created a way
+    // to get it wrong: three of the six real cluster names had no match and silently collapsed
+    // into "Category Specific", taking 19 attributes and their global scope with them.
+    // Scope no longer rides on the group name either (PT states it per attribute), so a group
+    // is now purely a display heading and any string is valid.
+    const group = rawCluster.trim() || 'Category Specific';
 
     const options = a.options ?? [];
     if (dataType === 'enum' && options.length === 0) {
       flags.push("The definition doesn't restrict this select's options — Akeneo's own option list applies.");
     }
 
+    const supplierVisible = a.supplierVisible === false ? false : undefined;
     const name = (a.displayName ?? '').trim() || a.akeneoCode;
     if (!(a.displayName ?? '').trim()) {
       flags.push('No display name in the definition — using the Akeneo code as the name.');
@@ -181,11 +197,20 @@ export const mapProductToolkitAttributes = (attrs: PtAttribute[]): ParsedAttribu
 
     return {
       name,
+      unit: (a.unit ?? '').trim() || undefined,
       akeneoId: a.akeneoCode?.trim() || undefined,
       group,
       dataType,
       enumOptions: dataType === 'enum' ? options : undefined,
+      supplierVisible,
       required: a.required === true ? true : undefined,
+      sortOrder: typeof a.sortOrder === 'number' ? a.sortOrder : undefined,
+      ptAttributeId: typeof a.attributeId === 'number' ? a.attributeId : undefined,
+      eprelId: a.eprelId ?? undefined,
+      // Only the two values we understand are honoured; anything else falls back to
+      // inferring scope from the group, rather than silently trusting an unknown string.
+      scope: a.scope === 'global' || a.scope === 'category' ? a.scope : undefined,
+      usedByCategories: typeof a.usedByCategories === 'number' ? a.usedByCategories : undefined,
       flags,
       rawGroup: rawCluster,
       rawDataType: rawFieldType,

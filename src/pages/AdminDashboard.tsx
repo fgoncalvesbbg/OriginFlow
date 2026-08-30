@@ -9,22 +9,23 @@ import {
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   importCategoryAttributes, replaceCategoryAttributes,
   getProductToolkitDefinitions, getProductToolkitDefinition, mapProductToolkitAttributes,
+  planAttributeSync, applyAttributeSync, getAttributeUsage, usageTotal, resolvesToGlobal,
   ProductToolkitUnavailableError,
   unassignAttributeFromCategory, makeAttributeGlobal, assignAttributeToCategory,
   assignSupplierToPMs, getSupplierPMs,
   reassignProjectPM, getProjects, deleteProject,
-  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS, attributeGroupRank,
+  ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS, attributeGroupRank, groupsInOrder, compareAttributes,
   getAIPrompts, updateAIPrompt,
   getPromptLibrary, createPromptLibraryEntry, updatePromptLibraryEntry, deletePromptLibraryEntry,
   getTranslationVerbatims, createTranslationVerbatim, updateTranslationVerbatim, deleteTranslationVerbatim,
   getIMMarkets, saveIMMarket, deleteIMMarket
 } from '../services';
-import type { IMMarket, ReplaceAttributesResult } from '../services';
+import type { IMMarket, ReplaceAttributesResult, SyncPlan } from '../services';
 import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../utils';
 import type { ParsedAttributeRow } from '../utils';
 import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryTree, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
@@ -315,6 +316,23 @@ const AdminDashboard: React.FC = () => {
   // 'add' leaves what is already here alone; 'replace' treats the source as the truth and
   // clears this category's own attributes first. See replaceCategoryAttributes.
   const [importMode, setImportMode] = useState<'add' | 'replace'>('add');
+  // Reviewed ProductToolkit sync: the computed plan, which items are ticked, and any
+  // reviewer remaps (incoming key -> existing attribute id, '' = force new).
+  const [syncPlan, setSyncPlan] = useState<SyncPlan | null>(null);
+  const [syncIncluded, setSyncIncluded] = useState<Set<string>>(new Set());
+  const [syncRemap, setSyncRemap] = useState<Record<string, string>>({});
+  const [syncBusy, setSyncBusy] = useState(false);
+
+  /**
+   * Every group offerable in a picker: OriginFlow's built-ins plus whatever groups the data
+   * actually uses. ProductToolkit clusters arrive as groups verbatim, so without this a synced
+   * attribute's own group would be missing from its dropdown and silently reset on edit.
+   */
+  const allGroupOptions = React.useMemo(() => {
+    const set = new Set<string>(ATTRIBUTE_GROUPS as readonly string[]);
+    for (const a of attributes) if (a.group) set.add(a.group);
+    return [...set];
+  }, [attributes]);
 
   // Bulk grid editor for the open category's attributes.
   const [attrView, setAttrView] = useState<'list' | 'grid'>('list');
@@ -360,11 +378,7 @@ const AdminDashboard: React.FC = () => {
     if (gridDirty.size > 0) return;
     const rows = getAttributesForCategory(attributes, selectedCategoryDetail)
       .slice()
-      .sort((a, b) => {
-        const gi = (ATTRIBUTE_GROUPS as readonly string[]).indexOf(a.group ?? 'Category Specific')
-          - (ATTRIBUTE_GROUPS as readonly string[]).indexOf(b.group ?? 'Category Specific');
-        return gi !== 0 ? gi : a.name.localeCompare(b.name);
-      });
+      .sort(compareAttributes);
     setGridRows(rows.map(r => ({ ...r, validationRules: { ...(r.validationRules ?? {}) } })));
     setGridOptionsText(Object.fromEntries(rows.map(r => [r.id, (r.validationRules?.enumOptions ?? []).join(', ')])));
   }, [attributes, selectedCategoryDetail, gridDirty.size]);
@@ -619,13 +633,91 @@ const AdminDashboard: React.FC = () => {
     setImporting(false);
     setImportSource('csv');
     setImportMode('add');
+    setSyncPlan(null);
+    setSyncIncluded(new Set());
+    setSyncRemap({});
     setPtNotice(null);
     setPtUnmatched(null);
     setImportModalOpen(true);
   };
 
+  /**
+   * Build (or rebuild, after a remap) the sync plan for the open category: fetch the live
+   * definition, ask the database what currently depends on each attribute, and diff.
+   * Nothing is written here — this only produces the review.
+   */
+  const buildSyncPlan = async (remap: Record<string, string> = syncRemap) => {
+    const target = categories.find(c => c.id === selectedCategoryDetail);
+    if (!target) return;
+    setSyncBusy(true);
+    setImportError(null);
+    setPtNotice(null);
+    try {
+      const attrs = await getProductToolkitDefinition(target.name);
+      if (attrs === null) {
+        setSyncPlan(null);
+        setPtNotice(`ProductToolkit has no definition loaded for "${target.name}".`);
+        return;
+      }
+      const incoming = mapProductToolkitAttributes(attrs);
+      const applies = getAttributesForCategory(attributes, target.id);
+      const usage = await getAttributeUsage(applies.map(a => a.id));
+      const plan = planAttributeSync(applies, incoming, usage, target.id, remap);
+      setSyncPlan(plan);
+      // Default: everything that would change, except anything flagged breaking — those are
+      // opt-in, so a careless Apply cannot strand data.
+      setSyncIncluded(new Set(
+        plan.items
+          .filter(i => (i.action === 'create' || i.action === 'update')
+            && !i.risks.some(r => r.level === 'breaking'))
+          .map(i => i.key),
+      ));
+    } catch (err: any) {
+      setSyncPlan(null);
+      setImportError(
+        err instanceof ProductToolkitUnavailableError ? err.message : `Could not build the sync plan: ${err.message}`,
+      );
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const setRemap = (key: string, existingId: string) => {
+    const next = { ...syncRemap };
+    if (existingId === '__auto__') delete next[key]; else next[key] = existingId;
+    setSyncRemap(next);
+    void buildSyncPlan(next); // re-plan so risks and counts reflect the correction
+  };
+
+  /** Newline for the confirm() text; a literal one inside a template string breaks the file. */
+  const NL = String.fromCharCode(10);
+
+  const handleApplySync = async () => {
+    if (!syncPlan || !selectedCategoryDetail) return;
+    const breaking = syncPlan.items.filter(i => syncIncluded.has(i.key) && i.risks.some(r => r.level === 'breaking'));
+    if (breaking.length && !window.confirm(
+      `${breaking.length} selected change(s) are flagged as breaking:` + NL + NL +
+      breaking.slice(0, 6).map(i => `• ${i.incoming?.name ?? i.existing?.name}`).join(NL) +
+      NL + NL + `Apply anyway?`)) return;
+
+    setSyncBusy(true);
+    try {
+      const res = await applyAttributeSync(syncPlan, selectedCategoryDetail, syncIncluded);
+      await loadData();
+      setImportModalOpen(false);
+      setSyncPlan(null);
+      alert(`Sync applied: ${res.updated} updated, ${res.created} created, ${res.skipped} skipped.`);
+    } catch (e: any) {
+      setImportError(`Sync failed: ${e.message}`);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   const switchImportSource = (source: 'csv' | 'producttoolkit') => {
     setImportSource(source);
+    setSyncPlan(null);
+    setSyncRemap({});
     setImportRows([]);
     setImportIncluded([]);
     setImportFileName('');
@@ -697,7 +789,10 @@ const AdminDashboard: React.FC = () => {
   // in ATTRIBUTE_GROUPS order. Sort is stable, so the source file's order survives within a
   // group. Applied where rows ENTER state, so the parallel importIncluded array stays aligned.
   const orderImportRows = (rows: ParsedAttributeRow[]) =>
-    [...rows].sort((a, b) => attributeGroupRank(a.group) - attributeGroupRank(b.group));
+    [...rows].sort((a, b) =>
+      attributeGroupRank(a.group) - attributeGroupRank(b.group) ||
+      (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+      a.name.localeCompare(b.name));
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -738,7 +833,7 @@ const AdminDashboard: React.FC = () => {
     const code = norm(row.akeneoId);
     const byName = (a: CategoryAttribute) => a.group === row.group && norm(a.name) === norm(row.name);
     const byCode = (a: CategoryAttribute) => !!code && norm(a.akeneoId) === code;
-    const match = PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group)
+    const match = resolvesToGlobal(row)
       ? (attributes.find(byName) ?? attributes.find(byCode))
       : attributes.find(a => (code ? byCode(a) : byName(a)));
     if (!match) return 'new';
@@ -806,16 +901,51 @@ const AdminDashboard: React.FC = () => {
   };
 
   const changeGridGroup = (id: string, group: string) => {
-    const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
-    setGridRows(prev => prev.map(r => {
-      if (r.id !== id) return r;
-      // Keep categoryId consistent with the new scope: converting a global attribute to a
-      // category-scoped group must attach it to THIS category (saveCategoryAttribute only
-      // nulls the id for predefined groups, it never fills a null one).
-      const categoryId = isGlobal ? r.categoryId : (r.categoryId ?? selectedCategoryDetail ?? null);
-      return { ...r, group, categoryId };
-    }));
+    // Scope no longer follows the group. It used to: a group outside
+    // PREDEFINED_ATTRIBUTE_GROUPS was assumed category-scoped, so filling categoryId in here
+    // was how a demotion happened. Every ProductToolkit cluster is outside that list, so
+    // that rule would silently demote a synced GLOBAL attribute — stripping it from every
+    // other category — just because someone touched its group dropdown.
+    // Group is now a display heading; scope lives in categoryId and only changes explicitly
+    // (Make global / Unlink, or a reviewed sync).
+    setGridRows(prev => prev.map(r => (r.id === id ? { ...r, group } : r)));
     markGridDirty(id);
+  };
+
+  /**
+   * Move an attribute up or down WITHIN its group.
+   *
+   * Reorders the group's rows, then renumbers that whole group 10, 20, 30... — an untouched
+   * group sits at sort_order 0 and reads alphabetically, so the first move is what makes its
+   * order explicit. Every row whose number actually changes is marked dirty, so "Save all
+   * changes" persists exactly the ones that moved. Gaps of 10 leave room to slot a row in
+   * later without renumbering everything again.
+   */
+  const moveGridRow = (id: string, direction: -1 | 1) => {
+    setGridRows(prev => {
+      const row = prev.find(r => r.id === id);
+      if (!row) return prev;
+      const group = row.group ?? 'Category Specific';
+      const inGroup = prev.filter(r => (r.group ?? 'Category Specific') === group);
+      const idx = inGroup.findIndex(r => r.id === id);
+      const target = idx + direction;
+      if (idx < 0 || target < 0 || target >= inGroup.length) return prev; // already at the edge
+
+      const reordered = [...inGroup];
+      [reordered[idx], reordered[target]] = [reordered[target], reordered[idx]];
+
+      const renumbered = new Map(reordered.map((r, i) => [r.id, (i + 1) * 10]));
+      for (const r of reordered) {
+        if ((r.sortOrder ?? 0) !== renumbered.get(r.id)) markGridDirty(r.id);
+      }
+      // Rebuild the flat list in the new within-group order, leaving other groups untouched.
+      const queue = [...reordered];
+      return prev.map(r =>
+        (r.group ?? 'Category Specific') === group
+          ? (() => { const next = queue.shift()!; return { ...next, sortOrder: renumbered.get(next.id) }; })()
+          : r,
+      );
+    });
   };
 
   const changeGridOptions = (id: string, text: string) => {
@@ -836,6 +966,13 @@ const AdminDashboard: React.FC = () => {
       validationRules: {},
       group: 'Category Specific',
       supplierVisible: true,
+      // Append to the end of its group rather than sorting to the top on an empty name.
+      sortOrder: Math.max(
+        0,
+        ...gridRows
+          .filter(r => (r.group ?? 'Category Specific') === 'Category Specific')
+          .map(r => r.sortOrder ?? 0),
+      ) + 10,
     };
     setGridRows(prev => [...prev, row]);
     setGridOptionsText(prev => ({ ...prev, [id]: '' }));
@@ -859,10 +996,15 @@ const AdminDashboard: React.FC = () => {
     setGridSaving(true);
     try {
       for (const r of changed) {
-        await saveCategoryAttribute({
-          ...r,
-          validationRules: r.validationRules && Object.keys(r.validationRules).length ? r.validationRules : undefined,
-        });
+        await saveCategoryAttribute(
+          {
+            ...r,
+            validationRules: r.validationRules && Object.keys(r.validationRules).length ? r.validationRules : undefined,
+          },
+          // What the grid shows is what gets saved: pass the row's actual scope instead of
+          // letting it be re-derived from the group name, which no longer implies scope.
+          { forceScope: r.categoryId === null ? 'global' : 'category' },
+        );
       }
       setGridDirty(new Set());
       await loadData();
@@ -1028,18 +1170,48 @@ const AdminDashboard: React.FC = () => {
 
   const renderAttributeGrid = () => {
     const dirtyCount = gridRows.filter(r => gridDirty.has(r.id)).length;
-    const COLS = 9;
-    // Section the working rows by their group, in ATTRIBUTE_GROUPS order.
-    const grouped = (ATTRIBUTE_GROUPS as readonly string[])
-      .map(group => ({ group, rows: gridRows.filter(r => (r.group ?? 'Category Specific') === group) }))
+    const COLS = 10;
+    // Section by the groups actually present, in the order they appear once sorted. A
+    // ProductToolkit cluster is a valid group and is not on ATTRIBUTE_GROUPS, so iterating
+    // that list would silently omit every synced attribute from the grid.
+    const grouped = groupsInOrder(gridRows)
+      .map(group => ({
+        group,
+        // Within a group: explicit sort_order first, name as the tie-break (0 = unordered).
+        rows: gridRows
+          .filter(r => (r.group ?? 'Category Specific') === group)
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name)),
+      }))
       .filter(g => g.rows.length > 0);
 
-    const renderGridRow = (r: CategoryAttribute) => {
+    const renderGridRow = (r: CategoryAttribute, indexInGroup: number, groupSize: number) => {
       const isGlobal = r.categoryId === null;
       const isShared = r.categoryId !== null && r.categoryId !== selectedCategoryDetail;
       const dirty = gridDirty.has(r.id);
       return (
         <tr key={r.id} className={dirty ? 'bg-amber-50/40' : 'hover:bg-light'}>
+          <td className="px-1 py-1.5">
+            <div className="flex flex-col items-center leading-none">
+              <button
+                type="button"
+                onClick={() => moveGridRow(r.id, -1)}
+                disabled={indexInGroup === 0}
+                title="Move up within this group"
+                className="p-0.5 text-gray-300 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-300"
+              >
+                <ChevronUp size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveGridRow(r.id, 1)}
+                disabled={indexInGroup === groupSize - 1}
+                title="Move down within this group"
+                className="p-0.5 text-gray-300 hover:text-indigo-600 disabled:opacity-25 disabled:hover:text-gray-300"
+              >
+                <ChevronDown size={13} />
+              </button>
+            </div>
+          </td>
           <td className="px-2 py-1.5">
             <input
               type="text"
@@ -1056,7 +1228,7 @@ const AdminDashboard: React.FC = () => {
                 onChange={e => changeGridGroup(r.id, e.target.value)}
                 className="w-full px-1 py-1 border border-gray-200 rounded text-xs bg-white focus:ring-1 focus:ring-indigo-400 outline-none"
               >
-                {(ATTRIBUTE_GROUPS as readonly string[]).map(g => <option key={g} value={g}>{g}</option>)}
+                {allGroupOptions.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
               <span
                 className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase shrink-0 ${isGlobal ? 'text-indigo-500 bg-indigo-50' : isShared ? 'text-violet-500 bg-violet-50' : 'text-slate-500 bg-slate-100'}`}
@@ -1162,6 +1334,7 @@ const AdminDashboard: React.FC = () => {
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-left text-gray-500 border-b border-gray-200">
               <tr>
+                <th className="px-2 py-2 w-12 text-center" title="Move the attribute within its group">Order</th>
                 <th className="px-2 py-2 min-w-[180px]">Name</th>
                 <th className="px-2 py-2 min-w-[160px]">Group</th>
                 <th className="px-2 py-2 min-w-[150px]">Akeneo ID</th>
@@ -1183,7 +1356,7 @@ const AdminDashboard: React.FC = () => {
                       {group} <span className="text-indigo-300 font-normal normal-case">({rows.length})</span>
                     </td>
                   </tr>
-                  {rows.map(renderGridRow)}
+                  {rows.map((r, i) => renderGridRow(r, i, rows.length))}
                 </React.Fragment>
               ))}
             </tbody>
@@ -1248,7 +1421,7 @@ const AdminDashboard: React.FC = () => {
 
                 {attrView === 'list' && (
                 <div className="space-y-4">
-                    {ATTRIBUTE_GROUPS.map(group => {
+                    {groupsInOrder(getAttributesForCategory(attributes, selectedCategoryDetail)).map(group => {
                         const isPredefined = PREDEFINED_ATTRIBUTE_GROUPS.includes(group);
                         const groupAttrs = isPredefined
                             ? attributes.filter(a => a.categoryId === null && (a.group ?? 'Category Specific') === group)
@@ -1977,7 +2150,7 @@ const AdminDashboard: React.FC = () => {
                         value={editingItem.group ?? 'Category Specific'}
                         onChange={e => setEditingItem({ ...editingItem, group: e.target.value })}
                       >
-                        {ATTRIBUTE_GROUPS.map(g => (
+                        {allGroupOptions.map(g => (
                           <option key={g} value={g}>{g}</option>
                         ))}
                       </select>
@@ -2776,6 +2949,15 @@ const AdminDashboard: React.FC = () => {
                       {ptLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                       {ptLoading ? 'Loading…' : `Load definition for "${targetName}"`}
                     </button>
+                    <button
+                      onClick={() => void buildSyncPlan({})}
+                      disabled={syncBusy}
+                      title="Compare the live definition against what is here, and show what each change would break"
+                      className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-50 text-sm font-medium disabled:opacity-50"
+                    >
+                      {syncBusy ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+                      {syncBusy ? 'Checking…' : 'Review sync'}
+                    </button>
                     {importFileName && <span className="text-sm text-gray-600 truncate">{importFileName}</span>}
                   </div>
                   <p className="text-[11px] text-gray-400 mt-2">
@@ -2806,7 +2988,124 @@ const AdminDashboard: React.FC = () => {
                 </div>
               )}
 
-              {importRows.length > 0 && (
+              {syncPlan && (() => {
+                const planRows = syncPlan.items.filter(i => i.action !== 'unchanged');
+                const sev = (i: typeof planRows[number]) =>
+                  i.risks.some(r => r.level === 'breaking') ? 'breaking'
+                  : i.risks.some(r => r.level === 'warning') ? 'warning' : 'ok';
+                return (
+                  <>
+                    <div className="text-xs text-gray-600 mb-2 flex flex-wrap gap-x-3 gap-y-1">
+                      <span><span className="font-semibold">{syncPlan.counts.update}</span> to update</span>
+                      <span className="text-emerald-600 font-medium">{syncPlan.counts.create} new</span>
+                      <span className="text-gray-400">{syncPlan.counts.unchanged} unchanged</span>
+                      {syncPlan.counts.absent > 0 && (
+                        <span className="text-amber-600 font-medium">{syncPlan.counts.absent} no longer in the definition</span>
+                      )}
+                      {syncPlan.breakingCount > 0 && (
+                        <span className="text-rose-600 font-bold">{syncPlan.breakingCount} would break data</span>
+                      )}
+                    </div>
+                    {syncPlan.breakingCount > 0 && (
+                      <div className="mb-3 flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
+                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <span>
+                          Changes flagged <strong>breaking</strong> are unticked by default &mdash; each would strand data that
+                          already points at the attribute. If an attribute was renamed upstream, use <strong>Match to</strong> to
+                          point it at the existing attribute instead of creating a second one.
+                        </span>
+                      </div>
+                    )}
+                    <div className="overflow-auto flex-1 border border-gray-200 rounded-lg">
+                      <table className="w-full text-xs">
+                        <thead className="bg-light sticky top-0">
+                          <tr className="text-left text-gray-500">
+                            <th className="px-2 py-2 w-8"></th>
+                            <th className="px-2 py-2">Attribute</th>
+                            <th className="px-2 py-2">Action</th>
+                            <th className="px-2 py-2">Changes &amp; risk</th>
+                            <th className="px-2 py-2">Used by</th>
+                            <th className="px-2 py-2 min-w-[190px]">Match to</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {planRows.map(i => {
+                            const level = sev(i);
+                            const rowName = i.incoming?.name ?? i.existing?.name ?? '—';
+                            const applicable = i.action === 'create' || i.action === 'update';
+                            return (
+                              <tr key={i.key} className={level === 'breaking' ? 'bg-rose-50/40' : 'hover:bg-light'}>
+                                <td className="px-2 py-1.5">
+                                  <input
+                                    type="checkbox"
+                                    disabled={!applicable}
+                                    checked={syncIncluded.has(i.key)}
+                                    onChange={() => setSyncIncluded(prev => {
+                                      const n = new Set(prev);
+                                      if (n.has(i.key)) n.delete(i.key); else n.add(i.key);
+                                      return n;
+                                    })}
+                                  />
+                                </td>
+                                <td className="px-2 py-1.5 font-medium text-gray-800">
+                                  {rowName}
+                                  {i.matchedBy === 'name' && (
+                                    <span
+                                      className="ml-1 text-[9px] font-bold uppercase text-amber-600 bg-amber-50 px-1 py-0.5 rounded"
+                                      title="Matched only by name, across a group change. Confirm this is the same attribute."
+                                    >weak match</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <span className={
+                                    i.action === 'create' ? 'text-emerald-600 font-medium'
+                                    : i.action === 'absent' ? 'text-amber-600 font-medium' : 'text-gray-600'}>
+                                    {i.action === 'absent' ? 'not in definition' : i.action}
+                                  </span>
+                                </td>
+                                <td className="px-2 py-1.5 text-gray-500 max-w-[300px]">
+                                  {i.changes.map(c => (
+                                    <div key={c.field} className="truncate">
+                                      <span className="text-gray-400">{c.field}:</span> {c.from} &rarr; <strong className="text-gray-700">{c.to}</strong>
+                                    </div>
+                                  ))}
+                                  {i.risks.map((r, n) => (
+                                    <div
+                                      key={n}
+                                      className={`mt-0.5 ${r.level === 'breaking' ? 'text-rose-600' : r.level === 'warning' ? 'text-amber-600' : 'text-gray-400'}`}
+                                    >{r.message}</div>
+                                  ))}
+                                  {i.changes.length === 0 && i.risks.length === 0 && '—'}
+                                </td>
+                                <td className="px-2 py-1.5 tabular-nums text-gray-500">
+                                  {usageTotal(i.usage) || '—'}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  {i.incoming ? (
+                                    <select
+                                      value={syncRemap[i.key] ?? '__auto__'}
+                                      onChange={e => setRemap(i.key, e.target.value)}
+                                      className="border border-gray-200 rounded px-1 py-0.5 text-xs bg-white w-full max-w-[180px]"
+                                    >
+                                      <option value="__auto__">Auto{i.existing ? ` (${i.matchedBy})` : ' (new)'}</option>
+                                      <option value="">Force new attribute</option>
+                                      {getAttributesForCategory(attributes, selectedCategoryDetail!).map(a => (
+                                        <option key={a.id} value={a.id}>{a.name}</option>
+                                      ))}
+                                    </select>
+                                  ) : <span className="text-gray-300">&mdash;</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
+
+              {!syncPlan && importRows.length > 0 && (
                 <>
                   <div className="text-xs text-gray-600 mb-2">
                     <span className="font-semibold">{includedCount}</span> selected of {importRows.length} ·{' '}
@@ -2830,7 +3129,9 @@ const AdminDashboard: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {importRows.map((r, i) => {
-                          const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(r.group);
+                          // Scope comes from the row (PT states it); the group name no longer
+                          // implies it, so inferring here would mislabel every synced global.
+                          const isGlobal = resolvesToGlobal(r);
                           const status = importRowStatus(r);
                           return (
                             <tr key={i} className={`hover:bg-light ${!importIncluded[i] ? 'opacity-40' : ''}`}>
@@ -2854,7 +3155,7 @@ const AdminDashboard: React.FC = () => {
                                     onChange={e => setImportRowGroup(i, e.target.value)}
                                     className="border border-gray-200 rounded px-1 py-0.5 text-xs text-indigo-700 bg-white max-w-[150px] focus:ring-1 focus:ring-indigo-400 outline-none"
                                   >
-                                    {(ATTRIBUTE_GROUPS as readonly string[]).map(g => (
+                                    {allGroupOptions.map(g => (
                                       <option key={g} value={g}>{g}</option>
                                     ))}
                                   </select>
@@ -2903,6 +3204,16 @@ const AdminDashboard: React.FC = () => {
                 >
                   Cancel
                 </button>
+                {syncPlan ? (
+                  <button
+                    onClick={handleApplySync}
+                    disabled={syncBusy || syncIncluded.size === 0}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {syncBusy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                    {syncBusy ? 'Applying…' : `Apply ${syncIncluded.size} change${syncIncluded.size === 1 ? '' : 's'}`}
+                  </button>
+                ) : (
                 <button
                   onClick={handleConfirmImport}
                   disabled={importing || includedCount === 0}
@@ -2910,6 +3221,7 @@ const AdminDashboard: React.FC = () => {
                 >
                   <Upload size={16} /> {importing ? 'Importing…' : `Import ${includedCount} attribute${includedCount === 1 ? '' : 's'}`}
                 </button>
+                )}
               </div>
             </div>
           </div>

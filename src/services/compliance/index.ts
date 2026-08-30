@@ -36,12 +36,16 @@ export {
   saveCategoryAttribute,
   importCategoryAttributes,
   replaceCategoryAttributes,
+  applyAttributeSync,
+  getAttributeUsage,
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
   makeAttributeGlobal
 } from './compliance-requirement.service';
-export type { ImportAttributesResult, ReplaceAttributesResult } from './compliance-requirement.service';
+export type { ImportAttributesResult, ReplaceAttributesResult, ApplySyncResult } from './compliance-requirement.service';
+export { planAttributeSync, buildSyncWrite, usageTotal, emptyUsage, resolvesToGlobal } from './attribute-sync-plan';
+export type { SyncPlan, SyncItem, SyncRisk, SyncAction, AttributeUsage } from './attribute-sync-plan';
 
 export {
   getProductToolkitDefinitions,
@@ -51,4 +55,4 @@ export {
 } from './producttoolkit-attributes.service';
 export type { PtDefinitionSummary, PtAttribute } from './producttoolkit-attributes.service';
 
-export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS, attributeGroupRank } from '../../config/compliance.constants';
+export { COMPLIANCE_SECTIONS, ATTRIBUTE_GROUPS, PREDEFINED_ATTRIBUTE_GROUPS, attributeGroupRank, compareAttributes, groupsInOrder } from '../../config/compliance.constants';

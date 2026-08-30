@@ -28,28 +28,50 @@ describe('mapProductToolkitAttributes', () => {
     expect(row.flags).toEqual([]);
   });
 
-  it('strips the cluster numbering and lands on a canonical group', () => {
-    // "2. Standard Electric Specs" is a predefined group, so the import will create this
-    // attribute as GLOBAL rather than scoping it to the category.
-    expect(mapProductToolkitAttributes([attr()])[0].group).toBe('Standard Electric Specs');
-    expect(mapProductToolkitAttributes([attr({ cluster: '9. Accessories' })])[0].group).toBe('Accessories');
+  it('uses the ProductToolkit cluster verbatim as the group', () => {
+    // PT owns the taxonomy. Translating its clusters onto OriginFlow's own ATTRIBUTE_GROUPS
+    // was only a way to get it wrong: three of the six real cluster names had no match and
+    // collapsed into 'Category Specific', taking 19 attributes and their scope with them.
+    expect(mapProductToolkitAttributes([attr()])[0].group).toBe('2. Standard Electric Specs');
+    expect(mapProductToolkitAttributes([attr({ cluster: '9. Accessories' })])[0].group).toBe('9. Accessories');
   });
 
-  it("routes a cluster named Global into the Global group", () => {
-    // Nothing special-cases it: 'Global' is a canonical group name, so the shared
-    // mapGroupName picks it up like any other, numbering stripped.
-    for (const cluster of ['Global', '1. Global', ' global ']) {
+  it('keeps the real cluster names intact, however awkward', () => {
+    // Verified against the live definition — these are the actual strings.
+    for (const cluster of [
+      'Category 5.0 & Segmentation',
+      '1 . Category Specific Attributes',
+      '4. Battery Information - Mandatory for all items with batteries according to EU regulations',
+      '5. Packaging & What is included',
+    ]) {
       const [row] = mapProductToolkitAttributes([attr({ cluster })]);
-      expect(row.group).toBe('Global');
-      expect(row.flags).toEqual([]);
+      expect(row.group).toBe(cluster);
+      expect(row.flags).toEqual([]); // nothing to flag: there is no mapping left to fail
     }
   });
 
-  it('falls back to Category Specific and flags an unknown cluster', () => {
-    const [row] = mapProductToolkitAttributes([attr({ cluster: '1. General' })]);
-    expect(row.group).toBe('Category Specific');
-    expect(row.flags.join(' ')).toMatch(/no matching group/i);
-    expect(row.rawGroup).toBe('1. General');
+  it('falls back to Category Specific only when the cluster is blank', () => {
+    expect(mapProductToolkitAttributes([attr({ cluster: '' })])[0].group).toBe('Category Specific');
+    expect(mapProductToolkitAttributes([attr({ cluster: '   ' })])[0].group).toBe('Category Specific');
+  });
+
+  it('carries the identity and scope fields the sync depends on', () => {
+    const [row] = mapProductToolkitAttributes([attr({
+      attributeId: 28, scope: 'global', supplierVisible: false, sortOrder: 12,
+      unit: 'mm', eprelId: 'EP-1', usedByCategories: 3,
+    })]);
+    expect(row.ptAttributeId).toBe(28);
+    expect(row.scope).toBe('global');
+    expect(row.supplierVisible).toBe(false);
+    expect(row.sortOrder).toBe(12);
+    expect(row.unit).toBe('mm');
+    expect(row.eprelId).toBe('EP-1');
+    expect(row.usedByCategories).toBe(3);
+  });
+
+  it('ignores a scope value it does not understand rather than trusting it', () => {
+    const [row] = mapProductToolkitAttributes([attr({ scope: 'something-new' as any })]);
+    expect(row.scope).toBeUndefined(); // falls back to inferring from the group
   });
 
   it('maps both select kinds to enum, keeping the options', () => {

@@ -143,6 +143,11 @@ export {
   saveCategoryAttribute,
   importCategoryAttributes,
   replaceCategoryAttributes,
+  applyAttributeSync,
+  getAttributeUsage,
+  planAttributeSync,
+  usageTotal,
+  resolvesToGlobal,
   deleteCategoryAttribute,
   assignAttributeToCategory,
   unassignAttributeFromCategory,
@@ -150,9 +155,10 @@ export {
   COMPLIANCE_SECTIONS,
   ATTRIBUTE_GROUPS,
   PREDEFINED_ATTRIBUTE_GROUPS,
-  attributeGroupRank
+  attributeGroupRank, compareAttributes, groupsInOrder
 } from './compliance';
-export type { ImportAttributesResult, ReplaceAttributesResult } from './compliance';
+export type { ImportAttributesResult, ReplaceAttributesResult, ApplySyncResult } from './compliance';
+export type { SyncPlan, SyncItem, SyncRisk, AttributeUsage } from './compliance';
 
 export {
   getProductToolkitDefinitions,

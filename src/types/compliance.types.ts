@@ -165,4 +165,10 @@ export interface CategoryAttribute {
    * Presentation filter, not access control — see db_migrations/134.
    */
   supplierVisible?: boolean;
+  /** Order within the attribute group. 0/undefined = unordered, falls back to name. */
+  sortOrder?: number;
+  /** ProductToolkit's stable attribute id — the rename-safe sync key (migration 138). */
+  ptAttributeId?: number | null;
+  /** EPREL identifier from the ProductToolkit definition. Reference only. */
+  eprelId?: string | null;
 }

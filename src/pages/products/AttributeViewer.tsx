@@ -21,7 +21,7 @@ import {
   upsertSkuAttributeFlag,
   setSkuAttributeFlagResolved,
   deleteSkuAttributeFlag,
-  attributeGroupRank,
+  compareAttributes,
 } from '../../services';
 import { getAttributesForCategory } from '../../utils/attribute-validation.utils';
 import SkuAttributeCellDrawer from '../../components/products/SkuAttributeCellDrawer';
@@ -113,7 +113,7 @@ const AttributeViewer: React.FC = () => {
       }
     }
     return Array.from(byId.values()).sort(
-      (a, b) => attributeGroupRank(a.group) - attributeGroupRank(b.group) || a.name.localeCompare(b.name),
+      compareAttributes,
     );
   }, [allAttrs, categoryId, skus]);
 

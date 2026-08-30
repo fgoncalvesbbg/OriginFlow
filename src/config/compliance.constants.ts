@@ -66,6 +66,43 @@ export const attributeGroupRank = (group?: string): number => {
     return i === -1 ? ATTRIBUTE_GROUPS.length : i;
 };
 
+/**
+ * The canonical order of attributes anywhere they are listed: group first (ATTRIBUTE_GROUPS
+ * order, Global at the top), then the explicit per-group sort_order, then name as the
+ * tie-breaker.
+ *
+ * sort_order 0 means "not explicitly ordered", so an untouched group still reads
+ * alphabetically exactly as it did before migration 137, and a group someone has arranged
+ * keeps that arrangement. Applied centrally in getCategoryAttributes so every consumer —
+ * admin grid and list, SKU catalog, attribute viewer, and every supplier-facing form —
+ * inherits one order without each having to re-sort.
+ */
+export const compareAttributes = (
+    a: { group?: string; sortOrder?: number; name: string },
+    b: { group?: string; sortOrder?: number; name: string },
+): number =>
+    attributeGroupRank(a.group) - attributeGroupRank(b.group) ||
+    (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+    a.name.localeCompare(b.name);
+
+/**
+ * The groups present in a set of attributes, in the order they should be displayed.
+ *
+ * Attributes arrive already sorted (compareAttributes), so a group's position is simply where
+ * its first attribute lands. That is what makes ProductToolkit's own clusters work as groups
+ * without being registered anywhere: PT's sortOrder is category-wide and its clusters are
+ * contiguous within it, so first-appearance order reproduces PT's intended section order
+ * exactly. Iterating ATTRIBUTE_GROUPS instead would silently DROP any group not on that list.
+ */
+export const groupsInOrder = (attrs: { group?: string }[]): string[] => {
+    const seen: string[] = [];
+    for (const a of attrs) {
+        const g = a.group || 'Category Specific';
+        if (!seen.includes(g)) seen.push(g);
+    }
+    return seen;
+};
+
 export const COMPLIANCE_SECTIONS = [
     'General Requirements',
     'Safety & Electrical',

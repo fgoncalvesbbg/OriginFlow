@@ -7,8 +7,9 @@ import { db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { generateUUID } from '../../utils';
-import { PREDEFINED_ATTRIBUTE_GROUPS } from '../../config/compliance.constants';
+import { PREDEFINED_ATTRIBUTE_GROUPS, compareAttributes } from '../../config/compliance.constants';
 import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
+import { buildSyncWrite, resolvesToGlobal, type SyncPlan, type AttributeUsage } from './attribute-sync-plan';
 
 /**
  * Get all compliance requirements
@@ -123,15 +124,30 @@ export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
         akeneoId: a.akeneo_id ?? undefined,
         // Absent column or NULL reads as visible: the flag only ever hides on purpose.
         supplierVisible: a.supplier_visible !== false,
-    }));
+        sortOrder: a.sort_order ?? 0,
+        ptAttributeId: a.pt_attribute_id ?? null,
+        eprelId: a.eprel_id ?? null,
+    // Sorted once here so every consumer gets the same order without re-sorting.
+    })).sort(compareAttributes);
 };
 
 /**
  * Save/update a category attribute
  */
-export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<void> => {
+export const saveCategoryAttribute = async (
+    attr: CategoryAttribute,
+    opts: { forceScope?: 'global' | 'category' } = {},
+): Promise<void> => {
+    // OriginFlow's own rule is "a predefined group is global". ProductToolkit decouples the
+    // two — it has a `scope` per attribute that is independent of its cluster — so a sync
+    // needs to be able to say "category-scoped even though the group is a predefined one".
+    // categoryId is the actual source of truth everywhere (getAttributesForCategory and the
+    // Global/Shared badges all read it), so overriding it here is safe; the group is left
+    // alone so the attribute still displays under its real cluster.
     const isPredefinedGroup = !!attr.group && PREDEFINED_ATTRIBUTE_GROUPS.includes(attr.group);
-    const intendedCategoryId = isPredefinedGroup ? null : (attr.categoryId ?? null);
+    const intendedCategoryId = opts.forceScope
+        ? (opts.forceScope === 'global' ? null : (attr.categoryId ?? null))
+        : (isPredefinedGroup ? null : (attr.categoryId ?? null));
 
     // Akeneo ID is the global identity of an attribute — the same code must not exist twice
     // across categories. If a save would introduce a code already owned by another attribute,
@@ -153,6 +169,9 @@ export const saveCategoryAttribute = async (attr: CategoryAttribute): Promise<vo
         group: attr.group ?? 'Category Specific',
         akeneo_id: attr.akeneoId ?? null,
         supplier_visible: attr.supplierVisible !== false,
+        sort_order: attr.sortOrder ?? 0,
+        pt_attribute_id: attr.ptAttributeId ?? null,
+        eprel_id: attr.eprelId ?? null,
     };
     await db.upsert('category_attributes', payload);
 };
@@ -242,7 +261,9 @@ export const importCategoryAttributes = async (
     for (const row of rows) {
         if (!row.name?.trim()) { result.skipped++; continue; }
 
-        const isGlobal = PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group);
+        // PT states scope explicitly; only fall back to inferring it from the group when the
+        // source does not say (a CSV row), which is what every pre-existing caller does.
+        const isGlobal = row.scope ? row.scope === 'global' : PREDEFINED_ATTRIBUTE_GROUPS.includes(row.group);
         const code = row.akeneoId ? norm(row.akeneoId) : '';
 
         // Match an existing attribute.
@@ -310,6 +331,10 @@ export const importCategoryAttributes = async (
             // ProductToolkit definitions carry no notion of supplier visibility, so an
             // imported attribute starts visible and is marked internal by hand.
             supplierVisible: row.supplierVisible !== false,
+            // ProductToolkit definitions carry a sortOrder; a CSV row leaves it unset (0).
+            sortOrder: row.sortOrder ?? 0,
+            ptAttributeId: row.ptAttributeId ?? null,
+            eprelId: row.eprelId ?? null,
         };
         await saveCategoryAttribute(created);
         existing.push(created); // so later rows in this run can match it (prevents in-file dupes)
@@ -317,6 +342,79 @@ export const importCategoryAttributes = async (
         result.created++;
     }
 
+    return result;
+};
+
+/**
+ * Dependent-record counts per attribute, via the attribute_usage() probe (migration 138).
+ * Everything a sync could strand: SKU values, supplier submissions, review flags and IM
+ * block conditions. Returns {} rather than throwing if the probe is unavailable — a missing
+ * count must not block the review, but the caller should treat {} as "unknown", not "zero".
+ */
+export const getAttributeUsage = async (
+    ids: string[],
+): Promise<Record<string, AttributeUsage>> => {
+    if (!isLive || ids.length === 0) return {};
+    try {
+        const rows = await portalDb.rpc<any[]>('attribute_usage', { p_ids: ids });
+        const out: Record<string, AttributeUsage> = {};
+        for (const r of rows ?? []) {
+            out[r.attribute_id] = {
+                skuValues: Number(r.sku_values) || 0,
+                requestValues: Number(r.request_values) || 0,
+                reviewFlags: Number(r.review_flags) || 0,
+                imRefs: Number(r.im_refs) || 0,
+            };
+        }
+        return out;
+    } catch (e) {
+        console.error('getAttributeUsage failed', e);
+        return {};
+    }
+};
+
+export interface ApplySyncResult {
+    created: number;
+    updated: number;
+    skipped: number;
+}
+
+/**
+ * Apply a reviewed ProductToolkit sync plan.
+ *
+ * Only the items the reviewer ticked are written, and only creates/updates — an 'absent'
+ * attribute is never deleted here. Deleting is what strands data, so it stays a deliberate,
+ * separate act (the Replace import, or removing the row by hand) rather than something a
+ * sync can do on its own.
+ *
+ * An update writes back to the EXISTING attribute id, so every SKU value, supplier
+ * submission, review flag and IM block condition that references it keeps resolving.
+ * `forceScope` carries ProductToolkit's own scope through, overriding OriginFlow's
+ * "predefined group means global" inference — see saveCategoryAttribute.
+ */
+export const applyAttributeSync = async (
+    plan: SyncPlan,
+    categoryId: string,
+    includedKeys: Set<string>,
+): Promise<ApplySyncResult> => {
+    if (!isLive) throw new Error('Database not configured.');
+    const result: ApplySyncResult = { created: 0, updated: 0, skipped: 0 };
+
+    for (const item of plan.items) {
+        if (!includedKeys.has(item.key) || (item.action !== 'create' && item.action !== 'update')) {
+            result.skipped++;
+            continue;
+        }
+        const write = buildSyncWrite(item, categoryId);
+        if (!write) { result.skipped++; continue; }
+
+        const isCreate = item.action === 'create';
+        await saveCategoryAttribute(
+            { ...write, id: write.id || generateUUID() },
+            { forceScope: resolvesToGlobal(item.incoming!) ? 'global' : 'category' },
+        );
+        if (isCreate) result.created++; else result.updated++;
+    }
     return result;
 };
 
