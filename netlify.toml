@@ -24,6 +24,8 @@
 #   MARKUPIO_FOLDER_ID                         — send-to-markup.ts (optional target folder)
 #   JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN — jira-status.ts (live project lookup)
 #   JIRA_PROJECT_KEY                           — jira-status.ts (optional; scopes the search)
+#   JIRA_PROJECT_ID_FIELD                      — jira-status.ts (optional; display name of the
+#                                                Jira field holding the launch code, default "ProjectID")
 # The matching public UI flag is VITE_MARKUP_REVIEW_ENABLED=true.
 #
 # The Jira connector needs NO public flag: jira-status.ts answers { configured: false }

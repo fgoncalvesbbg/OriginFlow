@@ -11,14 +11,21 @@
  * This is Pattern A in netlify.toml — same shape as translate.ts.
  *
  * HOW a project code maps to an issue: OriginFlow's `projects.project_id_code` is a
- * free-text launch code (e.g. "MDA26010", "CL26003AU", "Test Pergolas"), NOT a Jira
- * issue key. So we search the configured Jira project for an issue whose SUMMARY
- * contains the code as a whole token, then fall back to a full-text (`text ~`) search
- * for the codes that found nothing. A code that already looks like an issue key
- * ("PL-123") is matched by key instead. See buildJql() / matchIssuesToCodes().
+ * free-text launch code (e.g. "MDA26010", "CL26003AU"), NOT a Jira issue key. Jira
+ * carries the same code in a custom field — "ProjectID" on go-bbg — and that field is
+ * the real link. We resolve it by NAME at runtime (JIRA_PROJECT_ID_FIELD, see
+ * resolveProjectIdField) because its numeric id differs per Jira site.
  *
- * Whole-token matching matters: "MDA26016" must not claim "MDA26016AU"'s issue, so
- * the final match is a boundary-anchored regex over the summary, not a substring test.
+ * Three passes, narrowest first; each one only runs for the codes still unmatched:
+ *   1. the ProjectID custom field — verified EXACTLY against the value read back off
+ *      the issue, so a fuzzy JQL hit cannot produce a false match;
+ *   2. the summary, for tickets where nobody filled the field in;
+ *   3. full text (description/comments), which we cannot re-verify.
+ * A code that already looks like an issue key ("PL-123") is matched by key instead.
+ * Each result carries `matchedBy` so the UI can show how solid the link is.
+ *
+ * Whole-token matching matters throughout: "MDA26016" must not claim "MDA26016AU"'s
+ * issue, so matching is a boundary-anchored regex, never a substring test.
  *
  * Request body:  { codes: string[] }          (max 60 per call; the client chunks)
  * Response body: {
@@ -41,6 +48,8 @@
  *   JIRA_EMAIL         Atlassian account the API token belongs to
  *   JIRA_API_TOKEN     https://id.atlassian.com/manage-profile/security/api-tokens
  *   JIRA_PROJECT_KEY   optional; scopes the search (e.g. PL). Unset = search all projects.
+ *   JIRA_PROJECT_ID_FIELD  optional; display name of the field holding the launch code.
+ *                          Defaults to "ProjectID".
  *   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   session validation
  */
 
@@ -48,9 +57,11 @@ import { createClient } from '@supabase/supabase-js';
 import {
   SAFE_CODE,
   buildJql,
+  findFieldByName,
   matchIssuesToCodes,
   type CodeResult,
   type JiraSearchIssue,
+  type MatchStrategy,
 } from './lib/jira-match';
 
 interface NetlifyEvent {
@@ -62,7 +73,8 @@ interface NetlifyEvent {
 const MAX_CODES = 60;
 /** Jira caps page size at 100; two searches x 100 is well inside the 10s function budget. */
 const MAX_RESULTS = 100;
-const FIELDS = ['summary', 'status', 'issuetype', 'assignee', 'priority', 'updated', 'duedate'];
+const BASE_FIELDS = ['summary', 'status', 'issuetype', 'assignee', 'priority', 'updated', 'duedate'];
+const DEFAULT_PROJECT_ID_FIELD = 'ProjectID';
 /** Leave headroom under Netlify's ~10s synchronous limit so we return a real error, not a 502. */
 const JIRA_TIMEOUT_MS = 7000;
 
@@ -81,7 +93,12 @@ const json = (statusCode: number, payload: unknown) => ({
  * the legacy path. 410 is deliberately NOT a fallback trigger: it means "removed", so
  * retrying the legacy path would just turn one clear error into a confusing one.
  */
-const searchJira = async (baseUrl: string, auth: string, jql: string): Promise<JiraSearchIssue[]> => {
+const searchJira = async (
+  baseUrl: string,
+  auth: string,
+  jql: string,
+  fields: string[],
+): Promise<JiraSearchIssue[]> => {
   const attempt = async (path: string) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), JIRA_TIMEOUT_MS);
@@ -89,7 +106,7 @@ const searchJira = async (baseUrl: string, auth: string, jql: string): Promise<J
       return await fetch(`${baseUrl}${path}`, {
         method: 'POST',
         headers: { Authorization: auth, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ jql, fields: FIELDS, maxResults: MAX_RESULTS }),
+        body: JSON.stringify({ jql, fields, maxResults: MAX_RESULTS }),
         signal: controller.signal,
       });
     } finally {
@@ -124,6 +141,52 @@ const searchJira = async (baseUrl: string, auth: string, jql: string): Promise<J
   return Array.isArray(data?.issues) ? data.issues : [];
 };
 
+/**
+ * Look up the custom field that holds the launch code, by display name.
+ *
+ * Cached for the life of the warm function instance: the field id never changes for a
+ * given Jira site, and re-fetching ~30-200 field definitions on every dashboard load
+ * would double the connector's latency for nothing.
+ *
+ * Returns null when the field cannot be found — the caller then falls back to summary
+ * and text matching rather than failing, so a renamed field degrades instead of breaking.
+ */
+let fieldIdCache: { name: string; id: string | null } | null = null;
+
+const resolveProjectIdField = async (
+  baseUrl: string,
+  auth: string,
+  wantedName: string,
+): Promise<string | null> => {
+  if (fieldIdCache && fieldIdCache.name === wantedName) return fieldIdCache.id;
+
+  let id: string | null = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), JIRA_TIMEOUT_MS);
+    let fields: { id: string; name?: string }[] = [];
+    try {
+      const res = await fetch(`${baseUrl}/rest/api/3/field`, {
+        headers: { Authorization: auth, Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data: any = await res.json().catch(() => []);
+        if (Array.isArray(data)) fields = data;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    id = findFieldByName(fields, wantedName);
+  } catch {
+    // Network trouble here is not fatal — fall through to the summary/text passes.
+    id = null;
+  }
+
+  fieldIdCache = { name: wantedName, id };
+  return id;
+};
+
 export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
@@ -144,6 +207,7 @@ export const handler = async (event: NetlifyEvent) => {
   const email = (process.env.JIRA_EMAIL || '').trim();
   const apiToken = (process.env.JIRA_API_TOKEN || '').trim();
   const projectKey = (process.env.JIRA_PROJECT_KEY || '').trim();
+  const projectIdFieldName = (process.env.JIRA_PROJECT_ID_FIELD || '').trim() || DEFAULT_PROJECT_ID_FIELD;
 
   // Missing Jira config is NOT an error — the feature is simply off.
   if (!rawBase || !email || !apiToken) {
@@ -193,16 +257,30 @@ export const handler = async (event: NetlifyEvent) => {
   const auth = 'Basic ' + Buffer.from(`${email}:${apiToken}`).toString('base64');
 
   try {
-    // Pass 1: summary match — precise, and how launch codes are actually written on tickets.
-    const bySummary = await searchJira(rawBase, auth, buildJql(searchable.map(s => s.code), projectKey, 'summary'));
-    matchIssuesToCodes(searchable, bySummary, results, rawBase, 'summary');
+    const fieldId = await resolveProjectIdField(rawBase, auth, projectIdFieldName);
+    // Ask for the ProjectID field alongside the display fields so the match can be
+    // verified against the value itself rather than trusting Jira's fuzzy `~`.
+    const fields = fieldId ? [...BASE_FIELDS, fieldId] : BASE_FIELDS;
 
-    // Pass 2: only for codes still unmatched, widen to full text (description, comments).
-    const missing = searchable.filter(s => results[s.raw].matchCount === 0);
-    if (missing.length > 0) {
-      const byText = await searchJira(rawBase, auth, buildJql(missing.map(m => m.code), projectKey, 'text'));
-      matchIssuesToCodes(missing, byText, results, rawBase, 'text');
+    // Narrowest strategy first; each pass only runs for the codes still unmatched, so
+    // a fully-populated ProjectID field costs exactly one Jira search.
+    const strategies: MatchStrategy[] = [
+      ...(fieldId ? [{ kind: 'field', fieldId } as const] : []),
+      { kind: 'summary' },
+      { kind: 'text' },
+    ];
+
+    let pending = searchable;
+    for (const strategy of strategies) {
+      if (pending.length === 0) break;
+      const found = await searchJira(rawBase, auth, buildJql(pending.map(c => c.code), projectKey, strategy), fields);
+      matchIssuesToCodes(pending, found, results, rawBase, strategy);
+      pending = pending.filter(c => results[c.raw].matchCount === 0);
     }
+
+    // Reported so the UI (and an operator debugging a miss) can tell "no ticket" apart
+    // from "the ProjectID field could not be resolved, so this was a text search".
+    (payload as any).projectIdField = fieldId ? projectIdFieldName : null;
   } catch (e: any) {
     return json(502, { error: e?.message || 'Jira request failed.' });
   }

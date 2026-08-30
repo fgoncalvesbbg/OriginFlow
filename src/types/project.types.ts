@@ -197,6 +197,14 @@ export interface JiraIssueRef {
   priority?: string;
   updated?: string;
   dueDate?: string;
+  /**
+   * How the issue was tied to this project code:
+   *   'field'   — Jira's ProjectID custom field, verified exactly (the reliable one)
+   *   'key'     — the project code IS the issue key
+   *   'summary' — the code appears in the issue summary (field was blank)
+   *   'text'    — the code is somewhere in the description/comments (weakest)
+   */
+  matchedBy?: 'field' | 'summary' | 'text' | 'key';
 }
 
 /** Lookup outcome for one project code. `issue === null` means "not on Jira". */

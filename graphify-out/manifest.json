@@ -1122,15 +1122,15 @@
     "semantic_hash": ""
   },
   "src/pages/PMDashboard.tsx": {
-    "mtime": 1785413963.732312,
-    "seen": 1787843281.2441883,
-    "ast_hash": "13ef2b0df77294fd1dab5b627a3d13fa",
+    "mtime": 1788115021.569189,
+    "seen": 1788115621.7267156,
+    "ast_hash": "1ce43c3139b2b000c41b47cd1c777457",
     "semantic_hash": ""
   },
   "src/pages/ProjectDetail.tsx": {
-    "mtime": 1787944193.3222628,
-    "seen": 1788113944.662936,
-    "ast_hash": "7a3ee42b9b99420c98b19cb63cff1212",
+    "mtime": 1788115068.228232,
+    "seen": 1788115621.7267175,
+    "ast_hash": "4367b2c4141b13faaf43712c6b1d9ad0",
     "semantic_hash": ""
   },
   "src/pages/SupplierAttributePortal.tsx": {
@@ -1638,9 +1638,9 @@
     "semantic_hash": ""
   },
   "src/services/index.ts": {
-    "mtime": 1788109417.4011734,
-    "seen": 1788113944.6637585,
-    "ast_hash": "5c99b18b758dc143fa1d76fa66b62457",
+    "mtime": 1788114942.055457,
+    "seen": 1788115621.7270532,
+    "ast_hash": "40002fe13f963316e0cf66a36f125215",
     "semantic_hash": ""
   },
   "src/services/manufacturing/index.ts": {
@@ -1656,9 +1656,9 @@
     "semantic_hash": ""
   },
   "src/services/project/index.ts": {
-    "mtime": 1787944128.9874442,
-    "seen": 1788113944.6637778,
-    "ast_hash": "401b5c9c30c1260a6e99450dc2c5a82e",
+    "mtime": 1788114942.0544484,
+    "seen": 1788115621.7270582,
+    "ast_hash": "aff5ca18c9f5329479ca55cbba6d73ec",
     "semantic_hash": ""
   },
   "src/services/project/project-attribute-request.service.ts": {
@@ -1806,9 +1806,9 @@
     "semantic_hash": ""
   },
   "src/types/index.ts": {
-    "mtime": 1787913700.2747622,
-    "seen": 1787914392.0173266,
-    "ast_hash": "284c54f474ed1d45a46919e5122ef054",
+    "mtime": 1788115099.5795891,
+    "seen": 1788115621.7271314,
+    "ast_hash": "1830a238f4605d037c6c1458b0e3474f",
     "semantic_hash": ""
   },
   "src/types/manufacturing.types.ts": {
@@ -1818,9 +1818,9 @@
     "semantic_hash": ""
   },
   "src/types/project.types.ts": {
-    "mtime": 1787944098.1024556,
-    "seen": 1788113944.6640227,
-    "ast_hash": "e861a77d2cdeb23062ff1441bb4b0be4",
+    "mtime": 1788114902.896241,
+    "seen": 1788115621.7271347,
+    "ast_hash": "9d33c4c509a7f1483fb06874c578b10c",
     "semantic_hash": ""
   },
   "src/types/sourcing.types.ts": {
@@ -1944,9 +1944,9 @@
     "semantic_hash": ""
   },
   "vite.config.ts": {
-    "mtime": 1785413963.800888,
-    "seen": 1787843281.2445621,
-    "ast_hash": "ac67a0b965100cab823287a11aae2306",
+    "mtime": 1788115240.3170686,
+    "seen": 1788115621.7271836,
+    "ast_hash": "a3f2f24d690ab288393e1b1d16290681",
     "semantic_hash": ""
   },
   ".agents/skills/caveman/README.md": {
@@ -3741,6 +3741,36 @@
     "mtime": 1787941849.2543945,
     "seen": 1788113944.6643722,
     "ast_hash": "6edbe3a1730fb86c81c4274830a22741",
+    "semantic_hash": ""
+  },
+  "netlify/functions/jira-status.ts": {
+    "mtime": 1788115381.3810186,
+    "seen": 1788115621.7265277,
+    "ast_hash": "b18b69800199e8f3eb6841180f17e996",
+    "semantic_hash": ""
+  },
+  "netlify/functions/lib/jira-match.test.ts": {
+    "mtime": 1788115231.968464,
+    "seen": 1788115621.726535,
+    "ast_hash": "942d9c04c6a750f9f09c04966ecbfdd7",
+    "semantic_hash": ""
+  },
+  "netlify/functions/lib/jira-match.ts": {
+    "mtime": 1788115171.1188607,
+    "seen": 1788115621.726537,
+    "ast_hash": "b24c34b17b1263287b72cf1ded0d3f79",
+    "semantic_hash": ""
+  },
+  "src/components/JiraStatusBadge.tsx": {
+    "mtime": 1788114955.6761246,
+    "seen": 1788115621.7265828,
+    "ast_hash": "4476ae4a3cc62b402edd409c5033eb61",
+    "semantic_hash": ""
+  },
+  "src/services/project/jira.service.ts": {
+    "mtime": 1788115438.2395325,
+    "seen": 1788115621.7270596,
+    "ast_hash": "e82b3b9f8de9d4e88ec22c9cb239cb14",
     "semantic_hash": ""
   }
 }

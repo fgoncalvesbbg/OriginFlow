@@ -10,7 +10,8 @@
     "serve": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "graph": "node scripts/graph-query.mjs"
+    "graph": "node scripts/graph-query.mjs",
+    "jira:check": "node scripts/jira-check.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",

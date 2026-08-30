@@ -45,14 +45,23 @@ export const JiraStatusBadge: React.FC<Props> = ({ lookup, loading = false, show
   }
 
   const { issue, matchCount } = lookup;
+  // A 'field' (or 'key') match is the ProjectID link and is exact. 'summary'/'text'
+  // mean the ProjectID field was blank and we fell back to searching the ticket, so
+  // say that in the tooltip rather than presenting a guess as a fact.
+  const matchNote =
+    issue.matchedBy === 'summary'
+      ? '\nMatched on the issue summary — the ProjectID field is not set on this ticket.'
+      : issue.matchedBy === 'text'
+        ? '\nMatched on the issue text — the ProjectID field is not set on this ticket.'
+        : '';
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0">
       <a
         href={issue.url}
         target="_blank"
         rel="noopener noreferrer"
-        title={`${issue.key} — ${issue.summary}${issue.assignee ? ` (${issue.assignee})` : ''}`}
-        className="inline-flex items-center gap-1 shrink-0 rounded-lg hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        title={`${issue.key} — ${issue.summary}${issue.assignee ? ` (${issue.assignee})` : ''}${matchNote}`}
+        className={`inline-flex items-center gap-1 shrink-0 rounded-lg hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-indigo-300 ${matchNote ? 'decoration-dotted underline-offset-4 underline' : ''}`}
       >
         <Badge tone={toneForCategory(issue.statusCategory)}>
           <span className="font-mono">{issue.key}</span>
