@@ -2,17 +2,18 @@
 /** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles } from '../services';
-import { Project, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus } from '../types';
+import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, lookupJiraIssues, jiraCategoryLabel } from '../services';
+import { Project, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus, JiraLookup } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
+import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import { Card } from '../components/common/Card';
 import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
 
 // Column keys used for per-column filtering and sorting in the projects table.
-type ProjectColKey = 'name' | 'projectId' | 'pm' | 'supplier' | 'step' | 'status';
+type ProjectColKey = 'name' | 'projectId' | 'pm' | 'supplier' | 'step' | 'status' | 'jira';
 type SortDir = 'asc' | 'desc';
 
 /** Clickable table header that toggles sorting for its column. */
@@ -50,9 +51,17 @@ const PMDashboard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   // Per-column filters + sort state for the projects table.
-  const [colFilters, setColFilters] = useState<Record<ProjectColKey, string>>({ name: '', projectId: '', pm: '', supplier: '', step: '', status: 'all' });
+  const [colFilters, setColFilters] = useState<Record<ProjectColKey, string>>({ name: '', projectId: '', pm: '', supplier: '', step: '', status: 'all', jira: 'all' });
   const [sortKey, setSortKey] = useState<ProjectColKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  // Jira is looked up live and never stored — see src/services/project/jira.service.ts.
+  // It loads separately from the project data so a slow or broken Jira never delays
+  // (or breaks) the dashboard.
+  const [jira, setJira] = useState<Record<string, JiraLookup>>({});
+  const [jiraConfigured, setJiraConfigured] = useState(false);
+  const [jiraLoading, setJiraLoading] = useState(false);
+  const [jiraError, setJiraError] = useState('');
 
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
@@ -74,6 +83,9 @@ const PMDashboard: React.FC = () => {
       setSuppliers(sData);
       setProfiles(profileData);
       setStats(statsData);
+      // Deliberately not awaited: the table renders immediately and the Jira
+      // column fills in when Atlassian answers.
+      void refreshJira(pData);
     } catch (e: any) {
       console.error("Failed to load dashboard data", e);
       setErrorMsg(e.message || "Failed to load data.");
@@ -83,6 +95,22 @@ const PMDashboard: React.FC = () => {
   };
 
   useRefetchOnFocus(loadData);
+
+  /**
+   * Re-read every project's Jira status straight from Jira. Called on load, on the
+   * "Refresh Jira" button, and on focus-refetch via loadData. Nothing is cached or
+   * persisted, so this is always the live answer.
+   */
+  const refreshJira = async (list: Project[]) => {
+    const codes = list.map(p => p.projectId).filter(Boolean);
+    if (codes.length === 0) { setJira({}); return; }
+    setJiraLoading(true);
+    const res = await lookupJiraIssues(codes);
+    setJira(res.results);
+    setJiraConfigured(res.configured);
+    setJiraError(res.error || '');
+    setJiraLoading(false);
+  };
 
   const getSupplierName = (id: string) => suppliers.find(s => s.id === id)?.name || 'Unknown';
   const getPmName = (id: string) => {
@@ -99,6 +127,12 @@ const PMDashboard: React.FC = () => {
       case 'supplier': return getSupplierName(p.supplierId);
       case 'step': return String(p.currentStep);
       case 'status': return p.status;
+      // Sorts/filters on the same words the cell shows, so "In Progress" in the
+      // dropdown matches what the operator reads in the row.
+      case 'jira': {
+        const issue = jira[p.projectId]?.issue;
+        return issue ? jiraCategoryLabel(issue) : 'Not on Jira';
+      }
     }
   };
 
@@ -126,11 +160,11 @@ const PMDashboard: React.FC = () => {
       }
 
       // Per-column filters. Status/PM are exact-match dropdowns ('all' = no filter); the rest are substring.
-      for (const key of ['name', 'projectId', 'pm', 'supplier', 'step', 'status'] as ProjectColKey[]) {
+      for (const key of ['name', 'projectId', 'pm', 'supplier', 'step', 'status', 'jira'] as ProjectColKey[]) {
         const f = colFilters[key];
         if (!f || f === 'all') continue;
         const v = colValue(p, key).toLowerCase();
-        if (key === 'status' || key === 'pm') { if (v !== f.toLowerCase()) return false; }
+        if (key === 'status' || key === 'pm' || key === 'jira') { if (v !== f.toLowerCase()) return false; }
         else if (!v.includes(f.toLowerCase())) return false;
       }
       return true;
@@ -276,6 +310,30 @@ const PMDashboard: React.FC = () => {
                 <SortableTh label="Supplier" colKey="supplier" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                 <SortableTh label="Current Step" colKey="step" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                 <SortableTh label="Status" colKey="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                {jiraConfigured && (
+                  <th className="px-6 py-4 font-semibold text-gray-700">
+                    <span className="inline-flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onSort('jira')}
+                        className={`inline-flex items-center gap-1 hover:text-indigo-600 transition-colors ${sortKey === 'jira' ? 'text-indigo-600' : ''}`}
+                      >
+                        Jira
+                        {sortKey === 'jira' ? (sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />) : <ChevronsUpDown size={13} className="text-gray-300" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void refreshJira(projects)}
+                        disabled={jiraLoading}
+                        title={jiraError || 'Re-read every status from Jira now'}
+                        className="text-gray-400 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+                      >
+                        <RefreshCw size={13} className={jiraLoading ? 'animate-spin' : ''} />
+                      </button>
+                      {jiraError && <AlertTriangle size={13} className="text-amber-500" aria-label={jiraError} />}
+                    </span>
+                  </th>
+                )}
                 <th className="px-6 py-4 font-semibold text-gray-700"></th>
               </tr>
               {/* Per-column filter row */}
@@ -310,13 +368,25 @@ const PMDashboard: React.FC = () => {
                     {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </th>
+                {jiraConfigured && (
+                  <th className="px-6 py-2">
+                    <select value={colFilters.jira} onChange={e => setFilter('jira', e.target.value)}
+                      className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400">
+                      <option value="all">All</option>
+                      <option value="To Do">To Do</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Done">Done</option>
+                      <option value="Not on Jira">Not on Jira</option>
+                    </select>
+                  </th>
+                )}
                 <th className="px-6 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-muted">
+                  <td colSpan={jiraConfigured ? 8 : 7} className="px-6 py-12 text-center text-muted">
                     <div className="flex flex-col items-center gap-2">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
                       <span>Loading projects...</span>
@@ -325,7 +395,7 @@ const PMDashboard: React.FC = () => {
                 </tr>
               ) : filteredProjects.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-muted">
+                  <td colSpan={jiraConfigured ? 8 : 7} className="px-6 py-12 text-center text-muted">
                     <div className="flex flex-col items-center gap-2 opacity-50">
                        <Search size={32} />
                        <span>No projects found.</span>
@@ -355,6 +425,11 @@ const PMDashboard: React.FC = () => {
                     <td className="px-6 py-4">
                       <StatusBadge status={project.status} type="project" />
                     </td>
+                    {jiraConfigured && (
+                      <td className="px-6 py-4">
+                        <JiraStatusBadge lookup={jira[project.projectId]} loading={jiraLoading && !jira[project.projectId]} />
+                      </td>
+                    )}
                     <td className="px-6 py-4 text-right">
                       <Link 
                         to={`/project/${project.id}`} 

@@ -77,11 +77,15 @@ export {
   logSkuCreated,
   logSkuDeleted,
   markSkusExported,
-  getSkuChangeLog
+  getSkuChangeLog,
+  lookupJiraIssues,
+  lookupJiraIssue,
+  jiraCategoryLabel
 } from './project';
 export type { CategorySku } from './project';
 export type { SiblingAttributeRequest } from './project';
 export type { ParsedSkuRow, BulkUpsertSkuResult, ChangeActor, SkuFieldChange } from './project';
+export type { JiraLookupResponse } from './project';
 
 // Supplier module
 export {

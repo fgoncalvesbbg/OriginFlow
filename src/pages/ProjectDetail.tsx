@@ -50,17 +50,19 @@ import {
   updateProjectSku,
   deleteProjectSku,
   getEffectiveSkuValue,
-  MAX_SKUS_PER_PROJECT
+  MAX_SKUS_PER_PROJECT,
+  lookupJiraIssue
 } from '../services';
 import { getAttributesForCategory, generateUUID } from '../utils';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, IMTemplate, ProductionUpdate, ProductionDelayReason,
-  ProjectAttributeRequest, ProjectSku, SkuAttributeValue
+  ProjectAttributeRequest, ProjectSku, SkuAttributeValue, JiraLookup
 } from '../types';
 import type { PrintRender } from '../services';
 import { printedManualStatusOf, MANUAL_STATUS_META } from './im/im-manual-status';
 import { StatusBadge } from '../components/StatusBadge';
+import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
   Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes, FileDown
@@ -234,9 +236,29 @@ const ProjectDetail: React.FC = () => {
     isOpen: false, title: '', message: '', action: () => {}
   });
   const [refreshing, setRefreshing] = useState(false);
+  // Live Jira status for project.projectId — never persisted, see refreshJira below.
+  const [jiraLookup, setJiraLookup] = useState<JiraLookup | null>(null);
+  const [jiraConfigured, setJiraConfigured] = useState(false);
+  const [jiraLoading, setJiraLoading] = useState(false);
+  const [jiraError, setJiraError] = useState('');
 
   const showNotification = (msg: string, type: 'success' | 'error') => {
     setNotification({ msg, type });
+  };
+
+  /**
+   * Jira status for this project's launch code. Fetched live on every load and on
+   * Refresh — never persisted, so what is on screen is what Jira says right now.
+   * Kept out of loadProjectData's Promise.all so a slow Jira cannot delay the page.
+   */
+  const refreshJira = async (code: string) => {
+    if (!code) { setJiraLookup(null); return; }
+    setJiraLoading(true);
+    const res = await lookupJiraIssue(code);
+    setJiraLookup(res.lookup);
+    setJiraConfigured(res.configured);
+    setJiraError(res.error || '');
+    setJiraLoading(false);
   };
 
   const handleRefreshData = async () => {
@@ -532,6 +554,9 @@ const ProjectDetail: React.FC = () => {
       const p = await getProjectById(id);
       if (p) {
         setProject(p);
+        // Not awaited: the Jira chip fills in on its own, and Atlassian being slow or
+        // down must never hold up (or fail) the project page.
+        void refreshJira(p.projectId);
         const [sData, stepsData, docsData, compReqs, cats, imData, leafletData, prodUpdates] = await Promise.all([
           getSupplierById(p.supplierId).catch(err => {
             console.error('Error loading supplier:', err);
@@ -1389,6 +1414,12 @@ const ProjectDetail: React.FC = () => {
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm text-muted font-mono">{project.projectId}</span>
             <StatusBadge status={project.status} type="project" />
+            {jiraConfigured && (
+              <JiraStatusBadge lookup={jiraLookup} loading={jiraLoading} />
+            )}
+            {jiraConfigured && jiraError && (
+              <span className="text-xs text-amber-600" title={jiraError}>Jira unavailable</span>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold text-primary">{project.name}</h1>

@@ -176,3 +176,33 @@ export interface DocumentComment {
   authorRole: string;
   createdAt: string;
 }
+
+/**
+ * Jira link-through (see netlify/functions/jira-status.ts).
+ *
+ * Never persisted: these are fetched live from Jira on every load/refresh, so the
+ * status shown is always Jira's current one and there is no OriginFlow copy to drift.
+ */
+export interface JiraIssueRef {
+  key: string;
+  /** Direct browse link, e.g. https://go-bbg.atlassian.net/browse/PL-123 */
+  url: string;
+  summary: string;
+  /** The workflow status name as configured in Jira, e.g. "In Review". */
+  status: string;
+  /** Jira's three-bucket rollup — stable across custom workflows, unlike status names. */
+  statusCategory: 'new' | 'indeterminate' | 'done' | 'unknown';
+  issueType?: string;
+  assignee?: string;
+  priority?: string;
+  updated?: string;
+  dueDate?: string;
+}
+
+/** Lookup outcome for one project code. `issue === null` means "not on Jira". */
+export interface JiraLookup {
+  issue: JiraIssueRef | null;
+  /** >1 means the launch code matched several issues; `alternates` holds the rest. */
+  matchCount: number;
+  alternates: JiraIssueRef[];
+}

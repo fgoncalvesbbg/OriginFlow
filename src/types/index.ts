@@ -21,7 +21,9 @@ export type {
   CatalogSku,
   SkuAttributeValue,
   SkuAttributeFlag,
-  SkuChangeLogEntry
+  SkuChangeLogEntry,
+  JiraIssueRef,
+  JiraLookup
 } from './project.types';
 
 // Compliance types

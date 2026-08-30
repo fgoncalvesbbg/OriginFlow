@@ -88,3 +88,10 @@ export {
   deleteSkuAttributeFlag
 } from './sku-attribute-review.service';
 export type { CategorySku } from './sku-attribute-review.service';
+
+export {
+  lookupJiraIssues,
+  lookupJiraIssue,
+  jiraCategoryLabel
+} from './jira.service';
+export type { JiraLookupResponse } from './jira.service';

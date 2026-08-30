@@ -1,16 +1,16 @@
-# Graph Report - OriginFlow  (2026-08-28)
+# Graph Report - OriginFlow  (2026-08-30)
 
 ## Corpus Check
-- 595 files · ~743,814 words
+- 616 files · ~869,172 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4804 nodes · 12553 edges · 312 communities (235 shown, 77 thin omitted)
-- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 145 edges (avg confidence: 0.83)
+- 4842 nodes · 12621 edges · 326 communities (248 shown, 78 thin omitted)
+- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 149 edges (avg confidence: 0.83)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f4212a4f`
+- Built from commit: `7ec7110e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -34,16 +34,16 @@
 - modern-screenshot.umd.js
 - IMDashboard.tsx
 - initPageChat
-- impeccable-paths.mjs
+- StatusBadge.tsx
 - live-svelte-component.mjs
 - InlineBlockEditor.tsx
 - IMTemplateEditor.tsx
 - Impeccable Frontend Design Skill
 - initGlobalBar
 - rfq.service.ts
-- im-import.service.ts
+- im/index.ts
 - live-wrap.mjs
-- orEmpty
+- data/index.ts
 - src/types.ts
 - live-insert-ui.mjs
 - design-parser.mjs
@@ -54,10 +54,10 @@
 - IMRegulationLibrary.tsx
 - live-manual-edit-evidence.mjs
 - translate-im-template.mjs
-- PdfToMarkdownPage.tsx
-- im-publish.service.ts
+- pdf-to-markdown.utils.ts
+- orEmpty
 - translation.service.ts
-- live-session-store.mjs
+- impeccable-paths.mjs
 - compilerOptions
 - detect-antipatterns.mjs
 - im-tm-similarity.ts
@@ -75,14 +75,14 @@
 - sampleCssBackground
 - IMReviewPortal.tsx
 - im-tm-types.ts
-- compliance.service.ts
-- live-manual-edits-buffer.mjs
+- SupplierCompliancePortal.tsx
+- createRequestHandler
 - live-sveltekit-adapter.mjs
 - context-signals.mjs
 - analyzeVisualContrastCandidate
 - collectBrowserFindings
 - critique-storage.mjs
-- im/index.ts
+- PrintExportDialog.tsx
 - prepare_category_import.py
 - OriginFlow Full Application Documentation
 - entry
@@ -100,7 +100,7 @@
 - checkElementHeroEyebrow
 - resolveLengthPx
 - live-ui-core.mjs
-- im-tm-write.service.ts
+- TranslationMemoryAdmin.tsx
 - ports/errors.ts
 - regulatory-check.service.test.ts
 - 133_category_tree_l1_l2.sql
@@ -142,7 +142,7 @@
 - regulation-checklist.ts
 - im-tm-normalize.ts
 - IMTemplateRegulations.tsx
-- im-print-html.test.ts
+- DraftPrintExportDialog.tsx
 - render-print-merge.ts
 - build-print-fonts.mjs
 - ports/index.ts
@@ -178,10 +178,10 @@
 - react-router-dom
 - @supabase/supabase-js
 - @vitejs/plugin-react
-- project-im.service.ts
-- im-print-preflight.service.ts
+- auth.service.ts
+- sku-catalog.service.ts
 - 70_supplier_portal_phase2a_rpcs.sql
-- regulation-finding-status.ts
+- pdf-to-markdown/types.ts
 - 73_supplier_portal_phase3a_rpcs.sql
 - isGeneratedFile
 - im-tm-abbreviations.i18n.ts
@@ -257,14 +257,26 @@
 - public.im_templates
 - project_ims
 - im_sections
-- public.im_blocks
+- PdfToMarkdownPage.tsx
 - public.im_publish_snapshots
 - public.im_review_comments
 - public.regulations
 - public.supplier_pm_assignments
 - PipelineStepper.tsx
+- translation-verbatim.service.ts
+- im-print-geometry.ts
+- LeafletCoverageTab.tsx
 - im-resolver.ts
+- OptionalContentPanel.tsx
+- Button.tsx
+- tm-markers.tsx
+- EditorSideRail.tsx
+- feedback.service.ts
+- main.tsx
+- Breadcrumbs.tsx
 - types/index.ts
+- public.category_attributes
+- public.category_attributes
 
 ## God Nodes (most connected - your core abstractions)
 1. `orEmpty()` - 105 edges
@@ -275,8 +287,8 @@
 6. `ProjectDetail()` - 48 edges
 7. `IMTemplateEditor()` - 46 edges
 8. `db` - 46 edges
-9. `generateUUID()` - 41 edges
-10. `Row` - 40 edges
+9. `Row` - 40 edges
+10. `generateUUID()` - 39 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Impeccable Product Register` --semantically_similar_to--> `OriginFlow Design Principles`  [INFERRED] [semantically similar]
@@ -304,35 +316,35 @@
 - **AI Slop Avoidance System** — _agents_skills_impeccable_skill_ai_slop_test, _agents_skills_impeccable_skill_absolute_bans, _agents_skills_impeccable_reference_brand_reflex_reject [INFERRED 0.85]
 - **Status-at-a-Glance Visual System** — design_control_room, design_status_badges, design_color_plus_shape_rule, product_design_principles [INFERRED 0.85]
 
-## Communities (312 total, 77 thin omitted)
+## Communities (326 total, 78 thin omitted)
 
 ### Community 0 - "live-browser.js"
 Cohesion: 0.04
 Nodes (106): acceptedDomAlreadyClean(), addManualContextText(), applyPlaceholderSizingStyles(), bufferToBase64(), buildCollapsible(), buildColorModels(), buildDesignHeader(), buildListHtml() (+98 more)
 
 ### Community 1 - "im-print-html.ts"
-Cohesion: 0.09
-Nodes (47): getContentsLabel(), buildBackPage(), buildCoverPage(), buildCoverPartHtml(), buildLanguageBand(), buildLanguageIndex(), buildLeafletHeader(), buildPrintHtml() (+39 more)
+Cohesion: 0.08
+Nodes (51): getContentsLabel(), buildBackPage(), buildCoverPage(), buildCoverPartHtml(), buildFontCss(), buildLanguageBand(), buildLanguageIndex(), buildLeafletHeader() (+43 more)
 
 ### Community 2 - "im-viewer/types.ts"
-Cohesion: 0.06
-Nodes (64): AnnotatedImageSet(), APPLIES_TO_I18N, CALLOUT_TITLES_I18N, getAppliesToLabel(), getCalloutTitle(), NOTE: this is a standalone copy of `src/services/im/callout-titles.i18n.ts` so, fetchJson(), loadManifest() (+56 more)
+Cohesion: 0.05
+Nodes (67): AnnotatedImageSet(), APPLIES_TO_I18N, CALLOUT_TITLES_I18N, getAppliesToLabel(), getCalloutTitle(), NOTE: this is a standalone copy of `src/services/im/callout-titles.i18n.ts` so, fetchJson(), loadManifest() (+59 more)
 
 ### Community 3 - "live-commit-manual-edits.mjs"
 Cohesion: 0.10
 Nodes (49): allEntryIds(), argVal(), buildRepairBatch(), candidatesForEntry(), changedFilesSinceSnapshot(), clearAppliedEntries(), collectApplyOwnedFiles(), collectRollbackFiles() (+41 more)
 
 ### Community 4 - "attribute-csv-import.utils.ts"
-Cohesion: 0.10
-Nodes (21): baseUrl(), getJson(), getProductToolkitDefinition(), getProductToolkitDefinitions(), mapFieldType(), mapProductToolkitAttributes(), ProductToolkitUnavailableError, PtAttribute (+13 more)
+Cohesion: 0.18
+Nodes (11): FakeRow, rows, extractUnit(), GROUP_MAP, isBlankRow(), mapDataType(), mapGroupName(), normalize() (+3 more)
 
 ### Community 5 - "SupplierDashboard.tsx"
-Cohesion: 0.22
-Nodes (17): SubmitProposalModal(), SupplierDashboard(), addDocumentComment(), getRFQsForSupplier(), assignSupplierToPMs(), createSupplier(), ensureSupplierToken(), generateAccessCode() (+9 more)
+Cohesion: 0.10
+Nodes (36): orUndefined(), SupplierDashboard(), checkComplianceDeadlines(), createComplianceRequest(), getComplianceRequestById(), getComplianceRequests(), getComplianceRequestsBySupplierToken(), addDocumentComment() (+28 more)
 
 ### Community 6 - "ProjectDetail.tsx"
-Cohesion: 0.05
-Nodes (93): formatLabel(), Props, StatusBadge(), toneForStatus(), SKU_ATTRIBUTE_ID, storage, ProjectDetail(), SupplierPortal() (+85 more)
+Cohesion: 0.07
+Nodes (74): Props, SKU_ATTRIBUTE_ID, ProjectDetail(), SupplierPortal(), getProjectPrintedLanguages(), getPublishHistory(), createAttributeRequest(), deleteAttributeRequest() (+66 more)
 
 ### Community 7 - "gen-category-tree-seed.mjs"
 Cohesion: 0.15
@@ -343,8 +355,8 @@ Cohesion: 0.06
 Nodes (68): applyOriginalAttrsToSvelteAnchor(), applyParamDefaults(), applyParamValue(), applySavedSessionMeta(), buildSveltePropValuesFromLiveElement(), checkpointPayload(), clampVariantIndex(), clearHandled() (+60 more)
 
 ### Community 9 - "live-server.mjs"
-Cohesion: 0.05
-Nodes (92): countByPage(), acknowledgePendingEvent(), activeSessionSummaries(), addOpToManualApplyChunk(), agentPollingConnected(), annotRoot, APPLY_EVENT_HARD_TIMEOUT_MS, APPLY_EVENT_SOFT_DEADLINE_MS (+84 more)
+Cohesion: 0.06
+Nodes (74): acknowledgePendingEvent(), activeSessionSummaries(), addOpToManualApplyChunk(), agentPollingConnected(), annotRoot, APPLY_EVENT_HARD_TIMEOUT_MS, APPLY_EVENT_SOFT_DEADLINE_MS, args (+66 more)
 
 ### Community 10 - "projects table"
 Cohesion: 0.05
@@ -367,8 +379,8 @@ Cohesion: 0.10
 Nodes (59): abortSvelteComponentInjection(), buildConfigureRow(), cancelEditing(), cancelEditingToPicking(), cancelInsertConfigure(), cleanup(), cleanupAcceptedSession(), clearAnnotations() (+51 more)
 
 ### Community 15 - "utils/index.ts"
-Cohesion: 0.09
-Nodes (45): SkuCatalog(), skuThumbnailUrl(), mapProjectSku(), bulkUpsertCatalogSkus(), BulkUpsertSkuResult, createCatalogSku(), getCatalogSkus(), mapCatalog() (+37 more)
+Cohesion: 0.08
+Nodes (38): AttributeInputProps, ACCENT, AttributePicker(), AttributePickerLeadingOption, AttributePickerProps, BindableFieldProps, AttributeViewer(), cellKey() (+30 more)
 
 ### Community 16 - "modern-screenshot.umd.js"
 Cohesion: 0.09
@@ -376,15 +388,15 @@ Nodes (55): ae(), be(), bt(), Ce(), s(), Ct(), de(), dt() (+47 more)
 
 ### Community 17 - "IMDashboard.tsx"
 Cohesion: 0.11
-Nodes (27): daysSince(), groupByStatus(), isInReview(), MANUAL_STATUS_META, MANUAL_STATUS_ORDER, ManualStatus, ManualStatusInput, ManualStatusMeta (+19 more)
+Nodes (28): daysSince(), groupByStatus(), isInReview(), MANUAL_STATUS_META, MANUAL_STATUS_ORDER, ManualStatus, ManualStatusInput, ManualStatusMeta (+20 more)
 
 ### Community 18 - "initPageChat"
 Cohesion: 0.13
 Nodes (34): activeElementDeep(), attachSteerFocusDebug(), attachSteerFocusGuard(), buildSteerProcessingDots(), clearSteerAwaitTimer(), clearSteerFocusRecoverTimer(), collapsePageChat(), expandPageChat() (+26 more)
 
-### Community 19 - "impeccable-paths.mjs"
-Cohesion: 0.14
-Nodes (24): CRITIQUE_DIR, firstExisting(), getDesignSidecarCandidates(), getDesignSidecarPath(), getImpeccableDir(), getLegacyLiveConfigPath(), getLegacyLiveServerPath(), getLiveAnnotationsDir() (+16 more)
+### Community 19 - "StatusBadge.tsx"
+Cohesion: 0.11
+Nodes (22): formatLabel(), Props, StatusBadge(), toneForStatus(), DocStatus, APPROVED, NOT_STARTED, REJECTED (+14 more)
 
 ### Community 20 - "live-svelte-component.mjs"
 Cohesion: 0.09
@@ -392,11 +404,11 @@ Nodes (47): applyLegacyDeferredAcceptsOnStartup(), appendCssToSvelteStyle(), app
 
 ### Community 21 - "InlineBlockEditor.tsx"
 Cohesion: 0.05
-Nodes (65): IMG_VALIGNS, ImgAlign, imgStyleFor(), ImgVAlign, readImgAlign(), readImgBorder(), readImgValign(), BlockInsertType (+57 more)
+Nodes (68): IMG_VALIGNS, ImgAlign, imgStyleFor(), ImgVAlign, readImgAlign(), readImgBorder(), readImgValign(), BlockInsertType (+60 more)
 
 ### Community 22 - "IMTemplateEditor.tsx"
-Cohesion: 0.08
-Nodes (29): ConfirmationModal(), ConfirmationModalProps, DEFAULT_CONFIRM_LABEL, SaveProgressOverlay(), SaveProgressOverlayProps, ACCENT, AttributePicker(), AttributePickerLeadingOption (+21 more)
+Cohesion: 0.10
+Nodes (24): ConfirmationModal(), SaveProgressOverlay(), SaveProgressOverlayProps, EditorToolbarMenuProps, TONE_CLASSES, ToolbarItemTone, ToolbarMenuGroup, ToolbarMenuItem (+16 more)
 
 ### Community 23 - "Impeccable Frontend Design Skill"
 Cohesion: 0.07
@@ -407,24 +419,24 @@ Cohesion: 0.11
 Nodes (36): barPaletteForTheme(), brandMarkSvg(), buildParamsPanel(), defangOutsideHandlers(), designPanelCss(), detectPageTheme(), ensureAgentPollTooltip(), ensureInsertLine() (+28 more)
 
 ### Community 25 - "rfq.service.ts"
-Cohesion: 0.10
-Nodes (39): Props, RFQAttributeComparison(), orUndefined(), RFQDetail(), SupplierRFQPortal(), submitRFQEntry(), awardRFQ(), createRFQ() (+31 more)
+Cohesion: 0.11
+Nodes (33): Props, RFQAttributeComparison(), RFQDetail(), SupplierRFQPortal(), submitRFQEntry(), awardRFQ(), createRFQ(), deleteRFQ() (+25 more)
 
-### Community 26 - "im-import.service.ts"
-Cohesion: 0.05
-Nodes (62): guessCategory(), ImImportDialog(), Props, ImportPromptGuide(), Props, ProjectImImportDialog(), Props, ProjectSupplierDiffImportDialog() (+54 more)
+### Community 26 - "im/index.ts"
+Cohesion: 0.04
+Nodes (114): guessCategory(), ImImportDialog(), Props, ImportPromptGuide(), Props, ProjectImImportDialog(), Props, ProjectSupplierDiffImportDialog() (+106 more)
 
 ### Community 27 - "live-wrap.mjs"
 Cohesion: 0.13
 Nodes (35): argVal(), buildInsertWrapperLines(), computeInsertLine(), INSERT_POSITIONS, insertCli(), isInsertPosition(), resolveElementMatch(), buildSvelteComponentCssAuthoring() (+27 more)
 
-### Community 28 - "orEmpty"
+### Community 28 - "data/index.ts"
 Cohesion: 0.08
-Nodes (45): FeedbackAdminSection(), APP_CONFIG, isLive, AuthContextType, auth, db, portalDb, Row (+37 more)
+Nodes (36): APP_CONFIG, isLive, db, portalDb, storage, Row, orValue(), supabaseClient (+28 more)
 
 ### Community 29 - "src/types.ts"
 Cohesion: 0.12
-Nodes (29): AttributeInput(), AttributeInputProps, CategorySelect(), CategorySelectProps, isNumeric(), Props, SkuAttributeCellDrawer(), SubmitProposalModalProps (+21 more)
+Nodes (21): AttributeInput(), CategorySelect(), CategorySelectProps, isNumeric(), SkuAttributeCellDrawer(), SubmitProposalModal(), SubmitProposalModalProps, ComplianceLibrary() (+13 more)
 
 ### Community 30 - "live-insert-ui.mjs"
 Cohesion: 0.08
@@ -452,7 +464,7 @@ Nodes (35): detectUrl(), runVisualContrastFallback(), CSS_IN_JS_EXTENSIONS, dete
 
 ### Community 36 - "IMRegulationLibrary.tsx"
 Cohesion: 0.16
-Nodes (23): Draft, EditorProps, emptyDraft(), kb(), RegulationEditor(), RegulationLibraryContent(), parseRegulationChecklist(), parseBulletLines() (+15 more)
+Nodes (25): Draft, EditorProps, emptyDraft(), kb(), RegulationEditor(), RegulationLibraryContent(), parseRegulationChecklist(), parseBulletLines() (+17 more)
 
 ### Community 37 - "live-manual-edit-evidence.mjs"
 Cohesion: 0.15
@@ -462,21 +474,21 @@ Nodes (26): analyzeSourceHint(), buildCandidatesForOp(), buildContextHintsByRef(
 Cohesion: 0.11
 Nodes (23): argv, cache, die(), DRY_RUN, fill(), fillTitle(), freeze(), FROM (+15 more)
 
-### Community 39 - "PdfToMarkdownPage.tsx"
-Cohesion: 0.06
-Nodes (52): BadgeProps, BadgeTone, TONE_CLASSES, Card(), CardProps, assembleMarkdown(), buildFrontMatter(), buildPageMarker() (+44 more)
+### Community 39 - "pdf-to-markdown.utils.ts"
+Cohesion: 0.23
+Nodes (16): assembleMarkdown(), buildFrontMatter(), buildPageMarker(), detectColumns(), estimateTokens(), groupIntoLines(), isImageOnlyPage(), joinLineItems() (+8 more)
 
-### Community 40 - "im-publish.service.ts"
-Cohesion: 0.11
-Nodes (43): getIMBlocks(), contentKey(), diffResolvedSections(), getPublishDiff(), stableStringify(), findVerbatimViolations(), getAttributesById(), getProjectRequiredLanguages() (+35 more)
+### Community 40 - "orEmpty"
+Cohesion: 0.08
+Nodes (48): orEmpty(), KIND_STYLE, PublishDiffModal(), PublishDiffModalProps, getIMBlocks(), checkPrintImageWeights(), collectManualImages(), headBytes() (+40 more)
 
 ### Community 41 - "translation.service.ts"
 Cohesion: 0.10
-Nodes (33): countTranslatablePieces(), cutPoint(), findCloseTag(), MAX_CHUNK_CHARS, parseSiblings(), pushChunk(), safeHardCut(), SiblingNode (+25 more)
+Nodes (32): countTranslatablePieces(), cutPoint(), findCloseTag(), MAX_CHUNK_CHARS, parseSiblings(), pushChunk(), safeHardCut(), SiblingNode (+24 more)
 
-### Community 42 - "live-session-store.mjs"
-Cohesion: 0.14
-Nodes (23): getLegacyLiveSessionsDir(), collectManualApplyFiles(), manualApplyReplyCommand(), manualApplyResumeHint(), parseArgs(), resumeCli(), summarizeManualApplyEvent(), applyEvent() (+15 more)
+### Community 42 - "impeccable-paths.mjs"
+Cohesion: 0.07
+Nodes (47): CRITIQUE_DIR, firstExisting(), getDesignSidecarCandidates(), getDesignSidecarPath(), getImpeccableDir(), getLegacyLiveConfigPath(), getLegacyLiveServerPath(), getLegacyLiveSessionsDir() (+39 more)
 
 ### Community 43 - "compilerOptions"
 Cohesion: 0.08
@@ -488,7 +500,7 @@ Nodes (31): confirm(), detectCli(), formatFindings(), handleStdin(), printUsage(
 
 ### Community 45 - "im-tm-similarity.ts"
 Cohesion: 0.11
-Nodes (31): canonicalNumber(), canPrecedeUnit(), classify(), demoteBareUnits(), FREE, gapCost(), isAutoApplicable(), isCriticalClass() (+23 more)
+Nodes (29): canonicalNumber(), canPrecedeUnit(), classify(), demoteBareUnits(), FREE, gapCost(), isCriticalClass(), isFormatMarker() (+21 more)
 
 ### Community 46 - "showToast"
 Cohesion: 0.11
@@ -511,8 +523,8 @@ Cohesion: 0.09
 Nodes (23): autoprefixer, @fontsource/inter, devDependencies, autoprefixer, @fontsource/inter, knip, postcss, tailwindcss (+15 more)
 
 ### Community 51 - "services/index.ts"
-Cohesion: 0.11
-Nodes (39): ATTRIBUTE_GROUPS, COMPLIANCE_SECTIONS, PREDEFINED_ATTRIBUTE_GROUPS, SKU_ATTRIBUTE_NAME, AdminDashboard(), ComplianceLibrary(), describeRequirementCondition(), generateUUID() (+31 more)
+Cohesion: 0.08
+Nodes (60): ATTRIBUTE_GROUPS, attributeGroupRank(), compareAttributes(), COMPLIANCE_SECTIONS, groupsInOrder(), PREDEFINED_ATTRIBUTE_GROUPS, SKU_ATTRIBUTE_NAME, AdminDashboard() (+52 more)
 
 ### Community 52 - "parseRgb"
 Cohesion: 0.20
@@ -523,8 +535,8 @@ Cohesion: 0.08
 Nodes (35): applyPlaceholderDimensions(), averageRgb01(), beginEditPin(), buildAnnotationsForCapture(), buildPinElement(), cancelEditingPin(), captureAndEmit(), captureChromeNodes() (+27 more)
 
 ### Community 54 - "im-tm-lookup.service.ts"
-Cohesion: 0.08
-Nodes (37): contentKeyForLocale(), DEFAULT_SOURCE_LOCALE, isAutoApplicableLocale(), localeDistance(), localeFallbackChain(), localesForMarket(), normalizeLocale(), orValue() (+29 more)
+Cohesion: 0.12
+Nodes (27): contentKeyForLocale(), DEFAULT_SOURCE_LOCALE, isAutoApplicableLocale(), localeDistance(), localeFallbackChain(), localesForMarket(), bestOf(), evaluateCandidate() (+19 more)
 
 ### Community 55 - "dependencies"
 Cohesion: 0.10
@@ -543,16 +555,16 @@ Cohesion: 0.06
 Nodes (58): IMReviewPortal(), readStoredName(), STATUS_LABEL, STATUS_TONE, storeName(), formatReviewStamp(), REVIEW_STATUS_LABEL, REVIEW_STATUS_ORDER (+50 more)
 
 ### Community 59 - "im-tm-types.ts"
-Cohesion: 0.11
-Nodes (38): AlignedSegment, AlignmentRejection, AlignmentResult, AlignOptions, alignTargetToSource(), countOccurrences(), placeholderizeTarget(), REJECT() (+30 more)
+Cohesion: 0.10
+Nodes (37): AlignedSegment, AlignmentRejection, AlignmentResult, AlignOptions, countOccurrences(), placeholderizeTarget(), REJECT(), sameSequence() (+29 more)
 
-### Community 60 - "compliance.service.ts"
+### Community 60 - "SupplierCompliancePortal.tsx"
+Cohesion: 0.15
+Nodes (16): evidenceSpec(), SupplierCompliancePortal(), SupplierCompliancePortalList(), getComplianceRequirements(), getComplianceRequestsBySupplierCode(), submitComplianceResponseSecure(), verifySupplierAccess(), ComplianceRequest (+8 more)
+
+### Community 61 - "createRequestHandler"
 Cohesion: 0.12
-Nodes (23): AppContent(), evidenceSpec(), SupplierCompliancePortal(), SupplierCompliancePortalList(), checkComplianceDeadlines(), createComplianceRequest(), getComplianceRequestById(), getComplianceRequests() (+15 more)
-
-### Community 61 - "live-manual-edits-buffer.mjs"
-Cohesion: 0.23
-Nodes (13): args, buffer, cwd, pageUrlFilter, remaining, getBufferPath(), readBuffer(), readBufferInternal() (+5 more)
+Nodes (31): args, buffer, cwd, pageUrlFilter, remaining, countByPage(), getBufferPath(), readBuffer() (+23 more)
 
 ### Community 62 - "live-sveltekit-adapter.mjs"
 Cohesion: 0.18
@@ -574,9 +586,9 @@ Nodes (16): browserFindingsFromMap(), checkClippedOverflow(), checkCreamPalette(
 Cohesion: 0.32
 Nodes (11): kebab(), listSnapshotsForSlug(), main(), nowFilenameStamp(), parseFrontmatter(), readLatestSnapshot(), readTrend(), serializeFrontmatter() (+3 more)
 
-### Community 67 - "im/index.ts"
-Cohesion: 0.07
-Nodes (56): DraftPrintExportDialog(), CategoryGroup, csvCell(), exportCsv(), fmtDate(), groupRows(), LeafletCoverageTab(), LeafletGroup (+48 more)
+### Community 67 - "PrintExportDialog.tsx"
+Cohesion: 0.19
+Nodes (17): PrintExportDialog(), PrintExportDialogProps, deriveStatus(), getLeafletCoverage(), getLeafletIssues(), getLeafletPolicies(), issueCategoryLeaflet(), IssueForSkusResult (+9 more)
 
 ### Community 68 - "prepare_category_import.py"
 Cohesion: 0.29
@@ -616,7 +628,7 @@ Nodes (10): detectCsp(), INLINE_HEADER_SIGNALS, LAYOUT_EXTS, MONOREPO_HELPER_SIG
 
 ### Community 78 - "im-tm-segment.ts"
 Cohesion: 0.08
-Nodes (37): Atom, AtomKind, attr(), buildProbe(), buildSegmentText(), CLOSERS, CONTAINER_TAGS, frozenIdentity() (+29 more)
+Nodes (36): Atom, AtomKind, attr(), buildProbe(), buildSegmentText(), CLOSERS, CONTAINER_TAGS, frozenIdentity() (+28 more)
 
 ### Community 79 - "palette.mjs"
 Cohesion: 0.24
@@ -642,17 +654,17 @@ Nodes (14): checkElementOversizedH1(), checkElementOversizedH1DOM(), checkElemen
 Cohesion: 0.29
 Nodes (8): appendStyleToLiveUiRoot(), appendToLiveUiRoot(), escapeCssIdent(), getLiveUiElementById(), LIVE_CHROME_MOUNT_CONTRACT, LIVE_UI_COMPONENT_IDS, LIVE_UI_SURFACES, resolveLiveUiRoot()
 
-### Community 85 - "im-tm-write.service.ts"
-Cohesion: 0.05
-Nodes (55): allMarkersRe(), CHIP_CLASSES, kindOf(), labelOf(), MarkerKind, markersIn(), MarkerText(), num() (+47 more)
+### Community 85 - "TranslationMemoryAdmin.tsx"
+Cohesion: 0.13
+Nodes (21): num(), RANGES, TIER_LABELS, TIER_ORDER, TmLeveragePanel(), Props, localeLabel(), STATUS_TONE (+13 more)
 
 ### Community 86 - "ports/errors.ts"
 Cohesion: 0.23
 Nodes (8): DataAccessError, DataErrorKind, run(), classify(), toDataError(), createSupabaseStorage(), createUnconfiguredDatabase(), fail()
 
 ### Community 87 - "regulatory-check.service.test.ts"
-Cohesion: 0.18
-Nodes (7): __resetRegCheckEndpointLatch(), { calls, sessionToken }, section(), template, twoChunkSections(), { verbatimCalls, existingVerbatims }, RegulatoryVerbatim
+Cohesion: 0.17
+Nodes (8): registerVerbatimFinding(), __resetRegCheckEndpointLatch(), { calls, sessionToken }, section(), template, twoChunkSections(), { verbatimCalls, existingVerbatims }, RegulatoryVerbatim
 
 ### Community 88 - "133_category_tree_l1_l2.sql"
 Cohesion: 0.50
@@ -663,16 +675,16 @@ Cohesion: 0.22
 Nodes (3): ErrorBoundary, ErrorBoundaryProps, ErrorBoundaryState
 
 ### Community 90 - "ProjectIMGenerator.tsx"
-Cohesion: 0.06
-Nodes (55): skuSyntheticAttribute(), orderIMLanguages(), beginRowTmRun(), CollapsedPaneRail(), read(), ResizablePane, Stored, useResizablePane() (+47 more)
+Cohesion: 0.07
+Nodes (54): skuSyntheticAttribute(), orderIMLanguages(), imContentPrintScale(), imContentVars(), beginRowTmRun(), CollapsedPaneRail(), read(), ResizablePane (+46 more)
 
 ### Community 91 - "Impeccable Polish Reference"
 Cohesion: 0.29
 Nodes (8): Impeccable Layout Reference, Impeccable Live Variant Mode, Impeccable Onboard Reference, Impeccable Optimize Reference, Impeccable Overdrive Reference, Impeccable Polish Reference, Impeccable Quieter Reference, Impeccable Typeset Reference
 
 ### Community 92 - "print-render-shared.ts"
-Cohesion: 0.11
-Nodes (36): AuthError, BUCKET, buildParts(), draftManualPath(), draftPdfPath(), fetchDraftManuals(), fetchJson(), fetchManifestAndManuals() (+28 more)
+Cohesion: 0.12
+Nodes (35): AuthError, BUCKET, buildParts(), draftManualPath(), draftPdfPath(), fetchDraftManuals(), fetchJson(), fetchManifestAndManuals() (+27 more)
 
 ### Community 93 - "live.mjs"
 Cohesion: 0.38
@@ -683,8 +695,8 @@ Cohesion: 0.13
 Nodes (13): InlineBlockEditor(), TmRowContext, BlockLocation, downloadJson(), FindingRowProps, FixPanelProps, locateBlock(), Props (+5 more)
 
 ### Community 95 - "print-export-report.ts"
-Cohesion: 0.18
-Nodes (15): findComparableRender(), LanguagePages, median(), PAGE_SPREAD_TOLERANCE_RATIO, PageBudget, PreflightSummary, sameLanguageSet(), spreadTolerance() (+7 more)
+Cohesion: 0.19
+Nodes (14): findComparableRender(), LanguagePages, median(), PAGE_SPREAD_TOLERANCE_RATIO, PageBudget, PreflightSummary, sameLanguageSet(), spreadTolerance() (+6 more)
 
 ### Community 96 - "supplier-file-url.ts"
 Cohesion: 0.47
@@ -719,20 +731,20 @@ Cohesion: 0.50
 Nodes (3): candidates, detectorPath, __dirname
 
 ### Community 104 - "im-layout.utils.ts"
-Cohesion: 0.33
-Nodes (6): BindableField(), BindableFieldProps, DEFAULT_MASTER_PAGES, getBackgroundStyle(), joinAttrValues(), IMMasterPageOverride
+Cohesion: 0.39
+Nodes (5): BindableField(), DEFAULT_MASTER_PAGES, getBackgroundStyle(), joinAttrValues(), IMMasterPageOverride
 
 ### Community 111 - "im-tm-placeholders.ts"
-Cohesion: 0.12
-Nodes (26): buildMatchers(), canonicalize(), canonicalNumber(), collectMatches(), DECIMAL_SEPARATOR, DEGREE, escapeRe(), ExtractPlaceholderOptions (+18 more)
+Cohesion: 0.11
+Nodes (27): TmLookupRequest, buildMatchers(), canonicalize(), canonicalNumber(), collectMatches(), DECIMAL_SEPARATOR, DEGREE, escapeRe() (+19 more)
 
 ### Community 112 - "uiGetById"
 Cohesion: 0.14
 Nodes (26): buildInsertConfigureRow(), buildInsertPlaceholderSnapshotFromDom(), canCreateInsert(), configureVoiceContext(), cssId(), finishVoiceSession(), handleInsertCreate(), hideInsertCreateTooltip() (+18 more)
 
 ### Community 113 - "regulatory/index.ts"
-Cohesion: 0.11
-Nodes (33): buildRegCheckDocument(), callCheck(), GATEWAY_STATUSES, getRegulatoryCheckHistory(), isRawFinding(), isRawVerbatim(), mapRun(), opt() (+25 more)
+Cohesion: 0.10
+Nodes (35): FindingStatus, FindingStatusEntry, buildRegCheckDocument(), callCheck(), GATEWAY_STATUSES, getRegulatoryCheckHistory(), isRawFinding(), isRawVerbatim() (+27 more)
 
 ### Community 114 - "OriginFlow audit — Supplier portal — 2026-08-20"
 Cohesion: 0.08
@@ -743,24 +755,24 @@ Cohesion: 0.09
 Nodes (22): 1. Verdict in three lines, 2. Ladder A — defects visible in code, 3. Ladder B — workflow gaps traced through code, 4. Ladder C — heuristic violations, cost unobserved, 5. Ladder D — speculative (max 3), 6. Ranked shortlist, 7. Coverage, A1. Preview shows a chapter as "In the manual"; publish silently drops it (+14 more)
 
 ### Community 116 - "App.tsx"
-Cohesion: 0.08
-Nodes (51): App(), root, rootElement, AdminRoute(), Props, Breadcrumbs(), navigablePaths, routeLabels (+43 more)
+Cohesion: 0.09
+Nodes (45): AppContent(), AdminRoute(), Props, FeedbackWidget(), Layout(), LayoutProps, Logo(), Props (+37 more)
 
 ### Community 117 - "PublishReviewPanel.tsx"
 Cohesion: 0.15
 Nodes (14): FILL_ANCHOR_ATTR, fillAnchors, groupPublishIssues(), PublishIssue, PublishIssueGroup, PublishIssueKind, PublishIssueSummary, PublishIssueTarget (+6 more)
 
 ### Community 118 - "im-print-settings.service.ts"
-Cohesion: 0.18
-Nodes (22): key(), lineBudget(), PAGE_HEIGHT_MM, PrintSettingsAdminSection(), ProfileCard(), profileTitle(), PrintHtmlOptions, getPrintSettings() (+14 more)
+Cohesion: 0.13
+Nodes (27): key(), lineBudget(), PAGE_HEIGHT_MM, PrintSettingsAdminSection(), ProfileCard(), profileTitle(), a4, a5 (+19 more)
 
 ### Community 119 - "withDeadline"
-Cohesion: 0.10
-Nodes (43): isPermanent(), withDeadline(), AssetLibraryPanel(), AssetLibraryPanelProps, buildImgHtml(), imgTag(), errText(), isPermanentError() (+35 more)
+Cohesion: 0.11
+Nodes (38): isPermanent(), withDeadline(), AssetLibraryPanel(), AssetLibraryPanelProps, buildImgHtml(), imgTag(), errText(), isPermanentError() (+30 more)
 
 ### Community 120 - "IMBlockLibrary.tsx"
-Cohesion: 0.06
-Nodes (47): IM_LANGUAGE_CODES, IM_LANGUAGE_NAMES, IM_LANGUAGE_TABS, IM_PREVIEW_LANGUAGE_OPTIONS, IM_TEMPLATE_LANGUAGE_OPTIONS, IMLanguage, imContentPrintScale(), imContentVars() (+39 more)
+Cohesion: 0.08
+Nodes (30): IM_LANGUAGE_CODES, IM_LANGUAGE_NAMES, IM_LANGUAGE_TABS, IM_PREVIEW_LANGUAGE_OPTIONS, IM_TEMPLATE_LANGUAGE_OPTIONS, IMLanguage, cache, geometryFor() (+22 more)
 
 ### Community 121 - "resolveLengthPx"
 Cohesion: 0.19
@@ -779,24 +791,24 @@ Cohesion: 0.12
 Nodes (16): Banned proposals, H10 — Every async job needs a status the operator can act on, H11 — Handoff needs an explicit state, H12 — The exit door matters as much as the entry, H13 — Empty, partial and error states are the product, H14 — Reviewers sample; make sampling cheap, H1 — Throughput beats discoverability, H2 — Bulk is the unit of work, not the record (+8 more)
 
 ### Community 125 - "im-share.service.ts"
-Cohesion: 0.27
-Nodes (14): IMSharedManual(), IMViewerTab(), keyOf(), getPublishedManifestUrl(), createIMShare(), getIMReviewUrl(), getIMShares(), getIMShareUrl() (+6 more)
+Cohesion: 0.37
+Nodes (11): IMViewerTab(), keyOf(), createIMShare(), getIMReviewUrl(), getIMShares(), getIMShareUrl(), IMShare, IMShareMode (+3 more)
 
 ### Community 126 - "regulation-checklist.ts"
-Cohesion: 0.15
-Nodes (26): ChecklistProps, loadTemplateChecklistProgress(), ModalProps, TemplateChecklistModal(), TemplateChecklistProgress, TemplateComplianceChecklist(), PanelProps, PublishReviewPanelProps (+18 more)
+Cohesion: 0.16
+Nodes (24): ChecklistProps, loadTemplateChecklistProgress(), ModalProps, TemplateChecklistModal(), TemplateChecklistProgress, TemplateComplianceChecklist(), PublishReviewPanelProps, RegulatoryChecklistPanel() (+16 more)
 
 ### Community 127 - "im-tm-normalize.ts"
 Cohesion: 0.18
 Nodes (13): DASH_RE, decodeEntitiesSafely(), DOUBLE_QUOTE_RE, ELLIPSIS_RE, INVISIBLES_RE, isBrace(), normalizeForMatch(), normalizeLoose() (+5 more)
 
 ### Community 128 - "IMTemplateRegulations.tsx"
-Cohesion: 0.24
-Nodes (16): kb(), ModalProps, TemplateRegulationsPanel(), assignRegulationToTemplate(), derivedAssignmentId(), getTemplateRegulationCounts(), getTemplateRegulations(), isDerivedAssignmentId() (+8 more)
+Cohesion: 0.20
+Nodes (18): kb(), ModalProps, PanelProps, TemplateRegulationsPanel(), BuildTranslationXliffParams, assignRegulationToTemplate(), derivedAssignmentId(), getTemplateRegulationCounts() (+10 more)
 
-### Community 129 - "im-print-html.test.ts"
-Cohesion: 0.13
-Nodes (12): DEFAULT_IM_LOGO_URL, IM_LANGUAGES, a4, a5, bodyHtmlFor(), manualWith(), textNode, PrintManual (+4 more)
+### Community 129 - "DraftPrintExportDialog.tsx"
+Cohesion: 0.15
+Nodes (14): DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL, QR_ROOT_URL, QR_SKU_PLACEHOLDER_ID, QR_SKU_URL_BASE, IM_LANGUAGES, DraftPrintExportDialog(), DraftPrintExportDialogProps (+6 more)
 
 ### Community 130 - "render-print-merge.ts"
 Cohesion: 0.15
@@ -843,8 +855,8 @@ Cohesion: 0.31
 Nodes (10): checkColors(), checkElementAIPaletteDOM(), checkElementGlow(), checkGlow(), colorToHex(), contrastRatio(), getHue(), hasChroma() (+2 more)
 
 ### Community 142 - "im-tm-translate.ts"
-Cohesion: 0.09
-Nodes (27): updateAIPrompt(), createPromptLibraryEntry(), deletePromptLibraryEntry(), getPromptLibrary(), mapRow(), updatePromptLibraryEntry(), createTranslationVerbatim(), deleteTranslationVerbatim() (+19 more)
+Cohesion: 0.07
+Nodes (44): TmSegmentEditModal(), normalizeLocale(), alignTargetToSource(), buildTmSourceUnits(), NORMALIZATION_VERSION, PLACEHOLDER_VERSION, SEGMENTATION_VERSION, appliedSegmentIdsOf() (+36 more)
 
 ### Community 143 - "regulatory-check/index.ts"
 Cohesion: 0.22
@@ -864,7 +876,7 @@ Nodes (6): flatten(), main(), Turn the EE marking guide workbook into an idempot
 
 ### Community 148 - "im-translation-import.service.ts"
 Cohesion: 0.06
-Nodes (62): AddProjectSectionProps, planKey(), TmFragmentPlan, TmPlanResult, buildTranslationXliff(), BuildTranslationXliffParams, BuildTranslationXliffResult, downloadTranslationXliff() (+54 more)
+Nodes (61): AddProjectSectionProps, planKey(), TmFragmentPlan, TmPlanResult, buildTranslationXliff(), BuildTranslationXliffResult, downloadTranslationXliff(), encodeFragmentHtml() (+53 more)
 
 ### Community 149 - "OriginFlow — roles and jobs"
 Cohesion: 0.33
@@ -898,21 +910,21 @@ Nodes (16): encoder, fmix32(), HASH_FIELD_SEP, hex8(), tmHash128(), tmHashFields
 Cohesion: 0.40
 Nodes (4): Deploy, Notes, regulatory-check (Supabase Edge Function), Why this is here and not in `netlify/functions`
 
-### Community 165 - "project-im.service.ts"
-Cohesion: 0.18
-Nodes (13): backupProjectIM(), deleteProjectIM(), getGeneratedProjectIMs(), getProjectIMBackups(), mapProjectIMRow(), ProjectIMConflictError, ProjectIMSummary, saveProjectIM() (+5 more)
+### Community 165 - "auth.service.ts"
+Cohesion: 0.21
+Nodes (16): AuthContextType, auth, login(), logout(), signUp(), getProfiles(), getUserProfile(), ProfileRow (+8 more)
 
-### Community 166 - "im-print-preflight.service.ts"
-Cohesion: 0.20
-Nodes (8): checkPrintImageWeights(), collectManualImages(), headBytes(), HEAVY_IMAGE_BYTES, PrintImageInfo, PrintImageReport, getPublishedManualUrl(), ResolvedManual
+### Community 166 - "sku-catalog.service.ts"
+Cohesion: 0.21
+Nodes (18): mapProjectSku(), bulkUpsertCatalogSkus(), BulkUpsertSkuResult, createCatalogSku(), getCatalogSkus(), mapCatalog(), baseRow(), ChangeActor (+10 more)
 
 ### Community 167 - "70_supplier_portal_phase2a_rpcs.sql"
 Cohesion: 0.23
 Nodes (10): public.get_attribute_requests_by_project_token(), public.get_attribute_requests_by_supplier(), public.get_compliance_requests_by_supplier(), public.supplier_add_adhoc_document(), public.supplier_add_document_comment(), public.supplier_set_document_file(), public.compliance_requests, public.project_attribute_requests (+2 more)
 
-### Community 168 - "regulation-finding-status.ts"
-Cohesion: 0.24
-Nodes (10): findingKey(), FindingStatus, FindingStatusEntry, getFindingStatuses(), hash32(), mapRow(), normalize(), setFindingStatus() (+2 more)
+### Community 168 - "pdf-to-markdown/types.ts"
+Cohesion: 0.15
+Nodes (15): ConversionMeta, ConversionResult, ErrorResponse, FileEntry, FileStatus, IMAGE_ONLY_CHAR_THRESHOLD, PageMeta, ProcessFileRequest (+7 more)
 
 ### Community 169 - "73_supplier_portal_phase3a_rpcs.sql"
 Cohesion: 0.27
@@ -931,8 +943,8 @@ Cohesion: 0.36
 Nodes (5): public.im_review_add_comment(), public.im_review_comments, public.im_review_list_comments(), public.im_shares, public.projects
 
 ### Community 173 - "public.im_sku_leaflet_coverage"
-Cohesion: 0.25
-Nodes (7): public.im_sku_leaflet_coverage, public.categories_l3, public.im_print_renders, public.im_templates, public.im_leaflet_issues, public.im_leaflet_policies, public.project_skus
+Cohesion: 0.13
+Nodes (13): public.im_sku_leaflet_coverage, public.categories_l3, public.im_print_renders, public.im_templates, public.attribute_usage(), public.im_blocks, public.im_leaflet_issues, public.im_leaflet_policies (+5 more)
 
 ### Community 174 - "113_im_translation_memory.sql"
 Cohesion: 0.33
@@ -959,8 +971,8 @@ Cohesion: 0.33
 Nodes (4): public.submit_supplier_production_update(), public.projects, public.suppliers, public.production_updates
 
 ### Community 181 - "im-print-fonts.test.ts"
-Cohesion: 0.20
-Nodes (10): INTER_WEBFONT_SUBSETS, InterWebfontFace, InterWebfontSubset, inRanges(), interFontFaceCss(), interSubsetsForText(), nonAsciiCodepoints(), opts (+2 more)
+Cohesion: 0.22
+Nodes (9): INTER_WEBFONT_SUBSETS, InterWebfontFace, InterWebfontSubset, inRanges(), interFontFaceCss(), interSubsetsForText(), nonAsciiCodepoints(), opts (+1 more)
 
 ### Community 182 - "public.regulations"
 Cohesion: 0.70
@@ -986,37 +998,81 @@ Nodes (3): public.get_compliance_requests_by_supplier_code(), public.compliance_
 Cohesion: 0.67
 Nodes (3): compliance_requests, project_ims, projects
 
+### Community 303 - "PdfToMarkdownPage.tsx"
+Cohesion: 0.19
+Nodes (11): Badge(), BadgeProps, BadgeTone, TONE_CLASSES, Card(), CardProps, downloadBlob(), imageOnlyRatio() (+3 more)
+
 ### Community 309 - "PipelineStepper.tsx"
 Cohesion: 0.40
 Nodes (3): PipelineStep, PipelineStepState, STATE_STYLE
 
+### Community 310 - "translation-verbatim.service.ts"
+Cohesion: 0.23
+Nodes (12): loadVerbatimsCached(), updateAIPrompt(), createPromptLibraryEntry(), deletePromptLibraryEntry(), getPromptLibrary(), mapRow(), updatePromptLibraryEntry(), createTranslationVerbatim() (+4 more)
+
+### Community 311 - "im-print-geometry.ts"
+Cohesion: 0.24
+Nodes (13): A5_FURNITURE_SCALE, CRAMPED_PREVIEW_ZOOM, CSS_PX_PER_MM, HEADING_RATIOS, MAX_PREVIEW_ZOOM, MIN_PREVIEW_ZOOM, PAGE_HEIGHT_MM, PAGE_WIDTH_MM (+5 more)
+
+### Community 312 - "LeafletCoverageTab.tsx"
+Cohesion: 0.22
+Nodes (12): CategoryGroup, csvCell(), exportCsv(), fmtDate(), groupRows(), LeafletCoverageTab(), LeafletGroup, STATUS_CLASS (+4 more)
+
 ### Community 313 - "im-resolver.ts"
-Cohesion: 0.09
-Nodes (32): DEFAULT_LEAFLET_LOGO_URL, QR_ROOT_URL, QR_SKU_PLACEHOLDER_ID, QR_SKU_URL_BASE, DraftPrintExportDialogProps, DraftResolveResult, TypographySummary(), APPLIES_TO_I18N (+24 more)
+Cohesion: 0.18
+Nodes (19): calloutVariant(), containsTempHighlight(), findTempHighlightSections(), ISO_ICONS, isSectionVisible(), nextId(), resolveInlineRef(), resolveLegacyChips() (+11 more)
+
+### Community 314 - "OptionalContentPanel.tsx"
+Cohesion: 0.23
+Nodes (11): IncludeMode, IncludeModeControl(), isContraryOverride(), ItemRow(), modeOf(), MODES, OptionalContentItem, OptionalContentPanel() (+3 more)
+
+### Community 315 - "Button.tsx"
+Cohesion: 0.22
+Nodes (8): Button(), ButtonProps, ButtonSize, ButtonVariant, SIZE_CLASSES, VARIANT_CLASSES, ConfirmationModalProps, DEFAULT_CONFIRM_LABEL
+
+### Community 316 - "tm-markers.tsx"
+Cohesion: 0.36
+Nodes (7): allMarkersRe(), CHIP_CLASSES, kindOf(), labelOf(), MarkerKind, markersIn(), MarkerText()
+
+### Community 317 - "EditorSideRail.tsx"
+Cohesion: 0.25
+Nodes (6): BADGE_TONE, EditorSideRailProps, ICON_TONE, RailTone, SidePanelId, SideRailItem
+
+### Community 318 - "feedback.service.ts"
+Cohesion: 0.57
+Nodes (4): FeedbackAdminSection(), getFeedbackReports(), mapRow(), setFeedbackReportStatus()
+
+### Community 319 - "main.tsx"
+Cohesion: 0.50
+Nodes (3): App(), root, rootElement
+
+### Community 320 - "Breadcrumbs.tsx"
+Cohesion: 0.50
+Nodes (3): Breadcrumbs(), navigablePaths, routeLabels
 
 ### Community 321 - "types/index.ts"
 Cohesion: 0.07
-Nodes (52): ProjectIMBackup, AIPrompt, PromptLibraryEntry, AttributeDataType, AttributeValidationRules, CategoryL1, CategoryL2, CategoryTree (+44 more)
+Nodes (50): AIPrompt, PromptLibraryEntry, DashboardStats, DeadlineItem, AttributeDataType, AttributeValidationRules, CategoryL1, CategoryL2 (+42 more)
 
 ## Knowledge Gaps
-- **742 isolated node(s):** `FakeRow`, `rows`, `CalloutVariant`, `LangValue`, `PrintAnnotatedImage` (+737 more)
+- **744 isolated node(s):** `SKU_ATTRIBUTE_NAME`, `RiskLevel`, `FieldChange`, `PENDING_SUPPLIER`, `SUBMITTED` (+739 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **77 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **78 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `orEmpty()` connect `orEmpty` to `IMTemplateRegulations.tsx`, `SupplierDashboard.tsx`, `ProjectDetail.tsx`, `im-tm-translate.ts`, `utils/index.ts`, `IMDashboard.tsx`, `rfq.service.ts`, `im-import.service.ts`, `src/types.ts`, `IMRegulationLibrary.tsx`, `project-im.service.ts`, `im-publish.service.ts`, `regulation-finding-status.ts`, `im-tm-lookup.service.ts`, `compliance.service.ts`, `im/index.ts`, `im-tm-write.service.ts`, `regulatory/index.ts`, `App.tsx`, `im-print-settings.service.ts`, `withDeadline`, `im-share.service.ts`, `regulation-checklist.ts`?**
-  _High betweenness centrality (0.006) - this node is a cross-community bridge._
-- **Why does `DocStatus` connect `ProjectDetail.tsx` to `types/index.ts`, `App.tsx`?**
-  _High betweenness centrality (0.006) - this node is a cross-community bridge._
-- **Why does `ComplianceRequestStatus` connect `compliance.service.ts` to `types/index.ts`, `App.tsx`, `SupplierDashboard.tsx`?**
+- **Why does `orEmpty()` connect `orEmpty` to `IMTemplateRegulations.tsx`, `SupplierDashboard.tsx`, `ProjectDetail.tsx`, `IMDashboard.tsx`, `rfq.service.ts`, `im/index.ts`, `data/index.ts`, `IMRegulationLibrary.tsx`, `auth.service.ts`, `sku-catalog.service.ts`, `translation-verbatim.service.ts`, `im-tm-lookup.service.ts`, `feedback.service.ts`, `PrintExportDialog.tsx`, `TranslationMemoryAdmin.tsx`, `regulatory/index.ts`, `App.tsx`, `im-print-settings.service.ts`, `withDeadline`, `im-share.service.ts`, `regulation-checklist.ts`?**
+  _High betweenness centrality (0.007) - this node is a cross-community bridge._
+- **Why does `IMViewer()` connect `im-viewer/types.ts` to `im-share.service.ts`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
-- **What connects `FakeRow`, `rows`, `CalloutVariant` to the rest of the system?**
-  _742 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `StepStatus` connect `StatusBadge.tsx` to `types/index.ts`, `ProjectDetail.tsx`?**
+  _High betweenness centrality (0.005) - this node is a cross-community bridge._
+- **What connects `SKU_ATTRIBUTE_NAME`, `RiskLevel`, `FieldChange` to the rest of the system?**
+  _744 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `live-browser.js` be split into smaller, more focused modules?**
   _Cohesion score 0.03824852890273451 - nodes in this community are weakly interconnected._
 - **Should `im-print-html.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.0851063829787234 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07547169811320754 - nodes in this community are weakly interconnected._
 - **Should `im-viewer/types.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.05617283950617284 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05322128851540616 - nodes in this community are weakly interconnected._

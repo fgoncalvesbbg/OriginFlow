@@ -11,7 +11,7 @@
   framework = "#custom"
 
 # Server-side functions (PDF render, supplier file signed-URL issuer, IM
-# translation proxy, Markup.io review upload).
+# translation proxy, Markup.io review upload, Jira project lookup).
 # NOTE: the AI regulatory check is deliberately NOT here — it lives in
 # supabase/functions/regulatory-check because one claude-opus-5 call over a regulation
 # summary cannot finish inside the synchronous limit these functions run under (10s by
@@ -22,7 +22,14 @@
 #   ANTHROPIC_API_KEY                          — translate.ts (IM AI translation)
 #   MARKUPIO_API_KEY                           — send-to-markup.ts (workspace API key)
 #   MARKUPIO_FOLDER_ID                         — send-to-markup.ts (optional target folder)
+#   JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN — jira-status.ts (live project lookup)
+#   JIRA_PROJECT_KEY                           — jira-status.ts (optional; scopes the search)
 # The matching public UI flag is VITE_MARKUP_REVIEW_ENABLED=true.
+#
+# The Jira connector needs NO public flag: jira-status.ts answers { configured: false }
+# when its three secrets are unset, and the UI hides the Jira column on that. Nothing it
+# reads is stored — every page load and every Refresh re-reads Jira, so the status shown
+# is always live. Set the same four vars in the repo-root .env for `netlify dev`.
 #
 # ProductToolkit (category attribute definitions) is deliberately NOT proxied through a
 # function: it is published only as https://producttoolkit.chal-tec.local on the internal
