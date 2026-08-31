@@ -2172,6 +2172,20 @@ const ProjectIMGenerator: React.FC = () => {
       };
   };
 
+  // What the per-row "Translate from EN" buttons report to the translation memory.
+  // Memoized because it is passed as a prop into every inline row: a fresh literal per
+  // render would churn the rows' translate handlers on each keystroke.
+  const rowTmContext = useMemo<TmRowContext>(() => ({
+    scope: 'project',
+    projectId: projectId ?? null,
+    templateId: selectedTemplateId ?? null,
+    templateType,
+    domainCategoryId: project?.categoryId ?? null,
+  }), [projectId, selectedTemplateId, templateType, project?.categoryId]);
+
+  // NOTE: hooks must stay above the early returns below (loading / load error /
+  // no-template-picked); declaring one after them changes the hook count between
+  // renders and throws React #310.
   if (loading) return <Layout><div>Loading...</div></Layout>;
 
   // Load failure gets its own screen — NOT the template picker. Showing the picker here
@@ -3173,17 +3187,6 @@ const ProjectIMGenerator: React.FC = () => {
   const projectAttributes = project?.categoryId
     ? getAttributesForCategory(allAttributes, project.categoryId)
     : allAttributes;
-
-  // What the per-row "Translate from EN" buttons report to the translation memory.
-  // Memoized because it is passed as a prop into every inline row: a fresh literal per
-  // render would churn the rows' translate handlers on each keystroke.
-  const rowTmContext = useMemo<TmRowContext>(() => ({
-    scope: 'project',
-    projectId: projectId ?? null,
-    templateId: selectedTemplateId ?? null,
-    templateType,
-    domainCategoryId: project?.categoryId ?? null,
-  }), [projectId, selectedTemplateId, templateType, project?.categoryId]);
 
   // --- Per-project required languages ------------------------------------------
   // A project produces a subset of the template's languages (English always
