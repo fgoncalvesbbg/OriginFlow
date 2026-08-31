@@ -1,39 +1,54 @@
 /**
- * Jira link-through chip: issue key + live Jira status, linking straight to the ticket.
+ * Jira link-through chip: the launch Epic's key + its live status, linking to the ticket.
  *
- * Sibling of StatusBadge.tsx — same Badge primitive, but the tone comes from Jira's
- * statusCategory rather than an OriginFlow enum. We key off `statusCategory` (Jira's
- * own new/indeterminate/done rollup) instead of the status NAME because workflow
- * status names are configurable per project and would not map reliably.
+ * Sibling of StatusBadge.tsx — same Badge primitive, same four-family tone vocabulary
+ * from DESIGN.md, but the status text comes straight from Jira's Epic workflow.
  *
- * Renders nothing but a muted "Not on Jira" when the code has no matching issue —
- * that is a real answer for the operator, not an error state.
+ * Renders a muted "Not on Jira" when no Epic carries the project code. That is a real
+ * answer for the operator, not an error state.
  */
 
 import React from 'react';
 import { ExternalLink, AlertTriangle } from 'lucide-react';
 import { Badge, BadgeTone } from './common/Badge';
-import type { JiraLookup } from '../types';
+import type { JiraIssueRef, JiraLookup } from '../types';
 
 interface Props {
   lookup: JiraLookup | null | undefined;
   /** While the live lookup is in flight. */
   loading?: boolean;
-  /** Show the issue summary alongside the status (detail page); off in dense tables. */
+  /** Show the Epic summary alongside the status (detail page); off in dense tables. */
   showSummary?: boolean;
 }
 
-const toneForCategory = (category: string): BadgeTone => {
-  switch (category) {
-    case 'done':
-      return 'emerald';
-    case 'indeterminate':
-      return 'indigo';
-    case 'new':
-      return 'gray';
-    default:
-      return 'gray';
-  }
+/**
+ * Statuses that mean "stopped", whatever Jira's category says.
+ *
+ * Cancelled is the reason this maps by NAME rather than by statusCategory: Jira files
+ * it under the 'done' category alongside Done, so a category-based mapping would paint
+ * all 78 cancelled launches emerald "completed". Per DESIGN.md the rose family covers
+ * blocked / rejected / cancelled, and StatusBadge.tsx already maps OriginFlow's own
+ * ON_HOLD and CANCELLED there — so these two match the rest of the app.
+ */
+const STOPPED = new Set(['cancelled', 'canceled', 'on hold']);
+/** Statuses that mean the launch actually shipped, as opposed to merely being closed. */
+const DELIVERED = new Set(['done', 'go live', 'closed', 'complete', 'completed']);
+
+/**
+ * Tone for one Epic status.
+ *
+ * Name first, category second: the PL workflow puts 6 of its 9 statuses in Jira's
+ * 'indeterminate' bucket, so the category alone cannot distinguish shipped from stopped
+ * from in-flight. The status label always carries the precise meaning (DESIGN.md's
+ * Color-Plus-Shape Rule), so the hue only needs to say which of those four it is.
+ */
+export const jiraStatusTone = (issue: JiraIssueRef): BadgeTone => {
+  const name = issue.status.trim().toLowerCase();
+  if (STOPPED.has(name)) return 'rose';
+  if (DELIVERED.has(name)) return 'emerald';
+  if (issue.statusCategory === 'done') return 'emerald';
+  if (issue.statusCategory === 'indeterminate') return 'indigo';
+  return 'gray';
 };
 
 export const JiraStatusBadge: React.FC<Props> = ({ lookup, loading = false, showSummary = false }) => {
@@ -45,25 +60,16 @@ export const JiraStatusBadge: React.FC<Props> = ({ lookup, loading = false, show
   }
 
   const { issue, matchCount } = lookup;
-  // A 'field' (or 'key') match is the ProjectID link and is exact. 'summary'/'text'
-  // mean the ProjectID field was blank and we fell back to searching the ticket, so
-  // say that in the tooltip rather than presenting a guess as a fact.
-  const matchNote =
-    issue.matchedBy === 'summary'
-      ? '\nMatched on the issue summary — the ProjectID field is not set on this ticket.'
-      : issue.matchedBy === 'text'
-        ? '\nMatched on the issue text — the ProjectID field is not set on this ticket.'
-        : '';
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0">
       <a
         href={issue.url}
         target="_blank"
         rel="noopener noreferrer"
-        title={`${issue.key} — ${issue.summary}${issue.assignee ? ` (${issue.assignee})` : ''}${matchNote}`}
-        className={`inline-flex items-center gap-1 shrink-0 rounded-lg hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-indigo-300 ${matchNote ? 'decoration-dotted underline-offset-4 underline' : ''}`}
+        title={`${issue.key} — ${issue.summary}${issue.assignee ? `\nAssignee: ${issue.assignee}` : ''}`}
+        className="inline-flex items-center gap-1 shrink-0 rounded-xl hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-indigo-300"
       >
-        <Badge tone={toneForCategory(issue.statusCategory)}>
+        <Badge tone={jiraStatusTone(issue)}>
           <span className="font-mono">{issue.key}</span>
           <span aria-hidden="true" className="opacity-40">|</span>
           <span>{issue.status}</span>
@@ -71,10 +77,13 @@ export const JiraStatusBadge: React.FC<Props> = ({ lookup, loading = false, show
         </Badge>
       </a>
       {matchCount > 1 && (
-        // An ambiguous launch code is worth surfacing: the chip links to the most
-        // recently updated match, which may not be the one the operator means.
+        // Two Epics sharing one ProjectID is a Jira data problem. The chip links to the
+        // most recently updated one, which may not be the one the operator means, so
+        // say so rather than quietly picking a winner.
         <span
-          title={`${matchCount} Jira issues mention this project code. Showing the most recently updated one.`}
+          title={`${matchCount} Jira Epics carry this project code (${[issue, ...lookup.alternates]
+            .map(i => i.key)
+            .join(', ')}). Showing the most recently updated one.`}
           className="inline-flex items-center text-amber-600"
         >
           <AlertTriangle size={13} />

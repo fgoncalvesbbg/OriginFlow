@@ -7,10 +7,14 @@
  * all look identical ("Not on Jira"). This says which one it is.
  *
  * Reads the same JIRA_* vars the Netlify function reads, from the repo-root .env, and
- * runs the same three passes. It never prints the token.
+ * applies the same rule: one EPIC whose ProjectID field holds the code. It never prints
+ * the token.
  *
- *   node scripts/jira-check.mjs                 # diagnose + look up every project code in .env-free demo mode
- *   node scripts/jira-check.mjs MDA26003        # look up specific codes
+ *   npm run jira:check                    # diagnose the connection only
+ *   npm run jira:check MDA26003           # diagnose, then look up specific codes
+ *
+ * For an assertion-based check of the matching logic against live Jira, see
+ * netlify/functions/lib/jira-match.live.test.ts (JIRA_LIVE_TEST=1).
  */
 import { readFileSync } from 'node:fs';
 
@@ -42,6 +46,38 @@ if (missing.length) {
 
 const AUTH = 'Basic ' + Buffer.from(`${EMAIL}:${TOKEN}`).toString('base64');
 
+/**
+ * Structural check on the token BEFORE calling Jira.
+ *
+ * Worth doing because a truncated token and a revoked one produce the identical 401,
+ * and truncation is by far the more common of the two: Atlassian shows the token in a
+ * scrollable box, so selecting it by dragging (instead of clicking Copy) silently
+ * yields only the visible part. Current-format tokens start "ATATT" and end with "="
+ * plus a short checksum, so a missing suffix is a reliable tell.
+ */
+const tokenShapeProblem = () => {
+  if (!TOKEN.startsWith('ATATT')) {
+    return TOKEN.length === 24
+      ? 'this looks like a legacy (pre-2023) API token; those no longer work on Atlassian Cloud.'
+      : 'this does not look like an Atlassian API token (they start with "ATATT").';
+  }
+  if (!TOKEN.includes('=')) {
+    return `it is ${TOKEN.length} chars and has no "=" checksum suffix, so it is TRUNCATED — a complete token is roughly 190 chars and ends with "=" plus a short checksum.`;
+  }
+  return null;
+};
+
+// Reported, not enforced: this is a heuristic about Atlassian's token format, and a
+// heuristic must never be what stops a working credential from being tried. Jira's own
+// answer below is the authority.
+const shapeProblem = tokenShapeProblem();
+const RECOPY_HINT = `
+Re-copy the token at
+  https://id.atlassian.com/manage-profile/security/api-tokens
+using the dialog's Copy button rather than selecting the text by hand — the box scrolls,
+so a hand-selection silently grabs only the visible part. Paste it into .env as a single
+line, no quotes, no line breaks.`;
+
 const call = async (path, init = {}) => {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -60,6 +96,7 @@ const call = async (path, init = {}) => {
 console.log(`site        ${BASE}`);
 console.log(`account     ${EMAIL}`);
 console.log(`token       ${TOKEN.length} chars, starts "${TOKEN.slice(0, 5)}"`);
+if (shapeProblem) console.log(`WARN  token shape: ${shapeProblem}`);
 console.log(`project key ${PROJECT_KEY || '(none — searching all projects)'}`);
 console.log(`field name  ${FIELD_NAME}\n`);
 
@@ -69,13 +106,18 @@ console.log(`field name  ${FIELD_NAME}\n`);
 const me = await call('/rest/api/3/myself');
 if (me.status !== 200) {
   console.error(`FAIL  /myself -> ${me.status}: ${typeof me.body === 'string' ? me.body : JSON.stringify(me.body)}`);
-  console.error(`
-The API token is not being accepted. Check that:
-  - it was pasted in full (Atlassian tokens are ~192 chars and end with "=" plus a
-    short checksum; a shorter value is almost always a truncated paste),
-  - it belongs to ${EMAIL},
-  - it has not been revoked at
-    https://id.atlassian.com/manage-profile/security/api-tokens`);
+  if (shapeProblem) {
+    // Rejected AND malformed — the shape is almost certainly the reason.
+    console.error(`
+The token is also malformed: ${shapeProblem}${RECOPY_HINT}`);
+  } else {
+    console.error(`
+The token looks well-formed but Jira will not accept it. Check that:
+  - it belongs to ${EMAIL} (the token and the email must be the same account),
+  - it has not been revoked or expired at
+    https://id.atlassian.com/manage-profile/security/api-tokens,
+  - the account can log in to ${BASE}.${RECOPY_HINT}`);
+  }
   process.exit(1);
 }
 console.log(`OK    authenticated as ${me.body.displayName} <${me.body.emailAddress || 'email hidden'}>`);
@@ -108,38 +150,57 @@ if (codes.length === 0) {
   process.exit(0);
 }
 
-const cf = fieldId && /^customfield_(\d+)$/.test(fieldId) ? `cf[${fieldId.match(/\d+/)[0]}]` : fieldId;
-const passes = [...(cf ? [[`field (${FIELD_NAME})`, cf]] : []), ['summary', 'summary'], ['text', 'text']];
+if (!fieldId) {
+  console.error(`
+Cannot look up codes without the "${FIELD_NAME}" field — that field IS the link
+between an OriginFlow project and its Jira Epic. Set JIRA_PROJECT_ID_FIELD to the exact
+display name shown above.`);
+  process.exit(1);
+}
+
+const cf = `cf[${fieldId.match(/\d+/)[0]}]`;
+const scope = PROJECT_KEY ? `project = "${PROJECT_KEY}" AND ` : '';
 
 console.log('');
 for (const code of codes) {
-  let done = false;
-  for (const [label, jqlField] of passes) {
-    if (done) break;
-    const jql =
-      (PROJECT_KEY ? `project = "${PROJECT_KEY}" AND ` : '') +
-      `(${jqlField} ~ "\\"${code}\\"") ORDER BY updated DESC`;
-    const res = await call('/rest/api/3/search/jql', {
-      method: 'POST',
-      body: JSON.stringify({
-        jql,
-        fields: ['summary', 'status', ...(fieldId ? [fieldId] : [])],
-        maxResults: 20,
-      }),
-    });
-    if (res.status !== 200) {
-      console.log(`${code}  [${label}] ERROR ${res.status}: ${JSON.stringify(res.body).slice(0, 300)}`);
-      continue;
-    }
-    const issues = res.body.issues || [];
-    if (issues.length === 0) {
-      console.log(`${code}  [${label}] no hits`);
-      continue;
-    }
-    for (const i of issues) {
-      const value = fieldId ? JSON.stringify(i.fields?.[fieldId]) : '(field not resolved)';
-      console.log(`${code}  [${label}] ${i.key}  ${i.fields?.status?.name}  ${FIELD_NAME}=${value}  "${i.fields?.summary}"`);
-    }
-    done = true;
+  const phrase = `${cf} ~ "\\"${code}\\""`;
+
+  // The Epic is the launch; this is exactly what the connector queries.
+  const epics = await call('/rest/api/3/search/jql', {
+    method: 'POST',
+    body: JSON.stringify({
+      jql: `${scope}issuetype = Epic AND (${phrase}) ORDER BY updated DESC`,
+      fields: ['summary', 'status', 'issuetype', fieldId],
+      maxResults: 20,
+    }),
+  });
+  if (epics.status !== 200) {
+    console.log(`${code}  ERROR ${epics.status}: ${JSON.stringify(epics.body).slice(0, 300)}`);
+    continue;
+  }
+  const found = epics.body.issues || [];
+  if (found.length === 0) {
+    console.log(`${code}  no Epic carries this code`);
+  }
+  for (const i of found) {
+    const flag = found.length > 1 ? '  <-- AMBIGUOUS' : '';
+    console.log(
+      `${code}  ${i.key}  status="${i.fields?.status?.name}" (${i.fields?.status?.statusCategory?.key})  ` +
+        `${FIELD_NAME}=${JSON.stringify(i.fields?.[fieldId])}  "${i.fields?.summary}"${flag}`,
+    );
+  }
+
+  // Count what the Epic filter keeps out, so "why isn't ticket X shown?" has an answer.
+  const others = await call('/rest/api/3/search/jql', {
+    method: 'POST',
+    body: JSON.stringify({
+      jql: `${scope}issuetype != Epic AND (${phrase})`,
+      fields: ['issuetype'],
+      maxResults: 100,
+    }),
+  });
+  const otherTypes = [...new Set((others.body?.issues || []).map(i => i.fields?.issuetype?.name))];
+  if (otherTypes.length) {
+    console.log(`${' '.repeat(code.length)}  (excluded: ${others.body.issues.length} non-Epic ticket(s) — ${otherTypes.join(', ')})`);
   }
 }

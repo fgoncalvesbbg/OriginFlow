@@ -1,0 +1,18 @@
+{
+  // The root tsconfig.json EXCLUDES netlify/ because these functions run on Node, not
+  // in the browser bundle — so `tsc -p .` never sees them. This is the "typechecked
+  // separately" half that comment refers to: `npm run typecheck:functions`.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true
+  },
+  "include": ["functions/**/*.ts"]
+}

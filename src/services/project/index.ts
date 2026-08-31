@@ -92,6 +92,7 @@ export type { CategorySku } from './sku-attribute-review.service';
 export {
   lookupJiraIssues,
   lookupJiraIssue,
-  jiraCategoryLabel
+  jiraFilterValue,
+  JIRA_NOT_FOUND_LABEL
 } from './jira.service';
 export type { JiraLookupResponse } from './jira.service';

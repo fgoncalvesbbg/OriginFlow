@@ -180,8 +180,12 @@ export interface DocumentComment {
 /**
  * Jira link-through (see netlify/functions/jira-status.ts).
  *
- * Never persisted: these are fetched live from Jira on every load/refresh, so the
- * status shown is always Jira's current one and there is no OriginFlow copy to drift.
+ * One launch == one Jira EPIC whose "ProjectID" field holds the project code, so
+ * `status` is the launch stage ("RFQ CREATION" -> "BUSINESS CASE" -> "Gates" ->
+ * "PO PLACEMENT" -> "PRODUCTION" -> "Go Live" / "Done"). Gate sub-tickets are excluded.
+ *
+ * Never persisted: fetched live from Jira on every load/refresh, so the status shown is
+ * always Jira's current one and there is no OriginFlow copy to drift.
  */
 export interface JiraIssueRef {
   key: string;
@@ -197,20 +201,12 @@ export interface JiraIssueRef {
   priority?: string;
   updated?: string;
   dueDate?: string;
-  /**
-   * How the issue was tied to this project code:
-   *   'field'   — Jira's ProjectID custom field, verified exactly (the reliable one)
-   *   'key'     — the project code IS the issue key
-   *   'summary' — the code appears in the issue summary (field was blank)
-   *   'text'    — the code is somewhere in the description/comments (weakest)
-   */
-  matchedBy?: 'field' | 'summary' | 'text' | 'key';
 }
 
-/** Lookup outcome for one project code. `issue === null` means "not on Jira". */
+/** Lookup outcome for one project code. `issue === null` means "no Epic carries this code". */
 export interface JiraLookup {
   issue: JiraIssueRef | null;
-  /** >1 means the launch code matched several issues; `alternates` holds the rest. */
+  /** Expected to be 1. >1 means several Epics share the code; `alternates` holds the rest. */
   matchCount: number;
   alternates: JiraIssueRef[];
 }

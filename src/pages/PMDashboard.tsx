@@ -2,7 +2,7 @@
 /** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, lookupJiraIssues, jiraCategoryLabel } from '../services';
+import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, lookupJiraIssues, jiraFilterValue, JIRA_NOT_FOUND_LABEL } from '../services';
 import { Project, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus, JiraLookup } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
@@ -127,18 +127,23 @@ const PMDashboard: React.FC = () => {
       case 'supplier': return getSupplierName(p.supplierId);
       case 'step': return String(p.currentStep);
       case 'status': return p.status;
-      // Sorts/filters on the same words the cell shows, so "In Progress" in the
-      // dropdown matches what the operator reads in the row.
-      case 'jira': {
-        const issue = jira[p.projectId]?.issue;
-        return issue ? jiraCategoryLabel(issue) : 'Not on Jira';
-      }
+      // Sorts/filters on the same words the cell shows — the Epic's own Jira status.
+      case 'jira': return jiraFilterValue(jira[p.projectId]);
     }
   };
 
   // Distinct PMs and statuses present, for the dropdown filters.
   const pmOptions = [...new Set(projects.map(p => getPmName(p.pmId)))].sort((a, b) => a.localeCompare(b));
   const statusOptions = [...new Set(projects.map(p => p.status))];
+  // Built from the Epics actually loaded rather than hardcoded: the PL workflow's status
+  // names are configured in Jira and would drift out of sync with any list kept here.
+  // "Not on Jira" is appended only when some project really has no Epic.
+  const jiraOptions = (() => {
+    const present = [...new Set(projects.map(p => jira[p.projectId]?.issue?.status).filter(Boolean) as string[])]
+      .sort((a, b) => a.localeCompare(b));
+    const anyMissing = projects.some(p => jira[p.projectId] && !jira[p.projectId].issue);
+    return anyMissing ? [...present, JIRA_NOT_FOUND_LABEL] : present;
+  })();
 
   const setFilter = (key: ProjectColKey, value: string) =>
     setColFilters(prev => ({ ...prev, [key]: value }));
@@ -373,10 +378,7 @@ const PMDashboard: React.FC = () => {
                     <select value={colFilters.jira} onChange={e => setFilter('jira', e.target.value)}
                       className="w-full font-normal border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400">
                       <option value="all">All</option>
-                      <option value="To Do">To Do</option>
-                      <option value="In Progress">In Progress</option>
-                      <option value="Done">Done</option>
-                      <option value="Not on Jira">Not on Jira</option>
+                      {jiraOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </th>
                 )}

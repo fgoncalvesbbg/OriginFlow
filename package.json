@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "graph": "node scripts/graph-query.mjs",
-    "jira:check": "node scripts/jira-check.mjs"
+    "jira:check": "node scripts/jira-check.mjs",
+    "typecheck:functions": "tsc --noEmit -p netlify/tsconfig.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",

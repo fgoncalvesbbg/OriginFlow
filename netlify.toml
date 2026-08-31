@@ -31,7 +31,13 @@
 # The Jira connector needs NO public flag: jira-status.ts answers { configured: false }
 # when its three secrets are unset, and the UI hides the Jira column on that. Nothing it
 # reads is stored — every page load and every Refresh re-reads Jira, so the status shown
-# is always live. Set the same four vars in the repo-root .env for `netlify dev`.
+# is always live. Set the same vars in the repo-root .env for `netlify dev`.
+#
+# A launch is one EPIC in project PL whose "ProjectID" field (customfield_10260 on
+# go-bbg, resolved by NAME at runtime) holds the OriginFlow project code; that Epic's
+# status is the launch stage. The ~10-17 gate sub-tickets sharing a ProjectID are
+# excluded. Diagnose with `npm run jira:check <CODE>`; assert against live Jira with
+# `JIRA_LIVE_TEST=1 npx vitest run netlify/functions/lib/jira-match.live.test.ts`.
 #
 # ProductToolkit (category attribute definitions) is deliberately NOT proxied through a
 # function: it is published only as https://producttoolkit.chal-tec.local on the internal

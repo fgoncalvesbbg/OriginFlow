@@ -80,7 +80,8 @@ export {
   getSkuChangeLog,
   lookupJiraIssues,
   lookupJiraIssue,
-  jiraCategoryLabel
+  jiraFilterValue,
+  JIRA_NOT_FOUND_LABEL
 } from './project';
 export type { CategorySku } from './project';
 export type { SiblingAttributeRequest } from './project';

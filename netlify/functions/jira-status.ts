@@ -10,28 +10,30 @@
  * Atlassian Cloud does not send CORS headers that would let the SPA call it directly.
  * This is Pattern A in netlify.toml — same shape as translate.ts.
  *
- * HOW a project code maps to an issue: OriginFlow's `projects.project_id_code` is a
- * free-text launch code (e.g. "MDA26010", "CL26003AU"), NOT a Jira issue key. Jira
- * carries the same code in a custom field — "ProjectID" on go-bbg — and that field is
- * the real link. We resolve it by NAME at runtime (JIRA_PROJECT_ID_FIELD, see
- * resolveProjectIdField) because its numeric id differs per Jira site.
+ * HOW a project code maps to an issue (verified against go-bbg on 2026-08-31): a launch
+ * is one EPIC in project PL whose "ProjectID" field holds the OriginFlow project code.
+ * All 278 Epics in PL have that field set, and each code resolves to exactly one Epic,
+ * so the Epic's status IS the launch stage ("RFQ CREATION" -> "BUSINESS CASE" ->
+ * "Gates" -> "PO PLACEMENT" -> "PRODUCTION" -> "Go Live" / "Done").
  *
- * Three passes, narrowest first; each one only runs for the codes still unmatched:
- *   1. the ProjectID custom field — verified EXACTLY against the value read back off
- *      the issue, so a fuzzy JQL hit cannot produce a false match;
- *   2. the summary, for tickets where nobody filled the field in;
- *   3. full text (description/comments), which we cannot re-verify.
- * A code that already looks like an issue key ("PL-123") is matched by key instead.
- * Each result carries `matchedBy` so the UI can show how solid the link is.
+ * The ~10-17 non-Epic issues sharing each ProjectID are per-gate sub-tickets (Design
+ * Gate, Compliance Gate, RFQ Process...); `issuetype = Epic` excludes them, because
+ * their gate-level statuses would drown the launch stage.
  *
- * Whole-token matching matters throughout: "MDA26016" must not claim "MDA26016AU"'s
- * issue, so matching is a boundary-anchored regex, never a substring test.
+ * The field is resolved by NAME at runtime (JIRA_PROJECT_ID_FIELD, default "ProjectID")
+ * because its numeric id is site-specific — customfield_10260 here. One JQL covers the
+ * whole batch, then every hit is re-verified against the field value it came back with,
+ * because Jira's `~` is a fuzzy tokenized match that returns near-misses.
+ *
+ * Whole-token matching matters: "MDA26016" must not claim "MDA26016AU"'s Epic, so the
+ * verification is a boundary-anchored regex, never a substring test.
  *
  * Request body:  { codes: string[] }          (max 60 per call; the client chunks)
  * Response body: {
  *   configured: true,
  *   baseUrl: string,
  *   projectKey: string | null,
+ *   projectIdField: string,
  *   results: Record<code, { issue: JiraIssueRef | null, matchCount: number, alternates: JiraIssueRef[] }>
  * }
  * ...or { configured: false, reason } with HTTP 200 when the server env is not set up —
@@ -61,7 +63,6 @@ import {
   matchIssuesToCodes,
   type CodeResult,
   type JiraSearchIssue,
-  type MatchStrategy,
 } from './lib/jira-match';
 
 interface NetlifyEvent {
@@ -258,29 +259,27 @@ export const handler = async (event: NetlifyEvent) => {
 
   try {
     const fieldId = await resolveProjectIdField(rawBase, auth, projectIdFieldName);
-    // Ask for the ProjectID field alongside the display fields so the match can be
-    // verified against the value itself rather than trusting Jira's fuzzy `~`.
-    const fields = fieldId ? [...BASE_FIELDS, fieldId] : BASE_FIELDS;
-
-    // Narrowest strategy first; each pass only runs for the codes still unmatched, so
-    // a fully-populated ProjectID field costs exactly one Jira search.
-    const strategies: MatchStrategy[] = [
-      ...(fieldId ? [{ kind: 'field', fieldId } as const] : []),
-      { kind: 'summary' },
-      { kind: 'text' },
-    ];
-
-    let pending = searchable;
-    for (const strategy of strategies) {
-      if (pending.length === 0) break;
-      const found = await searchJira(rawBase, auth, buildJql(pending.map(c => c.code), projectKey, strategy), fields);
-      matchIssuesToCodes(pending, found, results, rawBase, strategy);
-      pending = pending.filter(c => results[c.raw].matchCount === 0);
+    // A hard error, not a fallback: the ProjectID field IS the link between an
+    // OriginFlow project and its Epic. Without it there is no honest answer, and
+    // guessing from the summary would risk showing the wrong launch's status.
+    if (!fieldId) {
+      return json(502, {
+        error: `No Jira field named "${projectIdFieldName}" is visible to ${email}. ` +
+          'Set JIRA_PROJECT_ID_FIELD to its exact display name, or check the account can see it.',
+      });
     }
 
-    // Reported so the UI (and an operator debugging a miss) can tell "no ticket" apart
-    // from "the ProjectID field could not be resolved, so this was a text search".
-    (payload as any).projectIdField = fieldId ? projectIdFieldName : null;
+    // Request the ProjectID field alongside the display fields so each hit can be
+    // verified against the value itself rather than trusting Jira's fuzzy `~`.
+    const fields = [...BASE_FIELDS, fieldId];
+    const found = await searchJira(
+      rawBase,
+      auth,
+      buildJql(searchable.map(c => c.code), projectKey, fieldId),
+      fields,
+    );
+    matchIssuesToCodes(searchable, found, results, rawBase, fieldId);
+    (payload as any).projectIdField = projectIdFieldName;
   } catch (e: any) {
     return json(502, { error: e?.message || 'Jira request failed.' });
   }

@@ -14,7 +14,7 @@
  */
 
 import { auth } from '../../data';
-import type { JiraIssueRef, JiraLookup } from '../../types';
+import type { JiraLookup } from '../../types';
 
 const ENDPOINT = '/.netlify/functions/jira-status';
 /** Must not exceed MAX_CODES in netlify/functions/jira-status.ts. */
@@ -116,19 +116,16 @@ export const lookupJiraIssue = async (
   return { configured: res.configured, lookup: res.results[code] ?? null, error: res.error };
 };
 
+/** Shown in place of a status when no Epic carries the project code. Also a filter value. */
+export const JIRA_NOT_FOUND_LABEL = 'Not on Jira';
+
 /**
- * Short label for a Jira status category, used where the full status name is too long
- * (e.g. a dashboard cell). Falls back to the Jira status name, which is always set.
+ * The value the dashboard sorts and filters a project's Jira cell on: the Epic's own
+ * status name, which is exactly what the chip displays.
+ *
+ * Deliberately NOT Jira's statusCategory rollup — the PL Epic workflow puts 6 of its 9
+ * statuses in the 'indeterminate' bucket, so filtering by category would collapse
+ * "RFQ CREATION", "Gates", "PO PLACEMENT" and "PRODUCTION" into one useless option.
  */
-export const jiraCategoryLabel = (issue: JiraIssueRef): string => {
-  switch (issue.statusCategory) {
-    case 'new':
-      return 'To Do';
-    case 'indeterminate':
-      return 'In Progress';
-    case 'done':
-      return 'Done';
-    default:
-      return issue.status;
-  }
-};
+export const jiraFilterValue = (lookup: JiraLookup | undefined): string =>
+  lookup?.issue?.status || JIRA_NOT_FOUND_LABEL;
