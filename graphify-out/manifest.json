@@ -780,9 +780,9 @@
     "semantic_hash": ""
   },
   "package.json": {
-    "mtime": 1788116152.512912,
-    "seen": 1788116560.544787,
-    "ast_hash": "e92568b9bce8a63a46e59701f6736db8",
+    "mtime": 1788187202.6997628,
+    "seen": 1788188453.8906884,
+    "ast_hash": "072ebc0b0199267aa4b6207db7bc0647",
     "semantic_hash": ""
   },
   "schema.sql": {
@@ -1122,9 +1122,9 @@
     "semantic_hash": ""
   },
   "src/pages/PMDashboard.tsx": {
-    "mtime": 1788115021.569189,
-    "seen": 1788115621.7267156,
-    "ast_hash": "1ce43c3139b2b000c41b47cd1c777457",
+    "mtime": 1788186947.9503849,
+    "seen": 1788188453.8908982,
+    "ast_hash": "ddfbdb207e87554b1011fc449ef4f64e",
     "semantic_hash": ""
   },
   "src/pages/ProjectDetail.tsx": {
@@ -1638,9 +1638,9 @@
     "semantic_hash": ""
   },
   "src/services/index.ts": {
-    "mtime": 1788114942.055457,
-    "seen": 1788115621.7270532,
-    "ast_hash": "40002fe13f963316e0cf66a36f125215",
+    "mtime": 1788186932.3005798,
+    "seen": 1788188453.8913472,
+    "ast_hash": "2e488b1dcd93ae9497a6e4d119a02433",
     "semantic_hash": ""
   },
   "src/services/manufacturing/index.ts": {
@@ -1656,9 +1656,9 @@
     "semantic_hash": ""
   },
   "src/services/project/index.ts": {
-    "mtime": 1788114942.0544484,
-    "seen": 1788115621.7270582,
-    "ast_hash": "aff5ca18c9f5329479ca55cbba6d73ec",
+    "mtime": 1788186932.3005798,
+    "seen": 1788188453.8913531,
+    "ast_hash": "c951f5c1073b1b9c588270f25cf762c3",
     "semantic_hash": ""
   },
   "src/services/project/project-attribute-request.service.ts": {
@@ -1818,9 +1818,9 @@
     "semantic_hash": ""
   },
   "src/types/project.types.ts": {
-    "mtime": 1788116031.6230445,
-    "seen": 1788116560.5453746,
-    "ast_hash": "a0e63bad7b951a0bdbb556b5e9aa2390",
+    "mtime": 1788186932.2995727,
+    "seen": 1788188453.8914518,
+    "ast_hash": "8bd55f67e6c6c70b5f7721ce9e9a0b6e",
     "semantic_hash": ""
   },
   "src/types/sourcing.types.ts": {
@@ -3744,39 +3744,51 @@
     "semantic_hash": ""
   },
   "netlify/functions/jira-status.ts": {
-    "mtime": 1788115939.555222,
-    "seen": 1788116560.5447595,
-    "ast_hash": "22b66c35749c205b1b13677910106b82",
+    "mtime": 1788186847.1360269,
+    "seen": 1788188453.8906486,
+    "ast_hash": "90321aaf8a670fafe04f93c5a129898b",
     "semantic_hash": ""
   },
   "netlify/functions/lib/jira-match.test.ts": {
-    "mtime": 1788116011.9260962,
-    "seen": 1788116560.544767,
-    "ast_hash": "34739c4f275d2e9ca8b44c35ef1bc306",
+    "mtime": 1788187047.1298316,
+    "seen": 1788188453.890662,
+    "ast_hash": "3f8f1b8b8dc5897c00fa8a24e15c1df3",
     "semantic_hash": ""
   },
   "netlify/functions/lib/jira-match.ts": {
-    "mtime": 1788115886.684867,
-    "seen": 1788116560.544769,
-    "ast_hash": "61ac537bf1b9f8929d507930ba67cbc7",
+    "mtime": 1788186814.297184,
+    "seen": 1788188453.8906643,
+    "ast_hash": "7f451a89f2c463c2f1c5620ef4822453",
     "semantic_hash": ""
   },
   "src/components/JiraStatusBadge.tsx": {
-    "mtime": 1788116041.9639375,
-    "seen": 1788116560.5448184,
-    "ast_hash": "517bc37d6f31bc93f67cd3afb995beba",
+    "mtime": 1788186907.5800061,
+    "seen": 1788188453.8907263,
+    "ast_hash": "a3a6b0b7800b025282b71d5ed5e315bf",
     "semantic_hash": ""
   },
   "src/services/project/jira.service.ts": {
-    "mtime": 1788115438.2395325,
-    "seen": 1788115621.7270596,
-    "ast_hash": "e82b3b9f8de9d4e88ec22c9cb239cb14",
+    "mtime": 1788186932.2995727,
+    "seen": 1788188453.8913558,
+    "ast_hash": "3028f87f9bd4b2a43c830afa446c91ae",
     "semantic_hash": ""
   },
   "scripts/jira-check.mjs": {
-    "mtime": 1788116136.3813114,
-    "seen": 1788116560.5448017,
-    "ast_hash": "13f9cc760544e19f1b3b66d578a460c2",
+    "mtime": 1788187145.0194137,
+    "seen": 1788188453.890707,
+    "ast_hash": "e1e642e2af61072df40e1d18031fed15",
+    "semantic_hash": ""
+  },
+  "netlify/functions/lib/jira-match.live.test.ts": {
+    "mtime": 1788187107.7900164,
+    "seen": 1788188453.890659,
+    "ast_hash": "df14925fdd4f27de03e4d0d5c2a88a5d",
+    "semantic_hash": ""
+  },
+  "netlify/tsconfig.json": {
+    "mtime": 1788187202.4616122,
+    "seen": 1788188453.8906865,
+    "ast_hash": "2e38ea12b03bbcebe29d41976de41739",
     "semantic_hash": ""
   }
 }

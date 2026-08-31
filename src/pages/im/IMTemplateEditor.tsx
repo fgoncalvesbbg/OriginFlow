@@ -1933,6 +1933,19 @@ const IMTemplateEditor: React.FC = () => {
     return persistSections([updated]);
   }, [persistSections]);
 
+  // What the per-row "Translate from EN" buttons report to the translation memory, so a
+  // single-row translation reads and writes the same corpus as the bulk run below.
+  // Memoized: it is a prop on every inline row, and a fresh literal per render would
+  // rebuild those rows' translate handlers on each keystroke.
+  const rowTmContext = useMemo<TmRowContext>(() => ({
+    scope: 'template',
+    templateId: template?.id ?? null,
+    templateType,
+    domainCategoryId: categoryId ?? null,
+  }), [template?.id, templateType, categoryId]);
+
+  // NOTE: hooks must stay above these early returns. Declaring one after them changes
+  // the hook count between renders (the loading pass runs fewer) and throws React #310.
   if (loading) return <Layout><div>Loading...</div></Layout>;
   if (!template) return <Layout><div>Template not found.</div></Layout>;
 
@@ -1947,16 +1960,6 @@ const IMTemplateEditor: React.FC = () => {
     ...(categoryId ? getAttributesForCategory(categoryAttributes, categoryId) : []),
   ];
   const imThemeVars = getIMThemeVariables(metaSettings);
-  // What the per-row "Translate from EN" buttons report to the translation memory, so a
-  // single-row translation reads and writes the same corpus as the bulk run above.
-  // Memoized: it is a prop on every inline row, and a fresh literal per render would
-  // rebuild those rows' translate handlers on each keystroke.
-  const rowTmContext = useMemo<TmRowContext>(() => ({
-    scope: 'template',
-    templateId: template.id,
-    templateType,
-    domainCategoryId: categoryId ?? null,
-  }), [template.id, templateType, categoryId]);
   const unsavedCount = getDirtySections().length;
   // FINAL templates are read-only until explicitly unlocked (pre-released).
   const locked = template.isFinalized;

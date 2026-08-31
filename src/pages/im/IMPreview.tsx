@@ -87,6 +87,33 @@ const IMPreview: React.FC = () => {
     }
   };
 
+  // Shared blocks must be resolved by id so rows referencing the block library render
+  // here too — passing {} silently drops them (resolveManual treats an unresolvable
+  // block id as "block not found" and returns no node for that row).
+  const blocksById = useMemo(() => {
+    const map: Record<string, IMBlock> = {};
+    for (const b of blocks) map[b.id] = b;
+    return map;
+  }, [blocks]);
+
+  // Resolve the full document for the active language. Recomputes whenever
+  // the language switcher changes; no project context in preview mode.
+  // Null while the template is still loading — this sits above the early returns
+  // below, so it runs on the loading render too and cannot assume a template.
+  const resolved = useMemo(
+    () => (template ? resolveManual(template, sections, blocksById, null, activeLang) : null),
+    [template, sections, blocksById, activeLang],
+  );
+
+  // Build a lookup from section id → ResolvedSection for the renderer
+  const resolvedById = useMemo(() => {
+    const map: Record<string, ResolvedSection> = {};
+    for (const rs of resolved?.sections ?? []) map[rs.id] = rs;
+    return map;
+  }, [resolved]);
+
+  // NOTE: hooks must stay above these early returns. Declaring one after them changes
+  // the hook count between renders (the loading pass runs fewer) and throws React #310.
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-light text-muted">Loading Preview...</div>;
   if (error) return <div className="min-h-screen flex items-center justify-center bg-light text-red-500 font-medium">{error}</div>;
   if (!template) return null;
@@ -106,29 +133,6 @@ const IMPreview: React.FC = () => {
     ...DEFAULT_MASTER_PAGES,
     ...(template.metadata?.masterPages || {})
   };
-
-  // Shared blocks must be resolved by id so rows referencing the block library render
-  // here too — passing {} silently drops them (resolveManual treats an unresolvable
-  // block id as "block not found" and returns no node for that row).
-  const blocksById = useMemo(() => {
-    const map: Record<string, IMBlock> = {};
-    for (const b of blocks) map[b.id] = b;
-    return map;
-  }, [blocks]);
-
-  // Resolve the full document for the active language. Recomputes whenever
-  // the language switcher changes; no project context in preview mode.
-  const resolved = useMemo(
-    () => resolveManual(template, sections, blocksById, null, activeLang),
-    [template, sections, blocksById, activeLang],
-  );
-
-  // Build a lookup from section id → ResolvedSection for the renderer
-  const resolvedById = useMemo(() => {
-    const map: Record<string, ResolvedSection> = {};
-    for (const rs of resolved.sections) map[rs.id] = rs;
-    return map;
-  }, [resolved]);
 
   const rootSections = sections.filter(s => !s.parentId).sort((a, b) => a.order - b.order);
 
