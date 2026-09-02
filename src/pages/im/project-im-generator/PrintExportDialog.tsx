@@ -13,7 +13,14 @@
 import React, { useEffect, useState } from 'react';
 import { X, Upload, Loader2, Download, CheckSquare, Square, Trash2, FileDown, AlertCircle, History, BookMarked } from 'lucide-react';
 import { IMTemplate, IMTemplateType } from '../../../types';
-import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
+import {
+  DEFAULT_IM_LOGO_URL,
+  DEFAULT_LEAFLET_LOGO_URL,
+  IM_BRANDS,
+  IM_BRAND_ORDER,
+  brandForLogoUrl,
+  brandLogoUrl,
+} from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, getIMMarkets, checkPrintImageWeights, PrintPdfResult, PrintRender, IMMarket, PrintImageReport } from '../../../services';
 import {
   getLeafletPolicies,
@@ -434,6 +441,42 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
+  /**
+   * Brand picker — the ONLY difference between brands is the wordmark (IM cover / leaflet
+   * header), so this just swaps `logoUrl`. The selected brand is DERIVED from that URL rather
+   * than held as its own state: uploading a custom logo therefore deselects both chips by
+   * itself, and a project that remembered a Blumfeldt logo reopens on Blumfeldt, with no
+   * second source of truth to keep in sync. Klarstein is what an unset IM prefills to.
+   */
+  const selectedBrand = brandForLogoUrl(logoUrl);
+
+  const BrandPicker: React.FC = () => (
+    <div>
+      <label className="text-xs font-semibold text-gray-500 uppercase">Brand</label>
+      <div className="flex flex-wrap items-center gap-2 mt-1">
+        {IM_BRAND_ORDER.map((brand) => {
+          const on = selectedBrand === brand;
+          return (
+            <button
+              key={brand}
+              onClick={() => setLogoUrl(brandLogoUrl(brand, isLeaflet))}
+              className={`text-sm px-3 py-1.5 border rounded font-medium ${
+                on ? 'bg-primary/10 border-primary text-primary' : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {IM_BRANDS[brand].label}
+            </button>
+          );
+        })}
+        {!selectedBrand && <span className="text-[11px] text-gray-400">Custom logo</span>}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-1">
+        Swaps the {isLeaflet ? 'header' : 'cover'} logo only — the content is identical. Klarstein unless
+        you change it; uploading a logo below overrides both.
+      </p>
+    </div>
+  );
+
   const ImgField: React.FC<{
     label: string;
     slot: string;
@@ -618,6 +661,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                 Shown at the top of the first page of each language. Leaflets have no cover, table of
                 contents, or back page — content is rendered compactly.
               </p>
+              <BrandPicker />
               <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
               <TypographySummary typography={typography} pageSize={pageSize} />
             </div>
@@ -643,6 +687,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                   />
                   <p className="text-[11px] text-gray-400 mt-1">Shown on the cover. Prefilled from the SKUs bound to this manual.</p>
                 </div>
+                <BrandPicker />
                 <div className="grid grid-cols-2 gap-3">
                   <ImgField label="Logo" slot="cover-logo" value={logoUrl} onSet={setLogoUrl} onClear={() => setLogoUrl('')} />
                   <ImgField

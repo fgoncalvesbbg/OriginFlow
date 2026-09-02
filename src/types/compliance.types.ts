@@ -80,7 +80,26 @@ export interface ComplianceRequirement {
   title: string;
   description: string;
   isMandatory: boolean;
+  /**
+   * Free-text citation. Superseded by `regulationId` for anything with a regulation behind
+   * it (migration 139) and rendered nowhere; kept as the fallback label for unlinked rows
+   * and as the value the backfill matched on.
+   */
   referenceCode?: string;
+  /**
+   * The `regulations` row this deliverable exists to satisfy, or null/undefined for a
+   * requirement with no regulation behind it — BOM, exploded view, packaging artwork are
+   * real asks, not legal obligations (migration 139). This is the join that makes the
+   * regulation library one brain instead of two: the regulation carries the summary, the
+   * version and the IM checklist; this row carries what the SUPPLIER must hand over.
+   */
+  regulationId?: string | null;
+  /**
+   * The specific clause this evidence satisfies, when the obligation is narrower than the
+   * whole document — "LVD Annex III", not "the LVD" (migration 141). Null means the
+   * requirement answers for the regulation as a whole.
+   */
+  clauseId?: string | null;
   appliesByDefault: boolean;
   /**
    * Attribute-based applicability gate (mirrors IM block refs). When set, the

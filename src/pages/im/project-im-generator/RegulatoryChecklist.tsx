@@ -159,9 +159,39 @@ const RegulationChecklistGroup: React.FC<{
                       : <Square size={15} className={na ? 'text-gray-300' : 'text-gray-400'} />}
                 </button>
                 <div className="min-w-0 flex-1">
+                  {/* The clause this obligation comes from (migration 141). Leading the row
+                      rather than trailing it: a reviewer checking a manual against a standard
+                      works clause by clause, and the citation is what they look up. */}
+                  {(item.clause || item.imOptional) && (
+                    <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                      {item.clause && (
+                        <span
+                          className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1 py-px"
+                          title={item.clauseTitle ? `${item.clause} — ${item.clauseTitle}` : `Clause ${item.clause}`}
+                        >
+                          {item.clause}
+                        </span>
+                      )}
+                      {item.imOptional && (
+                        <span
+                          className="text-[9px] font-bold text-gray-500 bg-gray-100 rounded px-1 py-px"
+                          title="This obligation is really discharged on the rating label or the packaging. The manual may repeat it, but does not have to."
+                        >
+                          optional in the manual
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <p className={`text-xs leading-snug ${na ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                     {item.text}
                   </p>
+                  {/* Wording that must survive translation byte-for-byte, so it is shown as a
+                      quotation rather than folded into the requirement above. */}
+                  {item.verbatim && (
+                    <p className="text-[10px] text-indigo-900 bg-indigo-50 border-l-2 border-indigo-300 pl-1.5 py-0.5 mt-1 italic leading-snug">
+                      {item.verbatim}
+                    </p>
+                  )}
                   {(decided || shared.length > 0) && (
                     <p className="text-[10px] text-gray-400 mt-0.5">
                       {decided && (

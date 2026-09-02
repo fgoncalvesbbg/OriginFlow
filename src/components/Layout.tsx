@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, Scale, type LucideIcon } from 'lucide-react';
 import { UserRole, Notification } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
 import { Logo } from './Logo';
@@ -98,6 +98,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { to: '/sourcing', label: 'Sourcing & RFQ', Icon: ShoppingBag, match: p => p.startsWith('/sourcing') },
     { to: '/suppliers', label: 'Suppliers', Icon: Truck, match: p => p === '/suppliers' },
     { to: '/compliance', label: 'Compliance', Icon: ShieldCheck, match: p => p.startsWith('/compliance') },
+    { to: '/regulations', label: 'Regulations', Icon: Scale, match: p => p.startsWith('/regulations') },
     { to: '/im', label: 'Instruction Manuals', Icon: BookOpen, match: p => p.startsWith('/im') },
     { to: '/attributes', label: 'Attribute Viewer', Icon: Table2, match: p => p.startsWith('/attributes') },
     { to: '/products', label: 'SKU Catalog', Icon: Package, match: p => p.startsWith('/products') },

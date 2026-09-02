@@ -277,11 +277,13 @@ Deno.serve(async (req: Request) => {
       console.error('[regulatory-check] template lookup failed', tmplErr);
       return json(500, { error: 'Could not verify the regulation assignment.' });
     }
-    // Only an ACTIVE regulation flows in by category — 'superseded' is how one is
-    // retired, and the client filters the same way.
+    // Everything except 'superseded' flows in by category — that is how a regulation is
+    // retired, and the client filters the same way. An EXPIRED regulation (migration 140)
+    // still authorizes a check: expiry stops a PUBLISH, and refusing to audit a template
+    // against the law that just expired would withhold exactly the report needed to fix it.
     appliesByCategory = Boolean(
       tmpl?.category_id &&
-      regulation.status === 'active' &&
+      regulation.status !== 'superseded' &&
       Array.isArray(regulation.applicable_categories) &&
       regulation.applicable_categories.includes(tmpl.category_id),
     );

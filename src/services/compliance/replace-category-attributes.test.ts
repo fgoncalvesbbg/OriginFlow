@@ -119,16 +119,17 @@ describe('replaceCategoryAttributes', () => {
     expect(rows.filter(r => r.akeneo_id === 'total_power')).toHaveLength(1);
   });
 
-  it('re-shares a sibling attribute it just un-shared when the source still lists it', async () => {
-    // Un-share then link back: the attribute stays owned by Beverage Coolers and is not duplicated.
+  it('keeps a sibling-owned attribute shared in, without churning it', async () => {
+    // Replace now matches first, so an attribute this definition still lists is never
+    // un-shared and re-linked. It stays owned by Beverage Coolers, stays shared into Angled
+    // Hoods, and — critically — its ownership is NOT moved to the importing category.
     const res = await replaceCategoryAttributes(ANGLED, [
       ptRow({ name: 'Defrost Type', akeneoId: 'defrost_system_type' }),
     ]);
-    expect(res.unshared).toBe(1);
-    expect(res.linked).toBe(1);
+    expect(res.unshared).toBe(0);
     expect(res.created).toBe(0);
     const shared = rows.find(r => r.id === 'shared-1')!;
-    expect(shared.category_id).toBe(BEVERAGE);
+    expect(shared.category_id).toBe(BEVERAGE);          // owner unchanged
     expect(shared.assigned_category_ids).toContain(ANGLED);
   });
 

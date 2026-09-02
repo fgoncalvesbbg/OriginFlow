@@ -21,7 +21,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Loader2, Download, FileDown, AlertCircle, AlertTriangle, ExternalLink, CheckSquare, Square, BookMarked } from 'lucide-react';
 import { IMTemplateType, IMTemplateMetadata } from '../../../types';
-import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../../config/im.constants';
+import {
+  DEFAULT_IM_BRAND,
+  IM_BRANDS,
+  IM_BRAND_ORDER,
+  brandForLogoUrl,
+  brandLogoUrl,
+} from '../../../config/im.constants';
 import { requestDraftPrintPdf, type DraftPrintPdfResult } from '../../../services';
 import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '../../../services/im/im-print-settings.service';
 import { orderIMLanguages } from '../../../config/im-languages';
@@ -93,6 +99,15 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
   const [title, setTitle] = useState(defaultTitle);
   const [skuText, setSkuText] = useState('');
 
+  // Brand wordmark for this draft. A template carries no brand — the same category content is
+  // issued under whichever brand the SKU ships as — so the brand is picked per export here,
+  // exactly as in the production dialog. A template that pins its own companyLogoUrl still wins
+  // on open; choosing a brand replaces it for this render only (nothing here is persisted).
+  const [logoUrl, setLogoUrl] = useState(
+    metadata.companyLogoUrl || brandLogoUrl(DEFAULT_IM_BRAND, isLeaflet),
+  );
+  const selectedBrand = brandForLogoUrl(logoUrl);
+
   const [typography, setTypography] = useState<PrintTypography>(() => defaultTypographyFor(templateType, pageSize));
   useEffect(() => {
     let alive = true;
@@ -156,7 +171,7 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
           title,
           // Subtitle left empty so the builder auto-fills "Instruction Manual" per language,
           // exactly as the production export does.
-          logoUrl: metadata.companyLogoUrl || (isLeaflet ? DEFAULT_LEAFLET_LOGO_URL : DEFAULT_IM_LOGO_URL),
+          logoUrl: logoUrl || undefined,
           coverImageUrl: isLeaflet ? undefined : metadata.coverImageUrl || undefined,
           skus: skuText.split(',').map((s) => s.trim()).filter(Boolean),
           companyName: metadata.companyName,
@@ -304,10 +319,37 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
               </div>
             </div>
           )}
+          {/* BRAND — a template is brand-neutral; the wordmark on the cover / leaflet header is
+              the only thing that differs, so it is chosen per export, as in production. */}
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase">Brand</label>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              {IM_BRAND_ORDER.map((brand) => {
+                const on = selectedBrand === brand;
+                return (
+                  <button
+                    key={brand}
+                    onClick={() => setLogoUrl(brandLogoUrl(brand, isLeaflet))}
+                    className={`px-3 py-1.5 rounded border text-sm font-medium ${
+                      on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {IM_BRANDS[brand].label}
+                  </button>
+                );
+              })}
+              {!selectedBrand && <span className="text-[11px] text-gray-400">This template&apos;s own logo</span>}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Swaps the {isLeaflet ? 'header' : 'cover'} logo only — the content is identical. Klarstein
+              unless this template pins its own logo or you change it here.
+            </p>
+          </div>
+
           <p className="text-[11px] text-gray-400">
-            Logo{isLeaflet ? '' : ', cover image'}, company name and footer come from this template&apos;s
-            settings — change them in Template settings, not here, so the draft shows what the template
-            really carries.
+            {isLeaflet ? 'Company name and footer come' : 'Cover image, company name and footer come'} from
+            this template&apos;s settings — change them in Template settings, not here, so the draft shows
+            what the template really carries.
           </p>
 
           <TypographySummary typography={typography} pageSize={pageSize} />

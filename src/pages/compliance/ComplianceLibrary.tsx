@@ -1,19 +1,21 @@
 
 /** Compliance library: manage categories, requirements, attributes (with AI-assisted authoring). */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
   getCategories, getComplianceRequirements,
   saveRequirement, deleteRequirement, addStandardRequirements,
   getCategoryAttributes,
   getComplianceSections, addComplianceSection, deleteComplianceSection,
+  getRegulations, collectBlocks,
   COMPLIANCE_SECTIONS
 } from '../../services';
-import { CategoryL3, ComplianceRequirement, CategoryAttribute, FeatureConditionFields } from '../../types';
+import { CategoryL3, ComplianceRequirement, CategoryAttribute, FeatureConditionFields, Regulation } from '../../types';
 import { getAttributesForCategory } from '../../utils';
 import { distinctL1, distinctL2, filterCategories } from '../../utils/category-tree.utils';
 // Added comment above fix: Adding missing X icon to lucide-react imports
-import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe, Search } from 'lucide-react';
+import { Plus, Edit2, Trash2, ArrowLeft, CheckCircle, RefreshCw, Folder, FolderOpen, Clock, Building, FileCheck, X, GitBranch, Lock, Globe, Search, Scale, Ban } from 'lucide-react';
 
 // Sentinel "category" id for the global requirements view — requirements stored with
 // categoryId = null apply to every category.
@@ -75,6 +77,7 @@ const ComplianceLibrary: React.FC = () => {
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
+  const [regulations, setRegulations] = useState<Regulation[]>([]);
   const [customSections, setCustomSections] = useState<string[]>([]);
   const [newSectionInput, setNewSectionInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -107,13 +110,15 @@ const ComplianceLibrary: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [c, r, a, s] = await Promise.all([
-        getCategories(), getComplianceRequirements(), getCategoryAttributes(), getComplianceSections()
+      const [c, r, a, s, regs] = await Promise.all([
+        getCategories(), getComplianceRequirements(), getCategoryAttributes(), getComplianceSections(),
+        getRegulations()
       ]);
       setCategories(c);
       setRequirements(r);
       setAttributes(a);
       setCustomSections(s);
+      setRegulations(regs);
     } catch (error) {
       console.error("Failed to load library data", error);
     } finally {
@@ -141,6 +146,55 @@ const ComplianceLibrary: React.FC = () => {
         await onConfirmAction();
         setModalState(prev => ({ ...prev, isOpen: false }));
       }
+    });
+  };
+
+  // Regulations by id, so a row can name the law behind it without an N+1 lookup.
+  const regulationById = useMemo(
+    () => new Map(regulations.map(r => [r.id, r])),
+    [regulations],
+  );
+
+  /** Regulations whose expiry is currently stopping work (migration 140). */
+  const blockedRegulationIds = useMemo(
+    () => new Set(collectBlocks(regulations, regulations).map(b => b.regulationId)),
+    [regulations],
+  );
+
+  /**
+   * Linking a requirement to a regulation carries its TCF description across, but ONLY
+   * into an empty description. Overwriting text somebody wrote would be the kind of silent
+   * edit that makes people stop trusting the picker — and the description is what the
+   * supplier actually reads.
+   */
+  const applyRegulationLink = (item: any, regulationId: string | null) => {
+    const reg = regulationId ? regulationById.get(regulationId) : null;
+    setEditingItem({
+      ...item,
+      regulationId,
+      // A clause belongs to one document, so changing the regulation must drop it —
+      // otherwise the requirement quietly cites a clause of a different standard.
+      clauseId: null,
+      referenceCode: reg ? reg.referenceCode : item.referenceCode,
+      description: !item.description?.trim() && reg?.tcfDescription ? reg.tcfDescription : item.description,
+      title: !item.title?.trim() && reg ? reg.referenceCode : item.title,
+    });
+  };
+
+  /**
+   * Narrowing a requirement to one clause (migration 141). Its TCF description, when the
+   * clause has one, is more specific than the regulation's and fills an empty description
+   * the same way the regulation's does — never overwriting text somebody wrote.
+   */
+  const applyClauseLink = (item: any, clauseId: string | null) => {
+    const reg = item.regulationId ? regulationById.get(item.regulationId) : null;
+    const clause = clauseId ? reg?.clauses?.find(c => c.id === clauseId) : null;
+    setEditingItem({
+      ...item,
+      clauseId,
+      description: !item.description?.trim() && clause?.tcfDescription
+        ? clause.tcfDescription
+        : item.description,
     });
   };
 
@@ -194,6 +248,7 @@ const ComplianceLibrary: React.FC = () => {
       section: sectionName || '',
       title: '', 
       description: '', 
+      regulationId: null,
       isMandatory: true,
       appliesByDefault: true,
       condition: null,
@@ -538,6 +593,58 @@ const ComplianceLibrary: React.FC = () => {
                                         {r.categoryId == null && <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide"><Globe size={10} /> Global</span>}
                                         {isLocked && <span className="inline-flex items-center gap-1 text-gray-400 text-[10px] font-bold px-1.5 py-0.5 uppercase tracking-wide"><Lock size={10} /> Locked</span>}
                                         </div>
+                                        {/* The law behind the ask (migration 139). Internal only —
+                                            the supplier portal renders none of this. */}
+                                        {(() => {
+                                            const reg = r.regulationId ? regulationById.get(r.regulationId) : null;
+                                            if (!reg) return null;
+                                            const edition = [reg.version, reg.editionYear ? String(reg.editionYear) : ''].filter(Boolean).join(' · ');
+                                            return (
+                                                <div className="flex flex-wrap items-center gap-2 mb-2 text-[10px]">
+                                                    <Link
+                                                        to={`/regulations/${reg.id}`}
+                                                        className="inline-flex items-center gap-1 font-mono font-bold text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded hover:bg-sky-100"
+                                                        title={reg.title}
+                                                    >
+                                                        <Scale size={10} /> {reg.referenceCode}
+                                                        {(() => {
+                                                            const clause = r.clauseId
+                                                                ? reg.clauses?.find(c => c.id === r.clauseId)
+                                                                : null;
+                                                            return clause
+                                                                ? <span className="text-sky-500">§{clause.number}</span>
+                                                                : null;
+                                                        })()}
+                                                    </Link>
+                                                    {edition && <span className="text-gray-400">{edition}</span>}
+                                                    {reg.lastAmendedAt && <span className="text-gray-400">last change {reg.lastAmendedAt}</span>}
+                                                    {reg.versionState === 'newer_available' && (
+                                                        <span className="font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                                                            Newer version available
+                                                        </span>
+                                                    )}
+                                                    {reg.versionState === 'repealed' && reg.status !== 'expired' && (
+                                                        <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
+                                                            Repealed on EUR-Lex
+                                                        </span>
+                                                    )}
+                                                    {/* Expiry is OUR decision and it stops work, so it outranks the
+                                                        EUR-Lex verdict in the row rather than sitting beside it. */}
+                                                    {reg.status === 'expired' && (
+                                                        <span className={`font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+                                                            blockedRegulationIds.has(reg.id)
+                                                                ? 'bg-rose-600 text-white'
+                                                                : 'text-amber-800 bg-amber-50 border border-amber-200'
+                                                        }`}>
+                                                            <Ban size={9} />
+                                                            {blockedRegulationIds.has(reg.id)
+                                                                ? 'Expired — blocking new requests'
+                                                                : 'Expired, replaced'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                         <p className="text-gray-600 text-xs leading-relaxed mb-3">{r.description}</p>
                                         
                                         <div className="bg-light p-2.5 rounded-xl border border-gray-100 flex flex-wrap gap-x-6 gap-y-2 items-center">
@@ -692,13 +799,95 @@ const ComplianceLibrary: React.FC = () => {
                 />
               </div>
               
+              {/* The regulation behind this requirement (migration 139). Optional on purpose:
+                  BOM, exploded views and packaging artwork are real asks with no law behind
+                  them, and forcing a pseudo-regulation for those would pollute the library. */}
+              <div className="bg-sky-50/50 border border-sky-200 p-4 rounded-xl space-y-2">
+                <label className="block text-sm font-medium text-sky-900 mb-1 flex items-center gap-1.5">
+                  <Scale size={14} /> Regulation
+                </label>
+                <select
+                  className="w-full border border-gray-300 p-2.5 rounded-md text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={editingItem.regulationId || ''}
+                  onChange={e => applyRegulationLink(editingItem, e.target.value || null)}
+                >
+                  <option value="">— No regulation (document request only) —</option>
+                  {regulations.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.referenceCode} — {r.title.length > 70 ? `${r.title.slice(0, 70)}…` : r.title}
+                      {r.status === 'superseded' ? ' (superseded)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const reg = editingItem.regulationId ? regulationById.get(editingItem.regulationId) : null;
+                  const clauses = reg?.clauses ?? [];
+                  if (reg && clauses.length > 0) {
+                    return (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-sky-900 mb-1 mt-2">
+                          Narrow to a clause (optional)
+                        </label>
+                        <select
+                          className="w-full border border-gray-300 p-2 rounded-md text-xs bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                          value={editingItem.clauseId || ''}
+                          onChange={e => applyClauseLink(editingItem, e.target.value || null)}
+                        >
+                          <option value="">— The whole regulation —</option>
+                          {clauses.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {[c.number, c.qualifier].filter(Boolean).join(' ')}
+                              {c.title ? ` — ${c.title}` : ''}
+                              {c.amendedIn ? ` (changed in ${c.amendedIn})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+                {(() => {
+                  const reg = editingItem.regulationId ? regulationById.get(editingItem.regulationId) : null;
+                  if (!reg) {
+                    return (
+                      <p className="text-[11px] text-gray-500">
+                        Link this to the regulation that demands it and the whole library — summary,
+                        version, and what the manual must contain — hangs off one row. Leave it unset
+                        for a document you simply need, like a BOM or packaging artwork.
+                      </p>
+                    );
+                  }
+                  const edition = [reg.version, reg.editionYear ? String(reg.editionYear) : ''].filter(Boolean).join(' · ');
+                  return (
+                    <div className="text-[11px] text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {edition && <span className="font-semibold">{edition}</span>}
+                      {reg.lastAmendedAt && <span>last change {reg.lastAmendedAt}</span>}
+                      {reg.versionState === 'newer_available' && (
+                        <span className="text-amber-700 font-semibold">A newer version exists</span>
+                      )}
+                      {reg.versionState === 'repealed' && (
+                        <span className="text-rose-700 font-semibold">Repealed</span>
+                      )}
+                      <Link to={`/regulations/${reg.id}`} className="text-indigo-600 hover:underline ml-auto">
+                        Open regulation →
+                      </Link>
+                    </div>
+                  );
+                })()}
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Reference Code (Optional)</label>
                     <input 
                         placeholder="e.g. EN-60335-1" 
-                        className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
+                        className="w-full border border-gray-300 p-2.5 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-50 disabled:text-gray-400" 
                         value={editingItem.referenceCode || ''} 
+                        disabled={!!editingItem.regulationId}
+                        title={editingItem.regulationId
+                          ? 'Taken from the linked regulation, so the two can never disagree.'
+                          : undefined}
                         onChange={e => setEditingItem({...editingItem, referenceCode: e.target.value})} 
                     />
                 </div>

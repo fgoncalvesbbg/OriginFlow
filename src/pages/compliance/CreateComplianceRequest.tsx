@@ -1,17 +1,18 @@
 /** Form page for creating a new compliance request for a supplier/category. */
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
   getProjects, getSuppliers, getCategories, createComplianceRequest,
   getComplianceRequirements, getCategoryAttributes,
   getProjectSkus, getAttributeRequestsByProject, getEffectiveSkuValue,
+  getRegulations, collectBlocks,
 } from '../../services';
-import { Project, Supplier, CategoryL3, ComplianceRequirement, CategoryAttribute } from '../../types';
+import { Project, Supplier, CategoryL3, ComplianceRequirement, CategoryAttribute, Regulation } from '../../types';
 import { CategorySelect } from '../../components/common/CategorySelect';
 import { getAttributesForCategory } from '../../utils';
 import AttributeInput from '../../components/common/AttributeInput';
-import { AlertCircle, ArrowLeft, Loader2, Lock, GitBranch } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, Lock, GitBranch, Scale } from 'lucide-react';
 
 const CreateComplianceRequest: React.FC = () => {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ const CreateComplianceRequest: React.FC = () => {
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
+  const [regulations, setRegulations] = useState<Regulation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -46,12 +48,13 @@ const CreateComplianceRequest: React.FC = () => {
         setLoading(true);
         // Load data in parallel. We wrap each in a catch to log errors but ideally allow others to succeed if possible,
         // though for this form most are critical.
-        const [pData, sData, cData, rData, aData] = await Promise.all([
+        const [pData, sData, cData, rData, aData, regData] = await Promise.all([
            getProjects(),
            getSuppliers(),
            getCategories(),
            getComplianceRequirements(),
            getCategoryAttributes(),
+           getRegulations(),
         ]);
 
         setProjects(pData);
@@ -59,6 +62,7 @@ const CreateComplianceRequest: React.FC = () => {
         setCategories(cData);
         setRequirements(rData);
         setAttributes(aData);
+        setRegulations(regData);
 
       } catch (err: any) {
         console.error("Critical load error", err);
@@ -99,6 +103,27 @@ const CreateComplianceRequest: React.FC = () => {
     .map(id => attributes.find(a => a.id === id))
     .filter((a): a is CategoryAttribute => !!a);
   const missingRequired = Array.from(requiredAttrIds).some(id => !(condValues[id]?.trim()));
+
+  /**
+   * Expired regulations behind the requirements this request would carry (migration 140).
+   *
+   * Deliberately scoped to the CATEGORY, not to the conditions: a conditional requirement
+   * that today's attribute values happen to exclude is still part of what this request
+   * means, and a supplier can be asked for it later. Blocking on the wider set is the
+   * cautious direction, and the message names the regulation either way.
+   *
+   * A request already sent is NOT affected — the supplier did nothing wrong, and stranding
+   * their work to signal an internal library problem is the wrong trade. The internal
+   * request detail flags those instead.
+   */
+  const regulationBlocks = useMemo(() => {
+    if (!categoryId) return [];
+    const byId = new Map(regulations.map(r => [r.id, r]));
+    const cited = requirements
+      .filter(r => r.categoryId == null || r.categoryId === categoryId)
+      .map(r => (r.regulationId ? byId.get(r.regulationId) : null));
+    return collectBlocks(cited, regulations);
+  }, [categoryId, requirements, regulations]);
 
   // Prefill condition attributes from existing project SKU / attribute-request data.
   useEffect(() => {
@@ -154,6 +179,20 @@ const CreateComplianceRequest: React.FC = () => {
     e.preventDefault();
     if (missingRequired) {
         alert('Please provide values for the required product attributes before creating the request.');
+        return;
+    }
+    // Guarded here as well as on the disabled button: this handler is the one that actually
+    // writes the request, and a gate that only lives in a disabled attribute is not a gate.
+    if (regulationBlocks.length > 0) {
+        alert(
+            [
+                'This request cannot be created yet:',
+                '',
+                ...regulationBlocks.map(b => `• ${b.message}`),
+                '',
+                'Fix it in the Regulations library, then come back.',
+            ].join('\n'),
+        );
         return;
     }
     setSubmitting(true);
@@ -314,9 +353,47 @@ const CreateComplianceRequest: React.FC = () => {
             </div>
           )}
 
+          {regulationBlocks.length > 0 && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+              <div className="flex items-start gap-2">
+                <Scale size={16} className="text-rose-600 mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-rose-900">
+                    {regulationBlocks.length === 1
+                      ? 'An expired regulation is blocking this request'
+                      : `${regulationBlocks.length} expired regulations are blocking this request`}
+                  </h3>
+                  <p className="text-xs text-rose-800 mt-1">
+                    This category asks suppliers for evidence against{' '}
+                    {regulationBlocks.length === 1 ? 'a regulation that is' : 'regulations that are'}{' '}
+                    no longer valid. Requests already sent are unaffected.
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {regulationBlocks.map(b => (
+                      <li key={b.regulationId} className="text-xs text-rose-800">
+                        <Link
+                          to={`/regulations/${b.regulationId}`}
+                          className="font-mono font-bold underline hover:text-rose-950"
+                        >
+                          {b.referenceCode}
+                        </Link>
+                        {' — '}{b.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end pt-4">
             <button type="button" onClick={() => navigate(-1)} className="px-6 py-2 text-gray-600 hover:bg-light mr-3 rounded">Cancel</button>
-            <button type="submit" disabled={submitting || missingRequired} className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={submitting || missingRequired || regulationBlocks.length > 0}
+              title={regulationBlocks.length > 0 ? 'An expired regulation must be replaced first' : undefined}
+              className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
               {submitting && <Loader2 size={16} className="animate-spin" />}
               {submitting ? 'Creating...' : 'Create & Generate Code'}
             </button>

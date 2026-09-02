@@ -34,6 +34,10 @@ import SupplierCompliancePortal from '../pages/compliance/SupplierCompliancePort
 import SupplierCompliancePortalList from '../pages/compliance/SupplierCompliancePortalList';
 import ComplianceLibrary from '../pages/compliance/ComplianceLibrary';
 
+// Regulations — the single regulation library both the TCF and the IM read from
+import RegulationsPage from '../pages/regulations/RegulationsPage';
+import RegulationDetail from '../pages/regulations/RegulationDetail';
+
 // IM Pages
 import IMDashboard from '../pages/im/IMDashboard';
 import IMTemplateEditor from '../pages/im/IMTemplateEditor';
@@ -170,6 +174,20 @@ const AppContent: React.FC = () => {
           <Route path="/compliance/request/:id" element={
             <ProtectedRoute>
               <ComplianceRequestDetail />
+            </ProtectedRoute>
+          } />
+
+          {/* Protected Regulations Module — the shared regulation brain (migration 139).
+              Top level rather than under /compliance or /im because both read from it;
+              filing it under either would have made it look owned by that one. */}
+          <Route path="/regulations" element={
+            <ProtectedRoute>
+              <RegulationsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/regulations/:regulationId" element={
+            <ProtectedRoute>
+              <RegulationDetail />
             </ProtectedRoute>
           } />
 

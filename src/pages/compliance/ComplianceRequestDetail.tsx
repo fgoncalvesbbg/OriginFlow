@@ -1,14 +1,14 @@
 
 /** Compliance request detail: review a request, its requirements, and supplier responses. */
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
 import Layout from '../../components/Layout';
 import {
   getComplianceRequestById, getComplianceRequirements,
   getCategories, submitComplianceResponse, deleteComplianceRequest,
   addDocument, uploadFile, getProjectDocs, COMPLIANCE_SECTIONS, getSupplierById,
-  getProjectById
+  getProjectById, getRegulations, collectBlocks
 } from '../../services';
 import { useAuth } from '../../context/AuthContext';
 import { useRefetchOnFocus } from '../../hooks';
@@ -16,9 +16,9 @@ import { passesFeatureGate } from '../../utils';
 import {
   ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
-  DocStatus, ResponsibleParty, Supplier, Project
+  DocStatus, ResponsibleParty, Supplier, Project, Regulation
 } from '../../types';
-import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck, RefreshCw } from 'lucide-react';
+import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertCircle, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck, RefreshCw } from 'lucide-react';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -50,6 +50,7 @@ const ComplianceRequestDetail: React.FC = () => {
   const [project, setProject] = useState<Project | null>(null);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [category, setCategory] = useState<CategoryL3 | null>(null);
+  const [regulations, setRegulations] = useState<Regulation[]>([]);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -74,11 +75,13 @@ const ComplianceRequestDetail: React.FC = () => {
   const loadData = async () => {
     if (!id) return;
     try {
-      const [r, allReqs, allCats] = await Promise.all([
+      const [r, allReqs, allCats, allRegs] = await Promise.all([
         getComplianceRequestById(id),
         getComplianceRequirements(),
-        getCategories()
+        getCategories(),
+        getRegulations()
       ]);
+      setRegulations(allRegs);
 
       if (r) {
         setReq(r);
@@ -402,6 +405,27 @@ LaunchFlow PLM Platform`;
   // here but must not be able to rewrite what was answered.
   const isLocked = req.status !== ComplianceRequestStatus.PENDING_SUPPLIER;
 
+  /**
+   * Expired regulations behind THIS request's requirements (migration 140).
+   *
+   * A request already sent is deliberately NOT blocked — the supplier did nothing wrong, and
+   * stranding their work to signal an internal library problem is the wrong trade. It is
+   * flagged here instead, so a reviewer sees it before signing anything off.
+   */
+  const blockedRequirementIds = useMemo(() => {
+    if (regulations.length === 0) return new Map<string, string>();
+    const byId = new Map(regulations.map(r => [r.id, r]));
+    const out = new Map<string, string>();
+    for (const requirement of requirements) {
+      if (!requirement.regulationId) continue;
+      const regulation = byId.get(requirement.regulationId);
+      if (!regulation) continue;
+      const [block] = collectBlocks([regulation], regulations);
+      if (block) out.set(requirement.id, block.regulationId);
+    }
+    return out;
+  }, [requirements, regulations]);
+
   const groupedReqs = requirements.reduce((acc, r) => {
       const sec = r.section || 'General Requirements';
       if (!acc[sec]) acc[sec] = [];
@@ -527,6 +551,19 @@ LaunchFlow PLM Platform`;
                             <div className="flex flex-col md:flex-row gap-6">
                             <div className="flex-1">
                                 <h4 className="font-bold text-primary">{r.title}</h4>
+                                {blockedRequirementIds.has(r.id) && (
+                                    <p className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded px-2 py-1 my-1 inline-flex items-center gap-1.5">
+                                        <AlertCircle size={11} className="shrink-0" />
+                                        The regulation behind this has expired with no replacement recorded.{' '}
+                                        <Link
+                                            to={`/regulations/${blockedRequirementIds.get(r.id)}`}
+                                            className="underline font-semibold hover:text-rose-950"
+                                        >
+                                            Review it
+                                        </Link>{' '}
+                                        before approving.
+                                    </p>
+                                )}
                                 <p className="text-sm text-gray-600 mb-4">{r.description}</p>
                                 
                                 {/* Standardized Rules Bar for PM Review */}

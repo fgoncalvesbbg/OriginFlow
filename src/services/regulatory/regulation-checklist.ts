@@ -33,7 +33,8 @@ import { db, withDeadline, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { tmHash128 } from '../im/im-tm-hash';
 import { parseBulletLines } from './regulation-notes';
-import type { TemplateRegulation } from '../../types';
+import { appliesToIM } from './obligation-parse';
+import type { Regulation, TemplateRegulation } from '../../types';
 
 const TAG = '[regulatory]';
 const READ_TIMEOUT_MS = 12000;
@@ -56,7 +57,62 @@ export interface ChecklistItem {
   /** Every regulation whose checklist contains this item (deduped by key). */
   regulationIds: string[];
   regulationReferences: string[];
+  /**
+   * The clause imposing it, e.g. "7.12.5" (migration 141). Undefined for an obligation whose
+   * source line never named one, and for every item still coming from the legacy text blob.
+   */
+  clause?: string;
+  clauseTitle?: string;
+  /** Wording that must appear word-for-word, when the obligation mandates some. */
+  verbatim?: string;
+  /**
+   * True when the manual is only an OPTIONAL carrier — the obligation is really discharged on
+   * the rating label or the packaging, and the manual may repeat it. Shown as a hint so a
+   * publisher does not chase a requirement that is not theirs to satisfy.
+   */
+  imOptional?: boolean;
 }
+
+/**
+ * Obligations a MANUAL can satisfy, in document order.
+ *
+ * Two sources, in priority order (migration 141):
+ *   1. `regulation.obligations` rows, filtered to those the IM carries.
+ *   2. the legacy `regulation.checklist` text, when a regulation has no rows yet — so a
+ *      regulation nobody has broken out still contributes its items instead of none.
+ *
+ * The carrier filter removes obligations a manual cannot satisfy. Measured against the live
+ * library on 2026-09-02 it currently removes NOTHING — every recorded obligation either names
+ * IM as a carrier or has no carriers yet — so its value today is the weaker `imOptional`
+ * signal (3 obligations, e.g. the CE and WEEE marks: a label obligation the manual may
+ * repeat, not one the publisher has to satisfy). It starts earning its keep the moment
+ * somebody records a label-only or packaging-only obligation, which the vocabulary now makes
+ * expressible. Stated plainly because the opposite is easy to assume from the code.
+ *
+ * An obligation with NO carriers recorded is INCLUDED: unclassified means "nobody has
+ * looked", not "not the manual's problem".
+ */
+const imObligations = (regulation: Regulation): Array<{
+  text: string; clause?: string; clauseTitle?: string; verbatim?: string; imOptional?: boolean;
+}> => {
+  const rows = regulation.obligations;
+  if (rows && rows.length > 0) {
+    const clauseById = new Map((regulation.clauses ?? []).map(c => [c.id, c]));
+    return rows
+      .filter(o => appliesToIM(o))
+      .map(o => {
+        const clause = o.clauseId ? clauseById.get(o.clauseId) : undefined;
+        return {
+          text: o.text,
+          clause: clause ? [clause.number, clause.qualifier].filter(Boolean).join(' ') : undefined,
+          clauseTitle: clause?.title,
+          verbatim: o.verbatim,
+          imOptional: o.carriers.length > 0 && !o.carriers.includes('IM'),
+        };
+      });
+  }
+  return parseRegulationChecklist(regulation.checklist).map(text => ({ text }));
+};
 
 /** Split a regulation's `checklist` column into items. Same convention as its notes. */
 export const parseRegulationChecklist = (checklist?: string | null): string[] =>
@@ -101,7 +157,8 @@ export const buildTemplateChecklist = (assignments: TemplateRegulation[]): Check
   for (const a of assignments) {
     const reg = a.regulation;
     if (!reg) continue;
-    for (const text of parseRegulationChecklist(reg.checklist)) {
+    for (const o of imObligations(reg)) {
+      const text = o.text;
       const key = checklistItemKey(text);
       // A blank-after-normalization line (e.g. a lone "-") is not an obligation.
       if (!key || !text.trim()) continue;
@@ -112,9 +169,19 @@ export const buildTemplateChecklist = (assignments: TemplateRegulation[]): Check
           text: text.trim(),
           regulationIds: [reg.id],
           regulationReferences: [reg.referenceCode],
+          clause: o.clause,
+          clauseTitle: o.clauseTitle,
+          verbatim: o.verbatim,
+          imOptional: o.imOptional,
         });
         continue;
       }
+      // Two regulations stating the same obligation share one confirmation. The first one
+      // seen supplies the clause shown; citing both would need the row to name a clause per
+      // regulation, which is more precision than a tick box can carry.
+      if (!existing.clause && o.clause) existing.clause = o.clause;
+      // Only stays "optional for the manual" if EVERY regulation stating it says so.
+      if (!o.imOptional) existing.imOptional = false;
       if (!existing.regulationIds.includes(reg.id)) {
         existing.regulationIds.push(reg.id);
         existing.regulationReferences.push(reg.referenceCode);

@@ -12,8 +12,19 @@
  * succeeds while they are on the internal network/VPN. Everything here therefore treats
  * "unreachable" as an ordinary, expected outcome rather than an error to shout about.
  *
- * The API has no authentication by design (anyone who can reach the URL can read it), so
- * these are plain GETs with no credentials attached.
+ * AUTH AND CORS (changed on ProductToolkit's side, 2026-09-01)
+ * The API used to be unauthenticated with open CORS. It now answers
+ *   401 {"code":"AUTH_REQUIRED","loginUrl":"/auth/login"}
+ * and returns `Access-Control-Allow-Origin: https://producttoolkit.chal-tec.local` — its own
+ * origin — together with `Access-Control-Allow-Credentials: true`.
+ *
+ * Two consequences, neither fixable here:
+ *  - A browser refuses to hand us any response whose ACAO does not match OriginFlow's origin,
+ *    so the fetch rejects at the network level and we cannot even see the 401. ProductToolkit
+ *    has to echo OriginFlow's origin before any browser call can work.
+ *  - Once it does, the request still needs a session. We send `credentials: 'include'` so an
+ *    operator already signed in to ProductToolkit in the same browser is authenticated by
+ *    their existing cookie; that pairs with the ACAC:true they already return.
  *
  * Trust boundary: the definitions are human-curated — "which attributes the team decided
  * matter for this category" — NOT a live read of Akeneo's own family requirements. They
@@ -83,9 +94,14 @@ export interface PtAttribute {
 export class ProductToolkitUnavailableError extends Error {
   constructor(public readonly url: string, cause?: unknown) {
     super(
-      `Could not reach ProductToolkit at ${url}. This API is published only on the internal ` +
-      `network, so it is unreachable off the VPN. If you are on the network, the host's TLS ` +
-      `certificate may not be trusted by this browser — that also surfaces as a connection failure.`,
+      `Could not reach ProductToolkit at ${url}. The browser reports a network-level failure, ` +
+      `which hides which of these it is:\n` +
+      `1. ProductToolkit is not allowing this site — it now returns its OWN origin in ` +
+      `Access-Control-Allow-Origin, so the browser discards the response before OriginFlow ` +
+      `sees it. It must echo this site's origin instead. This is the most likely cause.\n` +
+      `2. Not on the internal network/VPN — the host is only published there.\n` +
+      `3. Its TLS certificate is not trusted by this browser (it is issued by an internal CA).\n` +
+      `A signed-in ProductToolkit session is also required once the above is fixed.`,
     );
     this.name = 'ProductToolkitUnavailableError';
     this.cause = cause;
@@ -99,6 +115,12 @@ const getJson = async <T>(path: string): Promise<{ status: number; body: T | nul
     res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      // ProductToolkit now requires a session. Including credentials lets an operator who is
+      // already signed in to it in this browser authenticate with their existing cookie,
+      // rather than OriginFlow having to hold a second credential. Requires ProductToolkit to
+      // return our exact origin in Access-Control-Allow-Origin (a wildcard is rejected by the
+      // browser whenever credentials are included).
+      credentials: 'include',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
@@ -107,6 +129,12 @@ const getJson = async <T>(path: string): Promise<{ status: number; body: T | nul
     throw new ProductToolkitUnavailableError(url, err);
   }
   if (res.status === 404) return { status: 404, body: null };
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(
+      `ProductToolkit requires a signed-in session (${res.status}). Open ` +
+      `${baseUrl().replace(/\/api\/.*$/, '')}/auth/login in this browser, sign in, then retry.`,
+    );
+  }
   if (!res.ok) throw new Error(`ProductToolkit responded ${res.status} for ${path}`);
   return { status: res.status, body: (await res.json()) as T };
 };

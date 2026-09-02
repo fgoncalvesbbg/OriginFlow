@@ -230,6 +230,19 @@ describe('getRegulationUsageCounts', () => {
     expect(await getRegulationUsageCounts()).toEqual({ 'reg-1': 2 });
   });
 
+  it('still counts an EXPIRED regulation by category, but never a superseded one', async () => {
+    // Migration 140 widened the read from status='active' to "not superseded" so that an
+    // expired regulation keeps applying and therefore keeps BLOCKING. The superseded half
+    // of that rule is the easy thing to lose in the same edit, so both are asserted here.
+    results.byTable.im_template_regulations = [];
+    results.byTable.im_templates = [{ id: 't-hob', category_id: 'cat-hob' }];
+    results.byTable.regulations = [
+      row({ id: 'reg-expired', status: 'expired', applicable_categories: ['cat-hob'] }),
+      row({ id: 'reg-retired', status: 'superseded', applicable_categories: ['cat-hob'] }),
+    ];
+    expect(await getRegulationUsageCounts()).toEqual({ 'reg-expired': 1 });
+  });
+
   it('counts a template once when it is both explicitly assigned and category-covered', async () => {
     results.byTable.im_template_regulations = [{ regulation_id: 'reg-1', template_id: 't1' }];
     results.byTable.im_templates = [{ id: 't1', category_id: 'cat-hob' }];

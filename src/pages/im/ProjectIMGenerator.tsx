@@ -19,6 +19,7 @@ import {
     getIMShares, createIMShare, getIMReviewUrl,
     getReviewComments, setReviewCommentStatus, setProjectIMReviewRequested,
     getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
+    getRegulations, collectBlocks, summarizeBlocks,
     getTemplateChecklistState, summarizeChecklist, groupChecklistByRegulation
 } from '../../services';
 import type { ChecklistItem, ChecklistItemState, ChecklistItemStatus } from '../../services';
@@ -70,7 +71,7 @@ import { OptionalContentPanel, IncludeModeControl, modeOf, type OptionalContentI
 import { BindableField } from './project-im-generator/BindableField';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import PipelineStepper, { type PipelineStep } from './project-im-generator/PipelineStepper';
-import type { TemplateRegulation } from '../../types';
+import type { Regulation, TemplateRegulation } from '../../types';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 import { usePrintColumn } from './editor/usePrintColumn';
 import { imContentPrintScale, imContentVars } from './editor/im-content-style';
@@ -662,6 +663,9 @@ const ProjectIMGenerator: React.FC = () => {
   // The assignments the items were built from — the review panel groups by regulation, and
   // only the assignment carries the citation and title to head each group with.
   const [regAssignments, setRegAssignments] = useState<TemplateRegulation[]>([]);
+  // The whole library, not just what this template answers for: resolving an expired
+  // regulation's replacement chain walks rows nobody assigned here (migration 140).
+  const [regLibrary, setRegLibrary] = useState<Regulation[]>([]);
   const [regChecklistState, setRegChecklistState] = useState<Record<string, ChecklistItemState>>({});
   const [regChecklistBusy, setRegChecklistBusy] = useState<string | null>(null);
   const [regChecklistError, setRegChecklistError] = useState('');
@@ -672,19 +676,21 @@ const ProjectIMGenerator: React.FC = () => {
   const [regTemplateState, setRegTemplateState] = useState<Record<string, ChecklistItemState>>({});
 
   useEffect(() => {
-      if (!template?.id || !projectId) { setRegChecklist([]); setRegAssignments([]); setRegChecklistState({}); setRegTemplateState({}); return; }
+      if (!template?.id || !projectId) { setRegChecklist([]); setRegAssignments([]); setRegLibrary([]); setRegChecklistState({}); setRegTemplateState({}); return; }
       let alive = true;
       Promise.all([
           getTemplateRegulations(template.id, template.categoryId),
           getChecklistState(projectId, templateType),
           getTemplateChecklistState(template.id),
+          getRegulations(),
       ])
-          .then(([assignments, state, templateState]) => {
+          .then(([assignments, state, templateState, library]) => {
               if (!alive) return;
               setRegChecklist(buildTemplateChecklist(assignments));
               setRegAssignments(assignments);
               setRegChecklistState(state);
               setRegTemplateState(templateState);
+              setRegLibrary(library);
           })
           .catch(e => console.error('[ProjectIMGenerator] regulatory checklist unavailable:', e));
       return () => { alive = false; };
@@ -694,6 +700,19 @@ const ProjectIMGenerator: React.FC = () => {
   // The same items, split by the regulation that imposes them — how a reviewer reads a
   // checklist. Derived rather than stored: the grouping is a view of `regAssignments`.
   const regChecklistGroups = groupChecklistByRegulation(regAssignments);
+
+  /**
+   * Expired regulations this manual answers for that have no replacement recorded
+   * (migration 140). These STOP the publish — the one regulatory thing that does. The
+   * checklist deliberately never blocks (a checklist that blocks only teaches people to
+   * tick everything), but a manual published against a law that is no longer valid is a
+   * different kind of wrong: no amount of ticking makes it right, and the fix is one edit
+   * in the library rather than anything in this editor.
+   */
+  const regBlocks = useMemo(
+    () => collectBlocks(regAssignments.map(a => a.regulation), regLibrary),
+    [regAssignments, regLibrary],
+  );
 
   /**
    * Record or clear one item's decision. Written immediately (there is no Save button in
@@ -1309,6 +1328,21 @@ const ProjectIMGenerator: React.FC = () => {
       }
       // Don't publish on top of another in-flight operation (see handleSaveDraft).
       if (isBusy) return;
+
+      // The publish button is already disabled while a regulation is expired, but this is
+      // the function that actually writes the manual, and it is reachable from the "publish
+      // straight away" path where no panel was ever shown. A gate that only lives in a
+      // disabled attribute is not a gate.
+      if (regBlocks.length > 0) {
+          setPublishArmed(true);
+          setActivePanel('publish');
+          alert(
+              `This ${IM_TEMPLATE_TYPE_LABELS[templateType].toLowerCase()} cannot be published: ` +
+              `${summarizeBlocks(regBlocks)} Record its replacement in the Regulations library, ` +
+              `or set it back to Active if it was expired by mistake.`,
+          );
+          return;
+      }
 
       setGenerating(true);
       setPublishStatus('Preparing…');
@@ -3348,6 +3382,22 @@ const ProjectIMGenerator: React.FC = () => {
   const buildPublishIssues = (): PublishIssue[] => {
     const issues: PublishIssue[] = [];
     const seen = new Set<string>();
+
+    // Hard requirement: every regulation this manual answers for must still be valid. An
+    // expired one with a replacement recorded is fine — the successor's obligations apply
+    // instead (see regulation-lifecycle.ts). Listed first because it is the only blocker
+    // fixed outside this editor, so an operator should not hunt for it under the fields.
+    for (const block of regBlocks) {
+      issues.push({
+        key: `blocking:expired-regulation:${block.regulationId}`,
+        kind: 'blocking',
+        label: `${block.referenceCode} is expired.`,
+        detail: `${block.message} Until then this ${IM_TEMPLATE_TYPE_LABELS[templateType].toLowerCase()} cannot be published.`,
+        // Fixed in the Regulations library, not in this editor — the panel renders it as
+        // plain text rather than as a button that goes nowhere.
+        target: null,
+      });
+    }
 
     // Hard requirement: an IM must be bound to at least one SKU (and the project must have one).
     const boundCount = boundSkuIds.length ? projectSkus.filter(s => boundSkuIds.includes(s.id)).length : projectSkus.length;

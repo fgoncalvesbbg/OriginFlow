@@ -810,9 +810,9 @@
     "semantic_hash": ""
   },
   "src/app/App.tsx": {
-    "mtime": 1787944322.74377,
-    "seen": 1788113944.6626937,
-    "ast_hash": "5f743718acff2046a340d31440e99a32",
+    "mtime": 1788338774.138286,
+    "seen": 1788357134.3165336,
+    "ast_hash": "72b8519fe6b5daa8f0c54088ff3c93e0",
     "semantic_hash": ""
   },
   "src/app/main.tsx": {
@@ -828,15 +828,15 @@
     "semantic_hash": ""
   },
   "src/components/Breadcrumbs.tsx": {
-    "mtime": 1785421456.4165943,
-    "seen": 1787843281.2440686,
-    "ast_hash": "1d5a940441494d0a332445fa97039206",
+    "mtime": 1788338774.1400743,
+    "seen": 1788357134.3165383,
+    "ast_hash": "29640030ca8cf3d43c703641eda7a0c2",
     "semantic_hash": ""
   },
   "src/components/Layout.tsx": {
-    "mtime": 1787588564.3429718,
-    "seen": 1787843281.2440703,
-    "ast_hash": "1fa8e595dc7e4ac438a3805406a757c5",
+    "mtime": 1788338784.768664,
+    "seen": 1788357134.3165414,
+    "ast_hash": "eaea07903aea8539ca486cdc399bc649",
     "semantic_hash": ""
   },
   "src/components/Logo.tsx": {
@@ -954,9 +954,9 @@
     "semantic_hash": ""
   },
   "src/config/im.constants.ts": {
-    "mtime": 1787912638.6506994,
-    "seen": 1787914392.016553,
-    "ast_hash": "97a1bcdfb165fc3e42ce3420d71dc3fb",
+    "mtime": 1788333737.4077663,
+    "seen": 1788357134.3165972,
+    "ast_hash": "368f67cacc9314303af784beb875a2fb",
     "semantic_hash": ""
   },
   "src/config/routes.config.ts": {
@@ -1170,21 +1170,21 @@
     "semantic_hash": ""
   },
   "src/pages/compliance/ComplianceLibrary.tsx": {
-    "mtime": 1787913948.2282505,
-    "seen": 1787914392.0167065,
-    "ast_hash": "55d8d8a0deefed971b2c2f45daa72138",
+    "mtime": 1788348082.843923,
+    "seen": 1788357134.3166957,
+    "ast_hash": "e377f741147137bbf3b2ecd4bc765477",
     "semantic_hash": ""
   },
   "src/pages/compliance/ComplianceRequestDetail.tsx": {
-    "mtime": 1787602719.460492,
-    "seen": 1787843281.2442029,
-    "ast_hash": "af5035e0c75235bbbe70ff04d28fa09c",
+    "mtime": 1788346070.4170668,
+    "seen": 1788357134.3166974,
+    "ast_hash": "d688f3ee427efc6591042e1656032583",
     "semantic_hash": ""
   },
   "src/pages/compliance/CreateComplianceRequest.tsx": {
-    "mtime": 1787913973.0033069,
-    "seen": 1787914392.0167115,
-    "ast_hash": "3d5522a46cd6d699bca7f3591eaaac08",
+    "mtime": 1788345805.7199018,
+    "seen": 1788357134.3166988,
+    "ast_hash": "dc31f042b57f768a56a24e33e1a166c7",
     "semantic_hash": ""
   },
   "src/pages/compliance/SupplierCompliancePortal.tsx": {
@@ -1206,15 +1206,15 @@
     "semantic_hash": ""
   },
   "src/pages/im/IMDashboard.tsx": {
-    "mtime": 1787914077.4315877,
-    "seen": 1787914392.0167217,
-    "ast_hash": "12e95d555be4345f4530576c10a52b2a",
+    "mtime": 1788338817.726482,
+    "seen": 1788357134.316705,
+    "ast_hash": "02bc2b2b467c0edfbfad2fe804a28f9f",
     "semantic_hash": ""
   },
   "src/pages/im/IMPreview.tsx": {
-    "mtime": 1787662041.0788834,
-    "seen": 1787843281.2442122,
-    "ast_hash": "c2bca0a50b000168a91f689feb4b1de2",
+    "mtime": 1788189321.8825347,
+    "seen": 1788189582.8838885,
+    "ast_hash": "32ce6f5e3b76cf7499c72d01632535df",
     "semantic_hash": ""
   },
   "src/pages/im/IMSharedManual.tsx": {
@@ -1224,9 +1224,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/IMTemplateEditor.tsx": {
-    "mtime": 1787916643.3173048,
-    "seen": 1787931266.2845337,
-    "ast_hash": "c3da0c8810908b1cf60c8779da24d800",
+    "mtime": 1788189059.3076944,
+    "seen": 1788189582.8839018,
+    "ast_hash": "6ad29d719c623bf65f01509e9d010c40",
     "semantic_hash": ""
   },
   "src/pages/im/IMViewerTab.tsx": {
@@ -1242,9 +1242,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/ProjectIMGenerator.tsx": {
-    "mtime": 1788171552.9462123,
-    "seen": 1788172042.3617342,
-    "ast_hash": "ab137486ab11e534e60cadce2e0e3ee5",
+    "mtime": 1788345668.8521955,
+    "seen": 1788357134.316726,
+    "ast_hash": "f76e38deff35cbadcee8ed26e89d6a50",
     "semantic_hash": ""
   },
   "src/pages/im/ProjectImImportDialog.tsx": {
@@ -1296,9 +1296,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/PrintExportDialog.tsx": {
-    "mtime": 1787843522.7234116,
-    "seen": 1787846808.341762,
-    "ast_hash": "79f47b429d62cfc59e69bc3e1f00912b",
+    "mtime": 1788333777.496027,
+    "seen": 1788357134.3167663,
+    "ast_hash": "f7c84ed55d2aead204359b059f30e91d",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/im-content.utils.test.ts": {
@@ -1428,9 +1428,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/compliance-requirement.service.ts": {
-    "mtime": 1788106468.683761,
-    "seen": 1788113944.6632822,
-    "ast_hash": "cac4e3d87afec63b56f3bbf9e6969665",
+    "mtime": 1788348043.1572807,
+    "seen": 1788357134.3168604,
+    "ast_hash": "795a8a5f0c5e89202798f60cdbd69fa2",
     "semantic_hash": ""
   },
   "src/services/compliance/compliance.service.ts": {
@@ -1638,9 +1638,9 @@
     "semantic_hash": ""
   },
   "src/services/index.ts": {
-    "mtime": 1788186932.3005798,
-    "seen": 1788188453.8913472,
-    "ast_hash": "2e488b1dcd93ae9497a6e4d119a02433",
+    "mtime": 1788352850.200031,
+    "seen": 1788357134.3170424,
+    "ast_hash": "d3b82e85f361e6cab3adf4d7d0ba096e",
     "semantic_hash": ""
   },
   "src/services/manufacturing/index.ts": {
@@ -1794,9 +1794,9 @@
     "semantic_hash": ""
   },
   "src/types/compliance.types.ts": {
-    "mtime": 1788106165.9684966,
-    "seen": 1788113944.663997,
-    "ast_hash": "255d895620957378badaf3f0a0ee3aa4",
+    "mtime": 1788348043.1572807,
+    "seen": 1788357134.317131,
+    "ast_hash": "0f6f790b034480c0f11968f212f40b5d",
     "semantic_hash": ""
   },
   "src/types/im.types.ts": {
@@ -1806,9 +1806,9 @@
     "semantic_hash": ""
   },
   "src/types/index.ts": {
-    "mtime": 1788115099.5795891,
-    "seen": 1788115621.7271314,
-    "ast_hash": "1830a238f4605d037c6c1458b0e3474f",
+    "mtime": 1788347426.6294384,
+    "seen": 1788357134.3171356,
+    "ast_hash": "31ef36be4ba277828a03612557dc56f4",
     "semantic_hash": ""
   },
   "src/types/manufacturing.types.ts": {
@@ -2495,12 +2495,6 @@
     "ast_hash": "51bd6a0df6e27953c93d94db8c06cb0d",
     "semantic_hash": ""
   },
-  "src/pages/im/IMRegulationLibrary.tsx": {
-    "mtime": 1787321476.8989036,
-    "seen": 1787843281.2442136,
-    "ast_hash": "23b84f5e3255af359d09433ee7b03f12",
-    "semantic_hash": ""
-  },
   "src/pages/im/IMRegulatoryCheckModal.test.ts": {
     "mtime": 1787302690.309598,
     "seen": 1787843281.2442148,
@@ -2526,9 +2520,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/IMTemplateRegulations.tsx": {
-    "mtime": 1787322233.222102,
-    "seen": 1787843281.2442226,
-    "ast_hash": "dbb6d81c5687b1afa26c5e09ce6433ec",
+    "mtime": 1788339094.1229146,
+    "seen": 1788357134.3167174,
+    "ast_hash": "83422558e8b0552242d7293bab3a342e",
     "semantic_hash": ""
   },
   "src/pages/im/ImportPromptGuide.tsx": {
@@ -2640,9 +2634,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/RegulatoryChecklist.tsx": {
-    "mtime": 1787729537.1672843,
-    "seen": 1787843281.2442672,
-    "ast_hash": "c6e0d7757cc3fd13818a069eeb79eb5e",
+    "mtime": 1788348002.0037928,
+    "seen": 1788357134.3167713,
+    "ast_hash": "9712be8609fb7cd7000e2ec2243175e0",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/ReviewCommentsPanel.tsx": {
@@ -3150,33 +3144,33 @@
     "semantic_hash": ""
   },
   "src/services/regulatory/index.ts": {
-    "mtime": 1787326108.1985445,
-    "seen": 1787843281.2444785,
-    "ast_hash": "b65598dcbc89989e6eacfcef15bed65f",
+    "mtime": 1788352850.1970317,
+    "seen": 1788357134.3170717,
+    "ast_hash": "95d9cb18912373055433817e2f64ddb5",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation-assignment.service.test.ts": {
-    "mtime": 1787296748.0439608,
-    "seen": 1787843281.2444797,
-    "ast_hash": "e346bb2eb210804c02917420c00accfa",
+    "mtime": 1788345625.425249,
+    "seen": 1788357134.317076,
+    "ast_hash": "5e49d66a08b549a3564d5d3c5b83cb2c",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation-assignment.service.ts": {
-    "mtime": 1787296543.5105755,
-    "seen": 1787843281.244481,
-    "ast_hash": "945e53f43ffc7d46f2b8caf995b90b39",
+    "mtime": 1788346228.6539166,
+    "seen": 1788357134.3170774,
+    "ast_hash": "c80bf242b5d4f53f798f5feb969c9352",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation-checklist.test.ts": {
-    "mtime": 1787326654.6134522,
-    "seen": 1787843281.2444823,
-    "ast_hash": "c924ab179dff93f3824fac1ca9a76997",
+    "mtime": 1788347572.7184105,
+    "seen": 1788357134.317079,
+    "ast_hash": "08f38c62e2bd7bcb6ff5a782858e634c",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation-checklist.ts": {
-    "mtime": 1787326734.2049901,
-    "seen": 1787843281.2444832,
-    "ast_hash": "93b90f05e35ae8e444783897f271ace4",
+    "mtime": 1788347908.3550863,
+    "seen": 1788357134.3170803,
+    "ast_hash": "0aed0c9a12cec3c14a9293001a3edffa",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation-finding-status.test.ts": {
@@ -3204,15 +3198,15 @@
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation.service.test.ts": {
-    "mtime": 1787296923.5628853,
-    "seen": 1787843281.2444897,
-    "ast_hash": "1fd3a11cca28bb8bc76a0d9c87c27f7e",
+    "mtime": 1788346261.5828867,
+    "seen": 1788357134.317099,
+    "ast_hash": "309cd02e357344e792c7de642effcceb",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulation.service.ts": {
-    "mtime": 1787321275.2231092,
-    "seen": 1787843281.2444909,
-    "ast_hash": "a1a5a0a164d4b88c0ac9fadfd8f361ed",
+    "mtime": 1788347394.1826613,
+    "seen": 1788357134.3171005,
+    "ast_hash": "7ca934a028be1393f611eaa8d78a8784",
     "semantic_hash": ""
   },
   "src/services/regulatory/regulatory-check.service.test.ts": {
@@ -3246,9 +3240,9 @@
     "semantic_hash": ""
   },
   "src/types/regulatory.types.ts": {
-    "mtime": 1787321286.946586,
-    "seen": 1787843281.2445238,
-    "ast_hash": "8b5cac595405f86226ac70898b2334a8",
+    "mtime": 1788347310.4915361,
+    "seen": 1788357134.3171403,
+    "ast_hash": "b45ba86d2c625e1bf50f306990f842d3",
     "semantic_hash": ""
   },
   "src/utils/portal-lockout.utils.ts": {
@@ -3270,9 +3264,9 @@
     "semantic_hash": ""
   },
   "supabase/functions/regulatory-check/index.ts": {
-    "mtime": 1787300620.610745,
-    "seen": 1787843281.2445586,
-    "ast_hash": "b566de7616ef1fe92e6c9d159657a841",
+    "mtime": 1788345597.0205343,
+    "seen": 1788357134.3171852,
+    "ast_hash": "787e27fdcd9bdd6d64ab44b8157b3148",
     "semantic_hash": ""
   },
   ".claude/skills/SKILL.md": {
@@ -3552,9 +3546,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/editor/DraftPrintExportDialog.tsx": {
-    "mtime": 1787843755.236288,
-    "seen": 1787846808.3417141,
-    "ast_hash": "350160c2424938f2382e23cf0760d097",
+    "mtime": 1788333817.728204,
+    "seen": 1788357134.3167355,
+    "ast_hash": "c6d8e73484f47ac67c1a1179af1ab8d6",
     "semantic_hash": ""
   },
   "src/pages/im/editor/TypographySummary.tsx": {
@@ -3600,9 +3594,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/producttoolkit-attributes.service.ts": {
-    "mtime": 1788107822.48819,
-    "seen": 1788113944.6632977,
-    "ast_hash": "6a34a45e6de369458c841cb54844f1a3",
+    "mtime": 1788265618.087021,
+    "seen": 1788357134.3168676,
+    "ast_hash": "50239ed049a8f72bf4bd46c71d806f25",
     "semantic_hash": ""
   },
   "src/services/compliance/producttoolkit-attributes.test.ts": {
@@ -3789,6 +3783,186 @@
     "mtime": 1788187202.4616122,
     "seen": 1788188453.8906865,
     "ast_hash": "2e38ea12b03bbcebe29d41976de41739",
+    "semantic_hash": ""
+  },
+  "db_migrations/139_regulation_brain.sql": {
+    "mtime": 1788340083.0643215,
+    "seen": 1788357134.316352,
+    "ast_hash": "deb058ccf8217150b45df1a4017ae089",
+    "semantic_hash": ""
+  },
+  "db_migrations/140_regulation_expiry.sql": {
+    "mtime": 1788345563.3579085,
+    "seen": 1788357134.3163567,
+    "ast_hash": "f1da38a6e392e519723cfc6d337861ee",
+    "semantic_hash": ""
+  },
+  "db_migrations/141_regulation_clauses.sql": {
+    "mtime": 1788347289.2059844,
+    "seen": 1788357134.3163602,
+    "ast_hash": "d8c11063365547e4d050228e71112991",
+    "semantic_hash": ""
+  },
+  "docs/regulation-import/example.import.json": {
+    "mtime": 1788353009.3508933,
+    "seen": 1788357134.3164718,
+    "ast_hash": "23293bebe4f8022d4ffd2503fe596295",
+    "semantic_hash": ""
+  },
+  "netlify/functions/lib/eurlex.test.ts": {
+    "mtime": 1788338257.2903752,
+    "seen": 1788357134.3164792,
+    "ast_hash": "f6cfa92adf9ad8f5b0d24b4a3cb1b7e7",
+    "semantic_hash": ""
+  },
+  "netlify/functions/lib/eurlex.ts": {
+    "mtime": 1788338198.019275,
+    "seen": 1788357134.3164804,
+    "ast_hash": "fe37a0f41be89c5ef2b7783b3fc8247a",
+    "semantic_hash": ""
+  },
+  "netlify/functions/regulation-version-check.ts": {
+    "mtime": 1788338235.1971705,
+    "seen": 1788357134.316493,
+    "ast_hash": "c8c9e2ce1f5696dd78ae7fa272aff1cb",
+    "semantic_hash": ""
+  },
+  "scripts/backfill-regulation-clauses.ts": {
+    "mtime": 1788347829.3961902,
+    "seen": 1788357134.316516,
+    "ast_hash": "2e9d2b06b01b3c3a43d12415f18c14b9",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/ObligationsEditor.tsx": {
+    "mtime": 1788348158.390928,
+    "seen": 1788357134.31682,
+    "ast_hash": "97c2f9fd0474213c8c7b6b0a541baffc",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/RegulationDetail.tsx": {
+    "mtime": 1788348288.348519,
+    "seen": 1788357134.3168216,
+    "ast_hash": "9f85d1bd5f1459efda3567ff28d699f2",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/RegulationEditor.tsx": {
+    "mtime": 1788345885.6269965,
+    "seen": 1788357134.316823,
+    "ast_hash": "9036ac528867671b0eeb1ccd468fd1d5",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/RegulationImportDialog.tsx": {
+    "mtime": 1788352734.4803493,
+    "seen": 1788357134.3168244,
+    "ast_hash": "d724db0405a628271640d2d0b24fb671",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/RegulationLibrary.tsx": {
+    "mtime": 1788352895.86534,
+    "seen": 1788357134.3168256,
+    "ast_hash": "05d0d68d2076629bff774b8e1d093467",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/RegulationsPage.tsx": {
+    "mtime": 1788338748.7709858,
+    "seen": 1788357134.3168268,
+    "ast_hash": "7f8d9eecf6845470a076c559d1c70d4a",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/VersionBadge.tsx": {
+    "mtime": 1788338597.3708029,
+    "seen": 1788357134.3168283,
+    "ast_hash": "96b03a415e546ac3ba26087c652a9a38",
+    "semantic_hash": ""
+  },
+  "src/pages/regulations/research-prompt.ts": {
+    "mtime": 1788352835.2863052,
+    "seen": 1788357134.3168294,
+    "ast_hash": "db8c93842f19e10b5646515d5700fbd8",
+    "semantic_hash": ""
+  },
+  "src/services/compliance/producttoolkit-transport.test.ts": {
+    "mtime": 1788265681.2818618,
+    "seen": 1788357134.3168712,
+    "ast_hash": "e07cf5a854d315147c484547c9c63f80",
+    "semantic_hash": ""
+  },
+  "src/services/im/im-brand.test.ts": {
+    "mtime": 1788333881.0054595,
+    "seen": 1788357134.3169,
+    "ast_hash": "e524d041918252feae2962e46ec2c61a",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/celex.test.ts": {
+    "mtime": 1788338149.9821956,
+    "seen": 1788357134.3170688,
+    "ast_hash": "749fa68b8e13661d9b0c0eb26bda9749",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/celex.ts": {
+    "mtime": 1788338130.6762185,
+    "seen": 1788357134.3170702,
+    "ast_hash": "b05d70ece8ec02e34d81643334e355bd",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/obligation-parse.test.ts": {
+    "mtime": 1788347217.4343429,
+    "seen": 1788357134.3170729,
+    "ast_hash": "9b64e1c6c90449fbb4809052e09b1238",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/obligation-parse.ts": {
+    "mtime": 1788347179.7669919,
+    "seen": 1788357134.3170745,
+    "ast_hash": "0b565466a428fa6bab297c1e3d374e04",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-clause.service.ts": {
+    "mtime": 1788347358.2383778,
+    "seen": 1788357134.317082,
+    "ast_hash": "47df94ffd7350ba26c3e6159e0b36e8c",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-import.service.test.ts": {
+    "mtime": 1788353024.1220794,
+    "seen": 1788357134.3170874,
+    "ast_hash": "1f424c7fc0364142d512ed7cc7da6a10",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-import.service.ts": {
+    "mtime": 1788352594.568122,
+    "seen": 1788357134.3170888,
+    "ast_hash": "d92c47f2de3da1e11a23948028a4de99",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-lifecycle.test.ts": {
+    "mtime": 1788345498.5895336,
+    "seen": 1788357134.31709,
+    "ast_hash": "9af271d9db9285babd12b5ed120bdc11",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-lifecycle.ts": {
+    "mtime": 1788345467.1543827,
+    "seen": 1788357134.3170912,
+    "ast_hash": "da1efdd04c5dab21d361024763534c67",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-usage.service.ts": {
+    "mtime": 1788345582.5417924,
+    "seen": 1788357134.3170962,
+    "ast_hash": "ac9a01504848766891db9aca84757a01",
+    "semantic_hash": ""
+  },
+  "src/services/regulatory/regulation-version.service.ts": {
+    "mtime": 1788338321.924083,
+    "seen": 1788357134.3170974,
+    "ast_hash": "c2260ca67ba47bfcf01ee6aa54b0e06f",
+    "semantic_hash": ""
+  },
+  "docs/regulation-import/README.md": {
+    "mtime": 1788352967.250066,
+    "seen": 1788357134.3172746,
+    "ast_hash": "a1460a4c97b5a7d076b244a6fa61947e",
     "semantic_hash": ""
   }
 }

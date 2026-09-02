@@ -64,9 +64,115 @@ const assignment = (reg: Regulation, over: Partial<TemplateRegulation> = {}): Te
   ...over,
 });
 
+const clause = (over: Partial<import('../../types').RegulationClause> = {}) => ({
+  id: 'cl-1',
+  regulationId: 'reg-1',
+  number: '7.12.5',
+  kind: 'clause' as const,
+  sortKey: '0007.0012.0005',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+  ...over,
+});
+
+const obligation = (over: Partial<import('../../types').RegulationObligation> = {}) => ({
+  id: 'ob-1',
+  regulationId: 'reg-1',
+  clauseId: 'cl-1',
+  text: 'State that a damaged cord must be replaced by the manufacturer',
+  carriers: ['IM' as const],
+  optionalCarriers: [],
+  sortOrder: 0,
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+  ...over,
+});
+
 beforeEach(() => {
   calls.length = 0;
   rows.value = [];
+});
+
+describe('buildTemplateChecklist — obligations (migration 141)', () => {
+  it('prefers obligation rows over the legacy checklist text', () => {
+    const reg = regulation({
+      checklist: 'Legacy line that must not appear',
+      clauses: [clause()],
+      obligations: [obligation()],
+    });
+    const items = buildTemplateChecklist([assignment(reg)]);
+    expect(items).toHaveLength(1);
+    expect(items[0].text).toContain('damaged cord');
+    expect(items[0].clause).toBe('7.12.5');
+  });
+
+  it('falls back to the legacy text when a regulation has no obligation rows', () => {
+    // A regulation nobody has broken out yet must still contribute its items, not none.
+    const reg = regulation({ checklist: 'Energy label enclosed\nDoC in the box', obligations: [] });
+    expect(buildTemplateChecklist([assignment(reg)]).map(i => i.text))
+      .toEqual(['Energy label enclosed', 'DoC in the box']);
+  });
+
+  it('hides an obligation the manual cannot satisfy', () => {
+    // The substance of the carrier field: a rating-label-only obligation is noise to a
+    // manual publisher, who has no way to satisfy it.
+    const reg = regulation({
+      clauses: [clause()],
+      obligations: [
+        obligation({ id: 'ob-im', text: 'Manual item', carriers: ['IM'] }),
+        obligation({ id: 'ob-label', text: 'Rating label item', carriers: ['Rating label'] }),
+      ],
+    });
+    expect(buildTemplateChecklist([assignment(reg)]).map(i => i.text)).toEqual(['Manual item']);
+  });
+
+  it('SHOWS an unclassified obligation', () => {
+    // Empty carriers means "nobody has looked", not "not the manual's problem". Hiding it
+    // would put the least-reviewed obligation in the least-visible place.
+    const reg = regulation({
+      obligations: [obligation({ carriers: [], text: 'Unclassified obligation' })],
+    });
+    expect(buildTemplateChecklist([assignment(reg)]).map(i => i.text)).toEqual(['Unclassified obligation']);
+  });
+
+  it('marks an obligation the manual only optionally carries', () => {
+    const reg = regulation({
+      obligations: [obligation({ carriers: ['Rating label'], optionalCarriers: ['IM'] })],
+    });
+    expect(buildTemplateChecklist([assignment(reg)])[0].imOptional).toBe(true);
+  });
+
+  it('stops calling an item optional once any regulation requires it in the manual', () => {
+    const a = regulation({
+      id: 'reg-a', referenceCode: 'A',
+      obligations: [obligation({ id: 'o1', regulationId: 'reg-a', clauseId: null, text: 'Same obligation', carriers: ['Rating label'], optionalCarriers: ['IM'] })],
+    });
+    const b = regulation({
+      id: 'reg-b', referenceCode: 'B',
+      obligations: [obligation({ id: 'o2', regulationId: 'reg-b', clauseId: null, text: 'Same obligation', carriers: ['IM'] })],
+    });
+    const items = buildTemplateChecklist([assignment(a), assignment(b)]);
+    expect(items).toHaveLength(1);
+    expect(items[0].imOptional).toBe(false);
+    expect(items[0].regulationReferences).toEqual(['A', 'B']);
+  });
+
+  it('carries the mandated wording through', () => {
+    const reg = regulation({
+      clauses: [clause()],
+      obligations: [obligation({ verbatim: '"If the supply cord is damaged…"' })],
+    });
+    expect(buildTemplateChecklist([assignment(reg)])[0].verbatim).toContain('supply cord');
+  });
+
+  it('keeps the item key text-derived, so a clause does not change identity', () => {
+    // Confirmations are keyed on the obligation TEXT. Adding clause structure around an
+    // obligation must not silently clear a tick somebody already made.
+    const withClause = regulation({ clauses: [clause()], obligations: [obligation()] });
+    const withoutClause = regulation({ obligations: [obligation({ clauseId: null })] });
+    expect(buildTemplateChecklist([assignment(withClause)])[0].key)
+      .toBe(buildTemplateChecklist([assignment(withoutClause)])[0].key);
+  });
 });
 
 describe('parseRegulationChecklist', () => {

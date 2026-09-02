@@ -20,8 +20,9 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Check, FileText, Loader2, Lock, Plus, Scale, Trash2, X,
+  AlertTriangle, Check, ExternalLink, FileText, Loader2, Lock, Plus, Scale, Trash2, X,
 } from 'lucide-react';
 import {
   assignRegulationToTemplate,
@@ -120,6 +121,16 @@ export const TemplateRegulationsPanel: React.FC<PanelProps> = ({ template, onCha
       {error && (
         <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">{error}</div>
       )}
+
+      {/* The library is a top-level section since migration 139 — it is shared with the TCF,
+          so it no longer lives inside the IM dashboard and needs a way back. */}
+      <p className="text-[11px] text-gray-400">
+        This assigns regulations from the shared library. Their summaries, versions and IM
+        requirements are edited in{' '}
+        <Link to="/regulations" className="text-indigo-600 hover:underline inline-flex items-center gap-0.5">
+          Regulations <ExternalLink size={10} />
+        </Link>.
+      </p>
 
       {derivedCount > 0 && (
         <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-200 rounded p-2">

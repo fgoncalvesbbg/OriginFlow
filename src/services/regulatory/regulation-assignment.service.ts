@@ -5,7 +5,11 @@
  *
  *  - 'category'  — the regulation is marked for the template's category
  *                  (`regulations.applicable_categories` contains `im_templates.category_id`)
- *                  and is still 'active'. Derived at read time; there is no row.
+ *                  and is not 'superseded'. Derived at read time; there is no row.
+ *                  EXPIRED regulations are deliberately still derived (migration 140): if
+ *                  expiry removed them from the list, marking one expired would quietly
+ *                  make a template report one FEWER obligation instead of blocking its
+ *                  publish — the exact opposite of what expiry is for.
  *  - 'explicit'  — a real `im_template_regulations` row, created by assigning the
  *                  regulation to THIS template. Only an explicit row can carry a
  *                  per-template scope note.
@@ -108,7 +112,7 @@ export const getTemplateRegulations = async (
   const derived = categoryId
     ? library
         .filter((r) =>
-          r.status === 'active' &&
+          r.status !== 'superseded' &&
           !explicitRegIds.has(r.id) &&
           r.applicableCategories.includes(categoryId))
         .map((r) => mapDerived(templateId, r))
@@ -145,7 +149,7 @@ export const getTemplateRegulationCounts = async (): Promise<Record<string, numb
       ),
       `${TAG} getTemplateRegulationCounts`,
     ),
-    getRegulations({ status: 'active' }),
+    getRegulations(),
   ]);
 
   // regulationIds per template, so a regulation both explicitly assigned AND
@@ -162,6 +166,9 @@ export const getTemplateRegulationCounts = async (): Promise<Record<string, numb
   // Index the library by category once, rather than scanning it per template.
   const byCategory = new Map<string, string[]>();
   for (const reg of library) {
+    // Same rule as getTemplateRegulations: not 'superseded'. Expired regulations stay in the
+    // count because they still apply — that is what makes them blocking (migration 140).
+    if (reg.status === 'superseded') continue;
     for (const cat of reg.applicableCategories) {
       const list = byCategory.get(cat) ?? [];
       list.push(reg.id);

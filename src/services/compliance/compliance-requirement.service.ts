@@ -9,7 +9,7 @@ import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../
 import { generateUUID } from '../../utils';
 import { PREDEFINED_ATTRIBUTE_GROUPS, compareAttributes } from '../../config/compliance.constants';
 import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
-import { buildSyncWrite, resolvesToGlobal, type SyncPlan, type AttributeUsage } from './attribute-sync-plan';
+import { buildSyncWrite, resolvesToGlobal, planAttributeSync, type SyncPlan, type AttributeUsage } from './attribute-sync-plan';
 
 /**
  * Get all compliance requirements
@@ -23,6 +23,8 @@ export const getComplianceRequirements = async (): Promise<ComplianceRequirement
         condition: r.condition ?? null,
         conditionFeatureIds: r.condition_feature_ids,
         referenceCode: r.reference_code,
+        regulationId: r.regulation_id ?? null,
+        clauseId: r.clause_id ?? null,
         isMandatory: r.is_mandatory,
         appliesByDefault: r.applies_by_default,
         timingType: r.timing_type,
@@ -44,6 +46,12 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
         description: req.description,
         is_mandatory: req.isMandatory,
         reference_code: req.referenceCode,
+        // null, not undefined: unlinking a requirement from its regulation has to reach
+        // the database as an explicit NULL, or the upsert silently keeps the old link.
+        regulation_id: req.regulationId ?? null,
+        // Cleared whenever the regulation changes, so a requirement can never cite a clause
+        // belonging to a different document — there is no composite FK to catch that.
+        clause_id: req.regulationId ? (req.clauseId ?? null) : null,
         applies_by_default: req.appliesByDefault,
         condition: req.condition ?? null,
         timing_type: req.timingType,
@@ -423,8 +431,12 @@ export interface ReplaceAttributesResult extends ImportAttributesResult {
     deleted: number;
     /** Attributes owned elsewhere that were un-shared from this category rather than deleted. */
     unshared: number;
+    /** Attributes matched to the definition and rewritten in place, keeping their id. */
+    updated: number;
+    /** Global attributes deleted — only when includeGlobals was asked for. Affects EVERY category. */
+    deletedGlobals: number;
     /** Deleted rows, kept so the caller can report (and a human can reverse) what went. */
-    removed: { id: string; name: string; akeneoId?: string }[];
+    removed: { id: string; name: string; akeneoId?: string; wasGlobal: boolean }[];
 }
 
 /**
@@ -449,22 +461,93 @@ export interface ReplaceAttributesResult extends ImportAttributesResult {
 export const replaceCategoryAttributes = async (
     categoryId: string,
     rows: ParsedAttributeRow[],
+    opts: { includeGlobals?: boolean } = {},
 ): Promise<ReplaceAttributesResult> => {
-    const existing = await getCategoryAttributes();
-    const owned = existing.filter(a => a.categoryId === categoryId);
-    const sharedIn = existing.filter(
-        a => a.categoryId !== null && a.categoryId !== categoryId && (a.assignedCategoryIds ?? []).includes(categoryId),
+    if (!isLive) throw new Error('Database not configured.');
+
+    // Match FIRST, then remove only what the import does not account for.
+    //
+    // This used to delete every category-owned attribute and re-import, which handed each one
+    // a brand new uuid even when the same attribute came straight back. Every SKU value,
+    // supplier submission, review flag and IM condition references an attribute by id, so a
+    // Replace silently stranded all of them — the very outcome the sync planner exists to
+    // prevent. Reusing the planner keeps ids stable for anything still in the definition.
+    const all = await getCategoryAttributes();
+    const applies = all.filter(a =>
+        a.categoryId === categoryId ||
+        a.categoryId === null ||
+        (a.assignedCategoryIds ?? []).includes(categoryId));
+
+    const plan = planAttributeSync(applies, rows, {}, categoryId);
+
+    // 1. Write everything the definition still contains, in place.
+    let created = 0, updated = 0;
+    for (const item of plan.items) {
+        if (item.action !== 'create' && item.action !== 'update') continue;
+        const write = buildSyncWrite(item, categoryId);
+        if (!write) continue;
+
+        // An attribute owned by a SIBLING category that this definition also lists: leave its
+        // ownership and fields alone and just make sure it is shared in. Rewriting it would
+        // move category_id to the importing category and quietly take it away from its owner.
+        const owner = item.existing?.categoryId;
+        if (owner && owner !== categoryId) {
+            await assignAttributeToCategory(item.existing!.id, categoryId);
+            updated++;
+            continue;
+        }
+
+        await saveCategoryAttribute(
+            { ...write, id: write.id || generateUUID() },
+            { forceScope: resolvesToGlobal(item.incoming!) ? 'global' : 'category' },
+        );
+        if (item.action === 'create') created++; else updated++;
+    }
+
+    // 2. Remove what it does not. Anything the planner paired with an incoming row is kept,
+    //    however it was matched, so a rename never looks like "delete the old, add a new".
+    // Only rows the definition actually accounts for count as matched. An 'absent' item also
+    // carries `existing` — it is the attribute the definition DROPPED — so including it here
+    // would mark every leftover as matched and quietly delete nothing at all.
+    const matched = new Set(
+        plan.items
+            .filter(i => i.action === 'create' || i.action === 'update' || i.action === 'unchanged')
+            .map(i => i.existing?.id)
+            .filter(Boolean) as string[],
     );
+    const leftovers = applies.filter(a => !matched.has(a.id));
 
-    for (const a of owned) await deleteCategoryAttribute(a.id);
-    for (const a of sharedIn) await unassignAttributeFromCategory(a.id, categoryId);
+    const removed: ReplaceAttributesResult['removed'] = [];
+    let deleted = 0, unshared = 0, deletedGlobals = 0;
 
-    const imported = await importCategoryAttributes(categoryId, rows);
+    for (const a of leftovers) {
+        if (a.categoryId === categoryId) {
+            await deleteCategoryAttribute(a.id);
+            removed.push({ id: a.id, name: a.name, akeneoId: a.akeneoId, wasGlobal: false });
+            deleted++;
+        } else if (a.categoryId === null) {
+            // A global belongs to every category, so deleting one here removes it EVERYWHERE.
+            // Off by default: "not in this category's definition" is not the same as "unused".
+            if (!opts.includeGlobals) continue;
+            await deleteCategoryAttribute(a.id);
+            removed.push({ id: a.id, name: a.name, akeneoId: a.akeneoId, wasGlobal: true });
+            deletedGlobals++;
+        } else {
+            // Owned by a sibling category and shared in — un-share, never delete.
+            await unassignAttributeFromCategory(a.id, categoryId);
+            unshared++;
+        }
+    }
+
     return {
-        ...imported,
-        deleted: owned.length,
-        unshared: sharedIn.length,
-        removed: owned.map(a => ({ id: a.id, name: a.name, akeneoId: a.akeneoId })),
+        created,
+        updated,
+        linked: 0,                       // a replace matches in place; nothing is "shared in"
+        skipped: plan.counts.unchanged,  // already identical to the definition
+        deleted,
+        unshared,
+        deletedGlobals,
+        removed,
     };
 };
 

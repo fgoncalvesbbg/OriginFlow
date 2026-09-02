@@ -7,6 +7,7 @@ import { ChevronRight, Home } from 'lucide-react';
 const routeLabels: Record<string, string> = {
   'create': 'New Project',
   'compliance': 'Compliance',
+  'regulations': 'Regulations',
   'library': 'Library',
   'admin': 'Admin Console',
   'project': 'Project',
@@ -18,6 +19,7 @@ const routeLabels: Record<string, string> = {
 // Paths that correspond to actual pages we can link to
 const navigablePaths = new Set([
   '/compliance',
+  '/regulations',
   '/admin',
   '/compliance/library',
   '/'

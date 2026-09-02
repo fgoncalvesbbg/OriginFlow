@@ -25,7 +25,10 @@
 
 import { db, withDeadline, orEmpty, orUndefined, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import type { Regulation, RegulationInput, RegulationStatus } from '../../types';
+import type {
+  Regulation, RegulationInput, RegulationStatus, RegulationStructure,
+} from '../../types';
+import { getRegulationStructure, getRegulationStructures } from './regulation-clause.service';
 
 const TAG = '[regulatory]';
 const READ_TIMEOUT_MS = 12000;
@@ -41,9 +44,12 @@ export const SUMMARY_WARN_BYTES = 150_000;
  * src/data/PORTING.md).
  */
 const LIST_COLUMNS =
-  'id,title,reference_code,jurisdiction,notes,checklist,summary_file_name,summary_bytes,' +
-  'summary_uploaded_at,summary_uploaded_by,applicable_categories,status,' +
-  'superseded_by_id,created_by,created_at,updated_at';
+  'id,title,reference_code,jurisdiction,notes,summary,tcf_description,checklist,' +
+  'summary_file_name,summary_bytes,summary_uploaded_at,summary_uploaded_by,' +
+  'applicable_categories,status,superseded_by_id,expired_at,expired_reason,' +
+  'version,edition_year,issued_at,' +
+  'last_amended_at,source_url,celex_id,version_state,version_checked_at,version_detail,' +
+  'review_due_at,created_by,created_at,updated_at';
 
 const mapRow = (r: any): Regulation => ({
   id: r.id,
@@ -51,6 +57,11 @@ const mapRow = (r: any): Regulation => ({
   referenceCode: r.reference_code,
   jurisdiction: r.jurisdiction ?? undefined,
   notes: r.notes ?? undefined,
+  // The short human summary and the TCF obligation text are both in LIST_COLUMNS: they are
+  // a paragraph each and are exactly what the library list and the TCF need to show without
+  // a second read. `summary_md` stays excluded — that one is the whole regulation.
+  summary: r.summary ?? undefined,
+  tcfDescription: r.tcf_description ?? undefined,
   // Included in LIST_COLUMNS on purpose: the pre-publish checklist is built from the
   // assignment list's rows, and a few lines of text per regulation is nothing like a summary.
   checklist: r.checklist ?? undefined,
@@ -63,6 +74,18 @@ const mapRow = (r: any): Regulation => ({
   applicableCategories: r.applicable_categories ?? [],
   status: (r.status ?? 'active') as RegulationStatus,
   supersededById: r.superseded_by_id ?? null,
+  expiredAt: r.expired_at ?? null,
+  expiredReason: r.expired_reason ?? undefined,
+  version: r.version ?? undefined,
+  editionYear: r.edition_year ?? null,
+  issuedAt: r.issued_at ?? null,
+  lastAmendedAt: r.last_amended_at ?? null,
+  sourceUrl: r.source_url ?? undefined,
+  celexId: r.celex_id ?? undefined,
+  versionState: r.version_state ?? null,
+  versionCheckedAt: r.version_checked_at ?? null,
+  versionDetail: r.version_detail ?? null,
+  reviewDueAt: r.review_due_at ?? null,
   createdBy: r.created_by ?? undefined,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -76,24 +99,32 @@ export class RegulationInUseError extends Error {
   usageCount: number;
   /** True when at least part of the usage comes from a category marking, not a row. */
   viaCategory: boolean;
-  constructor(usageCount: number, viaCategory = false) {
+  /** TCF requirements pointing at this regulation (migration 139). */
+  tcfCount: number;
+  constructor(usageCount: number, viaCategory = false, tcfCount = 0) {
+    const users = [
+      usageCount > 0 ? `${usageCount} IM template(s)` : '',
+      tcfCount > 0 ? `${tcfCount} TCF requirement(s)` : '',
+    ].filter(Boolean).join(' and ');
     super(
-      `Cannot delete: ${usageCount} IM template(s) currently answer for this regulation. ` +
+      `Cannot delete: ${users} currently answer for this regulation. ` +
       (viaCategory
         ? `Untick its categories (and unassign it from any template that names it directly), `
         : `Unassign it everywhere first, `) +
-      `or mark it superseded to retire it while keeping existing assignments and past ` +
-      `check reports intact.`,
+      `or mark it superseded to retire it while keeping existing assignments, TCF links ` +
+      `and past check reports intact.`,
     );
     this.name = 'RegulationInUseError';
     this.usageCount = usageCount;
     this.viaCategory = viaCategory;
+    this.tcfCount = tcfCount;
   }
 }
 
 /**
- * The library list. Excludes `summary_md` — see the file header. `categoryId` filters
- * on `applicable_categories`, which is a picker hint only.
+ * The library list. Excludes `summary_md` — see the file header. `categoryId` filters on
+ * `applicable_categories`, which is LOAD-BEARING since migration 116: an active regulation
+ * listing a category applies to that category's IM templates automatically.
  */
 export const getRegulations = async (filters?: {
   status?: RegulationStatus;
@@ -118,8 +149,23 @@ export const getRegulations = async (filters?: {
     ),
     `${TAG} getRegulations`,
   );
-  return rows.map(mapRow);
+  // Clauses and obligations come along (migration 141) because essentially every consumer
+  // needs them: the library counts obligations, the pre-publish checklist is built from them,
+  // and the detail page groups by clause. Two flat selects for the whole library beat one
+  // round trip per regulation, and `getRegulationStructures` never rejects — a failed
+  // structure read leaves `obligations` undefined and the checklist falls back to the legacy
+  // `checklist` text rather than silently reporting zero obligations.
+  const structures = await getRegulationStructures();
+  return rows.map(mapRow).map(r => attachStructure(r, structures.get(r.id)));
 };
+
+/** Attach a regulation's clauses and obligations, leaving them undefined when unknown. */
+const attachStructure = (
+  regulation: Regulation,
+  structure: RegulationStructure | undefined,
+): Regulation => (structure
+  ? { ...regulation, clauses: structure.clauses, obligations: structure.obligations }
+  : regulation);
 
 /** The full row INCLUDING `summary_md`. For the edit dialog and the summary preview. */
 export const getRegulationById = async (id: string): Promise<Regulation | undefined> => {
@@ -132,7 +178,8 @@ export const getRegulationById = async (id: string): Promise<Regulation | undefi
     ),
     `${TAG} getRegulationById`,
   );
-  return row ? mapRow(row) : undefined;
+  if (!row) return undefined;
+  return attachStructure(mapRow(row), await getRegulationStructure(id));
 };
 
 /**
@@ -149,10 +196,30 @@ const buildPayload = (
   if (input.referenceCode !== undefined) payload.reference_code = input.referenceCode.trim();
   if (input.jurisdiction !== undefined) payload.jurisdiction = input.jurisdiction?.trim() || null;
   if (input.notes !== undefined) payload.notes = input.notes?.trim() || null;
+  if (input.summary !== undefined) payload.summary = input.summary?.trim() || null;
+  if (input.tcfDescription !== undefined) payload.tcf_description = input.tcfDescription?.trim() || null;
   if (input.checklist !== undefined) payload.checklist = input.checklist?.trim() || null;
+  if (input.version !== undefined) payload.version = input.version?.trim() || null;
+  if (input.editionYear !== undefined) payload.edition_year = input.editionYear ?? null;
+  // Dates are stored as DATE, so an empty string must become NULL rather than reaching
+  // Postgres as '' and failing the whole write with a type error.
+  if (input.issuedAt !== undefined) payload.issued_at = input.issuedAt || null;
+  if (input.lastAmendedAt !== undefined) payload.last_amended_at = input.lastAmendedAt || null;
+  if (input.reviewDueAt !== undefined) payload.review_due_at = input.reviewDueAt || null;
+  if (input.sourceUrl !== undefined) payload.source_url = input.sourceUrl?.trim() || null;
+  if (input.celexId !== undefined) payload.celex_id = input.celexId?.trim().toUpperCase() || null;
   if (input.applicableCategories !== undefined) payload.applicable_categories = input.applicableCategories;
   if (input.status !== undefined) payload.status = input.status;
   if (input.supersededById !== undefined) payload.superseded_by_id = input.supersededById || null;
+  if (input.expiredReason !== undefined) payload.expired_reason = input.expiredReason?.trim() || null;
+  // DATE column, so an empty string must become NULL rather than reaching Postgres as ''.
+  if (input.expiredAt !== undefined) payload.expired_at = input.expiredAt || null;
+  // An expiry with no date gives a block message that cannot say when this became true, so
+  // today is stamped rather than leaving it blank. Only ever fills a gap: an explicit date
+  // in the same write wins, and clearing the status clears nothing retrospectively.
+  if (input.status === 'expired' && !payload.expired_at && input.expiredAt === undefined) {
+    payload.expired_at = new Date().toISOString().slice(0, 10);
+  }
 
   if (input.summaryMd !== undefined) {
     if (input.summaryMd === null || input.summaryMd === '') {
@@ -260,7 +327,7 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
       ),
       `${TAG} getRegulationUsageCounts`,
     ),
-    getRegulations({ status: 'active' }),
+    getRegulations(),
   ]);
 
   // templateIds per regulation, so a template that is both explicitly assigned and
@@ -282,6 +349,10 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
     templatesByCategory.set(t.category_id, list);
   }
   for (const regulation of library) {
+    // Everything except 'superseded' derives by category — expired regulations included, so
+    // that expiring one BLOCKS its templates rather than quietly dropping off their lists
+    // (migration 140). Superseded is the retire path and must not reach new templates.
+    if (regulation.status === 'superseded') continue;
     for (const cat of regulation.applicableCategories) {
       for (const templateId of templatesByCategory.get(cat) ?? []) add(regulation.id, templateId);
     }
@@ -293,20 +364,50 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
 };
 
 /**
- * Delete a regulation, refusing while any template still answers for it — whether by an
- * explicit assignment or because one of its categories is ticked.
+ * TCF requirements citing each regulation, keyed by regulation id (migration 139).
+ *
+ * The other half of "who answers for this regulation". A regulation can have no IM
+ * template at all and still be the reason a supplier is asked for an EMC report, so the
+ * library's usage figure would be a lie without it.
+ */
+export const getRegulationTcfCounts = async (): Promise<Record<string, number>> => {
+  if (!isLive) return {};
+  const rows = await orEmpty(
+    withDeadline(
+      (signal) => db.select<Row>('compliance_requirements', { columns: 'regulation_id', signal }),
+      READ_TIMEOUT_MS,
+      'getRegulationTcfCounts',
+    ),
+    `${TAG} getRegulationTcfCounts`,
+  );
+  const counts: Record<string, number> = {};
+  for (const r of rows) {
+    if (!r.regulation_id) continue;
+    counts[r.regulation_id] = (counts[r.regulation_id] ?? 0) + 1;
+  }
+  return counts;
+};
+
+/**
+ * Delete a regulation, refusing while anything still answers for it — an explicit IM
+ * assignment, a ticked category, or a TCF requirement that cites it.
  *
  * The category half has no foreign key behind it, so this pre-check is the only thing
  * preventing a silent deletion from emptying what several templates are checked against.
- * `ON DELETE RESTRICT` still backs the explicit half, including the race where an
- * assignment appears between the check and the delete.
+ * `ON DELETE RESTRICT` backs the explicit IM half and, since migration 139, the TCF half
+ * too — including the race where a link appears between the check and the delete.
  */
 export const deleteRegulation = async (id: string): Promise<void> => {
   const explicit = await db.count('im_template_regulations', { where: { regulation_id: id } });
-  const effective = (await getRegulationUsageCounts())[id] ?? explicit;
-  if (effective > 0) {
-    console.warn(TAG, `deleteRegulation blocked — ${id} used by ${effective} template(s)`);
-    throw new RegulationInUseError(effective, effective > explicit);
+  const [usage, tcfCounts] = await Promise.all([
+    getRegulationUsageCounts(),
+    getRegulationTcfCounts(),
+  ]);
+  const effective = usage[id] ?? explicit;
+  const tcf = tcfCounts[id] ?? 0;
+  if (effective > 0 || tcf > 0) {
+    console.warn(TAG, `deleteRegulation blocked — ${id} used by ${effective} template(s), ${tcf} TCF requirement(s)`);
+    throw new RegulationInUseError(effective, effective > explicit, tcf);
   }
   try {
     await withDeadline(
@@ -317,7 +418,7 @@ export const deleteRegulation = async (id: string): Promise<void> => {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // The FK fired, so an assignment appeared after the pre-check.
-    if (/23503|foreign key|violates/i.test(message)) throw new RegulationInUseError(1);
+    if (/23503|foreign key|violates/i.test(message)) throw new RegulationInUseError(1, false, 0);
     console.error(TAG, 'deleteRegulation failed', e);
     throw e;
   }

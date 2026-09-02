@@ -128,6 +128,21 @@ describe('getTemplateRegulations — the effective list', () => {
     expect(await getTemplateRegulations('t1', 'cat-hob')).toEqual([]);
   });
 
+  it('STILL pulls in an expired regulation by category, so its templates can be blocked', async () => {
+    // Load-bearing (migration 140). If expiry dropped the regulation from the effective
+    // list, marking it expired would quietly make the template report one FEWER obligation
+    // instead of blocking its publish — the exact opposite of what expiry is for.
+    tables.rows.im_template_regulations = [];
+    tables.rows.regulations = [
+      reg({ id: 'r-dead', status: 'expired', applicable_categories: ['cat-hob'] }),
+    ];
+
+    const result = await getTemplateRegulations('t1', 'cat-hob');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ regulationId: 'r-dead', source: 'category' });
+  });
+
   it('keeps an explicit assignment to a superseded regulation — someone chose it', async () => {
     tables.rows.im_template_regulations = [
       { id: 'a1', template_id: 't1', regulation_id: 'r-old', created_at: '1' },

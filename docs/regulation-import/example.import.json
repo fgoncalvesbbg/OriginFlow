@@ -1,0 +1,114 @@
+{
+  "importSchemaVersion": 1,
+
+  "regulation": {
+    "referenceCode": "EN IEC 60335-2-6:2024",
+    "title": "Household and similar electrical appliances - Safety - Part 2-6: Particular requirements for stationary cooking ranges, hobs, ovens and similar appliances",
+    "jurisdiction": "EU",
+    "summary": "Particular safety requirements for stationary cooking appliances, applied on top of EN IEC 60335-1. Clause 7 governs marking and the content of the instructions; the obligations below are the ones that reach a printed manual.",
+    "tcfDescription": "LVD test report against EN IEC 60335-1 and EN IEC 60335-2-6, issued by a third-party laboratory, covering the appliance as placed on the market.",
+    "notes": "Hobs only for this category - the range and oven clauses are out of scope.",
+    "version": "Ed. 4.0",
+    "editionYear": 2024,
+    "sourceUrl": "https://webstore.iec.ch/",
+    "status": "active",
+    "reviewDueAt": "2027-03-01",
+    "applicableCategoryNames": ["Induction Hobs"]
+  },
+
+  "summaryMd": "# EN IEC 60335-2-6:2024 - Clause 7 (Marking and instructions)\n\nApplied in addition to EN IEC 60335-1 Clause 7. Only the sub-clauses that change or add to Part 1 are reproduced here.\n\n## 7.9 Marking of controls\n\nFlexible induction cooking zone switches, touch controls, displays and the like shall be marked or placed so as to indicate clearly which vessel is assigned to which switch, touch control, display or the like.\n\n## 7.12 Instructions\n\nAddition to Part 1. The instructions shall state that a steam cleaner is not to be used.\n\nThe instructions for hobs shall state that the appliance is not intended to be operated by means of an external timer or separate remote-control system. For hobs with a remote automatic regulation system, the instructions shall additionally identify the system, describe how it is connected, state the precautions for safe operation, illustrate its location, and describe how to enable and disable remote communication.\n\nThe instructions for hobs shall include the substance of the following: danger of fire from storing items on the cooking surfaces; that the cooking process has to be supervised, and a short-term cooking process supervised continuously; and that unattended cooking with fat or oil can be dangerous and can result in a fire.\n\n## 7.15 Placement of markings\n\nFor fixed appliances, the manufacturer's name or trademark and the model or type reference shall be marked on the appliance and, if not visible once installed as in normal use, shall be included in the instructions or on an additional label that can be fixed near the appliance after installation.\n",
+  "summaryFileName": "en-iec-60335-2-6-2024-clause-7.md",
+
+  "clauses": [
+    {
+      "number": "7.9",
+      "title": "Marking of switches and controls",
+      "kind": "clause",
+      "summary": "Controls must be marked or placed so it is unambiguous which cooking zone each one drives."
+    },
+    {
+      "number": "7.12",
+      "qualifier": "Addition",
+      "title": "Instructions",
+      "kind": "clause",
+      "summary": "Adds hob-specific content requirements to the instructions required by EN IEC 60335-1 7.12."
+    },
+    {
+      "number": "7.15",
+      "title": "Placement and durability of markings",
+      "kind": "clause",
+      "summary": "Where the identification marking must physically appear on a fixed appliance."
+    }
+  ],
+
+  "obligations": [
+    {
+      "clause": "7.9",
+      "text": "Flexible induction cooking zone switches, touch controls, displays and the like shall be marked or placed so as to indicate clearly as to which vessel is assigned to which switch, touch control, display or the like.",
+      "carriers": ["Rating label", "IM", "Product"]
+    },
+    {
+      "clause": "7.12",
+      "text": "The instructions for cooking ranges, hobs and ovens shall state that a steam cleaner is not to be used.",
+      "carriers": ["IM", "Product"]
+    },
+    {
+      "clause": "7.12",
+      "text": "The instructions for hobs shall state that the appliance is not intended to be operated by means of an external timer or separate remote-control system, and for hobs with a remote automatic regulation system shall identify it, describe its connection, state the precautions for safe operation, illustrate its location, and describe how to enable and disable remote communication.",
+      "carriers": ["IM", "Product"]
+    },
+    {
+      "clause": "7.12",
+      "text": "The instructions for hobs shall include the substance of the fire-risk warnings for stored items, supervised cooking and unattended cooking with fat or oil.",
+      "verbatim": "Danger of fire: Do not store items on the cooking surfaces. CAUTION: The cooking process has to be supervised. A short term cooking process has to be supervised continuously. WARNING: Unattended cooking on a hob with fat or oil can be dangerous and can result in a fire.",
+      "sourceQuoted": true,
+      "carriers": ["IM", "Product"],
+      "note": "Mandated wording - the translation freeze registry must protect this text."
+    },
+    {
+      "clause": "7.15",
+      "text": "For fixed appliances, the name or trademark of the manufacturer and the model or type reference shall be marked on the appliance and, if not visible once installed, shall be included in the instructions or on an additional label fixable near the appliance after installation.",
+      "carriers": ["Rating label", "Product"],
+      "optionalCarriers": ["IM"]
+    }
+  ],
+
+  "tcfRequirements": [
+    {
+      "title": "LVD test report - EN IEC 60335-2-6",
+      "description": "Low Voltage Directive test report and certificate against EN IEC 60335-1 and EN IEC 60335-2-6, for the main unit and any external adaptor supplied with it.",
+      "section": "Electrical Test Reports and Certificates",
+      "isMandatory": true,
+      "timingType": "ETD",
+      "timingWeeks": 0,
+      "testReportOrigin": "third_party_mandatory",
+      "selfDeclarationAccepted": false
+    },
+    {
+      "title": "Marking on product",
+      "description": "Artwork or photograph of the rating label and of the control markings, evidencing clause 7.9 and 7.15 compliance.",
+      "clause": "7.15",
+      "section": "Packaging & Labeling",
+      "isMandatory": true,
+      "timingType": "ETD",
+      "timingWeeks": 0,
+      "testReportOrigin": "supplier_inhouse",
+      "selfDeclarationAccepted": true
+    }
+  ],
+
+  "research": {
+    "sources": [
+      {
+        "title": "IEC Webstore - IEC 60335-2-6:2024",
+        "url": "https://webstore.iec.ch/",
+        "retrievedAt": "2026-09-02"
+      }
+    ],
+    "unverified": [
+      "The EN adoption date of IEC 60335-2-6:2024 by CENELEC was not confirmed; the IEC edition date is used for editionYear.",
+      "Whether the 7.12 fire-risk wording is mandated verbatim or 'in substance' varies by national annex - the verbatim field records the standard's own sentence."
+    ],
+    "marketNotes": "Competitor hob manuals reviewed (Bosch, Siemens, AEG built-in induction) all reproduce the 7.12 fire-risk block close to verbatim and place it in the first safety chapter, ahead of installation. Two of the three also repeat the steam-cleaner prohibition in the cleaning chapter, which is not required but reads as established practice. Safety Gate notifications for induction hobs in this period cluster on electric-shock and surface-temperature issues rather than on marking, so marking defects appear to be caught at approval rather than in the market."
+  }
+}

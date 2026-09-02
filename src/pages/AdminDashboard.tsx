@@ -316,6 +316,9 @@ const AdminDashboard: React.FC = () => {
   // 'add' leaves what is already here alone; 'replace' treats the source as the truth and
   // clears this category's own attributes first. See replaceCategoryAttributes.
   const [importMode, setImportMode] = useState<'add' | 'replace'>('add');
+  // Replace normally leaves global attributes alone. This opts into deleting the ones this
+  // import does not mention too — which removes them from EVERY category, not just this one.
+  const [replaceIncludeGlobals, setReplaceIncludeGlobals] = useState(false);
   // Reviewed ProductToolkit sync: the computed plan, which items are ticked, and any
   // reviewer remaps (incoming key -> existing attribute id, '' = force new).
   const [syncPlan, setSyncPlan] = useState<SyncPlan | null>(null);
@@ -633,6 +636,7 @@ const AdminDashboard: React.FC = () => {
     setImporting(false);
     setImportSource('csv');
     setImportMode('add');
+    setReplaceIncludeGlobals(false);
     setSyncPlan(null);
     setSyncIncluded(new Set());
     setSyncRemap({});
@@ -849,33 +853,56 @@ const AdminDashboard: React.FC = () => {
     const included = importRows.filter((_, i) => importIncluded[i]);
     if (included.length === 0) return;
     if (importMode === 'replace') {
-      const owned = attributes.filter(a => a.categoryId === selectedCategoryDetail);
-      const shared = attributes.filter(a => a.categoryId !== null && a.categoryId !== selectedCategoryDetail && (a.assignedCategoryIds ?? []).includes(selectedCategoryDetail));
-      const ok = window.confirm(
-        `Replace the attributes of "${categories.find(c => c.id === selectedCategoryDetail)?.name}"?
+      const applies = getAttributesForCategory(attributes, selectedCategoryDetail);
+      // Anything the incoming rows do not account for, keyed the way the importer matches.
+      const inCode = new Set(included.map(r => (r.akeneoId ?? '').trim().toLowerCase()).filter(Boolean));
+      const inName = new Set(included.map(r => r.name.trim().toLowerCase()));
+      const leftover = applies.filter(a =>
+        !(a.akeneoId && inCode.has(a.akeneoId.trim().toLowerCase())) && !inName.has(a.name.trim().toLowerCase()));
 
-` +
-        `• ${owned.length} attribute(s) owned by this category will be DELETED
-` +
-        `• ${shared.length} shared attribute(s) will be removed from this category (kept for their owner)
-` +
-        `• Global attributes are not touched
+      const ownedGone = leftover.filter(a => a.categoryId === selectedCategoryDetail);
+      const sharedGone = leftover.filter(a => a.categoryId !== null && a.categoryId !== selectedCategoryDetail);
+      const globalGone = leftover.filter(a => a.categoryId === null);
+      const otherCategories = new Set(
+        attributes.filter(a => a.categoryId && a.categoryId !== selectedCategoryDetail).map(a => a.categoryId),
+      ).size;
 
-` +
-        `Any SKU values captured against the deleted attributes stop resolving and are not migrated. This cannot be undone.`,
-      );
-      if (!ok) return;
+      const lines = [
+        'Replace the attributes of "' + (categories.find(c => c.id === selectedCategoryDetail)?.name ?? '') + '"?',
+        '',
+        'Kept and updated in place: ' + (applies.length - leftover.length) +
+          ' (ids survive, so SKU values and IM references keep working)',
+        'Deleted, owned by this category: ' + ownedGone.length,
+        'Un-shared from this category: ' + sharedGone.length,
+      ];
+      if (replaceIncludeGlobals) {
+        lines.push(
+          'Deleted GLOBAL attributes: ' + globalGone.length,
+          '',
+          'WARNING: a global attribute applies to every category, so deleting it removes it from ' +
+            otherCategories + ' other categor' + (otherCategories === 1 ? 'y' : 'ies') + ' as well.',
+        );
+        if (globalGone.length) lines.push('They are: ' + globalGone.map(a => a.name).join(', '));
+      } else {
+        lines.push('Global attributes left alone: ' + globalGone.length);
+      }
+      lines.push('', 'Values captured against a deleted attribute stop resolving. This cannot be undone.');
+
+      if (!window.confirm(lines.join(NL))) return;
     }
     setImporting(true);
     setImportError(null);
     try {
       const res = importMode === 'replace'
-        ? await replaceCategoryAttributes(selectedCategoryDetail, included)
+        ? await replaceCategoryAttributes(selectedCategoryDetail, included, { includeGlobals: replaceIncludeGlobals })
         : await importCategoryAttributes(selectedCategoryDetail, included);
       await loadData();
       setImportModalOpen(false);
+      const rep = res as ReplaceAttributesResult;
       const removed = importMode === 'replace'
-        ? `${(res as ReplaceAttributesResult).deleted} deleted, ${(res as ReplaceAttributesResult).unshared} un-shared, `
+        ? `${rep.updated} updated in place, ${rep.deleted} deleted` +
+          (rep.deletedGlobals ? `, ${rep.deletedGlobals} global(s) deleted` : '') +
+          `, ${rep.unshared} un-shared, `
         : '';
       alert(`Import complete: ${removed}${res.created} created, ${res.linked} linked${res.skipped ? `, ${res.skipped} already present` : ''}.`);
     } catch (e: any) {
@@ -2911,11 +2938,29 @@ const AdminDashboard: React.FC = () => {
                 <div className="mb-4 flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                   <span>
-                    The source is treated as the truth: attributes owned by this category are <strong>deleted</strong> and
-                    shared-in ones are removed from it before importing. Global attributes are left alone. SKU values
-                    captured against a deleted attribute stop resolving and are not migrated.
+                    The source is treated as the truth. Anything still in the import is matched and updated
+                    <strong> in place</strong> — its id survives, so SKU values and IM references keep working.
+                    Anything the import does not mention is deleted (if this category owns it) or un-shared.
                   </span>
                 </div>
+              )}
+              {importMode === 'replace' && (
+                <label className="mb-4 -mt-2 flex items-start gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={replaceIncludeGlobals}
+                    onChange={e => setReplaceIncludeGlobals(e.target.checked)}
+                  />
+                  <span className={replaceIncludeGlobals ? 'text-rose-700' : 'text-gray-600'}>
+                    <span className="font-medium">Also delete global attributes not in this import</span>
+                    <span className="block text-gray-500 mt-0.5">
+                      Leaves this category holding <em>only</em> the imported attributes. A global applies to
+                      every category, so this deletes it <strong>everywhere</strong> — for clearing out
+                      leftovers, not for a routine import.
+                    </span>
+                  </span>
+                </label>
               )}
 
               <div className="flex items-center gap-1 mb-4 border-b border-gray-100">

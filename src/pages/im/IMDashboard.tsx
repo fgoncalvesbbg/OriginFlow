@@ -25,7 +25,7 @@ import { LeafletCoverageTab } from './LeafletCoverageTab';
 import { ImImportDialog } from './ImImportDialog';
 import PublishDiffModal from './PublishDiffModal';
 import type { ImImportResult } from '../../services';
-import { RegulationLibraryContent } from './IMRegulationLibrary';
+
 import { TemplateRegulationsModal } from './IMTemplateRegulations';
 
 const TEMPLATE_TYPE_ORDER: IMTemplateType[] = ['im', 'warning_leaflet'];
@@ -880,7 +880,10 @@ const TemplatesTab: React.FC<TemplatesTabProps> = ({
 // Main dashboard
 // ---------------------------------------------------------------------------
 
-type Tab = 'templates' | 'manuals' | 'blocks' | 'regulations' | 'coverage' | 'viewer';
+// 'regulations' is gone: the library moved to the top-level /regulations section in
+// migration 139, because the TCF reads from the same rows and a tab inside the IM
+// dashboard is what let the two drift apart in the first place.
+type Tab = 'templates' | 'manuals' | 'blocks' | 'coverage' | 'viewer';
 
 const IMDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -998,7 +1001,6 @@ const IMDashboard: React.FC = () => {
     { id: 'manuals',   label: 'All Manuals',        count: allIMs.length, icon: <Layers size={15} /> },
     { id: 'templates', label: 'Category Templates',                        icon: <FileText size={15} /> },
     { id: 'blocks',    label: 'Block Library',                             icon: <BookOpen size={15} /> },
-    { id: 'regulations', label: 'Regulations',                             icon: <Scale size={15} /> },
     { id: 'coverage',  label: 'Leaflet Coverage',                          icon: <ShieldCheck size={15} /> },
     { id: 'viewer',    label: 'Viewer',                                    icon: <Eye size={15} /> },
   ];
@@ -1071,7 +1073,6 @@ const IMDashboard: React.FC = () => {
             />
       )}
       {activeTab === 'blocks' && <BlockLibraryContent />}
-      {activeTab === 'regulations' && <RegulationLibraryContent />}
       {activeTab === 'coverage' && <LeafletCoverageTab />}
       {activeTab === 'viewer' && <IMViewerTab ims={allIMs} />}
 

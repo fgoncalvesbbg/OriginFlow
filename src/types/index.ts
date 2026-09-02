@@ -112,6 +112,16 @@ export type { FeedbackReport, FeedbackReportType, FeedbackReportStatus } from '.
 // Regulatory types
 export type {
   RegulationStatus,
+  ObligationCarrier,
+  ClauseKind,
+  RegulationClause,
+  RegulationClauseInput,
+  RegulationObligation,
+  RegulationObligationInput,
+  RegulationStructure,
+  RegulationVersionState,
+  RegulationVersionDetail,
+  RegulationVersionResult,
   Regulation,
   RegulationInput,
   TemplateRegulation,
