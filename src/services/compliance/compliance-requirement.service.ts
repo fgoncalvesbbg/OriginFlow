@@ -324,8 +324,9 @@ export const importCategoryAttributes = async (
         const validationRules: CategoryAttribute['validationRules'] = {};
         if (row.unit) validationRules.unit = row.unit;
         if (row.dataType === 'enum') validationRules.enumOptions = row.enumOptions ?? [];
-        // Only ProductToolkit rows carry this; a CSV row never sets it, so nothing changes there.
+        // Only ProductToolkit rows carry these; a CSV row never sets them.
         if (row.required) validationRules.required = true;
+        if (row.note) validationRules.placeholder = row.note;
 
         const created: CategoryAttribute = {
             id: generateUUID(),

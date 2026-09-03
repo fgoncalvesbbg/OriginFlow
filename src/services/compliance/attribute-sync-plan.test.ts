@@ -238,3 +238,53 @@ describe('buildSyncWrite', () => {
     expect(buildSyncWrite(p.items[0], CAT)).toBeNull();
   });
 });
+
+describe('supplier-facing note', () => {
+  const plan = (existing: CategoryAttribute[], incoming: ParsedAttributeRow[]) =>
+    planAttributeSync(existing, incoming, {}, CAT);
+
+  it("writes ProductToolkit's note where the supplier sees it", async () => {
+    const { buildSyncWrite } = await import('./attribute-sync-plan');
+    const p = plan(
+      [ex({ id: 'a1', name: 'Total Power', akeneoId: 'power' })],
+      [inc({ name: 'Total Power', akeneoId: 'power', note: 'Total maximum power possible.' })],
+    );
+    // placeholder is what AttributeInput renders under the field in every supplier form.
+    expect(buildSyncWrite(p.items[0], CAT)!.validationRules?.placeholder)
+      .toBe('Total maximum power possible.');
+  });
+
+  it('keeps a hand-written hint when ProductToolkit has no note', async () => {
+    const { buildSyncWrite } = await import('./attribute-sync-plan');
+    const p = plan(
+      [ex({ id: 'a1', name: 'Motor Power', akeneoId: 'motor_power_W',
+            validationRules: { placeholder: 'Rated motor power in watts (W).' } })],
+      // note absent, but something else changed so a write genuinely happens — that is the
+      // case where a careless merge would drop the hint.
+      [inc({ name: 'Motor Power', akeneoId: 'motor_power_W', sortOrder: 12 })],
+    );
+    expect(p.items[0].action).toBe('update');
+    // An empty note means "nothing to say", not "delete what OriginFlow wrote".
+    expect(buildSyncWrite(p.items[0], CAT)!.validationRules?.placeholder)
+      .toBe('Rated motor power in watts (W).');
+  });
+
+  it("lets ProductToolkit's note override an existing hint, and shows it as a change", async () => {
+    const p = plan(
+      [ex({ id: 'a1', name: 'Standby', akeneoId: 'standby',
+            validationRules: { placeholder: 'old wording' } })],
+      [inc({ name: 'Standby', akeneoId: 'standby', note: 'Mandatory value by EU regulations' })],
+    );
+    const change = p.items[0].changes.find(c => c.field === 'note')!;
+    expect(change.from).toBe('old wording');
+    expect(change.to).toBe('Mandatory value by EU regulations');
+  });
+
+  it('carries required and supplierVisible through as well', async () => {
+    const { buildSyncWrite } = await import('./attribute-sync-plan');
+    const p = plan([], [inc({ name: 'X', akeneoId: 'x', required: true, supplierVisible: false })]);
+    const w = buildSyncWrite(p.items[0], CAT)!;
+    expect(w.validationRules?.required).toBe(true);
+    expect(w.supplierVisible).toBe(false);
+  });
+});

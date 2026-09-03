@@ -1,7 +1,7 @@
 # Graph Report - OriginFlow  (2026-09-03)
 
 ## Corpus Check
-- 654 files · ~919,237 words
+- 654 files · ~919,369 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `3a969761`
+- Built from commit: `6ceb6043`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1093,7 +1093,7 @@ Cohesion: 0.83
 Nodes (3): public.regulation_clauses, public.regulation_obligations, public.regulations
 
 ## Knowledge Gaps
-- **797 isolated node(s):** `private_archive.compliance_requirements_im_section_139`, `The loop`, `Why the JSON is validated so harshly`, `Merge semantics`, `The two artefacts, and why they are separate` (+792 more)
+- **797 isolated node(s):** `CalloutVariant`, `LangValue`, `PrintAnnotatedImage`, `PrintBackOptions`, `PrintCoverOptions` (+792 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **81 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1101,12 +1101,12 @@ Nodes (3): public.regulation_clauses, public.regulation_obligations, public.regu
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `orEmpty()` connect `orEmpty` to `TranslationMemoryAdmin.tsx`, `im-publish.service.ts`, `App.tsx`, `im/index.ts`, `regulatory-check.service.ts`, `SupplierDashboard.tsx`, `project-im.service.ts`, `withDeadline`, `im-print-typography.ts`, `im-tm-lookup.service.ts`, `im-import.service.ts`, `src/types.ts`, `rfq.service.ts`, `PrintExportDialog.tsx`?**
-  _High betweenness centrality (0.008) - this node is a cross-community bridge._
-- **Why does `useAuth()` connect `App.tsx` to `PMDashboard.tsx`, `regulation-checklist.ts`, `TranslationMemoryAdmin.tsx`, `services/index.ts`, `compliance.constants.ts`, `im-tm-translate.ts`, `IMTemplateEditor.tsx`, `InlineBlockEditor.tsx`, `ProjectIMGenerator.tsx`, `IMTemplateRegulations.tsx`, `AdminDashboard.tsx`, `IMRegulatoryCheckModal.tsx`, `PrintExportDialog.tsx`?**
-  _High betweenness centrality (0.006) - this node is a cross-community bridge._
-- **Why does `ProductionDelayReason` connect `ProductionDelayReason` to `types/index.ts`, `SupplierDashboard.tsx`?**
-  _High betweenness centrality (0.006) - this node is a cross-community bridge._
-- **What connects `private_archive.compliance_requirements_im_section_139`, `The loop`, `Why the JSON is validated so harshly` to the rest of the system?**
+  _High betweenness centrality (0.005) - this node is a cross-community bridge._
+- **Why does `isLive` connect `src/types.ts` to `regulation-checklist.ts`, `orEmpty`, `im/index.ts`, `im-translation-import.service.ts`, `InlineBlockEditor.tsx`, `project-im.service.ts`, `rfq.service.ts`, `im-import.service.ts`, `IMTemplateRegulations.tsx`, `services/index.ts`, `im-publish.service.ts`, `App.tsx`, `compliance/index.ts`, `IMReviewPortal.tsx`, `regulatory/index.ts`, `ConnectionContext.tsx`, `TranslationMemoryAdmin.tsx`, `im-tm-translate.ts`, `im-tm-lookup.service.ts`, `PrintExportDialog.tsx`, `regulatory-check.service.ts`, `SupplierDashboard.tsx`, `withDeadline`?**
+  _High betweenness centrality (0.004) - this node is a cross-community bridge._
+- **Why does `IMTemplateType` connect `im-import.service.ts` to `types/index.ts`, `im-publish.service.ts`, `IMBlockLibrary.tsx`, `im/index.ts`, `regulatory-check.service.ts`, `im-print-typography.ts`, `project-im.service.ts`, `src/types.ts`, `PrintExportDialog.tsx`?**
+  _High betweenness centrality (0.004) - this node is a cross-community bridge._
+- **What connects `CalloutVariant`, `LangValue`, `PrintAnnotatedImage` to the rest of the system?**
   _797 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `live-browser.js` be split into smaller, more focused modules?**
   _Cohesion score 0.03824852890273451 - nodes in this community are weakly interconnected._

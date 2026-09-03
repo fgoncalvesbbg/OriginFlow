@@ -2197,7 +2197,7 @@
       "file_type": "code",
       "norm_label": "producttoolkitunavailableerror",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L94"
+      "source_location": "L98"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_ptattribute",
@@ -2210,7 +2210,7 @@
       "file_type": "code",
       "norm_label": "ptattribute",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L67"
+      "source_location": "L71"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_ptdefinitionsummary",
@@ -2223,7 +2223,7 @@
       "file_type": "code",
       "norm_label": "ptdefinitionsummary",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L49"
+      "source_location": "L53"
     },
     {
       "id": "src_pages_regulations_regulationeditor_props",
@@ -18489,7 +18489,7 @@
       "file_type": "code",
       "norm_label": "baseurl()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L40"
+      "source_location": "L44"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_getjson",
@@ -18501,7 +18501,7 @@
       "file_type": "code",
       "norm_label": "getjson()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L111"
+      "source_location": "L117"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_getproducttoolkitdefinition",
@@ -18513,7 +18513,7 @@
       "file_type": "code",
       "norm_label": "getproducttoolkitdefinition()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L155"
+      "source_location": "L157"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_getproducttoolkitdefinitions",
@@ -18525,7 +18525,7 @@
       "file_type": "code",
       "norm_label": "getproducttoolkitdefinitions()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L146"
+      "source_location": "L148"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_mapfieldtype",
@@ -18537,7 +18537,7 @@
       "file_type": "code",
       "norm_label": "mapfieldtype()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L170"
+      "source_location": "L172"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_mapproducttoolkitattributes",
@@ -18549,7 +18549,7 @@
       "file_type": "code",
       "norm_label": "mapproducttoolkitattributes()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L193"
+      "source_location": "L195"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_service_producttoolkitunavailableerror_constructor",
@@ -18561,7 +18561,7 @@
       "file_type": "code",
       "norm_label": ".constructor()",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L95"
+      "source_location": "L99"
     },
     {
       "id": "src_services_compliance_producttoolkit_attributes_test_attr",
@@ -98974,7 +98974,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L112",
+      "source_location": "L118",
       "weight": 1.0
     },
     {
@@ -98986,7 +98986,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L199",
+      "source_location": "L201",
       "weight": 1.0
     },
     {
@@ -128076,7 +128076,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L34",
+      "source_location": "L38",
       "weight": 1.0
     },
     {
@@ -147888,7 +147888,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L34",
+      "source_location": "L38",
       "weight": 1.0
     },
     {
@@ -147900,7 +147900,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L35",
+      "source_location": "L39",
       "weight": 1.0
     },
     {
@@ -193484,7 +193484,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L111",
+      "source_location": "L117",
       "weight": 1.0
     },
     {
@@ -193495,7 +193495,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L146",
+      "source_location": "L148",
       "weight": 1.0
     },
     {
@@ -193506,7 +193506,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L155",
+      "source_location": "L157",
       "weight": 1.0
     },
     {
@@ -193517,7 +193517,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L170",
+      "source_location": "L172",
       "weight": 1.0
     },
     {
@@ -193528,7 +193528,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L193",
+      "source_location": "L195",
       "weight": 1.0
     },
     {
@@ -193539,7 +193539,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L40",
+      "source_location": "L44",
       "weight": 1.0
     },
     {
@@ -193550,7 +193550,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L49",
+      "source_location": "L53",
       "weight": 1.0
     },
     {
@@ -193561,7 +193561,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L67",
+      "source_location": "L71",
       "weight": 1.0
     },
     {
@@ -193572,7 +193572,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L94",
+      "source_location": "L98",
       "weight": 1.0
     },
     {
@@ -208525,7 +208525,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/services/compliance/producttoolkit-attributes.service.ts",
-      "source_location": "L95",
+      "source_location": "L99",
       "weight": 1.0
     },
     {
@@ -213891,5 +213891,5 @@
       "source_file": "DESIGN.md"
     }
   ],
-  "built_at_commit": "3a969761ad18ecdc016eedfca6988bf482c25082"
+  "built_at_commit": "6ceb6043982ef6ee59de519bf8dc324433627dff"
 }

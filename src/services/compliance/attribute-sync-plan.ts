@@ -235,6 +235,9 @@ export const planAttributeSync = (
       }
     }
 
+    if (row.note) {
+      add('note', match.validationRules?.placeholder ?? '—', row.note);
+    }
     if (row.supplierVisible !== undefined) {
       add('supplierVisible', String(match.supplierVisible !== false), String(row.supplierVisible !== false));
     }
@@ -310,6 +313,10 @@ export const buildSyncWrite = (item: SyncItem, categoryId: string): CategoryAttr
   if (row.unit) validationRules.unit = row.unit;
   if (row.dataType === 'enum') validationRules.enumOptions = row.enumOptions ?? [];
   if (row.required !== undefined) validationRules.required = row.required || undefined;
+  // The supplier-facing note. Only overwritten when ProductToolkit actually has one: an empty
+  // note is "nothing to say", not "delete what OriginFlow wrote", and hand-written hints are
+  // real work that a routine sync must not silently erase.
+  if (row.note) validationRules.placeholder = row.note;
 
   return {
     // Reuse the existing row on update; only a genuine create gets a new identity.

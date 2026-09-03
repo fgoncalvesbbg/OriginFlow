@@ -33,6 +33,9 @@ export interface ParsedAttributeRow {
   sortOrder?: number;
   /** ProductToolkit's stable attribute id — the rename-safe join key. PT rows only. */
   ptAttributeId?: number;
+  /** ProductToolkit's supplier-facing note for this attribute. Lands in
+   *  validationRules.placeholder, which AttributeInput renders under the field. */
+  note?: string;
   /** EPREL identifier carried by the definition. Reference only. */
   eprelId?: string | null;
   /** PT's own scope. Authoritative when present: it decides global vs category-scoped,

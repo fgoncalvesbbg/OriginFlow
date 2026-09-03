@@ -84,6 +84,11 @@ export interface PtAttribute {
   supplierVisible?: boolean;
   required?: boolean;
   sortOrder?: number;
+  /** Supplier-facing note. Shown under the field wherever a supplier fills it in. */
+  note?: string | null;
+  /** Per-option alias map, e.g. {"Electronic Button": "Digital"}. Semantics not agreed with
+   *  ProductToolkit yet, so deliberately NOT consumed — guessing would mislabel options. */
+  optionMap?: Record<string, string> | null;
   /** How many PT categories use it — context when a scope change is proposed. */
   usedByCategories?: number;
   /** Not served yet; present in the team's spec for incremental sync. */
@@ -236,6 +241,7 @@ export const mapProductToolkitAttributes = (attrs: PtAttribute[]): ParsedAttribu
       required: a.required === true ? true : undefined,
       sortOrder: typeof a.sortOrder === 'number' ? a.sortOrder : undefined,
       ptAttributeId: typeof a.attributeId === 'number' ? a.attributeId : undefined,
+      note: (a.note ?? '').trim() || undefined,
       eprelId: a.eprelId ?? undefined,
       // Only the two values we understand are honoured; anything else falls back to
       // inferring scope from the group, rather than silently trusting an unknown string.
