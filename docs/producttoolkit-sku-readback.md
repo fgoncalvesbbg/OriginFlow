@@ -119,7 +119,7 @@ using the field type from your own category definition.
 | Field | Meaning |
 | --- | --- |
 | `matches` | How many SKU records carry this number. Usually 1. See gotcha 2. |
-| `attributes` | Captured values keyed by Akeneo code. Only attributes that *have* a code appear. Blank values are omitted entirely. |
+| `attributes` | Captured values keyed by Akeneo code. Only attributes that *have* a code appear. Blank values are omitted entirely. Includes a supplier's latest **submitted** answer even before a PM has reviewed and saved it onto the SKU — see gotcha 5. |
 | `unmapped` | Values that could not be expressed as an Akeneo code, so you can tell a partial payload from an empty one. |
 | `isFinal` | The SKU is locked in OriginFlow: no edits without an explicit unlock. A good signal the data is settled. |
 | `pendingExport` | OriginFlow's own delta tracking — it has changes not yet exported. Read-only to you; reading never clears it. |
@@ -254,6 +254,17 @@ string.
 A payload can be partial. If a code you expect is absent, look in `unmapped` before reporting
 a gap — the value may exist but be unaddressable by code. Reporting those as missing data
 sends people hunting for something that is already there.
+
+### 5. `attributes` can include a value no PM has reviewed yet
+
+OriginFlow has a supplier-portal step where a supplier submits values that a PM then reviews
+before they become the SKU's own recorded value. This endpoint does not wait for that review:
+it overlays the supplier's latest *submitted* answer for each attribute over the SKU's own
+stored value (submitted wins when present and non-blank, the stored value stands otherwise),
+so you see supplier data as soon as it lands rather than only after a PM has opened and saved
+the SKU. There is currently no field distinguishing "PM-reviewed" from "submitted, not yet
+reviewed" — treat everything in `attributes` as OriginFlow's best current answer, not as
+something a human has necessarily signed off on.
 
 ---
 

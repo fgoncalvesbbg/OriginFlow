@@ -1135,7 +1135,7 @@ const ProjectDetail: React.FC = () => {
     }
     setSavingSku(true);
     try {
-      const created = await createProjectSku(project.id, skuDraftNumber.trim(), skuDraftTitle.trim(), [], projectSkus.length);
+      const created = await createProjectSku(project.id, skuDraftNumber.trim(), skuDraftTitle.trim(), [], projectSkus.length, project.categoryId);
       setProjectSkus(prev => [...prev, created]);
       setAddingSku(false);
       setSkuDraftNumber('');

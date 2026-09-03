@@ -43,7 +43,8 @@ export const createProjectSku = async (
   skuNumber: string,
   skuTitle: string,
   attributeValues: SkuAttributeValue[] = [],
-  sortOrder?: number
+  sortOrder?: number,
+  categoryId?: string | null,
 ): Promise<ProjectSku> => {
   if (!isLive) throw new Error('Database not configured.');
 
@@ -53,8 +54,13 @@ export const createProjectSku = async (
     throw new Error(`Maximum of ${MAX_SKUS_PER_PROJECT} SKUs per project reached.`);
   }
 
+  // Stamp the project's own category onto the SKU at creation time. Nothing in OriginFlow's
+  // UI reads sku.categoryId back (attribute resolution goes through project.categoryId), but
+  // external consumers reading the SKU row directly — the ProductToolkit readback API — do,
+  // so a SKU created here must not be left with category_id null.
   const created = await db.insert<Row>('project_skus', {
     project_id: projectId,
+    category_id: categoryId ?? null,
     sku_number: skuNumber,
     sku_title: skuTitle,
     attribute_values: attributeValues,

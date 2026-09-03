@@ -114,3 +114,21 @@ export const buildSkuAttributePayload = (
 /** Index attribute rows by id for the lookup above. */
 export const indexAttributes = (rows: AttributeLookupRow[]): Map<string, AttributeLookupRow> =>
   new Map(rows.map(r => [r.id, r]));
+
+/**
+ * Overlay a supplier's latest 'submitted' attribute-request data onto a SKU's own stored
+ * values, mirroring the in-app effective-value rule (getEffectiveSkuValue in
+ * project-sku.service.ts): a submitted value wins when present, otherwise the SKU's own
+ * value stands. Appending the submission after the SKU's own entries reuses
+ * buildSkuAttributePayload's existing "last non-empty entry per code wins" behaviour to get
+ * that rule for free — a blank submitted value is skipped there rather than clearing a good
+ * stored one.
+ *
+ * Without this, a value a supplier has submitted but a PM has not yet reviewed onto the SKU
+ * (via the ProjectDetail editor) is invisible to this payload, even though it is what a
+ * consumer means by "what was actually captured for a SKU".
+ */
+export const withLatestSubmission = (
+  values: StoredSkuValue[] | null | undefined,
+  submittedData: StoredSkuValue[] | null | undefined,
+): StoredSkuValue[] => [...(values ?? []), ...(submittedData ?? [])];

@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildSkuAttributePayload,
   indexAttributes,
+  withLatestSubmission,
   type AttributeLookupRow,
   type SkuRow,
 } from './sku-akeneo-payload';
@@ -128,5 +129,40 @@ describe('buildSkuAttributePayload', () => {
       lookup,
     );
     expect(payload.attributes).toEqual({ main_color: 'Silver' });
+  });
+});
+
+describe('withLatestSubmission', () => {
+  it('lets a submitted value win over the SKU\'s own stored value for the same attribute', () => {
+    const lookup = indexAttributes([attr({ id: 'a1', akeneo_id: 'main_color' })]);
+    const merged = withLatestSubmission(
+      [{ attributeId: 'a1', value: 'Black' }],
+      [{ attributeId: 'a1', value: 'Silver' }],
+    );
+    const payload = buildSkuAttributePayload(sku({ attribute_values: merged }), lookup);
+    expect(payload.attributes).toEqual({ main_color: 'Silver' });
+  });
+
+  it('falls back to the SKU\'s own value when the submission leaves an attribute blank', () => {
+    // Mirrors getEffectiveSkuValue: a blank submitted value must not clear a good stored one.
+    const lookup = indexAttributes([attr({ id: 'a1', akeneo_id: 'main_color' })]);
+    const merged = withLatestSubmission(
+      [{ attributeId: 'a1', value: 'Black' }],
+      [{ attributeId: 'a1', value: '' }],
+    );
+    const payload = buildSkuAttributePayload(sku({ attribute_values: merged }), lookup);
+    expect(payload.attributes).toEqual({ main_color: 'Black' });
+  });
+
+  it('adds a submitted attribute the SKU never had its own value for', () => {
+    const lookup = indexAttributes([attr({ id: 'a1', akeneo_id: 'zone_1_size' })]);
+    const merged = withLatestSubmission([], [{ attributeId: 'a1', value: '14' }]);
+    const payload = buildSkuAttributePayload(sku({ attribute_values: merged }), lookup);
+    expect(payload.attributes).toEqual({ zone_1_size: '14' });
+  });
+
+  it('handles no submission and no stored values', () => {
+    expect(withLatestSubmission(null, null)).toEqual([]);
+    expect(withLatestSubmission(undefined, undefined)).toEqual([]);
   });
 });

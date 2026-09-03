@@ -33,6 +33,17 @@
  * different decision (it changes OriginFlow's own delta tracking) and does not belong on a
  * GET that any consumer may retry.
  *
+ * "Captured" INCLUDES A SUPPLIER SUBMISSION A PM HASN'T REVIEWED YET
+ * -------------------------------------------------------------------
+ * project_skus.attribute_values only gets a supplier's answer once a PM opens the SKU in
+ * ProjectDetail and saves it — until then it lives solely in project_attribute_requests.
+ * That left this endpoint returning `attributes: {}` for SKUs a supplier had already filled
+ * in, because nobody had reviewed them yet. This overlays each SKU's latest submitted
+ * request (scoped by project_id, since sku_number is not unique) over its own stored values,
+ * same "submitted wins over stored" rule as the in-app effective-value display
+ * (getEffectiveSkuValue in src/services/project/project-sku.service.ts) — see
+ * withLatestSubmission in sku-akeneo-payload.ts.
+ *
  * Server-only env (set in Netlify, NOT VITE_-prefixed):
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_ROLE_KEY  — service role: project_skus is not readable by anon
@@ -43,8 +54,10 @@ import { createClient } from '@supabase/supabase-js';
 import {
   buildSkuAttributePayload,
   indexAttributes,
+  withLatestSubmission,
   type AttributeLookupRow,
   type SkuRow,
+  type StoredSkuValue,
 } from '../../src/services/project/sku-akeneo-payload';
 
 interface NetlifyEvent {
@@ -111,7 +124,7 @@ export const handler = async (event: NetlifyEvent) => {
 
   const { data: skus, error: skuErr } = await supabase
     .from('project_skus')
-    .select('id, sku_number, sku_title, category_id, attribute_values, is_final, pending_export, last_exported_at, updated_at')
+    .select('id, project_id, sku_number, sku_title, category_id, attribute_values, is_final, pending_export, last_exported_at, updated_at')
     .eq('sku_number', skuNumber);
 
   if (skuErr) return json(500, { error: `Could not read SKUs: ${skuErr.message}` });
@@ -119,10 +132,36 @@ export const handler = async (event: NetlifyEvent) => {
     return json(404, { error: `No SKU with number "${skuNumber}".`, code: 'SKU_NOT_FOUND' });
   }
 
+  // A supplier's latest submission is not written onto the SKU until a PM reviews and saves
+  // it (see ProjectDetail.tsx), so it lives only in project_attribute_requests until then.
+  // "What was actually captured" (the documented contract) includes it — pull the latest
+  // submitted row per project, keyed by project_id since sku_number is not unique.
+  const projectIds = [...new Set((skus as SkuRow[]).map((s: any) => s.project_id).filter(Boolean) as string[])];
+  const submissionByProjectId = new Map<string, StoredSkuValue[]>();
+  if (projectIds.length > 0) {
+    const { data: submissions, error: subErr } = await supabase
+      .from('project_attribute_requests')
+      .select('project_id, submitted_data, submitted_at')
+      .eq('sku_number', skuNumber)
+      .eq('status', 'submitted')
+      .not('submitted_data', 'is', null)
+      .in('project_id', projectIds)
+      .order('submitted_at', { ascending: true });
+    if (subErr) return json(500, { error: `Could not read submissions: ${subErr.message}` });
+    // Ascending order + overwrite-on-set keeps the LAST (latest submitted_at) row per project.
+    for (const row of submissions ?? []) {
+      submissionByProjectId.set((row as any).project_id, (row as any).submitted_data ?? []);
+    }
+  }
+  const skusWithSubmissions: SkuRow[] = (skus as any[]).map(s => ({
+    ...s,
+    attribute_values: withLatestSubmission(s.attribute_values, submissionByProjectId.get(s.project_id)),
+  }));
+
   // Resolve only the attributes these SKUs actually reference.
   const referencedIds = [
     ...new Set(
-      (skus as SkuRow[]).flatMap(s => (s.attribute_values ?? []).map(v => v?.attributeId).filter(Boolean) as string[]),
+      skusWithSubmissions.flatMap(s => (s.attribute_values ?? []).map(v => v?.attributeId).filter(Boolean) as string[]),
     ),
   ];
   let attributeRows: AttributeLookupRow[] = [];
@@ -137,14 +176,14 @@ export const handler = async (event: NetlifyEvent) => {
   const byId = indexAttributes(attributeRows);
 
   // Category names, for a payload that is readable without a second lookup.
-  const categoryIds = [...new Set((skus as SkuRow[]).map(s => s.category_id).filter(Boolean) as string[])];
+  const categoryIds = [...new Set(skusWithSubmissions.map(s => s.category_id).filter(Boolean) as string[])];
   const categoryNames = new Map<string, string>();
   if (categoryIds.length > 0) {
     const { data } = await supabase.from('categories_l3').select('id, name').in('id', categoryIds);
     for (const c of data ?? []) categoryNames.set((c as any).id, (c as any).name);
   }
 
-  const payloads = (skus as SkuRow[]).map(s =>
+  const payloads = skusWithSubmissions.map(s =>
     buildSkuAttributePayload(s, byId, s.category_id ? categoryNames.get(s.category_id) ?? null : null),
   );
 
