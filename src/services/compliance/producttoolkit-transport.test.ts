@@ -46,14 +46,31 @@ describe('ProductToolkit transport', () => {
     } finally { server.close(); }
   });
 
-  it('names the CORS case first when the fetch fails at network level', async () => {
-    // A blocked cross-origin response is indistinguishable from an outage in the browser, so
-    // the message has to name all three causes — CORS first, since it is now the likeliest.
+  it('leads with certificate trust, and names a check that settles it', async () => {
+    // A TLS failure, an outage and a blocked origin are indistinguishable to the caller — the
+    // browser hides which. The internal CA is the likeliest of the three here, and the only
+    // one an operator can confirm themselves, so the message leads with it and says how.
     vi.stubEnv('VITE_PRODUCTTOOLKIT_URL', 'http://127.0.0.1:1/apps/attribute-viewer');
     const err = await getProductToolkitDefinition('X').catch(e => e);
     expect(err).toBeInstanceOf(ProductToolkitUnavailableError);
-    expect(err.message).toMatch(/Access-Control-Allow-Origin/);
+    expect(err.message).toMatch(/internal CA/);
+    expect(err.message).toMatch(/\/api\/health/);       // the concrete check
+    expect(err.message).toMatch(/only for that browser session/); // why it "worked once"
     expect(err.message).toMatch(/VPN/);
-    expect(err.message).toMatch(/certificate/);
+  });
+
+  it('sends no credentials — a wildcard ACAO rejects credentialed requests', async () => {
+    // ProductToolkit returns Access-Control-Allow-Origin: *, which browsers refuse to honour
+    // when credentials are included. Including them would break a working call.
+    let sawCookieHeader: string | undefined;
+    const server = await serve((req, res) => {
+      sawCookieHeader = req.headers.cookie;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ l3: 'X', attributes: [] }));
+    });
+    try {
+      await getProductToolkitDefinition('X');
+      expect(sawCookieHeader).toBeUndefined();
+    } finally { server.close(); }
   });
 });

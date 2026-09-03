@@ -12,19 +12,23 @@
  * succeeds while they are on the internal network/VPN. Everything here therefore treats
  * "unreachable" as an ordinary, expected outcome rather than an error to shout about.
  *
- * AUTH AND CORS (changed on ProductToolkit's side, 2026-09-01)
- * The API used to be unauthenticated with open CORS. It now answers
- *   401 {"code":"AUTH_REQUIRED","loginUrl":"/auth/login"}
- * and returns `Access-Control-Allow-Origin: https://producttoolkit.chal-tec.local` — its own
- * origin — together with `Access-Control-Allow-Credentials: true`.
+ * AUTH AND CORS
+ * These two endpoints are public: `/definitions` and `/definitions/{l3}` need no session, and
+ * ProductToolkit returns `Access-Control-Allow-Origin: *`. Verified live, 2026-09-03.
  *
- * Two consequences, neither fixable here:
- *  - A browser refuses to hand us any response whose ACAO does not match OriginFlow's origin,
- *    so the fetch rejects at the network level and we cannot even see the 401. ProductToolkit
- *    has to echo OriginFlow's origin before any browser call can work.
- *  - Once it does, the request still needs a session. We send `credentials: 'include'` so an
- *    operator already signed in to ProductToolkit in the same browser is authenticated by
- *    their existing cookie; that pairs with the ACAC:true they already return.
+ * So this sends NO credentials. That is not just tidiness — a wildcard ACAO is REJECTED by
+ * browsers whenever the request includes credentials, so `credentials: 'include'` would turn
+ * a working call into a CORS failure. (It briefly existed here during a window when the API
+ * required a session and echoed its own origin; both were reverted upstream.)
+ *
+ * TLS IS THE REMAINING TRAP
+ * The host's certificate is issued by an internal CA:
+ *     issuer  DC=local, DC=chal-tec, CN=chal-tec-SKWNAPP11-CA
+ *     subject CN=producttoolkit.chal-tec.local   (expires 2028-07-26)
+ * A browser without that CA installed fails at the TLS layer, and a background fetch gets no
+ * certificate prompt — it simply fails, indistinguishably from the host being down. A
+ * click-through exception (from visiting the host in a tab) only lasts that browser session,
+ * which is exactly why this can "work once, then stop".
  *
  * Trust boundary: the definitions are human-curated — "which attributes the team decided
  * matter for this category" — NOT a live read of Akeneo's own family requirements. They
@@ -94,14 +98,16 @@ export interface PtAttribute {
 export class ProductToolkitUnavailableError extends Error {
   constructor(public readonly url: string, cause?: unknown) {
     super(
-      `Could not reach ProductToolkit at ${url}. The browser reports a network-level failure, ` +
-      `which hides which of these it is:\n` +
-      `1. ProductToolkit is not allowing this site — it now returns its OWN origin in ` +
-      `Access-Control-Allow-Origin, so the browser discards the response before OriginFlow ` +
-      `sees it. It must echo this site's origin instead. This is the most likely cause.\n` +
+      `Could not reach ProductToolkit at ${url}. The browser reports a network-level failure ` +
+      `and hides the reason, so check these in order:\n` +
+      `1. Certificate trust — most likely. The host uses an internal CA ` +
+      `(chal-tec-SKWNAPP11-CA). A browser without that CA installed fails during the TLS ` +
+      `handshake, and a background request like this one gets no certificate prompt, so it ` +
+      `just fails. TO CONFIRM: open ${new URL(url).origin}/api/health in this same browser — a ` +
+      `certificate warning proves it, a padlock rules it out. Note a click-through exception ` +
+      `lasts only for that browser session, which is why this can work once and then stop.\n` +
       `2. Not on the internal network/VPN — the host is only published there.\n` +
-      `3. Its TLS certificate is not trusted by this browser (it is issued by an internal CA).\n` +
-      `A signed-in ProductToolkit session is also required once the above is fixed.`,
+      `3. ProductToolkit is down, or blocking this origin.`,
     );
     this.name = 'ProductToolkitUnavailableError';
     this.cause = cause;
@@ -115,12 +121,8 @@ const getJson = async <T>(path: string): Promise<{ status: number; body: T | nul
     res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
-      // ProductToolkit now requires a session. Including credentials lets an operator who is
-      // already signed in to it in this browser authenticate with their existing cookie,
-      // rather than OriginFlow having to hold a second credential. Requires ProductToolkit to
-      // return our exact origin in Access-Control-Allow-Origin (a wildcard is rejected by the
-      // browser whenever credentials are included).
-      credentials: 'include',
+      // Deliberately no `credentials`: these endpoints are public, and ProductToolkit returns
+      // ACAO `*`, which a browser refuses to honour for a credentialed request.
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
