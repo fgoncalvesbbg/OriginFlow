@@ -18,6 +18,7 @@ import {
   json,
   loadManuals,
   buildParts,
+  leafletLayoutOf,
   AuthError,
   PermanentError,
 } from './lib/print-render-shared';
@@ -97,8 +98,13 @@ export const handler = async (event: NetlifyEvent) => {
       warnings,
       // One label per part, for a progress UI. Language body parts carry their code;
       // the shared cover/back parts (full IM only, absent for compact leaflets) sit
-      // at the very start/end of the array.
-      labels: parts.map((p, i) => p.tab?.code ?? (i === 0 ? 'cover' : 'back')),
+      // at the very start/end of the array. The compact two-column leaflet is a single
+      // part holding every language, so it is labelled by what it is rather than being
+      // mislabelled 'cover' by its position.
+      labels:
+        leafletLayoutOf(req) === 'compact2col'
+          ? parts.map(() => ordered.map((l) => l.toUpperCase()).join('+'))
+          : parts.map((p, i) => p.tab?.code ?? (i === 0 ? 'cover' : 'back')),
       ordered,
     });
   } catch (e) {

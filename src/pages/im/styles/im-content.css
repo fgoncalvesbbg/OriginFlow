@@ -301,6 +301,18 @@
   object-fit: contain;
 }
 
+/*
+ * Opt-out for a deliberately large image (a full-page diagram or illustration) — set via
+ * the "No height limit" toolbar toggle (InlineBlockEditor.tsx), mirrored to data-uncap so
+ * it survives the serializer's style rebuild. Also baked into the image's own inline style
+ * by imgStyleFor for the same reason; this rule exists so a hand-authored legacy_html image
+ * carrying the attribute (without going through imgStyleFor) behaves identically. The print
+ * stylesheet carries the matching rule (im-print-html.ts) so editor and PDF agree.
+ */
+.im-content img[data-uncap='1'] {
+  max-height: none;
+}
+
 /* Floats must not escape their block and drag into the next one, exactly as in print. */
 .im-content::after {
   content: '';

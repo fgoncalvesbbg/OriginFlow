@@ -39,7 +39,7 @@ import { auth, db, orEmpty, storage, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { generateUUID } from '../../utils';
 import type { IMTemplateType } from '../../types';
-import type { PrintTypography } from './im-print-typography';
+import type { PrintTypography, PrintLeafletLayout } from './im-print-typography';
 import { flagEnabled } from './feature-flags';
 
 const BUCKET = 'im-print';
@@ -89,6 +89,14 @@ export interface PrintRender {
   comment: string;
   /** im_markets.code this booklet was produced for (market preset), or null for ad-hoc. */
   market: string | null;
+  /**
+   * Which leaflet layout this PDF was set in — DERIVED from `storagePath`, never stored.
+   *
+   * im_print_renders has no layout column, and the render rows are immutable history, so
+   * there is nothing to backfill: every row written before the compact layout existed reads
+   * as 'classic', which is exactly what it is. See `layoutOfStoragePath`.
+   */
+  layout: PrintLeafletLayout;
 }
 
 export interface PrintBackInput {
@@ -125,6 +133,19 @@ export interface RequestPrintPdfParams {
    * mergeTocIntoContent). Off = the classic "contents, then the manual" separation.
    */
   mergeToc?: boolean;
+  /**
+   * Which layout to set a Warning Leaflet in — 'classic' (default) or 'compact2col', the
+   * dense two-column A5 booklet. Ignored for full manuals. A layout is a render choice, not
+   * a document type: same template, same content, same translations, same coverage issue.
+   */
+  leafletLayout?: PrintLeafletLayout;
+  /**
+   * The document code printed in the footer and used in the download filename, e.g.
+   * `WL-RAN-ANGLED-8MJ-A5`. Built by `buildDocCode` (./im-doc-code) from the template's
+   * category, which is why it is resolved here and not in the render functions — they have no
+   * reason to load the category tree. Validated server-side before it reaches the PDF.
+   */
+  docCode?: string;
   /** Progress reporter — called as each part finishes, e.g. "Rendering DE (3/12)…". */
   onProgress?: (label: string, done: number, total: number) => void;
 }
@@ -159,6 +180,21 @@ export interface PrintPdfResult {
   warning?: string;
 }
 
+/**
+ * The layout a stored render was produced in, read back out of its storage path.
+ *
+ * The merge step writes `warning_leaflet-compact2col-<langs>-<size>-v<n>-<job>.pdf` for the
+ * compact layout and leaves the classic name exactly as it always was, so this is a total
+ * function over every row ever written — old rows have no token and are classic.
+ *
+ * Path-derived rather than a column on purpose: the alternative is a migration that has to be
+ * applied before the feature works at all, against a table whose rows are append-only history
+ * that would need no backfill anyway. Promote it to a real column when something needs to
+ * QUERY by layout; reading it per row does not.
+ */
+export const layoutOfStoragePath = (storagePath: string | null | undefined): PrintLeafletLayout =>
+  /\/warning_leaflet-compact2col-/.test(storagePath ?? '') ? 'compact2col' : 'classic';
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const mapRender = (r: any): PrintRender => ({
   id: r.id,
@@ -176,6 +212,7 @@ const mapRender = (r: any): PrintRender => ({
   createdAt: r.created_at,
   comment: r.comment ?? '',
   market: r.market ?? null,
+  layout: layoutOfStoragePath(r.storage_path),
 });
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -419,6 +456,8 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     market: params.market,
     typography: params.typography,
     mergeToc: params.mergeToc,
+    leafletLayout: params.leafletLayout,
+    docCode: params.docCode,
   };
 
   return runRenderJob(base, token, generateUUID(), params.onProgress, undefined, async (merged) => ({
@@ -466,6 +505,10 @@ export interface RequestDraftPrintPdfParams {
   typography?: PrintTypography;
   /** Continue the first section on the TOC page (full manuals only). */
   mergeToc?: boolean;
+  /** Leaflet layout to preview — 'classic' (default) or 'compact2col'. */
+  leafletLayout?: PrintLeafletLayout;
+  /** Document code for the footer + filename (see RequestPrintPdfParams.docCode). */
+  docCode?: string;
   onProgress?: (label: string, done: number, total: number) => void;
 }
 
@@ -551,6 +594,8 @@ export const requestDraftPrintPdf = async (
     back: params.back,
     typography: params.typography,
     mergeToc: params.mergeToc,
+    leafletLayout: params.leafletLayout,
+    docCode: params.docCode,
   };
 
   // Upload the manuals into the job's own temp prefix, where cleanup will remove them

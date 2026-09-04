@@ -125,3 +125,39 @@ describe('replaceCategoryAttributes', () => {
     expect(kept.name).toBe('Motor Power (W)');
   });
 });
+
+describe('a ProductToolkit attribute shared with a sibling category', () => {
+  // Regression: importing Glass-Ceramic Hobs failed with
+  //   duplicate key value violates unique constraint "idx_category_attributes_pt_attribute_id"
+  // because PT id 34 (Main Color) was already owned by Angled Hoods. The planner was only
+  // shown this category's attributes, so the sibling-owned row was invisible and it decided
+  // to create a second one carrying the same pt_attribute_id.
+  const SIBLING = 'cat-angled-hoods';
+
+  beforeEach(() => {
+    rows = [
+      row({ id: 'sib-owned', name: 'Main Color', akeneo_id: 'main_color',
+            category_id: SIBLING, assigned_category_ids: [], pt_attribute_id: 34 }),
+    ];
+  });
+
+  it('links it into this category instead of creating a duplicate id', async () => {
+    const res = await replaceCategoryAttributes(CAT, [
+      inc({ name: 'Main Color', akeneoId: 'main_color', ptAttributeId: 34 }),
+    ]);
+
+    expect(res.created).toBe(0);                                  // NOT a second row
+    expect(rows.filter(r => r.pt_attribute_id === 34)).toHaveLength(1);
+    const shared = rows.find(r => r.pt_attribute_id === 34)!;
+    expect(shared.category_id).toBe(SIBLING);                     // owner unchanged
+    expect(shared.assigned_category_ids).toContain(CAT);          // now applies here too
+  });
+
+  it('still matches by id when the code was renamed upstream', async () => {
+    const res = await replaceCategoryAttributes(CAT, [
+      inc({ name: 'Primary Colour', akeneoId: 'primary_colour', ptAttributeId: 34 }),
+    ]);
+    expect(res.created).toBe(0);
+    expect(rows.filter(r => r.pt_attribute_id === 34)).toHaveLength(1);
+  });
+});

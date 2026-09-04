@@ -33,8 +33,9 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { PrintExportReport } from './PrintExportReport';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
-import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '../../../services/im/im-print-settings.service';
+import { getPrintTypography, defaultTypographyFor, type PrintTypography, type PrintLeafletLayout } from '../../../services/im/im-print-settings.service';
 import { TypographySummary } from '../editor/TypographySummary';
+import { useDocCode } from '../editor/useDocCode';
 
 interface PrintExportDialogProps {
   projectId: string;
@@ -141,6 +142,15 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     // chose A4 defaults to the larger sheet.
     isLeaflet ? 'a5' : meta?.pageSize === 'a4' ? 'a4' : 'a5',
   );
+
+  /**
+   * Which LAYOUT to set a Warning Leaflet in. Defaults to classic, so an operator who does
+   * nothing gets exactly the leaflet they get today.
+   *
+   * A layout is not a document type — same template, same content, same translations, same
+   * coverage issue — so it is a per-export choice here rather than a second template kind.
+   */
+  const [leafletLayout, setLeafletLayout] = useState<PrintLeafletLayout>('classic');
 
   // Save a page per language by letting the first section continue on the TOC page.
   // Default ON: the operator's standing goal is fewer printed pages; unticking restores
@@ -310,8 +320,21 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const sameSet = (a: string[], b: string[]) =>
     a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
 
-  // The most recent render matching the currently selected languages + page size.
-  const match = renders.find((r) => r.pageSize === pageSize && sameSet(r.languages, selected)) ?? null;
+  // The most recent render matching the currently selected languages + page size + layout.
+  // Layout is part of the identity: without it, generating the first compact leaflet would
+  // match the existing classic render, report "current" and demand a credit confirmation for
+  // a PDF that has never been produced.
+  const activeLayout: PrintLeafletLayout = isLeaflet ? leafletLayout : 'classic';
+
+  // The document code identifies the DOCUMENT, so it is keyed on the TEMPLATE's category — a
+  // leaflet is a property of the category, not of this one project — falling back to the
+  // project's category when no template is loaded.
+  const docCode = useDocCode(templateType, pageSize, template?.categoryId ?? categoryId);
+
+  const match =
+    renders.find(
+      (r) => r.pageSize === pageSize && r.layout === activeLayout && sameSet(r.languages, selected),
+    ) ?? null;
 
   // Compare the matching render's IM version against the IM's current version.
   type RegenStatus = 'new' | 'outdated' | 'current' | 'unknown';
@@ -331,7 +354,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   // Re-evaluate confirmation whenever the selection (and thus the match) changes.
   useEffect(() => {
     setConfirmCredit(false);
-  }, [pageSize, selected.join(',')]);
+  }, [pageSize, activeLayout, selected.join(',')]);
 
   const toggleLang = (lang: string) => {
     // A hand-edited selection is no longer the market's set — drop the stamp.
@@ -394,6 +417,8 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         typography,
         mergeToc: isLeaflet ? undefined : mergeToc,
+        leafletLayout: isLeaflet ? leafletLayout : undefined,
+        docCode: docCode || undefined,
         cover: {
           title,
           // Subtitle is never configured here — always left empty so the builder
@@ -634,6 +659,55 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
               ))}
             </div>
           </div>
+
+          {/* Document code — what identifies this PDF once it is off the screen. */}
+          {docCode && (
+            <div className="border rounded-lg px-4 py-3 bg-gray-50/60">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Document code</span>
+                <span className="text-sm font-semibold text-gray-800 font-mono tabular-nums">
+                  {docCode}
+                  {version != null && <span className="text-gray-400"> · v{version}</span>}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Printed in the footer and used in the filename. The code names the document (type,
+                category, page size) and the version names the revision — together they identify
+                exactly one PDF, and both are the same for every render of this leaflet.
+              </p>
+            </div>
+          )}
+
+          {/* Leaflet layout — leaflets only. */}
+          {isLeaflet && (
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Layout</label>
+              <div className="flex gap-2 mt-2">
+                {([
+                  { key: 'classic' as const, label: 'Classic', hint: 'One column, as printed today' },
+                  { key: 'compact2col' as const, label: 'Compact 2-column', hint: '7pt, two columns, no tinted panels' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setLeafletLayout(opt.key)}
+                    title={opt.hint}
+                    className={`text-sm px-4 py-1.5 border rounded text-left ${
+                      leafletLayout === opt.key
+                        ? 'bg-primary/10 border-primary text-primary'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                {leafletLayout === 'compact2col'
+                  ? 'Two columns, justified and hyphenated. Hazard blocks print as a coloured severity band with the ISO 7010 sign inline — no tinted panels and no icon gutter, so body text keeps the full column. Type sizes, line spacing and margins are the same Admin → IM Print leaflet profile the classic layout uses.'
+                  : 'One full-measure column with tinted hazard panels. Same Admin → IM Print leaflet profile as the compact layout.'}
+              </p>
+            </div>
+          )}
 
           {/* Page economy — full manuals only (leaflets have no TOC). */}
           {!isLeaflet && (

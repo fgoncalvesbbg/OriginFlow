@@ -6,7 +6,7 @@
  * drift before it stops being translation length and starts being a layout accident.
  */
 
-import type { PrintPdfResult, PrintRender } from '../../../services';
+import type { PrintPdfResult, PrintRender, PrintLeafletLayout } from '../../../services';
 
 /**
  * How far apart per-language page counts may sit before it is worth a look.
@@ -63,11 +63,17 @@ export const findComparableRender = (
   languages: readonly string[],
   pageSize: 'a4' | 'a5',
   excludeId?: string,
+  layout: PrintLeafletLayout = 'classic',
 ): PrintRender | null =>
   renders.find(
     (r) =>
       r.id !== excludeId &&
       r.pageSize === pageSize &&
+      // Layout has to match for the same reason page size does: the two-column compact
+      // leaflet and the classic single-column one are different artefacts from the same
+      // content, so diffing one against the other reports a page delta that says nothing
+      // about the template or the content — which is what this number is read for.
+      r.layout === layout &&
       r.pages != null &&
       sameLanguageSet(r.languages, languages),
   ) ?? null;
@@ -84,6 +90,9 @@ export const summarisePageBudget = (
     entries.map(([lang]) => lang),
     pageSize,
     result.render?.id,
+    // Read off the row just written rather than passed in from the dialog, so the comparison
+    // can never disagree with the artefact it is describing.
+    result.render?.layout ?? 'classic',
   );
 
   return {

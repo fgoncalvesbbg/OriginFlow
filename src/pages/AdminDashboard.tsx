@@ -664,9 +664,10 @@ const AdminDashboard: React.FC = () => {
         return;
       }
       const incoming = mapProductToolkitAttributes(attrs);
-      const applies = getAttributesForCategory(attributes, target.id);
-      const usage = await getAttributeUsage(applies.map(a => a.id));
-      const plan = planAttributeSync(applies, incoming, usage, target.id, remap);
+      // Match against every attribute: a ProductToolkit attribute shared with a sibling
+      // category has to be linked in, not recreated — pt_attribute_id is unique table-wide.
+      const usage = await getAttributeUsage(attributes.map(a => a.id));
+      const plan = planAttributeSync(attributes, incoming, usage, target.id, remap);
       setSyncPlan(plan);
       // Default: everything that would change, except anything flagged breaking — those are
       // opt-in, so a careless Apply cannot strand data.

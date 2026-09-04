@@ -31,7 +31,9 @@ import {
   defaultTypographyFor,
   normalizePrintTypography,
   type PrintTypography,
+  type PrintLeafletLayout,
 } from '../../../src/services/im/im-print-typography';
+import { isValidDocCode } from '../../../src/services/im/im-doc-code';
 
 export interface NetlifyEvent {
   httpMethod: string;
@@ -62,6 +64,25 @@ export interface RenderRequestBase {
    * `resolveTypography` below before it reaches PDFShift.
    */
   typography?: PrintTypography;
+  /**
+   * Which LAYOUT to set a Warning Leaflet in — 'classic' (the default, and what every leaflet
+   * has printed in so far) or 'compact2col' (the dense two-column A5 booklet).
+   *
+   * Chosen per export in the print dialog. Like `mergeToc` this MUST be identical across the
+   * prepare/part/merge calls of one job, which it is: the client sends one shared `base`.
+   * Ignored for full IMs.
+   */
+  leafletLayout?: PrintLeafletLayout;
+  /**
+   * The document code (e.g. `WL-RAN-ANGLED-8MJ-A5`) — printed in the footer and used in the
+   * download filename, so a leaflet on a pallet can be identified from the code plus the
+   * version alone. Built in the browser by `buildDocCode` (src/services/im/im-doc-code.ts),
+   * which needs the category's L2/L3 names that the render functions have no reason to load.
+   *
+   * NOT trusted as sent: it is stamped onto a safety document, so `resolveDocCode` below
+   * range-checks it against DOC_CODE_RE and drops anything else rather than printing it.
+   */
+  docCode?: string;
   /**
    * Continue the first content section on the TOC page (saves a page per language).
    * Chosen per export in the print dialog; the IM_PRINT_MERGE_TOC env flag still
@@ -124,6 +145,8 @@ export const isValidBase = (b: unknown): b is RenderRequestBase => {
     typeof r.back === 'object' &&
     (r.typography === undefined || (typeof r.typography === 'object' && r.typography !== null)) &&
     (r.mergeToc === undefined || typeof r.mergeToc === 'boolean') &&
+    (r.leafletLayout === undefined || r.leafletLayout === 'classic' || r.leafletLayout === 'compact2col') &&
+    (r.docCode === undefined || isValidDocCode(r.docCode)) &&
     (r.draft === undefined || typeof r.draft === 'boolean') &&
     (r.jobId === undefined || typeof r.jobId === 'string')
   );
@@ -160,7 +183,48 @@ export class PermanentError extends Error {}
  * out-of-range point size or margin would otherwise reach PDFShift verbatim.
  */
 export const resolveTypography = (req: RenderRequestBase): PrintTypography =>
+  // Layout-independent on purpose: both leaflet layouts are set from the operator's single
+  // (warning_leaflet, page size) profile, so the compact layout can never drift to a different
+  // size than the classic one and one admin change moves both.
   normalizePrintTypography(req.typography, defaultTypographyFor(req.templateType, req.pageSize));
+
+/**
+ * The leaflet layout this request renders in. `classic` for anything that is not a leaflet,
+ * so the layout can never change a full manual.
+ */
+export const leafletLayoutOf = (req: RenderRequestBase): PrintLeafletLayout =>
+  req.templateType === 'warning_leaflet' && req.leafletLayout === 'compact2col' ? 'compact2col' : 'classic';
+
+/**
+ * The leaflet's single last-page line: copyright, then the publish version.
+ *
+ * Assembled from segments and joined rather than interpolated, because interpolation is how
+ * the shipped v8 booklet came to read "© 2026 . All rights reserved." — the leaflet dialog
+ * offers no cover fields, so `cover.companyName` is always empty for a leaflet and the
+ * template blank was printed as a literal hole. A missing segment now drops out with its
+ * separator instead of leaving stray punctuation.
+ */
+export const buildCopyrightLine = (opts: {
+  year: number;
+  companyName?: string;
+  version?: number;
+  docCode?: string;
+}): string => {
+  const company = opts.companyName?.trim();
+  return [
+    company ? `© ${opts.year} ${company}. All rights reserved.` : `© ${opts.year}. All rights reserved.`,
+    // Code before version: the code says WHICH document, the version says WHICH revision of
+    // it, and that is the order someone reads them in when identifying a printed leaflet.
+    isValidDocCode(opts.docCode) ? opts.docCode : '',
+    opts.version ? `v${opts.version}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+};
+
+/** The document code to print, or '' when none was sent or it failed validation. */
+export const resolveDocCode = (req: RenderRequestBase): string =>
+  isValidDocCode(req.docCode) ? req.docCode : '';
 
 export interface PageMargin { top: string; bottom: string; left: string; right: string; }
 
@@ -210,6 +274,7 @@ export const buildParts = (
     back: req.back,
     version: req.version,
     compact,
+    leafletLayout: leafletLayoutOf(req),
     typography: resolveTypography(req),
     // Per-export choice from the print dialog; the server-side IM_PRINT_MERGE_TOC flag
     // still forces it on fleet-wide. Saves a page per language by letting content continue

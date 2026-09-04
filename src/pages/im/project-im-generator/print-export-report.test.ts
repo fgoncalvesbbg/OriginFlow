@@ -31,6 +31,7 @@ const render = (over: Partial<PrintRender>): PrintRender => ({
   createdAt: '2026-08-24T00:00:00Z',
   comment: '',
   market: null,
+  layout: 'classic',
   ...over,
 });
 
@@ -77,6 +78,21 @@ describe('findComparableRender', () => {
     const newer = render({ id: 'newer', languages: langs, pages: 60 });
     const older = render({ id: 'older', languages: langs, pages: 50 });
     expect(findComparableRender([newer, older], langs, 'a5')?.id).toBe('newer');
+  });
+
+  it('will not diff a compact two-column leaflet against a classic one', () => {
+    // Same content, same languages, same page size — but a different artefact. Diffing the
+    // two reports a page delta that says nothing about the template or the content.
+    const classic = render({ id: 'classic', languages: langs, layout: 'classic' });
+    const compact = render({ id: 'compact', languages: langs, layout: 'compact2col' });
+    expect(findComparableRender([classic], langs, 'a5', undefined, 'compact2col')).toBeNull();
+    expect(findComparableRender([compact], langs, 'a5', undefined, 'classic')).toBeNull();
+    expect(findComparableRender([compact, classic], langs, 'a5', undefined, 'compact2col')?.id).toBe('compact');
+  });
+
+  it('defaults to the classic layout, so every existing call site keeps its meaning', () => {
+    const classic = render({ id: 'classic', languages: langs, layout: 'classic' });
+    expect(findComparableRender([classic], langs, 'a5')?.id).toBe('classic');
   });
 });
 

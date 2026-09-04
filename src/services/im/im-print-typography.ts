@@ -13,6 +13,28 @@ import type { IMTemplateType } from '../../types';
 
 export type PrintPageSizeKey = 'a4' | 'a5';
 
+/**
+ * Which printed LAYOUT a Warning Leaflet is set in. A layout is not a document type — the
+ * template, its content, its translations and its leaflet-coverage issues are the same
+ * artefact either way — so this is a per-export render choice, not a new IMTemplateType.
+ *
+ *  - `classic`     — one full-measure column per page, the layout every leaflet has printed
+ *                    in so far.
+ *  - `compact2col` — the dense two-column booklet after
+ *                    docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf: two columns, justified and
+ *                    hyphenated, severity-band hazard headers and no tinted panels.
+ *
+ * BOTH layouts read the SAME typography — the operator's im_print_settings row for
+ * (warning_leaflet, page size). Point sizes, line spacing and margins are one admin-owned
+ * house style; a layout decides how the page is DIVIDED and how a hazard block is DRAWN, never
+ * how big the type is. So changing the leaflet profile in Admin → IM Print moves both layouts
+ * together, and the two are directly comparable at the same size.
+ *
+ * `classic` is the default everywhere, so every existing call site, stored row and render
+ * keeps its current meaning.
+ */
+export type PrintLeafletLayout = 'classic' | 'compact2col';
+
 /** Page margins in millimetres, as the PDF engine wants them. */
 export interface PrintMarginsMm {
   top: number;
@@ -96,7 +118,27 @@ export const PRINT_FONT_FAMILIES = [
   'Noto Sans',
 ] as const;
 
+/**
+ * The profile key for a (template type, page size) pair.
+ *
+ * Layout is deliberately NOT an axis: both leaflet layouts are set from the same profile, so
+ * there is nothing per-layout to store or key.
+ */
 export const profileKey = (templateType: string, pageSize: string): string => `${templateType}::${pageSize}`;
+
+/**
+ * Columns and gutter for the compact leaflet layout, per page size.
+ *
+ * A column COUNT rather than a width, so the columns divide whatever measure the profile's
+ * margins leave: at the reference's A5 margins that is 132mm split into 2 × 64mm with a 4mm
+ * gutter, exactly the column width in docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf. A4 takes
+ * three columns of its wider measure rather than two ~95mm ones, which would read as a wall of
+ * text.
+ */
+export const COMPACT_LEAFLET_COLUMNS: Record<PrintPageSizeKey, { columns: number; gapMm: number }> = {
+  a5: { columns: 2, gapMm: 4 },
+  a4: { columns: 3, gapMm: 4 },
+};
 
 /**
  * Built-in fallbacks, one per (template type, page size). These are the values the renderer
@@ -109,6 +151,7 @@ export const DEFAULT_PRINT_TYPOGRAPHY: Record<string, PrintTypography> = {
   'im::a5': { fontFamily: 'Inter', bodyPt: 8.83, headingPt: 14.41, lineHeight: 1.6, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 40, blockSpacingMm: 2.5, paragraphSpacingEm: 0.5, tableFontScale: 0.95, tableBorderMm: 0.1, margins: { top: 16, bottom: 18, left: 14, right: 14 } },
   'warning_leaflet::a4': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, paragraphSpacingEm: 0.35, tableFontScale: 1, tableBorderMm: 0.1, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
   'warning_leaflet::a5': { fontFamily: 'Inter', bodyPt: 6, headingPt: 8, lineHeight: 1.3, tableCellPaddingMm: 1.2, cellImageMaxHeightMm: 30, blockSpacingMm: 1.5, paragraphSpacingEm: 0.35, tableFontScale: 1, tableBorderMm: 0.1, margins: { top: 8, bottom: 8, left: 10, right: 10 } },
+
 };
 
 /** The built-in profile for a combination (never throws — falls back to the full-IM A4 set). */

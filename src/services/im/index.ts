@@ -57,6 +57,8 @@ export {
 
 export { resolveManual, TEMP_HIGHLIGHT_CLASS, containsTempHighlight, findTempHighlightSections } from './im-resolver';
 export { buildSkuQrSvg, skuQrUrl } from './im-qr-code';
+export { buildDocCode, categoryFingerprint, docCodeKind, isValidDocCode, DOC_CODE_RE } from './im-doc-code';
+export type { DocCodeInput } from './im-doc-code';
 export { publishResolvedManuals, normalizeResolverData, getPublishedManifestUrl, getPublishedManualUrl, getProjectRequiredLanguages, getProjectPrintedLanguages, getPublishHistory } from './im-publish.service';
 export { checkPrintImageWeights, HEAVY_IMAGE_BYTES } from './im-print-preflight.service';
 export type { PrintImageReport, PrintImageInfo } from './im-print-preflight.service';
@@ -70,7 +72,7 @@ export {
   PRINT_FONT_FAMILIES,
   PRINT_SETTING_LIMITS,
 } from './im-print-settings.service';
-export type { PrintSettingsProfile, PrintTypography, PrintPageSizeKey } from './im-print-settings.service';
+export type { PrintSettingsProfile, PrintTypography, PrintPageSizeKey, PrintLeafletLayout } from './im-print-settings.service';
 export type { PublishResult, PublishHistoryEvent } from './im-publish.service';
 export {
   getStaleProjectIMDetails,

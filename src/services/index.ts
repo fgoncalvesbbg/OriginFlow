@@ -334,6 +334,7 @@ export type {
   PrintSettingsProfile,
   PrintTypography,
   PrintPageSizeKey,
+  PrintLeafletLayout,
   IMShare,
   IMShareMode,
   IMReviewComment,

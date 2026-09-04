@@ -95,6 +95,16 @@ const isExistingGlobal = (a: CategoryAttribute): boolean => a.categoryId === nul
  * data, instead of creating a second one and orphaning it.
  */
 export const planAttributeSync = (
+  /**
+   * ALL attributes, not just the ones applying to `categoryId`.
+   *
+   * A ProductToolkit attribute is reused across categories (`usedByCategories` is often >1)
+   * while OriginFlow gives a category-scoped attribute a single owner. Pass a filtered list
+   * and an attribute owned by a SIBLING category is invisible: the planner reports "create",
+   * the insert reuses its pt_attribute_id, and the unique index rejects the whole import.
+   * Matching needs the full set; the "no longer in the definition" pass below still restricts
+   * itself to attributes that actually apply here.
+   */
   existing: CategoryAttribute[],
   incoming: ParsedAttributeRow[],
   usageById: Record<string, AttributeUsage>,

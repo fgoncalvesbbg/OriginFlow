@@ -16,9 +16,9 @@ import { IMAGE_ALIGNS, type ImageAlign } from '../../../services/im/im-image-ali
 import { sanitizeAuthorHtml } from '../../../services/im/im-author-html';
 import { usePrintColumn } from './usePrintColumn';
 import { previewZoomFor, widthAsColumnPercent, CRAMPED_PREVIEW_ZOOM } from '../../../services/im/im-print-geometry';
-import { imgStyleFor, imgTag, readImgAlign, readImgBorder, readImgValign, IMG_VALIGNS, type ImgVAlign } from './im-image-markup';
+import { imgStyleFor, imgTag, readImgAlign, readImgBorder, readImgValign, readImgUncap, IMG_VALIGNS, type ImgVAlign } from './im-image-markup';
 import { imContentVars } from './im-content-style';
-import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns, QrCode } from 'lucide-react';
+import { Bold, Italic, Underline, Highlighter, List, ListOrdered, Type, Image as ImageIcon, Images, GitBranch, Table as TableIcon, AlertTriangle, AlertOctagon, Zap, Flame, Thermometer, Info, Upload, Loader2, Code, Languages, AlignLeft, AlignCenter, AlignRight, WrapText, X, ShieldCheck, ShieldPlus, Square, Plus, ChevronDown, ChevronRight, type LucideIcon, Columns, QrCode, Maximize2 } from 'lucide-react';
 import { translateHtml } from '../../../services/ai/translation.service';
 import { planTmTranslation, translateFragmentWithMemory, getProtectedPhrases, getProtectedPhraseRefs, type TmPlanContext } from '../../../services/im/im-tm-translate';
 import { logTmReuse, noteTmSegmentsUsed, recordTmSegments, type RecordTmSegmentInput, type TmReuseEvent } from '../../../services/im/im-tm-write.service';
@@ -132,8 +132,9 @@ type InlineNode =
   // Inline image (e.g. an uploaded asset dropped at the caret inside a paragraph).
   // `width` is the optional CSS width set via the resize control (e.g. "50%");
   // `align` is the chosen inline/left/right/center placement; `border` draws a
-  // thin frame around the image; `valign` seats an INLINE image against its text line.
-  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign };
+  // thin frame around the image; `valign` seats an INLINE image against its text line;
+  // `uncap` opts this image out of the editor/print height ceiling (see im-image-markup.ts).
+  | { type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign; uncap?: boolean };
 
 // A table cell's content plus its own horizontal alignment (independent of any
 // per-image align/float set inside it — this centers/aligns whatever the cell
@@ -149,7 +150,7 @@ type EditorBlock =
   | { id: string; type: 'paragraph'; content: InlineNode[] }
   | { id: string; type: 'heading'; level: 1 | 2 | 3; content: InlineNode[] }
   | { id: string; type: 'callout'; variant: CalloutVariant; content: InlineNode[] }
-  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign }
+  | { id: string; type: 'image'; src: string; alt?: string; width?: string; align?: ImgAlign; border?: boolean; valign?: ImgVAlign; uncap?: boolean }
   | { id: string; type: 'list'; ordered: boolean; items: ListItemData[] }
   // `fit` — 'content' shrinks the table to its content instead of the full column (the
   // default house style). `colWidths` — author-set column widths in ABSOLUTE mm (not
@@ -400,6 +401,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
   const [imgWidth, setImgWidth] = useState<string>('');
   const [imgAlign, setImgAlign] = useState<ImgAlign | undefined>(undefined);
   const [imgBorder, setImgBorder] = useState(false);
+  const [imgUncap, setImgUncap] = useState(false);
   const [imgValign, setImgValign] = useState<ImgVAlign | undefined>(undefined);
   // Editable alt text of the selected image — previously settable only once, at upload.
   const [imgAlt, setImgAlt] = useState<string>('');
@@ -650,7 +652,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       // are silently dropped on the deserialize→serialize round-trip — i.e. they
       // render but never save. `width` carries any resize the user applied.
       if (el.tagName === 'IMG') {
-        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined, valign: readImgValign(el) });
+        inlines.push({ type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || undefined, width: el.style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined, valign: readImgValign(el), uncap: readImgUncap(el) || undefined });
         return;
       }
 
@@ -689,7 +691,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     }
 
     if (inline.type === 'image') {
-      return imgTag(inline.src, inline.alt || '', inline.width, inline.align, inline.border, inline.valign);
+      return imgTag(inline.src, inline.alt || '', inline.width, inline.align, inline.border, inline.valign, inline.uncap);
     }
 
     let textHtml = inline.text
@@ -762,7 +764,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return;
       }
       if (el.tagName === 'IMG') {
-        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined, valign: readImgValign(el) });
+        parsed.push({ id: createId(), type: 'image', src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', width: (el as HTMLElement).style.width || undefined, align: readImgAlign(el), border: readImgBorder(el) || undefined, valign: readImgValign(el), uncap: readImgUncap(el) || undefined });
         return;
       }
       if (el.tagName === 'UL' || el.tagName === 'OL') {
@@ -839,7 +841,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
         return `<div class="im-block-wrapper im-block-${block.variant}">${icon}<div class="im-block-content"><strong class="im-block-title">${title}</strong><p>${serializeInline(block.content)}</p></div></div>`;
       }
       if (block.type === 'image') {
-        return imgTag(block.src, block.alt || '', block.width, block.align, block.border);
+        return imgTag(block.src, block.alt || '', block.width, block.align, block.border, undefined, block.uncap);
       }
       if (block.type === 'list') {
         const tag = block.ordered ? 'ol' : 'ul';
@@ -1166,6 +1168,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       setImgWidth(img.style.width || '');
       setImgAlign(readImgAlign(img));
       setImgBorder(readImgBorder(img));
+      setImgUncap(readImgUncap(img));
       setImgValign(readImgValign(img));
       setImgAlt(img.getAttribute('alt') || '');
     } else {
@@ -1203,21 +1206,22 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       shell?.removeEventListener('scroll', syncImgHandle);
       window.removeEventListener('resize', syncImgHandle);
     };
-  }, [imgSelected, imgWidth, imgAlign, imgBorder, previewZoom, canvasWidth, syncImgHandle]);
+  }, [imgSelected, imgWidth, imgAlign, imgBorder, imgUncap, previewZoom, canvasWidth, syncImgHandle]);
 
   // Resize / re-align / re-border the selected image. All rebuild the whole inline
   // style (via imgStyleFor) so a previous float/margin/border is fully cleared,
   // preserve the OTHER dimensions (each control keeps the current values of the
   // rest), re-add the selection outline the rebuild wiped, then re-parse so the
   // change persists into blocks + emitted HTML while the live node stays in place.
-  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign, border?: boolean, valign?: ImgVAlign) => {
+  const restyleSelectedImg = useCallback((width?: string, align?: ImgAlign, border?: boolean, valign?: ImgVAlign, uncap?: boolean) => {
     const img = selectedImgRef.current;
     const el = contentRef.current;
     if (!img || !el) return;
     if (align) img.setAttribute('data-align', align);
     if (border) img.setAttribute('data-border', '1'); else img.removeAttribute('data-border');
     if (align === 'inline' && valign) img.setAttribute('data-valign', valign); else img.removeAttribute('data-valign');
-    img.style.cssText = imgStyleFor(width, align, border, valign);
+    if (uncap) img.setAttribute('data-uncap', '1'); else img.removeAttribute('data-uncap');
+    img.style.cssText = imgStyleFor(width, align, border, valign, uncap);
     img.style.outline = '2px solid #6366f1'; // rebuild wiped it — keep the selection visible
     isUserEditingRef.current = true; // keep the DOM node; just sync blocks + emit
     setBlocks(deserializeHtmlToBlocks(el.innerHTML));
@@ -1228,28 +1232,35 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
     const img = selectedImgRef.current;
     if (!img) return;
     setImgWidth(width);
-    restyleSelectedImg(width || undefined, readImgAlign(img), readImgBorder(img), readImgValign(img));
+    restyleSelectedImg(width || undefined, readImgAlign(img), readImgBorder(img), readImgValign(img), readImgUncap(img));
   }, [restyleSelectedImg]);
 
   const applyImgAlign = useCallback((align: ImgAlign) => {
     const img = selectedImgRef.current;
     if (!img) return;
     setImgAlign(align);
-    restyleSelectedImg(img.style.width || undefined, align, readImgBorder(img), readImgValign(img));
+    restyleSelectedImg(img.style.width || undefined, align, readImgBorder(img), readImgValign(img), readImgUncap(img));
   }, [restyleSelectedImg]);
 
   const applyImgBorder = useCallback((border: boolean) => {
     const img = selectedImgRef.current;
     if (!img) return;
     setImgBorder(border);
-    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), border, readImgValign(img));
+    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), border, readImgValign(img), readImgUncap(img));
   }, [restyleSelectedImg]);
 
   const applyImgValign = useCallback((valign: ImgVAlign) => {
     const img = selectedImgRef.current;
     if (!img) return;
     setImgValign(valign);
-    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), readImgBorder(img), valign);
+    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), readImgBorder(img), valign, readImgUncap(img));
+  }, [restyleSelectedImg]);
+
+  const applyImgUncap = useCallback((uncap: boolean) => {
+    const img = selectedImgRef.current;
+    if (!img) return;
+    setImgUncap(uncap);
+    restyleSelectedImg(img.style.width || undefined, readImgAlign(img), readImgBorder(img), readImgValign(img), uncap);
   }, [restyleSelectedImg]);
 
   /**
@@ -1287,7 +1298,7 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
       if (!st || !im) return;
       // Commit through the normal restyle path so the width persists into blocks + HTML.
       const w = im.style.width || undefined;
-      restyleSelectedImg(w, readImgAlign(im), readImgBorder(im), readImgValign(im));
+      restyleSelectedImg(w, readImgAlign(im), readImgBorder(im), readImgValign(im), readImgUncap(im));
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -2037,6 +2048,13 @@ const SimpleRichTextEditor: React.FC<EditorProps> = ({ initialContent, onChange,
                 onPress={() => applyImgBorder(!imgBorder)}
                 title={imgBorder ? 'Remove the border from the selected image' : 'Add a border around the selected image'}
               ><span className="flex items-center gap-1"><Square size={13} /> Border</span></TbPill>
+              <TbPill
+                active={imgUncap}
+                onPress={() => applyImgUncap(!imgUncap)}
+                title={imgUncap
+                  ? 'Height-limit removed — this image can print/preview at its full scaled size'
+                  : 'Let this image grow past the normal height limit (for a full-page diagram or illustration)'}
+              ><span className="flex items-center gap-1"><Maximize2 size={13} /> No height limit</span></TbPill>
             </TbGroup>
             <TbCaption title="Alt text of the selected image (read by screen readers; part of the published manual)">Alt</TbCaption>
             <input

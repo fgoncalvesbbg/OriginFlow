@@ -293,6 +293,11 @@ export const importCategoryAttributes = async (
         const byName = (a: CategoryAttribute) =>
             a.group === row.group && norm(a.name) === norm(row.name);
         const byCode = (a: CategoryAttribute) => !!code && norm(a.akeneoId ?? '') === code;
+        // pt_attribute_id is unique across the whole table, so it has to be checked before
+        // anything else — an upstream rename changes the code, and recreating the row would
+        // collide on the index rather than fail gracefully.
+        const byPtId = (a: CategoryAttribute) =>
+            row.ptAttributeId != null && a.ptAttributeId === row.ptAttributeId;
 
         // The code match deliberately ignores `consumedIds` in BOTH branches.
         // saveCategoryAttribute already enforces one-attribute-per-code (see
@@ -300,9 +305,11 @@ export const importCategoryAttributes = async (
         // silently not written. Letting such a row fall through to "create" therefore
         // counted a row that never existed, so the reported totals overstated the import.
         // Resolving it to the owning attribute instead makes the counts true.
-        const match = isGlobal
-            ? (existing.find(byName) ?? existing.find(byCode))
-            : (code ? existing.find(byCode) : existing.find(a => !consumedIds.has(a.id) && byName(a)));
+        const match =
+            (row.ptAttributeId != null ? existing.find(byPtId) : undefined) ??
+            (isGlobal
+                ? (existing.find(byName) ?? existing.find(byCode))
+                : (code ? existing.find(byCode) : existing.find(a => !consumedIds.has(a.id) && byName(a))));
 
         if (match) {
             consumedIds.add(match.id);
@@ -417,6 +424,15 @@ export const applyAttributeSync = async (
         const write = buildSyncWrite(item, categoryId);
         if (!write) { result.skipped++; continue; }
 
+        // Owned by a sibling category: share it in rather than rewriting it. Rewriting would
+        // move category_id here, taking the attribute away from the category that owns it.
+        const owner = item.existing?.categoryId;
+        if (owner && owner !== categoryId) {
+            await assignAttributeToCategory(item.existing!.id, categoryId);
+            result.updated++;
+            continue;
+        }
+
         const isCreate = item.action === 'create';
         await saveCategoryAttribute(
             { ...write, id: write.id || generateUUID() },
@@ -479,7 +495,9 @@ export const replaceCategoryAttributes = async (
         a.categoryId === null ||
         (a.assignedCategoryIds ?? []).includes(categoryId));
 
-    const plan = planAttributeSync(applies, rows, {}, categoryId);
+    // Match against EVERY attribute, not just this category's: a PT attribute shared with a
+    // sibling category must be linked in, never recreated (its pt_attribute_id is unique).
+    const plan = planAttributeSync(all, rows, {}, categoryId);
 
     // 1. Write everything the definition still contains, in place.
     let created = 0, updated = 0;

@@ -30,6 +30,9 @@ import {
   renderPartPdf,
   marginFor,
   resolveTypography,
+  leafletLayoutOf,
+  buildCopyrightLine,
+  resolveDocCode,
   tempPartPath,
   draftPdfPath,
   BUCKET,
@@ -58,6 +61,21 @@ const MM_TO_PT = 72 / 25.4;
  * from trim — inside a bookbinder's trim tolerance on a perfect-bound booklet.
  */
 const MIN_INK_CLEARANCE_MM = 8;
+
+/**
+ * Size of the leaflet's single last-page copyright + version line, in points.
+ *
+ * 5.5pt is what the reference booklet sets its footer and legal microcopy at
+ * (docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf, measured). It replaces a hardcoded 7pt, which
+ * on a leaflet whose BODY is set at 4.75pt made the one piece of non-safety text on the page
+ * the largest thing in the bottom third of it.
+ *
+ * Deliberately not from the typography profile: this is stamped furniture in the margin band,
+ * not running text, and it must stay legible even if an operator raises the body size. The
+ * trim guard still applies — stampBaselineY lifts the baseline off the paper edge, and it is
+ * given this size rather than assuming one.
+ */
+const LEAFLET_FOOTER_PT = 5.5;
 
 /** Fraction of the font size below the baseline. Inter and Helvetica are both ~0.21em;
  *  0.22 keeps the floor pessimistic rather than optimistic. */
@@ -98,10 +116,19 @@ const bandTooThinForStamp = (bottomMarginMm: number, sizePt: number, band: numbe
  */
 const buildDownloadName = (req: MergeRequest): string => {
   const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
-  const kind = req.templateType === 'warning_leaflet' ? 'Warning Leaflet' : 'Instruction Manual';
+  const kind =
+    req.templateType === 'warning_leaflet'
+      ? leafletLayoutOf(req) === 'compact2col'
+        ? 'Warning Leaflet (Compact)'
+        : 'Warning Leaflet'
+      : 'Instruction Manual';
   const sku = (req.cover.skus ?? []).map((s) => s.trim()).filter(Boolean).join(', ');
   const name = (req.cover.title ?? '').trim();
-  const base = [sku, name, kind].map(sanitize).filter(Boolean).join(' - ');
+  // The document code and version LEAD the filename, so a folder of PDFs sorts by document and
+  // a search for a code printed on paper finds the file. Identification has to work before
+  // anyone opens the PDF, which is the whole point of having a code.
+  const stamp = [resolveDocCode(req), req.version ? `v${req.version}` : ''].filter(Boolean).join(' ');
+  const base = [stamp, sku, name, kind].map(sanitize).filter(Boolean).join(' - ');
   return `${base || kind}.pdf`;
 };
 
@@ -397,8 +424,13 @@ const mergeAndStamp = async (
       // Leaflet: fully clean pages (no running footer, no page numbers). A single minimal
       // copyright/version line is stamped, centered, at the bottom of the LAST page only.
       if (copyright && pageNum === total) {
-        const cw = fonts.widthOfText(copyright, 7);
-        fonts.drawText(page, copyright, { x: (width - cw) / 2, y: stampBaselineY(margins.bottom, 7, 0.625), size: 7, color: footColor });
+        const cw = fonts.widthOfText(copyright, LEAFLET_FOOTER_PT);
+        fonts.drawText(page, copyright, {
+          x: (width - cw) / 2,
+          y: stampBaselineY(margins.bottom, LEAFLET_FOOTER_PT, 0.625),
+          size: LEAFLET_FOOTER_PT,
+          color: footColor,
+        });
       }
     } else if (pageNum >= 2) {
       // Full IM: footer + page number (cover stays clean).
@@ -525,22 +557,49 @@ export const handler = async (event: NetlifyEvent) => {
       partPageCounts[0] = (await PDFDocument.load(partPdfs[0])).getPageCount();
     }
 
-    // parts = [cover, lang0, …, back] for a full IM, [lang0, …] for a compact leaflet, and
-    // `manuals` is built by iterating `ordered`, so the two are index-aligned.
+    // parts = [cover, lang0, …, back] for a full IM, [lang0, …] for a classic compact leaflet,
+    // and `manuals` is built by iterating `ordered`, so the two are index-aligned.
+    //
+    // The compact two-column layout is the exception: it renders every language in ONE part so
+    // the locales flow continuously, which means a page can carry the end of one locale and the
+    // start of the next. Per-language page counts stop being a fact about that PDF, so it
+    // reports NULL rather than a fiction — `pages_by_language` has been nullable since
+    // migration 124 ("not measured" must not read as zero pages), and the page-budget report
+    // already renders a total with no per-language rows. Without this, 22 languages against one
+    // part count would record {first: 44, …21 more: 0}.
+    const continuousFlow = leafletLayoutOf(req) === 'compact2col';
     const languagePartOffset = compact ? 0 : 1;
-    const pagesByLanguage: Record<string, number> = {};
-    ordered.forEach((lang, i) => {
-      pagesByLanguage[lang] = partPageCounts[i + languagePartOffset] ?? 0;
-    });
+    let pagesByLanguage: Record<string, number> | null = null;
+    if (!continuousFlow) {
+      const perLanguage: Record<string, number> = {};
+      ordered.forEach((lang, i) => {
+        perLanguage[lang] = partPageCounts[i + languagePartOffset] ?? 0;
+      });
+      pagesByLanguage = perLanguage;
+    }
     const totalPages = partPageCounts.reduce((sum, n) => sum + n, 0);
 
     // Merge + stamp (footer/page numbers for IMs; a single last-page copyright line for leaflets) + edge tabs.
-    const name = `${req.templateType}-${ordered.join('-')}-${req.pageSize}`;
+    //
+    // The LAYOUT goes into the object name. im_print_renders has no layout column, and this
+    // is what keeps a compact render distinguishable from a classic one without a migration:
+    // five downstream consumers match renders on (template_type, page_size, languages) —
+    // the dialog's duplicate guard, the page-budget diff, the supplier-share "current
+    // leaflet", the coverage view and the project-document version chain — and would
+    // otherwise treat a compact render as a newer classic one. `layoutOfStoragePath` in
+    // im-print-export.service.ts reads it back. Classic keeps today's exact name, so every
+    // existing path, URL and history row is untouched.
+    const layoutToken = leafletLayoutOf(req) === 'compact2col' ? 'compact2col-' : '';
+    const name = `${req.templateType}-${layoutToken}${ordered.join('-')}-${req.pageSize}`;
     const running = [req.cover.footerText, req.cover.title].filter(Boolean).join(' · ');
     const year = new Date().getFullYear();
-    const companyName = req.cover.companyName ?? '';
-    const versionLabel = req.version ? ` · v${req.version}` : '';
-    const copyrightText = `© ${year} ${companyName}. All rights reserved.${versionLabel}`;
+    // The leaflet dialog offers no cover fields (only a header logo), so req.cover.companyName
+    // is empty for every leaflet export — which printed "© 2026 . All rights reserved." with a
+    // hole where the company should be, in production, on v8. The template's own metadata is
+    // the same fallback the HTML builder already uses for the header logo and the back page.
+    const companyName = req.cover.companyName?.trim() || manuals[0]?.metadata?.companyName?.trim() || '';
+    const docCode = resolveDocCode(req);
+    const copyrightText = buildCopyrightLine({ year, companyName, version: req.version, docCode });
     const { pdf, preflight } = await mergeAndStamp(partPdfs, parts, running, req.pageSize, compact, copyrightText, typography.margins);
     if (preflight.nonEmbeddedFonts.length) {
       console.warn('[render-print-merge] NOT embedded, will fail vendor preflight:', preflight.nonEmbeddedFonts.join(', '));

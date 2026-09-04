@@ -44,8 +44,8 @@ export const TypographySummary: React.FC<{ typography: PrintTypography; pageSize
         {row('Margins L/R', `${margins.left} / ${margins.right} mm`)}
       </div>
       <p className="text-[11px] text-gray-400">
-        One global house style per page size — the same for every product category. Admins change
-        it in the Admin console → IM Print.
+        One global house style per page size — the same for every product category, and the same
+        for both leaflet layouts. Admins change it in the Admin console → IM Print.
       </p>
     </div>
   );

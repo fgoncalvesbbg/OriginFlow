@@ -32,6 +32,7 @@ import {
   type LeafletMode,
 } from '../../services/im/leaflet-coverage.service';
 import { useAuth } from '../../context/AuthContext';
+import { useDocCodeResolver } from './editor/useDocCode';
 
 /** Human labels for the derived statuses. Kept beside the badge colours they pair with. */
 const STATUS_LABEL: Record<LeafletCoverageStatus, string> = {
@@ -188,6 +189,9 @@ const exportCsv = (rows: LeafletCoverageRow[]) => {
 
 export const LeafletCoverageTab: React.FC = () => {
   const { user } = useAuth();
+  // Resolves the printed document code per row — coverage spans categories, so each row has a
+  // different one.
+  const docCodeFor = useDocCodeResolver();
   const [rows, setRows] = useState<LeafletCoverageRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -372,6 +376,13 @@ export const LeafletCoverageTab: React.FC = () => {
                       </span>
                       <span className="text-gray-600 uppercase font-medium">{lf.languages.join(', ')}</span>
                       {lf.pageSize && <span className="text-gray-400">{lf.pageSize.toUpperCase()}</span>}
+                      {/* The printed document code — the same string in this row's PDF footer and
+                          filename, so a leaflet found on a pallet can be traced back to here. */}
+                      {docCodeFor('warning_leaflet', lf.pageSize ?? 'a5', g.categoryId) && (
+                        <span className="font-mono text-gray-500">
+                          {docCodeFor('warning_leaflet', lf.pageSize ?? 'a5', g.categoryId)}
+                        </span>
+                      )}
                       {lf.imVersion != null && <span className="text-gray-400">v{lf.imVersion}</span>}
                       <span className="text-gray-400">issued {fmtDate(lf.issuedAt)}</span>
                       {lf.url && (

@@ -1411,11 +1411,18 @@ const ProjectIMGenerator: React.FC = () => {
       const resp = await fetch(res.url);
       if (!resp.ok) throw new Error(`Could not download the rendered PDF (${resp.status}).`);
       const blob = await resp.blob();
-      const docTypeSlug = templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual';
+      // The layout is part of the slug, so a compact render is a document of its own rather
+      // than a new VERSION of the classic leaflet document — otherwise attaching one would
+      // bury the leaflet that actually ships behind it in the version chain.
+      const layoutSlug = res.render?.layout === 'compact2col' ? '_Compact' : '';
+      const docTypeSlug = (templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual') + layoutSlug;
       const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${langs.map(l => l.toUpperCase()).join('-')}_${pageSize.toUpperCase()}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
 
-      const title = generatedDocTitle(typeLabel);
+      // Same reason as the filename slug: the document is keyed by TITLE, so a compact render
+      // sharing the classic title would be filed as a new version of it. "Generated Warning
+      // Leaflet (Compact)" is its own document, and the classic one keeps its chain.
+      const title = generatedDocTitle(res.render?.layout === 'compact2col' ? `${typeLabel} (Compact)` : typeLabel);
       const existingDocs = await getProjectDocs(project.id);
       const targetDoc = existingDocs.find(d =>
          d.stepNumber === GENERATED_DOC_STEP &&

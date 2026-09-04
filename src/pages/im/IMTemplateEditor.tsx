@@ -3728,6 +3728,7 @@ const IMTemplateEditor: React.FC = () => {
          <DraftPrintExportDialog
            templateId={template.id}
            templateType={templateType}
+           categoryId={template.categoryId ?? null}
            metadata={metaSettings}
            defaultTitle={category?.name || template.name || ''}
            languages={templateLanguages}

@@ -25,7 +25,13 @@ import { sanitizeAuthorHtml, styleOf, IMG_TAG_RE, TAG_END_RE } from './im-author
 import { A5_FURNITURE_SCALE } from './im-print-geometry';
 import { inferImageAlign, FLOAT_MAX_WIDTH_PCT, type ImageAlign } from './im-image-align';
 import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.constants';
-import { defaultTypographyFor, type PrintTypography , effectiveTablePt } from './im-print-typography';
+import {
+  defaultTypographyFor,
+  effectiveTablePt,
+  COMPACT_LEAFLET_COLUMNS,
+  type PrintTypography,
+  type PrintLeafletLayout,
+} from './im-print-typography';
 import { interFontFaceCss } from './fonts/inter-webfont';
 
 export type PrintPageSize = 'a4' | 'a5';
@@ -173,6 +179,19 @@ export interface PrintHtmlOptions {
    * Only consulted by buildPrintPartsHtml (the PDF render path).
    */
   compact?: boolean;
+  /**
+   * Which leaflet LAYOUT to set the compact path in. Only consulted when `compact` is true.
+   *
+   *   'classic'     — one full-measure column, tinted callout panels: what every leaflet has
+   *                   printed so far. The default, so an omitted value changes nothing.
+   *   'compact2col' — the dense two-column booklet measured from
+   *                   docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf.
+   *
+   * A layout is a render choice, not a document type: same template, same content, same
+   * translations, same leaflet-coverage issue. That is why it lives here and not in
+   * IMTemplateType.
+   */
+  leafletLayout?: PrintLeafletLayout;
   /**
    * The global print typography (font family, body/heading point sizes, line spacing, page
    * margins) for this template type and page size — one admin-owned setting, NOT per product
@@ -329,6 +348,105 @@ const wrapCallout = (variant: CalloutVariant, contentHtml: string, lang: string)
 };
 
 // ---------------------------------------------------------------------------
+// Compact leaflet — severity / hazard / sign, as three separate axes
+// ---------------------------------------------------------------------------
+
+/**
+ * THE TAXONOMY PROBLEM THIS SOLVES.
+ *
+ * `CalloutVariant` is one axis carrying two different things: severity LEVELS (`danger`,
+ * `warning`, `caution`) and hazard TYPES (`electric`, `flammable`, `hot_surface`). The
+ * classic layout gets away with it because every block sits in its own tinted box, so the
+ * title is just a box label. Once the tint is gone and the severity band is the only signal,
+ * `RISK OF FIRE` printed in the severity slot reads as a fourth severity level.
+ *
+ * So the compact layout splits the one stored value into the three axes the reference PDF
+ * prints, WITHOUT touching the data model, the editors or a single translated string:
+ *
+ *   severity  -> the coloured band word          (localized, from CALLOUT_TITLES_I18N)
+ *   hazard    -> the bold descriptor line below  (localized, from CALLOUT_TITLES_I18N)
+ *   signs     -> the ISO 7010 sign, inline right (the icon this variant already carries)
+ *
+ * A variant that IS a severity level has no second axis to print, so it gets the band only
+ * rather than a descriptor repeating the band word.
+ */
+type PrintSeverity = 'danger' | 'warning' | 'caution' | 'info';
+
+/**
+ * Which severity level each stored variant prints at.
+ *
+ * Deliberately a fixed table rather than a render-time guess: `electric` and `flammable`
+ * describe outcomes that kill, `hot_surface` an injury you recover from. Authors never chose
+ * a severity (there is no field for one), so SOMETHING has to decide, and a table in one
+ * place is reviewable — a heuristic spread across a stylesheet is not.
+ */
+const VARIANT_SEVERITY: Record<CalloutVariant, PrintSeverity> = {
+  danger: 'danger',
+  flammable: 'danger',
+  electric: 'danger',
+  warning: 'warning',
+  hot_surface: 'warning',
+  caution: 'caution',
+  info: 'info',
+};
+
+/** ISO 7010 outer sign height the compact layout prints at, in mm. Never reduce this. */
+export const COMPACT_SIGN_HEIGHT_MM = 7.5;
+
+/**
+ * What fraction of each icon's viewBox its OUTER shape actually fills.
+ *
+ * The icons do not share a convention: W001/W012 draw their triangle across 81 of 100 viewBox
+ * units, W021/W017 across ~523 of 525, and M002's circle across 92 of 100. Sizing all five to
+ * the same box height would print the first group 19% short of the floor while the build
+ * reported a compliant "7.5mm" — the exact measurement trap an ISO sign floor exists to catch,
+ * so the correction lives with the icons instead of in a stylesheet.
+ */
+const SIGN_OUTER_FRACTION: Record<CalloutVariant, number> = {
+  warning: 0.81,
+  danger: 0.81,
+  caution: 0.81,
+  electric: 0.81,
+  flammable: 0.996,
+  hot_surface: 0.996,
+  info: 0.92,
+};
+
+/** SVG box height, in mm, that makes this sign's outer shape print at COMPACT_SIGN_HEIGHT_MM. */
+const signBoxMm = (variant: CalloutVariant): number =>
+  Number((COMPACT_SIGN_HEIGHT_MM / (SIGN_OUTER_FRACTION[variant] ?? SIGN_OUTER_FRACTION.warning)).toFixed(2));
+
+/**
+ * A hazard block in the compact layout: severity band, ISO sign, hazard descriptor, body.
+ *
+ * No tinted panel, no left accent bar and no icon gutter — which is the point. In the classic
+ * layout the icon gutter starts body text 10.5mm inside the block, so every line of the
+ * leaflet gives up 8% of its measure; here the body keeps the full column.
+ *
+ * `.imv-hz-head` is one unbreakable group so a band can never print at the foot of a column
+ * with its instructions in the next one, while the block as a whole is free to flow across
+ * the column break — which the reference's DANGER block does.
+ */
+const wrapCompactHazard = (variant: CalloutVariant, contentHtml: string, lang: string): string => {
+  if (!contentHtml) return contentHtml;
+  const severity = VARIANT_SEVERITY[variant] ?? 'warning';
+  const band = getCalloutTitle(severity, lang);
+  const descriptor = variant === severity ? '' : getCalloutTitle(variant, lang);
+  const icon = ISO_ICONS[variant] ?? ISO_M002;
+  const boxMm = signBoxMm(variant);
+  return (
+    `<div class="imv-hz imv-hz-${severity}">` +
+    `<div class="imv-hz-head">` +
+    `<div class="imv-hz-band">${band}</div>` +
+    `<div class="imv-hz-signs"><span class="imv-hz-sign" style="height:${boxMm}mm">${icon}</span></div>` +
+    (descriptor ? `<div class="imv-hz-desc">${descriptor}</div>` : '') +
+    `</div>` +
+    `<div class="imv-hz-body">${contentHtml}</div>` +
+    `</div>`
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Node rendering — mirrors src/modules/im-viewer/NodeRenderer.tsx output.
 // ---------------------------------------------------------------------------
 
@@ -402,12 +520,14 @@ const normalizeAuthorHtmlForPrint = (html: string): string =>
     );
   });
 
-const renderNode = (node: PrintNode, lang: string): string => {
+const renderNode = (node: PrintNode, lang: string, layout: PrintLeafletLayout = 'classic'): string => {
   switch (node.type) {
     case 'html':
       return `<div class="imv-node imv-content">${normalizeAuthorHtmlForPrint(node.html)}</div>`;
-    case 'callout':
-      return `<div class="imv-node imv-content">${wrapCallout(node.variant as CalloutVariant, normalizeAuthorHtmlForPrint(node.html), lang)}</div>`;
+    case 'callout': {
+      const wrap = layout === 'compact2col' ? wrapCompactHazard : wrapCallout;
+      return `<div class="imv-node imv-content">${wrap(node.variant as CalloutVariant, normalizeAuthorHtmlForPrint(node.html), lang)}</div>`;
+    }
     case 'annotated_image_set':
       return `<div class="imv-node imv-annotated">${node.images.map((img) => renderAnnotatedImage(img, lang)).join('')}</div>`;
     case 'legend_table':
@@ -543,11 +663,11 @@ const buildTocPage = (manual: PrintManual, band = ''): string => {
 // Sections flow continuously within a single content page (matching the live preview), instead
 // of forcing a new page per section. Only the content block as a whole starts on a fresh page
 // (im-break); individual sections break naturally on overflow.
-const buildSectionPages = (manual: PrintManual, startOnNewPage = true): string => {
-  const ordered = flattenInReadingOrder(manual.sections);
-  const inner = ordered
+/** One manual's `<section>` list, with no page container around it. */
+const buildSectionsInner = (manual: PrintManual, layout: PrintLeafletLayout = 'classic'): string =>
+  flattenInReadingOrder(manual.sections)
     .map((section) => {
-      const body = section.nodes.map((n) => renderNode(n, manual.language)).join('');
+      const body = section.nodes.map((n) => renderNode(n, manual.language, layout)).join('');
       return `
         <section id="sec-${section.id}" class="im-section">
           <h2 class="im-section-title">${escapeHtml(section.title)}</h2>
@@ -556,10 +676,66 @@ const buildSectionPages = (manual: PrintManual, startOnNewPage = true): string =
       `;
     })
     .join('');
+
+const buildSectionPages = (
+  manual: PrintManual,
+  startOnNewPage = true,
+  layout: PrintLeafletLayout = 'classic',
+): string => {
   // Dropping im-break lets the block continue on the TOC page; the sections inside still
   // break naturally on overflow either way.
   const cls = startOnNewPage ? 'im-page im-break im-page-content' : 'im-page im-page-content';
-  return `<div class="${cls}">${inner}</div>`;
+  return `<div class="${cls}">${buildSectionsInner(manual, layout)}</div>`;
+};
+
+/**
+ * The small black bar that separates one locale from the next in the compact layout.
+ *
+ * Names the language in ITS OWN language (Deutsch, Ελληνικά, Suomi — LANGUAGE_NAMES already
+ * holds the endonym for every language in IM_LANGUAGES), because the reader who needs to find
+ * their section cannot necessarily read the language it is labelled in otherwise. The ISO code
+ * rides along for the same reason in reverse: it is legible to everyone regardless of script.
+ *
+ * An ordinary in-column block, NOT a `column-span: all` spanner — a spanner splits the multicol
+ * into separate column groups, which is the page-break-shaped gap the continuous flow exists to
+ * remove.
+ */
+const buildCompactLanguageBar = (code: string): string =>
+  `<div class="imv-lang-bar"><span class="imv-lang-bar-name">${escapeHtml(languageName(code))}</span>` +
+  `<span class="imv-lang-bar-code">${escapeHtml(code.toUpperCase())}</span></div>`;
+
+/**
+ * Every language in ONE continuous flow — the compact layout's body.
+ *
+ * WHY THIS IS ONE PART. In this pipeline each render part is its own PDFShift conversion and
+ * the parts are merged whole-page by pdf-lib, so **a part boundary is unavoidably a page
+ * boundary**. Continuous text across languages therefore cannot be done with one part per
+ * language, however the CSS is written: the only way a locale can start halfway down a column
+ * is for every locale to live in a single multicol flow in a single conversion.
+ *
+ * Consequences that follow from that and are handled elsewhere, not bugs:
+ *   - the whole booklet is ONE PDFShift call, so it no longer parallelises across languages;
+ *   - per-language page counts stop existing, because a page can hold the end of one locale
+ *     and the start of the next (render-print-merge.ts reports null rather than a fiction);
+ *   - the edge thumb-tabs go, for the same reason — a tab indexes a PAGE by language, and
+ *     pages are no longer language-aligned.
+ *
+ * One `.im-page-content` wraps everything: a second multicol container would start its own
+ * column set below the tallest column of the first, which is the page-break-shaped gap this
+ * exists to remove. Each locale gets its own `lang` on a plain wrapper instead, so
+ * `hyphens: auto` still resolves a per-locale dictionary inside the shared flow.
+ */
+const buildContinuousLanguageFlow = (manuals: PrintManual[], layout: PrintLeafletLayout): string => {
+  const inner = manuals
+    .map((manual, i) => {
+      // The bar goes BETWEEN languages, so the first locale does not get one: it is announced
+      // by its own full-measure opening title, and a bar above that title would sit in the
+      // narrow column group a spanner creates above itself.
+      const bar = i > 0 ? buildCompactLanguageBar(manual.language) : '';
+      return `<div class="imv-lang" lang="${escapeHtml(manual.language)}">${bar}${buildSectionsInner(manual, layout)}</div>`;
+    })
+    .join('');
+  return `<div class="im-page im-page-content">${inner}</div>`;
 };
 
 /**
@@ -677,6 +853,182 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
 `;
 
 /**
+ * Compact two-column leaflet CSS, appended INSTEAD of `compactOverrides` — so the classic
+ * leaflet and the full manual keep emitting byte-identical stylesheets.
+ *
+ * Every number here was measured out of docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf with
+ * pdfjs (text positions, font sizes, fill colours and path geometry), not estimated from the
+ * page. What the reference actually does:
+ *
+ *   columns      2 with a 4mm gutter (2 × 64mm at the reference's 132mm measure)
+ *   body         justified + hyphenated in #374151
+ *   severity     WHITE bold reversed out of a full-column-width coloured band —
+ *                #c1121f / #d97706 / #b45309 / #1d4ed8
+ *   hazard       bold black descriptor line under the band
+ *   signs        ISO 7010, 7.5mm outer height, right-aligned on their own row
+ *
+ * The reference sets body 7pt on 8.4pt with the band at 7.5pt and the descriptor at 8.5pt.
+ * Those SIZES are not reproduced here: point sizes, line spacing and margins come from the
+ * operator's leaflet profile (Admin → IM Print), the same profile the classic layout is set
+ * from, so the two layouts are always comparable and one setting moves both. What the layout
+ * owns is the column division, the severity band and the sign geometry. The size mapping
+ * mirrors the classic compact path exactly — running text at `bodyPt`, every heading-slot
+ * element (section titles, h1-h3, the severity band, the hazard descriptor) at `headingPt`.
+ *
+ * A reversed-out band rather than coloured text on white is also what makes severity survive
+ * the greyscale print these leaflets frequently get: a solid ground still reads as a band,
+ * where #c1121f and #d97706 text collapse to nearly the same grey.
+ */
+const compact2colOverrides = (
+  primaryColor: string,
+  pageSize: PrintPageSize,
+  typography: PrintTypography,
+): string => {
+  const { bodyPt, headingPt, lineHeight, paragraphSpacingEm } = typography;
+  const { columns, gapMm } = COMPACT_LEAFLET_COLUMNS[pageSize];
+  const body = `${Number(bodyPt.toFixed(2))}pt`;
+  const paraGap = `${Number(paragraphSpacingEm.toFixed(3))}em`;
+  // Both the severity band and the hazard descriptor sit in the heading slot, so both take
+  // `headingPt` — exactly what the classic compact path does with the callout title. The band
+  // is told apart from the descriptor by being reversed out of a solid colour, not by size.
+  const heading = `${Number(headingPt.toFixed(2))}pt`;
+  return `
+    /* --- Warning Leaflet · compact two-column layout --- */
+    .im-leaflet-header { display: flex; align-items: center; margin: 0 0 2.5mm; padding-bottom: 1.2mm; border-bottom: 0.4mm solid ${primaryColor}; }
+    .im-leaflet-logo { height: 7mm; width: auto; object-fit: contain; }
+    .im-leaflet-qr { margin-left: auto; line-height: 0; }
+
+    /* Each language is its own render part, so the content block must NOT force a page break —
+       otherwise the header would sit alone on page 1 and content would start on page 2. */
+    .im-page-content {
+      padding: 0; break-before: auto; page-break-before: auto;
+      columns: ${columns}; column-gap: ${gapMm}mm;
+      /* auto, not the default balance: text must fill column 1 before starting column 2, the
+         way the reference reads. Balancing would leave both columns half-height on the last
+         page of every locale. */
+      column-fill: auto;
+    }
+
+    /* Running text. Justified + hyphenated is the dense-and-legible combination at a 64mm
+       measure: ragged-right wastes line ends, and justified-without-hyphenation opens rivers.
+       German is both the longest locale and the worst case for an unhyphenated narrow measure,
+       so this attacks the binding constraint directly. Hyphenation needs the lang attribute on
+       <html> (set by wrapStandalone) to pick a dictionary. */
+    .im-page-content, .im-section-content, .imv-content { font-size: ${body}; line-height: ${lineHeight}; }
+    .imv-content, .imv-content p, .imv-content li, .imv-hz-body {
+      text-align: justify;
+      hyphens: auto; -webkit-hyphens: auto;
+      hyphenate-limit-chars: 6 3 3;
+      orphans: 2; widows: 2;
+    }
+    .imv-content p, .imv-content ul, .imv-content ol { margin: 0 0 ${paraGap}; }
+    .imv-content li { margin-bottom: ${Number((paragraphSpacingEm * 0.3).toFixed(3))}em; }
+    /* The shared stylesheet indents lists by 1.5em, which is 3.7mm — 6% of a 64mm column
+       given up to bullets, on the same order as the icon gutter this layout removed. Tightened
+       rather than removed: dropping the markers would silently turn an authored list into
+       prose, and the marker is what makes a list of checks scannable. */
+    .imv-content ul, .imv-content ol { padding-left: 0.9em; }
+
+    /* Chapter furniture — the leaflet's only heading level. */
+    .im-section { margin: 0 0 2mm; }
+    .im-section-title {
+      font-size: ${heading}; line-height: 1.2; margin: 0 0 1.2mm; padding-bottom: 0.6mm;
+      border-bottom: 0.2mm solid ${primaryColor}; break-after: avoid;
+    }
+    .im-section-content h1, .im-section-content h2, .im-section-content h3 {
+      font-size: ${heading}; line-height: 1.2; margin: 1.2mm 0 0.8mm; break-after: avoid;
+    }
+    /* Every locale sits in ONE continuous flow, so the next language starts immediately where
+       the previous one ended — mid-column, with no page break and no gap. The wrapper exists
+       only to carry 'lang' for hyphenation, so it must add nothing of its own: no margin, no
+       padding, and explicitly no break. */
+    .imv-lang { margin: 0; padding: 0; break-before: auto; page-break-before: auto; }
+    /* No rule for the last section of a locale on purpose: it keeps the ordinary .im-section
+       rhythm, so a language boundary costs exactly what a chapter boundary costs and nothing
+       is spent on marking it. What tells the reader the language changed is the next locale's
+       own section title — localized, bold, and ruled — not white space. */
+
+    /* The language bar — the one marker at a locale boundary. Black ground, white name, one
+       line at the heading size, and the ordinary section rhythm around it: enough to stop a
+       reader running from one language into the next, without spending a page break on it.
+       'break-after: avoid' keeps it from printing alone at the foot of a column, and 'clear'
+       stops a preceding block's floated sign overlapping it. */
+    .imv-lang-bar {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 2mm;
+      background: #000; color: #fff;
+      font-size: ${heading}; line-height: 1.5; font-weight: 700;
+      letter-spacing: 0.02em; padding: 0 1.2mm; margin: 2mm 0 1.2mm;
+      clear: both; break-after: avoid; break-inside: avoid;
+    }
+    .imv-lang-bar-code { font-weight: 600; }
+
+    /* The booklet's opening title runs the full measure above the columns, as it does in the
+       reference. ONLY the very first one spans: a spanner mid-flow splits the columns into
+       separate groups, which is the page-break-shaped gap this layout exists to remove — so
+       every later locale's title stays in-column. */
+    .im-page-content > .imv-lang:first-child > .im-section:first-child > .im-section-title { column-span: all; }
+
+    /* Hazard blocks — severity band, ISO sign, descriptor, body. No tinted panel, no accent
+       bar, no icon gutter: the body keeps the full 64mm column. */
+    .imv-hz { margin: 0 0 1.6mm; }
+    /* The head is one unbreakable group and refuses to be the last thing in a column, so a
+       severity band can never print with its instructions in the next column. The BLOCK is
+       free to flow across the break — the reference's DANGER block does exactly that. */
+    .imv-hz-head { break-inside: avoid; break-after: avoid; }
+    .imv-hz-band {
+      display: block; font-size: ${heading}; line-height: 1.45; font-weight: 800;
+      letter-spacing: 0.04em; text-transform: uppercase; color: #fff;
+      padding: 0 1.2mm; margin: 0 0 0.5mm;
+    }
+    /* The ISO sign FLOATS INTO THE TEXT rather than taking a row of its own.
+       At 7.5mm outer height plus its margin, a sign on its own row costs ~8mm of column per
+       hazard block — 24mm per locale over the three blocks the real leaflet carries, and none
+       of it sets any text. Floated, the sign occupies vertical space the body copy needs
+       anyway: the descriptor and the first few lines of the instruction wrap beside it, so the
+       sign costs roughly the width of those lines instead of a whole row. Nothing about the
+       sign itself changes — same artwork, same 7.5mm outer height, same colours.
+
+       Declared AFTER the band in document order on purpose: a float is placed at the current
+       vertical position, so this lands BELOW the full-width coloured band instead of on top of
+       it (a yellow triangle over a red band). */
+    .imv-hz-signs { float: right; line-height: 0; margin: 0 0 0.6mm 1.4mm; }
+    .imv-hz-sign { display: inline-block; }
+    .imv-hz-sign svg { height: 100%; width: auto; display: block; }
+    /* A following hazard block's band, or a new chapter title, must start BELOW any sign still
+       floating — otherwise a short block's sign would overlap the next band. Costs nothing when
+       the instruction text is long enough to consume the float, which it is in practice. */
+    .imv-hz-band, .im-section-title { clear: both; }
+    .imv-hz-desc { font-size: ${heading}; line-height: 1.2; font-weight: 700; color: #111827; margin: 0 0 0.8mm; }
+    .imv-hz-body p { margin: 0 0 ${paraGap}; }
+    .imv-hz-body p:last-child { margin-bottom: 0; }
+    .imv-hz-danger  .imv-hz-band { background: #c1121f; }
+    .imv-hz-warning .imv-hz-band { background: #d97706; }
+    .imv-hz-caution .imv-hz-band { background: #b45309; }
+    .imv-hz-info    .imv-hz-band { background: #1d4ed8; }
+
+    /* Nothing tinted may sit behind body text in this layout. The hazard blocks no longer
+       emit .imv-block-wrapper at all, and authored .im-block-* markup inside a rich-text node
+       has never been styled by the print stylesheet — this is a belt-and-braces guarantee
+       that neither can reappear as a panel behind 7pt type. */
+    .imv-block-wrapper, .im-block-wrapper {
+      display: block; background: none; border: 0; border-radius: 0; padding: 0; margin: 0 0 1.6mm;
+    }
+    .imv-block-icon, .im-block-icon { display: none; }
+
+    /* A 64mm column is narrower than anything an author sized against the 132mm classic
+       column, so cap rather than overflow. Leaflet content carries no tables or images today;
+       this keeps that from becoming a clipped page if it ever does. */
+    .imv-content img { max-width: 100%; height: auto; }
+    .imv-content table { width: 100%; font-size: ${body}; }
+    .imv-annotated, .imv-steps, .imv-legend-table { margin: 1mm 0; }
+    .imv-step { margin-bottom: 1mm; gap: 1.5mm; }
+    .imv-marker { width: 1.9em; height: 1.9em; }
+    .imv-legend-num { min-width: 1.7em; height: 1.7em; }
+    .imv-step-num { width: 2.1em; height: 2.1em; }
+`;
+};
+
+/**
  * The shared stylesheet.
  *
  * Two distinct scales are at work here, on purpose:
@@ -697,6 +1049,7 @@ const buildStyles = (
   typography: PrintTypography,
   compact = false,
   fontCss = '',
+  leafletLayout: PrintLeafletLayout = 'classic',
 ): string => {
   const dims = PAGE_DIMS[pageSize];
   const s = pageSize === 'a5' ? A5_FURNITURE_SCALE : 1; // page furniture only (see above)
@@ -807,6 +1160,10 @@ const buildStyles = (
        so a 1rem (8.47mm) margin was otherwise frozen onto every image whatever the page size.
        object-fit preserves the aspect ratio when max-height binds on a width-pinned image. */
     .imv-content img { max-width: 100%; max-height: ${absMm(cellImageMaxHeightMm)}; height: auto; object-fit: contain; border-radius: 4px; }
+    /* Opt-out for a deliberately large image (the editor's "No height limit" toggle,
+       im-image-markup.ts) — matches the editor's own [data-uncap] rule in im-content.css
+       so an image sized past cellImageMaxHeightMm on screen prints the same way. */
+    .imv-content img[data-uncap="1"] { max-height: none; }
     .imv-content img[data-print-align="block"] { display: block; margin: ${gap} 0; }
     .imv-content img[data-print-align="center"] { display: block; margin: ${gap} auto; }
     .imv-content img[data-print-align="left"] { float: left; margin: 0 ${gap} ${halfGap} 0; }
@@ -907,7 +1264,13 @@ const buildStyles = (
     .im-end-logo { height: ${mm(16)}; object-fit: contain; margin-bottom: ${mm(8)}; }
     .im-end-content { font-size: ${pt(bodyPt)}; color: #1e293b; }
     .im-end-copyright { margin-top: ${mm(10)}; font-size: ${pt(bodyPt * 0.85)}; color: #64748b; text-align: center; }
-    ${compact ? compactOverrides(primaryColor, bodyPt, headingPt, lineHeight) : ''}
+    ${
+      compact
+        ? leafletLayout === 'compact2col'
+          ? compact2colOverrides(primaryColor, pageSize, typography)
+          : compactOverrides(primaryColor, bodyPt, headingPt, lineHeight)
+        : ''
+    }
   `;
 };
 
@@ -1017,8 +1380,14 @@ export interface PrintPart {
 }
 
 /** Wrap section HTML into a standalone print document with the shared stylesheet. */
-const wrapStandalone = (inner: string, styles: string): string => `<!doctype html>
-<html>
+/**
+ * `lang` is load-bearing, not cosmetic: CSS `hyphens: auto` picks its hyphenation dictionary
+ * from the document language, so an unset lang means the compact layout's justified 64mm
+ * columns get no hyphenation at all — silently, with rivers instead of an error. Omitted when
+ * a part spans languages (the shared cover/back), where no single value is correct.
+ */
+const wrapStandalone = (inner: string, styles: string, lang?: string): string => `<!doctype html>
+<html${lang ? ` lang="${escapeHtml(lang)}"` : ''}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -1036,6 +1405,7 @@ const partStyles = (manuals: PrintManual[], opts: PrintHtmlOptions): string => {
     typography,
     opts.compact,
     buildFontCss(typography.fontFamily, documentTextOf(manuals)),
+    opts.compact ? opts.leafletLayout ?? 'classic' : 'classic',
   );
 };
 
@@ -1072,16 +1442,47 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
   const multi = manuals.length > 1;
   const styles = partStyles(manuals, opts);
 
-  // Compact Warning Leaflet: no cover / TOC / dividers / back page. Each language is a single part
-  // (a logo-only header + its sections) so it still carries the same edge thumb-tab as the main
-  // manual. The last-page copyright line is stamped onto the merged PDF by the print function.
+  // Compact Warning Leaflet: no cover / TOC / dividers / back page.
   if (opts.compact) {
     // Leaflets fall back to their own standard logo (not the full-manual DEFAULT_IM_LOGO_URL).
     // `||` (not `??`): normalized metadata stores a missing companyLogoUrl as '', which must
     // still fall through to the default so the header logo is always prelinked.
     const logoUrl = opts.cover.logoUrl || base?.companyLogoUrl || DEFAULT_LEAFLET_LOGO_URL;
+    const layout = opts.leafletLayout ?? 'classic';
+
+    // compact2col: ONE part carrying every language in a single continuous flow, so a locale
+    // starts immediately after the one before it — mid-column if that is where the previous
+    // one ended — with no page break and no gap. See buildContinuousLanguageFlow for why this
+    // has to be one part, and what that costs.
+    if (layout === 'compact2col') {
+      return [
+        {
+          html: wrapStandalone(
+            // The header prints ONCE, at the top of the booklet. Repeating it per locale would
+            // mean a full-measure band inside the column flow — a spanner that breaks the
+            // columns into separate groups, i.e. exactly the gap this layout removes.
+            buildLeafletHeader(logoUrl, manuals[0].primarySkuQrSvg) +
+              buildContinuousLanguageFlow(manuals, layout),
+            styles,
+            // No document-level language: the part spans all of them, and each locale carries
+            // its own `lang` on its wrapper so `hyphens: auto` still resolves per locale.
+            undefined,
+          ),
+          // No edge thumb-tab: a tab indexes a PAGE by language, and pages are no longer
+          // language-aligned once locales share them.
+          tab: null,
+        },
+      ];
+    }
+
+    // classic: each language is its own part (a logo-only header + its sections) so it still
+    // carries the same edge thumb-tab as the main manual. The last-page copyright line is
+    // stamped onto the merged PDF by the print function.
     return manuals.map((manual, i) => ({
-      html: wrapStandalone(buildLeafletHeader(logoUrl, manual.primarySkuQrSvg) + buildSectionPages(manual), styles),
+      html: wrapStandalone(
+        buildLeafletHeader(logoUrl, manual.primarySkuQrSvg) + buildSectionPages(manual, true, layout),
+        styles,
+      ),
       tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,
     }));
   }

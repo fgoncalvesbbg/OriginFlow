@@ -1098,9 +1098,9 @@
     "semantic_hash": ""
   },
   "src/pages/AdminDashboard.tsx": {
-    "mtime": 1788434674.6171598,
-    "seen": 1788435499.1775806,
-    "ast_hash": "f3106f8137b9531b9cdcf9fbe8af21ff",
+    "mtime": 1788437292.1229987,
+    "seen": 1788440230.314801,
+    "ast_hash": "19afa0c7b125b3a432dc503df0770d81",
     "semantic_hash": ""
   },
   "src/pages/AdminTestEmail.tsx": {
@@ -1128,9 +1128,9 @@
     "semantic_hash": ""
   },
   "src/pages/ProjectDetail.tsx": {
-    "mtime": 1788115068.228232,
-    "seen": 1788115621.7267175,
-    "ast_hash": "4367b2c4141b13faaf43712c6b1d9ad0",
+    "mtime": 1788439236.1971593,
+    "seen": 1788440230.3148136,
+    "ast_hash": "8095f29afa5e28a4e1de7c4cabf5c21c",
     "semantic_hash": ""
   },
   "src/pages/SupplierAttributePortal.tsx": {
@@ -1428,9 +1428,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/compliance-requirement.service.ts": {
-    "mtime": 1788434759.18649,
-    "seen": 1788435499.1779518,
-    "ast_hash": "0da3e05a16bffb3d7b795a8e065ebaa4",
+    "mtime": 1788437292.1200042,
+    "seen": 1788440230.3150666,
+    "ast_hash": "110bd5279c19fc96253a7a5e969ec751",
     "semantic_hash": ""
   },
   "src/services/compliance/compliance.service.ts": {
@@ -1680,9 +1680,9 @@
     "semantic_hash": ""
   },
   "src/services/project/project-sku.service.ts": {
-    "mtime": 1787729324.6229844,
-    "seen": 1787843281.2444701,
-    "ast_hash": "26b97d4f8b685696abafac112967ebcf",
+    "mtime": 1788439230.7345188,
+    "seen": 1788440230.3153484,
+    "ast_hash": "810f13f2d043788398783af01cca6e03",
     "semantic_hash": ""
   },
   "src/services/project/project-step.service.ts": {
@@ -1860,9 +1860,9 @@
     "semantic_hash": ""
   },
   "src/utils/attribute-csv-import.utils.ts": {
-    "mtime": 1788106026.7624242,
-    "seen": 1788113944.6640708,
-    "ast_hash": "2ac8365dda018fc458c50e08c374775f",
+    "mtime": 1788436898.0513117,
+    "seen": 1788437109.6360328,
+    "ast_hash": "c33f766341d0976d1266e96393c64960",
     "semantic_hash": ""
   },
   "src/utils/attribute-validation.utils.ts": {
@@ -3594,9 +3594,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/producttoolkit-attributes.service.ts": {
-    "mtime": 1788436222.0554936,
-    "seen": 1788436452.1885848,
-    "ast_hash": "f2f774170adb31026b18563297058454",
+    "mtime": 1788436898.0513117,
+    "seen": 1788437109.635769,
+    "ast_hash": "e68642ed5239d8399c47f1ea7d506153",
     "semantic_hash": ""
   },
   "src/services/compliance/producttoolkit-attributes.test.ts": {
@@ -3666,9 +3666,9 @@
     "semantic_hash": ""
   },
   "netlify/functions/sku-attributes.ts": {
-    "mtime": 1787941102.8243616,
-    "seen": 1788113944.6626182,
-    "ast_hash": "bcf022b7958540674630c20243026ea4",
+    "mtime": 1788439906.155498,
+    "seen": 1788440230.3145638,
+    "ast_hash": "f978eb5ce02af31fe3455e95c66ce7b0",
     "semantic_hash": ""
   },
   "project_skus_attribute_values_backup.json": {
@@ -3690,15 +3690,15 @@
     "semantic_hash": ""
   },
   "src/services/compliance/attribute-sync-plan.test.ts": {
-    "mtime": 1788106709.60944,
-    "seen": 1788113944.6632717,
-    "ast_hash": "114bfc8bcac2eb2ed87ece1ee9269cba",
+    "mtime": 1788436960.9482017,
+    "seen": 1788437109.6357567,
+    "ast_hash": "4e7b5f4ca408857978f204e1f15909f0",
     "semantic_hash": ""
   },
   "src/services/compliance/attribute-sync-plan.ts": {
-    "mtime": 1788106398.8068376,
-    "seen": 1788113944.6632745,
-    "ast_hash": "62a9ee5c74320fa8c1c861d66b1a236c",
+    "mtime": 1788437292.1189017,
+    "seen": 1788440230.315062,
+    "ast_hash": "74a0a73caaccbf49c43f795280e90666",
     "semantic_hash": ""
   },
   "src/services/compliance/global-attribute-group.test.ts": {
@@ -3708,15 +3708,15 @@
     "semantic_hash": ""
   },
   "src/services/project/sku-akeneo-payload.test.ts": {
-    "mtime": 1787941153.6798563,
-    "seen": 1788113944.6638153,
-    "ast_hash": "8c5f5d4f5a5487123ddf224e37cebc19",
+    "mtime": 1788439870.9228666,
+    "seen": 1788440230.3153565,
+    "ast_hash": "77f9d8aeb707a43a53d1b4468af5c5c7",
     "semantic_hash": ""
   },
   "src/services/project/sku-akeneo-payload.ts": {
-    "mtime": 1787941071.281471,
-    "seen": 1788113944.6638207,
-    "ast_hash": "ae8d6e04d26433d00bfb775c114aad2c",
+    "mtime": 1788439790.896438,
+    "seen": 1788440230.3153586,
+    "ast_hash": "d80cfc51bfa7f8923e69f2cc08b29fbe",
     "semantic_hash": ""
   },
   "src/utils/attribute-ordering.test.ts": {
@@ -3732,9 +3732,9 @@
     "semantic_hash": ""
   },
   "docs/producttoolkit-sku-readback.md": {
-    "mtime": 1787941849.2543945,
-    "seen": 1788113944.6643722,
-    "ast_hash": "6edbe3a1730fb86c81c4274830a22741",
+    "mtime": 1788439893.6311545,
+    "seen": 1788440230.3156738,
+    "ast_hash": "138720afbe27f64ccc826d52787ef2ca",
     "semantic_hash": ""
   },
   "netlify/functions/jira-status.ts": {
@@ -3966,9 +3966,9 @@
     "semantic_hash": ""
   },
   "src/services/compliance/replace-full.test.ts": {
-    "mtime": 1788434569.5117788,
-    "seen": 1788435499.1779833,
-    "ast_hash": "f5cc738b4dcb1ac2ce0959a5efbc60de",
+    "mtime": 1788437346.3038146,
+    "seen": 1788440230.3150883,
+    "ast_hash": "6e6f9904c2154715d011d09b51cfad49",
     "semantic_hash": ""
   }
 }

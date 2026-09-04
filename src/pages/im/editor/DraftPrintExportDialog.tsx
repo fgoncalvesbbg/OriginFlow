@@ -29,9 +29,10 @@ import {
   brandLogoUrl,
 } from '../../../config/im.constants';
 import { requestDraftPrintPdf, type DraftPrintPdfResult } from '../../../services';
-import { getPrintTypography, defaultTypographyFor, type PrintTypography } from '../../../services/im/im-print-settings.service';
+import { getPrintTypography, defaultTypographyFor, type PrintTypography, type PrintLeafletLayout } from '../../../services/im/im-print-settings.service';
 import { orderIMLanguages } from '../../../config/im-languages';
 import { TypographySummary } from './TypographySummary';
+import { useDocCode } from './useDocCode';
 
 /** One language's resolved manual, plus whatever the resolver complained about. */
 export interface DraftResolveResult {
@@ -42,6 +43,8 @@ export interface DraftResolveResult {
 interface DraftPrintExportDialogProps {
   templateId: string;
   templateType: IMTemplateType;
+  /** The template's L3 category — the document code is built from it. */
+  categoryId: string | null;
   /** Template metadata as it stands in the editor — including unsaved changes. */
   metadata: IMTemplateMetadata;
   /** Cover-title default (the category name); still editable, since the real one is per project. */
@@ -68,6 +71,7 @@ interface DraftPrintExportDialogProps {
 const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
   templateId,
   templateType,
+  categoryId,
   metadata,
   defaultTitle,
   languages,
@@ -77,6 +81,12 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
   onClose,
 }) => {
   const isLeaflet = templateType === 'warning_leaflet';
+
+  // Leaflet layout to proof. This dialog is where the compact layout gets iterated on — a
+  // draft is one PDFShift part and leaves no history row — so it gets the same choice the
+  // production dialog does.
+  const [leafletLayout, setLeafletLayout] = React.useState<PrintLeafletLayout>('classic');
+
 
   // Every language the template carries, in house order; English first by convention.
   const pool = React.useMemo(() => orderIMLanguages(languages), [languages]);
@@ -93,6 +103,10 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
     isLeaflet ? 'a5' : metadata.pageSize === 'a4' ? 'a4' : 'a5',
   );
   const [mergeToc, setMergeToc] = useState(true);
+
+  // The same document code the production export stamps, so a draft proof is identifiable as
+  // a proof OF that document rather than an anonymous PDF.
+  const docCode = useDocCode(templateType, pageSize, categoryId);
 
   // The two cover strings a bare template cannot know: both are per-project in production, and
   // both change the cover's layout, so a draft needs stand-in values to show it honestly.
@@ -166,6 +180,8 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
         pageSize,
         typography,
         mergeToc: isLeaflet ? undefined : mergeToc,
+        leafletLayout: isLeaflet ? leafletLayout : undefined,
+        docCode: docCode || undefined,
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         cover: {
           title,
@@ -281,6 +297,29 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
                 ))}
               </div>
             </div>
+            {isLeaflet && (
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Layout</label>
+                <div className="flex gap-2 mt-1">
+                  {([
+                    { key: 'classic' as const, label: 'Classic' },
+                    { key: 'compact2col' as const, label: 'Compact 2-col' },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => setLeafletLayout(opt.key)}
+                      className={`px-3 py-1.5 rounded border text-sm font-medium ${
+                        leafletLayout === opt.key
+                          ? 'bg-indigo-600 border-indigo-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {!isLeaflet && (
               <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer max-w-xs">
                 <input type="checkbox" className="mt-0.5" checked={mergeToc} onChange={(e) => setMergeToc(e.target.checked)} />

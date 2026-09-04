@@ -33,7 +33,7 @@ import {
   type PrintTypography,
 } from './im-print-typography';
 
-export type { PrintPageSizeKey, PrintTypography } from './im-print-typography';
+export type { PrintPageSizeKey, PrintTypography, PrintLeafletLayout } from './im-print-typography';
 // Re-exported so callers get the whole print-settings surface from one module. The
 // remaining pieces of ./im-print-typography (DEFAULT_PRINT_TYPOGRAPHY,
 // normalizePrintTypography) are imported straight from there by the Netlify render

@@ -464,7 +464,12 @@ const ProjectDetail: React.FC = () => {
   // The Warning Leaflet has no printed-language-subset concept of its own (unlike the
   // Digital/Printed IM) — its newest render (leafletRenders[0], newest-first) simply IS
   // the leaflet PDF, so "current" here only means "matches the leaflet's current version".
-  const leafletRenderCandidate = leafletRenders[0] ?? null;
+  //
+  // Restricted to the CLASSIC layout: the compact two-column layout is a separate artefact
+  // produced from the same content, and it must not become the PDF a supplier is shown just
+  // by being the most recent render. When the compact layout becomes the one that ships, this
+  // is the single line that decides that.
+  const leafletRenderCandidate = leafletRenders.find((r) => r.layout === 'classic') ?? null;
   const leafletPdfIsStale = !leafletRenderCandidate ? null
     : (leafletRenderCandidate.imVersion == null || projectLeaflet?.version == null) ? null
     : leafletRenderCandidate.imVersion < projectLeaflet.version;
