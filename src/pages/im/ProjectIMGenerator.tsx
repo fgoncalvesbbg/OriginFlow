@@ -43,11 +43,14 @@ import { getSignedManifestUrl } from '../../services/im/im-publish.service';
 // same helper — im-print is one of the two buckets closed off from permanent public URLs.
 import { getSignedPrintPdfUrlForPath } from '../../services/im/im-print-export.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
-import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle, WizardQuestion } from '../../types';
+import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMReviewStage, IM_REVIEW_STAGE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle, WizardQuestion } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
-import { printedManualStatusOf, MANUAL_STATUS_META } from './im-manual-status';
+import {
+  printedManualStatusOf, PRINTED_STATUS_META, manualStatusOf, nextReviewStageFor,
+  MANUAL_STATUS_META, statusClasses, statusLabel, isReviewStep, type ManualStatus,
+} from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2 } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, CheckCircle2, RefreshCw, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2 } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
@@ -231,6 +234,11 @@ const ProjectIMGenerator: React.FC = () => {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentBusyId, setCommentBusyId] = useState<string | null>(null);
   const [sendingForReview, setSendingForReview] = useState(false);
+  // Send-for-review dialog. It exists for one reason: minting a link MOVES this manual on
+  // the board, and a side effect that changes where your work appears to everyone else
+  // should be shown before it happens, not announced afterwards.
+  const [showSendReview, setShowSendReview] = useState(false);
+  const [sendReviewStage, setSendReviewStage] = useState<IMReviewStage | null>(null);
   // The wording a supplier quoted, highlighted in the chapter the PM was just sent to. Held
   // as chapter + text rather than as an offset: the editor's HTML is rebuilt on every
   // keystroke, so anything positional would be stale before it was used.
@@ -3701,28 +3709,41 @@ const ProjectIMGenerator: React.FC = () => {
   /**
    * Mint a supplier review link for the CURRENT published version and copy it to the clipboard.
    *
-   * The version is stamped on the link, which is what later lets the panel say "this manual
-   * has been republished since it was sent for review".
+   * TWO things are stamped on the link, and both are load-bearing:
+   *
+   *  - the VERSION, which is what later lets the panel say "this manual has been republished
+   *    since it was sent for review";
+   *  - the STAGE — Draft Review or Final Review — which is what MOVES this manual's card into
+   *    the matching column on the All Manuals board. Creating the link is the whole gesture:
+   *    there is no separate "move it to review" step to forget, because a review link
+   *    existing and a manual being in review are the same fact.
+   *
+   * The stage defaults to the review step that follows wherever the manual stands now
+   * (`nextReviewStageFor`), and `stage` overrides that when the PM picks explicitly in the
+   * send dialog.
    */
-  const sendForReview = async () => {
+  const sendForReview = async (stage: IMReviewStage = pendingReviewStage) => {
     if (!projectId || !instance || sendingForReview) return;
     setSendingForReview(true);
+    const stageLabel = IM_REVIEW_STAGE_LABELS[stage];
     try {
       const share = await createIMShare(projectId, templateType, {
         mode: 'review',
         manualVersion: instance.version ?? null,
-        label: `Supplier review v${instance.version ?? '?'}`,
+        reviewStage: stage,
+        label: `${stageLabel} v${instance.version ?? '?'}`,
       });
-      // Stamp the round on the manual too, so "In Review" is derivable on the dashboard
-      // without loading every manual's share links. Non-fatal: the link is already minted
-      // and usable, and the panel derives its own state from the links directly.
+      // Mirror the round onto the manual too, so the board can place every manual from one
+      // query instead of loading each one's share links. Non-fatal: the link is already
+      // minted and usable, and this page derives its own state from the links directly.
       try {
-        const stamped = await setProjectIMReviewRequested(projectId, templateType, instance.version ?? null);
+        const stamped = await setProjectIMReviewRequested(projectId, templateType, instance.version ?? null, stage);
         setInstance(prev => prev ? {
           ...prev,
           reviewRequestedAt: stamped.reviewRequestedAt,
           reviewRequestedBy: stamped.reviewRequestedBy,
           reviewVersion: instance.version ?? null,
+          reviewStage: stamped.reviewStage,
         } : prev);
       } catch (e) {
         console.error('[ProjectIMGenerator] Failed to stamp the review round:', e);
@@ -3730,15 +3751,14 @@ const ProjectIMGenerator: React.FC = () => {
       const url = getIMReviewUrl(share.token);
       try {
         await navigator.clipboard.writeText(url);
-        alert('Review link copied — send it to the supplier.');
+        alert(`${stageLabel} link copied — send it to the supplier.\n\nThis manual has moved to ${stageLabel} on the IM board.`);
       } catch {
         // Clipboard is blocked in some browsers/contexts; the link still exists and is
         // listed on the Viewer tab, so this is a downgrade, not a failure.
-        alert(`Review link created — copy it from here:
-
-${url}`);
+        alert(`${stageLabel} link created — copy it from here:\n\n${url}`);
       }
       setReviewShares(prev => [share, ...prev]);
+      setShowSendReview(false);
       setActivePanel('comments');
     } catch (e) {
       console.error('[ProjectIMGenerator] Failed to create review link:', e);
@@ -4492,6 +4512,56 @@ ${url}`);
   // changed hook order and throws (#310). It also matches how the rest of this section
   // derives its values (see publishIssues below); the inputs are small arrays.
   const reviewRound = reviewRoundStateOf(reviewShares, reviewComments, instance?.version ?? null);
+
+  /**
+   * WHERE THIS MANUAL STANDS in the IM workflow — the same derivation the All Manuals
+   * board runs, from the same module, so both screens say the same word about the same
+   * manual.
+   *
+   * This page used to describe a manual in its own vocabulary (a green GENERATED chip, a
+   * sky In Review chip, a separate green Final chip, a `Review` pipeline step) while the
+   * dashboard described it in another. Two vocabularies for one thing is how a PM ends up
+   * unsure which screen is telling the truth.
+   */
+  const workflowStatus = instance
+    ? manualStatusOf(
+        {
+          status: instance.status,
+          isFinalized: locked,
+          version: instance.version ?? null,
+          reviewRequestedAt: instance.reviewRequestedAt ?? null,
+          reviewVersion: instance.reviewVersion ?? null,
+          // The live links are more current than the column mirrored on the manual:
+          // revoking the last one ends the round, and the newest link carries any
+          // corrected stage.
+          reviewStage: reviewRound.stage ?? instance.reviewStage ?? null,
+          // Revoking the last link ends the round; the manual's own columns cannot say so.
+          hasLiveReviewLink: reviewRound.isOpen,
+        },
+        pipelineStale,
+      )
+    : null;
+
+  /**
+   * Which review step a NEW link would open. Named on the Send for Review action so the
+   * PM reads it BEFORE clicking, rather than discovering it after the card has moved.
+   */
+  const pendingReviewStage: IMReviewStage = nextReviewStageFor(
+    workflowStatus ?? 'in_progress',
+    instance?.reviewRequestedAt != null,
+  );
+
+  /**
+   * Open the send-for-review dialog, dropping any override from a previous send.
+   *
+   * A manual override is a decision about ONE round ("this rewrite needs another draft
+   * pass"), not a standing preference. Carrying it into the next send would silently file a
+   * final review as a draft one — the kind of wrong that is only noticed on the board.
+   */
+  const openSendReview = () => {
+    setSendReviewStage(null);
+    setShowSendReview(true);
+  };
   const reviewCounts = reviewCommentCounts(reviewComments);
   const reviewGroups = groupCommentsBySection(
     reviewComments,
@@ -4598,6 +4668,78 @@ ${url}`);
          onConfirm={handleMarkFinal}
          onCancel={() => setShowFinalizeConfirm(false)}
        />
+
+       {/* Send this manual to the supplier — and say which of the two review steps that is.
+           The stage is pre-picked from where the manual stands (nextReviewStageFor) and is
+           overridable, because the derivation is a good default and not a verdict: a PM
+           re-running a draft pass after a big rewrite is doing a draft review, whatever the
+           board thinks. */}
+       {showSendReview && instance && (() => {
+         const stage = sendReviewStage ?? pendingReviewStage;
+         return (
+           <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={() => !sendingForReview && setShowSendReview(false)}>
+             <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
+               <h3 className="text-lg font-bold text-primary mb-1">Send for supplier review</h3>
+               <p className="text-sm text-muted mb-4">
+                 Creates an unguessable review link for the published v{instance.version ?? '?'} of this
+                 {' '}{typeLabel.toLowerCase()} and copies it to your clipboard.
+               </p>
+
+               <fieldset className="space-y-2 mb-4">
+                 <legend className="text-xs font-bold text-muted uppercase mb-2">Which review is this?</legend>
+                 {(['draft', 'final'] as IMReviewStage[]).map(option => (
+                   <label
+                     key={option}
+                     className={`flex items-start gap-3 border rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${stage === option ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'}`}
+                   >
+                     <input
+                       type="radio"
+                       name="review-stage"
+                       className="mt-0.5 accent-indigo-600"
+                       checked={stage === option}
+                       onChange={() => setSendReviewStage(option)}
+                     />
+                     <span className="min-w-0">
+                       <span className="block text-sm font-semibold text-gray-800">
+                         {IM_REVIEW_STAGE_LABELS[option]}
+                         {option === pendingReviewStage && (
+                           <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-indigo-600">suggested</span>
+                         )}
+                       </span>
+                       <span className="block text-xs text-gray-500">
+                         {option === 'draft'
+                           ? "The supplier's first pass. Their notes come back for you to work through at Adjust IM."
+                           : 'The supplier confirming the adjustments you made. Once they close it, mark the manual Done.'}
+                       </span>
+                     </span>
+                   </label>
+                 ))}
+               </fieldset>
+
+               <p className="text-xs text-gray-500 mb-4">
+                 This manual will move to <strong>{IM_REVIEW_STAGE_LABELS[stage]}</strong> on the IM
+                 board, and turn green there once the supplier closes their review.
+               </p>
+
+               <div className="flex justify-end gap-2">
+                 <button
+                   onClick={() => setShowSendReview(false)}
+                   disabled={sendingForReview}
+                   className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                 >Cancel</button>
+                 <button
+                   onClick={() => { void sendForReview(stage); }}
+                   disabled={sendingForReview}
+                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                 >
+                   <Send size={14} />
+                   {sendingForReview ? 'Creating link…' : `Create ${IM_REVIEW_STAGE_LABELS[stage]} link`}
+                 </button>
+               </div>
+             </div>
+           </div>
+         );
+       })()}
 
        {/* Unlock a FINAL manual so it can be edited again. */}
        <ConfirmationModal
@@ -4942,21 +5084,41 @@ ${url}`);
                        <h2 className="text-xl font-bold text-primary">{template?.name}</h2>
                        <div className="flex items-center gap-2 text-xs text-muted">
                           <span>For: {project?.name}</span>
-                          {instance?.status === 'generated' && <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">GENERATED</span>}
-                          {/* Out for supplier review. Derived from the live review links, so
-                              revoking the last one ends the round with no extra write. */}
-                          {reviewRound.isOpen && (
-                            <button
-                              onClick={() => setActivePanel('comments')}
-                              title={reviewRound.openCount > 0
-                                ? `${reviewRound.openCount} open supplier note(s) — open the review panel`
-                                : 'Out for supplier review — open the review panel'}
-                              className="flex items-center gap-1 bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide hover:bg-sky-200"
-                            >
-                              <Eye size={10} /> In Review{reviewRound.openCount > 0 ? ` · ${reviewRound.openCount}` : ''}
-                            </button>
+                          {/* ONE workflow chip, carrying the same word the board uses for this
+                              manual. It replaces the old GENERATED / In Review / Final trio,
+                              which could show two green chips at once and never said which of
+                              the two review steps a round was. Publish state is a separate
+                              fact and keeps its own quiet chip beside it. */}
+                          {workflowStatus && (() => {
+                            const submitted = isReviewStep(workflowStatus) && reviewRound.isSubmitted;
+                            const chip = (
+                              <>
+                                {isReviewStep(workflowStatus)
+                                  ? (submitted ? <CheckCircle2 size={10} /> : <Eye size={10} />)
+                                  : workflowStatus === 'done' ? <Lock size={10} />
+                                  : workflowStatus === 'republish_needed' ? <RefreshCw size={10} />
+                                  : null}
+                                {statusLabel(workflowStatus, submitted)}
+                                {isReviewStep(workflowStatus) && reviewRound.openCount > 0 ? ` · ${reviewRound.openCount}` : ''}
+                              </>
+                            );
+                            const cls = `flex items-center gap-1 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border ${statusClasses(workflowStatus, submitted)}`;
+                            return isReviewStep(workflowStatus) ? (
+                              <button
+                                onClick={() => setActivePanel('comments')}
+                                title={`${MANUAL_STATUS_META[workflowStatus].hint} Click to open the supplier notes.`}
+                                className={`${cls} hover:brightness-95`}
+                              >{chip}</button>
+                            ) : (
+                              <span title={MANUAL_STATUS_META[workflowStatus].hint} className={cls}>{chip}</span>
+                            );
+                          })()}
+                          {published && (
+                            <span
+                              title={`The online manual is published at v${instance?.version ?? '?'}.`}
+                              className="bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
+                            >Published v{instance?.version ?? '?'}</span>
                           )}
-                          {locked && <span className="flex items-center gap-1 bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"><Lock size={10} /> Final</span>}
                        </div>
                    </div>
                </div>
@@ -5085,13 +5247,17 @@ ${url}`);
                        {
                          key: 'send-review',
                          icon: <Send size={15} className="text-indigo-600" />,
-                         label: reviewRound.isOpen ? 'Review in progress — open panel' : 'Send for Review',
+                         // The action names the STEP it starts, so the PM knows where the card
+                         // is about to go before they click rather than after.
+                         label: reviewRound.isOpen
+                           ? `${IM_REVIEW_STAGE_LABELS[reviewRound.stage ?? 'draft']} in progress — open panel`
+                           : `Send for ${IM_REVIEW_STAGE_LABELS[pendingReviewStage]}`,
                          hint: !published
                            ? 'Publish the Full IM first — reviewers read the published online manual.'
                            : reviewRound.isOpen
                              ? 'A review round is already open — see the supplier notes so far.'
-                             : 'Create a supplier review link for the published manual and copy it.',
-                         onClick: reviewRound.isOpen ? () => setActivePanel('comments') : () => { void sendForReview(); },
+                             : `Creates a supplier review link and moves this manual to ${IM_REVIEW_STAGE_LABELS[pendingReviewStage]} on the IM board.`,
+                         onClick: reviewRound.isOpen ? () => setActivePanel('comments') : openSendReview,
                          disabled: !published || sendingForReview,
                        },
                      ] }]}
@@ -5142,27 +5308,27 @@ ${url}`);
                </div>
            </div>
 
-           {/* Manual pipeline — where this manual stands and what's next, each step
-               clickable to its action. Derivations use only data this page already has
-               (plus the three async pipeline signals fetched above). */}
-           {(() => {
-             // Translations have their own step below, so "Content" counts everything else.
-             const contentIssues = publishIssues.filter(i => i.kind !== 'translation').length;
-             const inReview = reviewRound.isOpen;
-             // "Done" means the reviewer submitted AND nothing is still outstanding — a
-             // submitted review with open notes is work for the PM, not a finished step.
-             const reviewDone = inReview && reviewRound.isSubmitted && reviewRound.openCount === 0;
-             const threads = reviewRound.openCount;
+           {/* TWO rows, answering two different questions in one vocabulary each.
 
-             const steps: PipelineStep[] = [
+               READINESS is a checklist: what has to be true before this manual can go
+               anywhere. Content, translation and publishing are not places a manual rests —
+               a PM publishes several times per manual — so they were always the wrong thing
+               to model as workflow steps, and modelling them that way is what left the
+               generator and the board describing the same manual differently.
+
+               WORKFLOW is the board, in the board's own words, with the manual's current
+               step marked. Both rows derive from data this page already holds. */}
+           {(() => {
+             // Translations have their own step, so "Content" counts everything else.
+             const contentIssues = publishIssues.filter(i => i.kind !== 'translation').length;
+
+             const readiness: PipelineStep[] = [
                {
                  key: 'content', label: 'Content',
                  state: contentIssues === 0 ? 'done' : 'todo',
                  detail: contentIssues > 0 ? `${contentIssues} open item${contentIssues === 1 ? '' : 's'}` : undefined,
                  title: contentIssues > 0 ? 'Open the review panel — missing values, SKU content and dropped chapters' : 'All values, slots and conditions are filled',
-                 onClick: contentIssues > 0
-                   ? () => setActivePanel('publish')
-                   : undefined,
+                 onClick: contentIssues > 0 ? () => setActivePanel('publish') : undefined,
                },
                otherRequiredLangs.length === 0
                  ? { key: 'translation', label: 'Translation', state: 'skipped', detail: 'EN only', title: 'This manual only produces English' }
@@ -5177,47 +5343,73 @@ ${url}`);
                  key: 'publish', label: 'Published',
                  state: !published ? 'todo' : pipelineStale ? 'warn' : 'done',
                  detail: !published ? undefined : pipelineStale ? `v${instance?.version} · out of date` : `v${instance?.version}`,
-                 title: !published ? 'Publish every required language' : pipelineStale ? 'Sources changed since this publish — publish again' : 'Published and up to date',
+                 title: !published
+                   ? 'Publish every required language — reviewers read the published online manual'
+                   : pipelineStale ? 'Sources changed since this publish — publish again' : 'Published and up to date',
                  // A settled step is a status, not a call to action — clicking it used to run
                  // the change check and answer with the "Already up to date" modal.
                  onClick: publishUpToDate ? undefined : () => handlePublishClick(),
                },
-               !inReview
-                 ? {
-                     key: 'review', label: 'Review', state: locked ? 'skipped' : 'optional',
-                     // Starting a review round is now a Publish menu action ("Send for Review"),
-                     // not a click here — this step is purely informational until one exists.
-                     detail: locked ? 'not reviewed' : 'use Publish → Send for Review',
-                     title: published
-                       ? 'Use Publish → Send for Review to create a supplier review link'
-                       : 'Publish the Full IM first — reviewers read the published online manual',
-                   }
-                 : reviewDone
-                   ? {
-                       key: 'review', label: 'Review', state: 'done', detail: 'Review done',
-                       title: 'Every supplier note has been handled — open the review panel',
-                       onClick: () => setActivePanel('comments'),
-                     }
-                   : {
-                       key: 'review', label: 'Review',
-                       state: reviewRound.isStale ? 'warn' : 'warn',
-                       detail: threads > 0
-                         ? `${reviewRound.isSubmitted ? 'returned' : 'in review'} · ${threads} open`
-                         : reviewRound.isSubmitted ? 'returned · no notes' : 'in review',
-                       title: reviewRound.isSubmitted
-                         ? 'The supplier submitted their review — open the notes'
-                         : 'Out with the supplier collecting notes — open what has come in so far',
-                       onClick: () => setActivePanel('comments'),
-                     },
-               {
-                 key: 'final', label: 'Final',
-                 state: locked ? 'done' : 'todo',
-                 detail: locked && instance?.finalizedAt ? new Date(instance.finalizedAt).toLocaleDateString() : undefined,
-                 title: locked ? 'Signed off and locked' : 'Mark this manual FINAL (locks its content)',
-                 onClick: !locked && instance ? () => setShowFinalizeConfirm(true) : undefined,
-               },
              ];
-             return <PipelineStepper steps={steps} />;
+
+             // The five steps a manual with a row can be at. To Do is excluded because this
+             // page cannot show it (a manual exists), and Republish Needed because it is a
+             // publish-health state, not a place in the sequence — the Published check above
+             // is where it shows, in warn.
+             const WORKFLOW_STEPS: ManualStatus[] = ['in_progress', 'draft_review', 'adjust_im', 'final_review', 'done'];
+             const current = workflowStatus;
+             const currentIndex = current ? WORKFLOW_STEPS.indexOf(current) : -1;
+
+             const workflow: PipelineStep[] = WORKFLOW_STEPS.map((step, i) => {
+               const isCurrent = step === current;
+               // Steps to the left of where we are have been passed; to the right, not yet.
+               // A manual that has never been reviewed shows nothing as passed beyond the
+               // step it is on, so the row never implies a review round that did not happen.
+               const passed = currentIndex >= 0 && i < currentIndex;
+               const label = MANUAL_STATUS_META[step].label;
+
+               let detail: string | undefined;
+               if (step === 'draft_review' || step === 'final_review') {
+                 if (isCurrent) {
+                   detail = reviewRound.isSubmitted
+                     ? (reviewRound.openCount > 0 ? `closed · ${reviewRound.openCount} open` : 'closed')
+                     : (reviewRound.openCount > 0 ? `out · ${reviewRound.openCount} notes` : 'out with supplier');
+                 }
+               } else if (step === 'done' && locked && instance?.finalizedAt) {
+                 detail = new Date(instance.finalizedAt).toLocaleDateString();
+               } else if (step === 'adjust_im' && isCurrent && reviewRound.openCount > 0) {
+                 detail = `${reviewRound.openCount} note${reviewRound.openCount === 1 ? '' : 's'}`;
+               }
+
+               // A closed review is the one step that reports done while still being current:
+               // the supplier is finished, and what remains is the PM's move.
+               const reviewClosed = isCurrent && isReviewStep(step) && reviewRound.isSubmitted;
+
+               return {
+                 key: step,
+                 label,
+                 state: isCurrent ? 'current' : passed ? 'done' : 'todo',
+                 detail,
+                 title: reviewClosed
+                   ? `${label} — the supplier has closed it. ${step === 'draft_review' ? 'Start adjusting the manual.' : 'Mark it Done.'}`
+                   : MANUAL_STATUS_META[step].hint,
+                 onClick:
+                   isReviewStep(step) && isCurrent ? () => setActivePanel('comments')
+                   : step === 'done' && !locked && instance ? () => setShowFinalizeConfirm(true)
+                   : step === 'draft_review' && !isCurrent && !locked && published && !reviewRound.isOpen && pendingReviewStage === 'draft'
+                     ? openSendReview
+                   : step === 'final_review' && !isCurrent && !locked && published && !reviewRound.isOpen && pendingReviewStage === 'final'
+                     ? openSendReview
+                   : undefined,
+               };
+             });
+
+             return (
+               <>
+                 <PipelineStepper caption="Readiness" steps={readiness} />
+                 <PipelineStepper caption="Workflow" steps={workflow} />
+               </>
+             );
            })()}
 
            {locked && (
@@ -5395,7 +5587,7 @@ ${url}`);
                          <div className="border-b border-gray-100 pb-6">
                            <h4 className="font-bold text-gray-800 mb-1 flex items-center gap-2 text-sm">
                              <Printer size={14} className="text-indigo-500" /> Printed IM
-                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${MANUAL_STATUS_META[printedStatus].classes}`}>{MANUAL_STATUS_META[printedStatus].label}</span>
+                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full normal-case ${PRINTED_STATUS_META[printedStatus].classes}`}>{PRINTED_STATUS_META[printedStatus].label}</span>
                            </h4>
                            <p className="text-xs text-muted mb-3">
                              Which of this manual's required languages ship in the PRINTED booklet that goes in the

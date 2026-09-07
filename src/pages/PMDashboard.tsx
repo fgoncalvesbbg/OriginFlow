@@ -11,6 +11,7 @@ import { Card } from '../components/common/Card';
 import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
+import { useInbox } from '../components/inbox/InboxContext';
 
 // Column keys used for per-column filtering and sorting in the projects table.
 type ProjectColKey = 'name' | 'projectId' | 'pm' | 'supplier' | 'step' | 'status' | 'jira';
@@ -42,6 +43,9 @@ const SortableTh: React.FC<{
 
 const PMDashboard: React.FC = () => {
   const { user } = useAuth();
+  // The open-work counters come from the app shell's inbox snapshot, not from a second
+  // query, so the tile and the drawer always agree. Null when rendered outside Layout.
+  const inboxCtx = useInbox();
   const [projects, setProjects] = useState<Project[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [profiles, setProfiles] = useState<User[]>([]);
@@ -181,6 +185,10 @@ const PMDashboard: React.FC = () => {
       return colValue(a, sortKey).localeCompare(colValue(b, sortKey), undefined, { numeric: true }) * dir;
     });
 
+  // Fall back to the old narrow count only when the page renders outside the app shell.
+  const reviewCount = inboxCtx?.inbox.reviewCount ?? stats?.pendingReviews ?? 0;
+  const waitingCount = inboxCtx?.inbox.waitingCount ?? 0;
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
@@ -213,15 +221,34 @@ const PMDashboard: React.FC = () => {
             </div>
           </Card>
 
-          <Card className="p-6 flex items-center justify-between group hover:border-indigo-200 transition-colors">
+          {/* Open work, from the inbox snapshot. The old number here counted only
+              project_documents at status 'uploaded' — one of six places a supplier can
+              answer — so it read 0 while TCF responses, attribute submissions and new
+              proposals were all waiting. Clicking opens the drawer that lists them. */}
+          <Card
+            role={inboxCtx ? 'button' : undefined}
+            tabIndex={inboxCtx ? 0 : undefined}
+            onClick={() => inboxCtx?.openInbox()}
+            onKeyDown={(e) => {
+              if (!inboxCtx) return;
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inboxCtx.openInbox(); }
+            }}
+            aria-label={inboxCtx ? 'Open project inbox' : undefined}
+            className={`p-6 flex items-center justify-between group transition-colors hover:border-indigo-200 ${
+              inboxCtx ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent' : ''
+            }`}
+          >
             <div>
-              <p className="text-sm font-medium text-muted mb-1">Pending Reviews</p>
-              <h3 className="text-3xl font-bold text-primary">{stats.pendingReviews}</h3>
-              {stats.pendingReviews > 0 && (
-                 <p className="text-xs text-amber-700 font-medium mt-1">Requires attention</p>
+              <p className="text-sm font-medium text-muted mb-1">Awaiting Your Review</p>
+              <h3 className="text-3xl font-bold text-primary">{reviewCount}</h3>
+              {reviewCount > 0 && (
+                 <p className="text-xs text-amber-700 font-medium mt-1">Supplier has responded</p>
+              )}
+              {waitingCount > 0 && (
+                 <p className="text-xs text-muted mt-1">{waitingCount} awaiting supplier</p>
               )}
             </div>
-            <div className={`p-4 rounded-full group-hover:scale-110 transition-transform ${stats.pendingReviews > 0 ? 'bg-amber-50 text-amber-700' : 'bg-light text-gray-400'}`}>
+            <div className={`p-4 rounded-full group-hover:scale-110 transition-transform ${reviewCount > 0 ? 'bg-amber-50 text-amber-700' : 'bg-light text-gray-400'}`}>
               <FileText size={24} />
             </div>
           </Card>

@@ -60,7 +60,7 @@ import {
   ProjectAttributeRequest, ProjectSku, SkuAttributeValue, JiraLookup
 } from '../types';
 import type { PrintRender } from '../services';
-import { printedManualStatusOf, MANUAL_STATUS_META } from './im/im-manual-status';
+import { printedManualStatusOf, PRINTED_STATUS_META } from './im/im-manual-status';
 import { StatusBadge } from '../components/StatusBadge';
 import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import {
@@ -494,7 +494,7 @@ const ProjectDetail: React.FC = () => {
   // handleUpdateProject and the Status select in the Edit Project Details modal below.
   const imCompletionChecklist = {
     digitalFinal: !!projectIM?.isFinalized,
-    printedFinal: printedStatus === 'final',
+    printedFinal: printedStatus === 'done',
     leafletFinal: !!projectLeaflet?.isFinalized,
   };
   const imAllFinal = imCompletionChecklist.digitalFinal && imCompletionChecklist.printedFinal && imCompletionChecklist.leafletFinal;
@@ -580,8 +580,8 @@ const ProjectDetail: React.FC = () => {
     <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">
         <h4 className="text-xs font-bold text-muted uppercase mb-2">Status</h4>
-        <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${MANUAL_STATUS_META[printedStatus].classes}`}>
-          {MANUAL_STATUS_META[printedStatus].label}
+        <span className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full border ${PRINTED_STATUS_META[printedStatus].classes}`}>
+          {PRINTED_STATUS_META[printedStatus].label}
         </span>
       </div>
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow">

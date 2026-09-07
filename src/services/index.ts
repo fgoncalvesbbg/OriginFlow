@@ -114,6 +114,10 @@ export {
 // Shared services
 export {
   getDashboardStats,
+  getInboxSnapshot,
+  dismissInboxItem,
+  dismissInboxItems,
+  restoreInboxItem,
   getNotifications,
   getSupplierNotifications,
   markNotificationRead,
@@ -195,6 +199,7 @@ export {
   setProjectIMReviewRequested,
   deleteProjectIM,
   getAllProjectIMs,
+  getProjectsWithoutIM,
   getProjectIMBackups,
   ProjectIMConflictError,
   getIMBlocks,
@@ -321,6 +326,7 @@ export type {
   PublishResult,
   PublishHistoryEvent,
   ProjectIMBackup,
+  ProjectWithoutIM,
   IMMarket,
   StaleReason,
   StaleManual,

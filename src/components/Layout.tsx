@@ -1,14 +1,17 @@
 
-/** App shell: sidebar/topbar navigation, notifications, and the routed page outlet. */
-import React, { useState, useEffect, useRef } from 'react';
+/** App shell: sidebar/topbar navigation, the project inbox drawer, and the routed page outlet. */
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Bell, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, Scale, type LucideIcon } from 'lucide-react';
-import { UserRole, Notification } from '../types';
+import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, Scale, type LucideIcon } from 'lucide-react';
+import { UserRole } from '../types';
 import { Breadcrumbs } from './Breadcrumbs';
 import { Logo } from './Logo';
 import { FeedbackWidget } from './feedback/FeedbackWidget';
-import { getNotifications, markNotificationRead, getDashboardStats } from '../services';
+import { ProjectInboxPanel } from './inbox/ProjectInboxPanel';
+import { InboxProvider } from './inbox/InboxContext';
+import { getDashboardStats } from '../services';
+import { useProjectInbox } from '../hooks';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -19,11 +22,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   
-  // Notification State
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  // The project inbox is the single notification surface: the topbar button opens the
+  // drawer, and both read the same snapshot (see hooks/useProjectInbox).
+  const inbox = useProjectInbox(user?.id ?? null);
   const [overdueCount, setOverdueCount] = useState(0);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const notifRef = useRef<HTMLDivElement>(null);
+  // Open/closed survives navigation and reloads — a PM working through the list should not
+  // have to reopen it on every page.
+  const [inboxOpen, setInboxOpen] = useState<boolean>(
+    () => localStorage.getItem('originflow.inboxOpen') === '1',
+  );
+  const setInbox = (next: boolean) => {
+    setInboxOpen(next);
+    try { localStorage.setItem('originflow.inboxOpen', next ? '1' : '0'); } catch { /* ignore */ }
+  };
 
   // Collapse the whole nav rail to reclaim screen width; persisted across sessions.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
@@ -39,41 +50,25 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   useEffect(() => { setMobileNavOpen(false); }, [location.pathname]);
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
-        setShowNotifications(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Poll for notifications and stats (Polling every 30s)
+  // The overdue pill is the only thing the topbar still needs from the dashboard stats;
+  // everything else it used to poll for now comes from the inbox snapshot.
   useEffect(() => {
     if (!user) return;
-    const fetchData = async () => {
+    const fetchStats = async () => {
       try {
-        const [notifData, statsData] = await Promise.all([
-          getNotifications(),
-          getDashboardStats()
-        ]);
-        setNotifications(notifData);
-        setOverdueCount(statsData.overdueCount || 0);
+        const stats = await getDashboardStats();
+        setOverdueCount(stats.overdueCount || 0);
       } catch (e) {
-        console.error("Failed to fetch layout data", e);
+        console.error("Failed to fetch layout stats", e);
       }
     };
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
+    fetchStats();
+    const interval = setInterval(fetchStats, 60000);
     return () => clearInterval(interval);
   }, [user]);
 
-  const handleMarkRead = async (id: string) => {
-    await markNotificationRead(id);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
-  };
+  // Stable identity so consumers re-render on inbox changes, not on every Layout render.
+  const inboxContext = useMemo(() => ({ inbox, openInbox: () => setInbox(true) }), [inbox]);
 
   const handleLogout = async () => {
     await logout();
@@ -118,8 +113,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const sectionLabel = (text: string) => (
     <div className={`pt-6 pb-2 px-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest ${railCollapsed ? 'md:hidden' : ''}`}>{text}</div>
   );
-
-  const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
     <div className="flex min-h-screen bg-light">
@@ -174,7 +167,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-1 min-h-screen flex flex-col transition-[margin] ${railCollapsed ? 'md:ml-16' : 'md:ml-64'}`}>
+      <main
+        className={`flex-1 min-h-screen flex flex-col transition-[margin,padding] ${
+          railCollapsed ? 'md:ml-16' : 'md:ml-64'
+        } ${inboxOpen ? 'lg:pr-[400px]' : ''}`}
+      >
         <div className="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center sticky top-0 z-20 shadow">
           <div className="flex-1 flex items-center gap-3 min-w-0">
              <button
@@ -195,8 +192,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
              <div className="min-w-0 flex-1"><Breadcrumbs /></div>
           </div>
 
-          {/* Notification Center */}
-          <div className="relative flex items-center gap-4" ref={notifRef}>
+          {/* Project inbox trigger — the app's only notification surface. */}
+          <div className="flex items-center gap-4">
             {overdueCount > 0 && (
               <Link to="/timeline" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-100 transition-colors border border-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400">
                 <AlertCircle size={14} />
@@ -205,84 +202,45 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             )}
 
             <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              aria-label="Notifications"
-              aria-expanded={showNotifications}
-              className={`relative p-2 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${unreadCount > 0 || overdueCount > 0 ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'text-gray-500 hover:bg-gray-100'}`}
+              onClick={() => setInbox(!inboxOpen)}
+              aria-label="Project inbox"
+              aria-expanded={inboxOpen}
+              title={
+                inbox.badgeCount > 0
+                  ? `${inbox.reviewCount} awaiting your review, ${inbox.waitingCount} awaiting supplier`
+                  : 'Project inbox'
+              }
+              className={`relative p-2 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                inboxOpen
+                  ? 'bg-accent text-white'
+                  : inbox.badgeCount > 0
+                    ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                    : 'text-gray-500 hover:bg-gray-100'
+              }`}
             >
-              <Bell size={20} className={overdueCount > 0 ? 'animate-pulse' : ''} />
-              {(unreadCount > 0 || overdueCount > 0) && (
-                <span className="absolute top-0 right-0 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow">
-                  {unreadCount + overdueCount}
+              <Inbox size={20} />
+              {/* Counts only what the PM can act on — review items and their own unread
+                  mail. "Waiting on supplier" is shown in the drawer but never badged: a
+                  number the PM cannot clear by working is just a permanent alarm. */}
+              {inbox.badgeCount > 0 && (
+                <span className="absolute top-0 right-0 min-w-4 h-4 px-1 bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow">
+                  {inbox.badgeCount > 99 ? '99+' : inbox.badgeCount}
                 </span>
               )}
             </button>
-
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 top-full w-80 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden animate-scaleIn z-50">
-                <div className="px-4 py-3 border-b border-gray-100 bg-light flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-primary">Notifications & Alerts</h3>
-                  <span className="text-xs text-muted">{unreadCount + overdueCount} total</span>
-                </div>
-                <div className="max-h-[400px] overflow-y-auto">
-                  {overdueCount > 0 && (
-                    <div className="p-4 bg-rose-50 border-b border-rose-100">
-                       <div className="flex items-start gap-2">
-                          <AlertCircle size={16} className="text-rose-600 mt-0.5" />
-                          <div>
-                            <p className="text-xs font-bold text-rose-800">Critical Deadlines Missed</p>
-                            <p className="text-[10px] text-rose-600 mt-0.5">You have {overdueCount} items past their due date.</p>
-                            <Link to="/" onClick={() => setShowNotifications(false)} className="text-[10px] font-bold text-rose-700 underline mt-1 inline-block">Review Now</Link>
-                          </div>
-                       </div>
-                    </div>
-                  )}
-
-                  {notifications.length === 0 && overdueCount === 0 ? (
-                    <div className="p-12 text-center text-muted text-xs italic">No notifications</div>
-                  ) : (
-                    notifications.map(notif => (
-                      <div
-                        key={notif.id}
-                        className={`p-4 border-b border-gray-50 last:border-0 hover:bg-light transition-colors ${notif.isRead ? 'opacity-60' : 'bg-indigo-50/30'}`}
-                      >
-                        <div className="flex justify-between items-start gap-2">
-                          <p className="text-xs text-primary leading-snug">{notif.message}</p>
-                          {!notif.isRead && (
-                            <button
-                              onClick={() => handleMarkRead(notif.id)}
-                              aria-label="Mark notification as read"
-                              className="rounded-full p-1 -m-1 text-indigo-600 hover:text-indigo-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                            >
-                              <div className="w-2 h-2 bg-indigo-600 rounded-full" aria-hidden="true"></div>
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex justify-between items-center mt-2">
-                          <span className="text-[10px] text-muted">{new Date(notif.createdAt).toLocaleDateString()}</span>
-                          {notif.link && (
-                            <Link
-                              to={notif.link}
-                              onClick={() => { handleMarkRead(notif.id); setShowNotifications(false); }}
-                              className="text-[10px] font-bold text-indigo-600 hover:underline"
-                            >
-                              View Details
-                            </Link>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
         <div className="p-6 md:p-10 overflow-y-auto">
-          {children}
+          {/* Pages read the same snapshot the drawer lists, so a dashboard counter and the
+              drawer can never disagree about what is open. */}
+          <InboxProvider value={inboxContext}>
+            {children}
+          </InboxProvider>
         </div>
       </main>
+
+      <ProjectInboxPanel open={inboxOpen} onClose={() => setInbox(false)} inbox={inbox} />
 
       <FeedbackWidget />
     </div>

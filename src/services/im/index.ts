@@ -30,10 +30,11 @@ export {
   setProjectIMReviewRequested,
   deleteProjectIM,
   getAllProjectIMs,
+  getProjectsWithoutIM,
   getProjectIMBackups,
   ProjectIMConflictError
 } from './project-im.service';
-export type { ProjectIMBackup } from './project-im.service';
+export type { ProjectIMBackup, ProjectWithoutIM } from './project-im.service';
 
 export {
   getIMBlocks,

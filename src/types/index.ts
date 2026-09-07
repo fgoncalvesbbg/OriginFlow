@@ -7,6 +7,9 @@
 export { UserRole } from './common.types';
 export type { User, Supplier, DeadlineItem, DashboardStats, Notification } from './common.types';
 
+// Project inbox types
+export type { InboxKind, InboxLane, InboxItem, InboxSnapshot } from './inbox.types';
+
 // Project types
 export { ProjectOverallStatus, StepStatus, DocStatus, ResponsibleParty } from './project.types';
 export type {
@@ -50,6 +53,7 @@ export type {
   IMMasterPageOverride,
   IMTemplateMetadata,
   IMTemplateType,
+  IMReviewStage,
   IMTemplate,
   IMSection,
   ProjectIM,
@@ -84,7 +88,7 @@ export type {
   ResolvedSection,
   ResolvedManual
 } from './im.types';
-export { IM_TEMPLATE_TYPE_LABELS, RESOLVED_MANUAL_SCHEMA_VERSION, localizedSectionTitle } from './im.types';
+export { IM_TEMPLATE_TYPE_LABELS, IM_REVIEW_STAGE_LABELS, RESOLVED_MANUAL_SCHEMA_VERSION, localizedSectionTitle } from './im.types';
 
 // Sourcing types
 export { RFQStatus, RFQEntryStatus } from './sourcing.types';
