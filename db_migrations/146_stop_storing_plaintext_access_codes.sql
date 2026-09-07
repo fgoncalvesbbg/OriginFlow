@@ -1,5 +1,27 @@
 -- 146: stop storing plaintext supplier access codes in supplier_access_logs.
 --
+-- *** SUPERSEDED 2026-09-07 BY 150_audit_remediation.sql PART B — DO NOT RUN THIS FILE. ***
+-- ***
+-- *** Running it now fails with:
+-- ***     ERROR: 42703: column "access_code" does not exist
+-- *** and that error is the proof the problem is already fixed, not a sign of trouble.
+-- ***
+-- *** 150 Part B went further than this migration intended: instead of NULLing the column
+-- *** and adding a trigger guard, it hashed each value into a new `code_fingerprint`
+-- *** column (101 rows written) and then DROPPED `access_code` outright. A dropped column
+-- *** cannot regress, so the strip_access_code_from_log() trigger below is unnecessary.
+-- *** 150 also dropped the anon INSERT policy this file's header complains about.
+-- ***
+-- *** Verified live 2026-09-07: supplier_access_logs is now
+-- ***   id, supplier_id, ip_address, success, attempt_count, created_at, code_fingerprint
+-- *** with exactly one policy ("Allow authenticated users to read access logs", SELECT).
+-- ***
+-- *** STILL OUTSTANDING: the 3 supplier access codes that were exposed in this log were
+-- *** never rotated. Dropping the column removed the copy; it did not invalidate the
+-- *** credential. See SUPABASE_AUDIT_2026-09-07.md D4.
+-- ***
+-- *** Kept for history only. Original header follows.
+--
 -- *** NOT YET APPLIED — this migration was blocked by the local permission classifier on
 -- *** 2026-09-05 and needs to be run manually (Supabase SQL editor) or re-approved.
 -- *** Until it runs, 101 rows in supplier_access_logs still hold plaintext codes

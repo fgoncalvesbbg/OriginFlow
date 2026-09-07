@@ -5,20 +5,21 @@ import Layout from '../../components/Layout';
 import {
   getCategories, getIMTemplates, createIMTemplate, duplicateIMTemplate, updateIMTemplate, getAllProjectIMs,
   getStaleProjectIMDetails, republishProjectIM, stalenessKey,
-  getLatestRendersByManual, getReviewRoundsByManual,
+  getLatestRendersByManual, getReviewRoundsByManual, getProjectsWithoutIM,
   getTemplateRegulationCounts
 } from '../../services';
-import type { StaleManual, ReviewRoundSummary } from '../../services';
+import type { StaleManual, ReviewRoundSummary, ProjectWithoutIM } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import { distinctL1, distinctL2, filterCategories } from '../../utils/category-tree.utils';
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
   FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X,
-  List, Kanban, Scale, ShieldCheck
+  List, Kanban, Scale, ShieldCheck, Circle, Pencil, Send
 } from 'lucide-react';
 import {
-  MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf, isInReview, type ManualStatus,
+  MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf,
+  isReviewStep, manualFlagsOf, statusClasses, statusLabel, type ManualStatus,
 } from './im-manual-status';
 import { IMViewerTab } from './IMViewerTab';
 import { LeafletCoverageTab } from './LeafletCoverageTab';
@@ -44,16 +45,26 @@ import { BlockLibraryContent } from './IMBlockLibrary';
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
-/** Icon per derived status. Kept here because im-manual-status.ts stays JSX-free. */
+/**
+ * Icon per workflow step. Kept here because im-manual-status.ts stays JSX-free.
+ *
+ * Shape carries the meaning alongside the hue (DESIGN.md's Color-Plus-Shape Rule), so the
+ * two review steps share one icon — they are the same kind of wait — and differ by label.
+ */
 const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
-  final: <Lock size={10} />,
-  needs_republish: <RefreshCw size={10} />,
+  to_do: <Circle size={10} />,
+  in_progress: <Pencil size={10} />,
+  draft_review: <Eye size={10} />,
+  adjust_im: <Pencil size={10} />,
+  final_review: <Eye size={10} />,
+  done: <Lock size={10} />,
+  republish_needed: <RefreshCw size={10} />,
   unknown: <AlertTriangle size={10} />,
-  review_done: <CheckCircle2 size={10} />,
-  in_review: <Eye size={10} />,
-  published: <CheckCircle2 size={10} />,
-  draft: <Clock size={10} />,
 };
+
+/** A closed review round earns a tick instead of the watching eye. */
+const statusIcon = (status: ManualStatus, submitted?: boolean | null): React.ReactNode =>
+  isReviewStep(status) && submitted ? <CheckCircle2 size={10} /> : STATUS_ICON[status];
 
 // ---------------------------------------------------------------------------
 // All Manuals tab
@@ -61,11 +72,13 @@ const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
 
 interface AllManualsTabProps {
   ims: ProjectIMSummary[];
+  /** Projects with no manual yet — the workflow's To Do step (see getProjectsWithoutIM). */
+  unstarted: ProjectWithoutIM[];
   categories: CategoryL3[];
   loading: boolean;
 }
 
-const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading }) => {
+const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categories, loading }) => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCat, setFilterCat] = useState<string>('all');
@@ -129,14 +142,25 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   }, []);
 
   /**
-   * Row's review outcome. "Done" means the reviewer submitted AND nothing is outstanding — a
-   * submitted review with open notes is work for the PM, not a finished step.
+   * Row's review outcome.
+   *
+   * `submitted` is the supplier having pressed Submit, and nothing more — that is what turns
+   * a review card green, because it is the moment the ball comes back. Triaging the notes is
+   * the PM's own work and happens at the Adjust IM step, so the open count is reported
+   * alongside rather than folded into the green.
    */
   const reviewStateOf = (im: ProjectIMSummary) => {
     const round = reviewRounds?.get(stalenessKey(im.projectId, im.templateType));
     return {
-      reviewDone: round ? round.submitted && round.openCount === 0 : null,
+      submitted: round ? round.submitted : null,
       activeThreads: round ? round.openCount : null,
+      /**
+       * A live (non-revoked) review link exists. getReviewRoundsByManual keys ONLY manuals
+       * that have one, so a missing entry means every link has been revoked — the round is
+       * over even though the manual's review columns still record it. Null until the rounds
+       * have loaded, which the deriver reads as "no link data, believe the columns".
+       */
+      hasLiveLink: reviewRounds ? reviewRounds.has(stalenessKey(im.projectId, im.templateType)) : null,
     };
   };
 
@@ -154,9 +178,13 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
   const staleReasons = (im: ProjectIMSummary) =>
     staleInfo.get(stalenessKey(im.projectId, im.templateType))?.reasons ?? [];
 
-  /** Mutually-exclusive display status used for the badge, the filter and the grouping. */
+  /** The manual's workflow step — used by the badge, the filter, the groups and the board. */
   const statusOf = (im: ProjectIMSummary) =>
-    manualStatusOf({ ...im, reviewDone: reviewStateOf(im).reviewDone }, isStale(im));
+    manualStatusOf({ ...im, hasLiveReviewLink: reviewStateOf(im).hasLiveLink }, isStale(im));
+
+  /** The same shape `groupByStatus` has to see, so the groups agree with every badge. */
+  const withReviewState = (im: ProjectIMSummary) =>
+    ({ ...im, hasLiveReviewLink: reviewStateOf(im).hasLiveLink });
 
   /**
    * Where a review link points now: the manual's own editor, where the notes panel lives.
@@ -173,10 +201,39 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
       status: statusOf(im),
       version: im.version,
       reviewRequestedAt: im.reviewRequestedAt,
+      reviewSubmitted: review.submitted,
       reviewActiveThreads: review.activeThreads,
       printedVersion: latestRenders ? (latestRenders.get(stalenessKey(im.projectId, im.templateType))?.imVersion ?? null) : undefined,
     });
   };
+
+  /**
+   * Unstarted projects, run through the SAME filters as the manuals so the To Do column
+   * never disagrees with the rest of the board. They carry no template, no version and no
+   * status of their own — their step is To Do by definition.
+   */
+  const filteredUnstarted = unstarted.filter(p => {
+    if (filterStatus !== 'all' && filterStatus !== 'to_do') return false;
+    if (filterCat !== 'all' && p.categoryId !== filterCat) return false;
+    if (filterProject) {
+      const pq = filterProject.toLowerCase();
+      if (!(p.projectCode ?? '').toLowerCase().includes(pq) && !p.projectName.toLowerCase().includes(pq)) return false;
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        p.projectName.toLowerCase().includes(q) ||
+        (p.projectCode ?? '').toLowerCase().includes(q) ||
+        (p.categoryId ? catMap[p.categoryId] ?? '' : '').toLowerCase().includes(q) ||
+        p.skus.some(sku => sku.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
+
+  /** Cards at a step, counting the synthetic To Do ones. Drives the filter dropdown. */
+  const countAtStep = (status: ManualStatus): number =>
+    status === 'to_do' ? unstarted.length : ims.filter(im => statusOf(im) === status).length;
 
   const filtered = ims.filter(im => {
     // Filter on the DERIVED status so the dropdown, the badges and the groups agree.
@@ -262,7 +319,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
         >
           <option value="all">All statuses</option>
           {MANUAL_STATUS_ORDER.map(status => {
-            const count = ims.filter(im => statusOf(im) === status).length;
+            const count = countAtStep(status);
             return (
               <option key={status} value={status}>
                 {MANUAL_STATUS_META[status].label}{count ? ` (${count})` : ''}
@@ -318,6 +375,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
         <p className="text-xs text-gray-400">
           {filtered.length} manual{filtered.length !== 1 ? 's' : ''}
           {filtered.length !== ims.length && ` (${ims.length} total)`}
+          {filteredUnstarted.length > 0 && ` · ${filteredUnstarted.length} project${filteredUnstarted.length !== 1 ? 's' : ''} not started`}
         </p>
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2">
@@ -340,11 +398,64 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
       </div>
 
       {/* Empty (table view only — the board always renders its columns, empty or not) */}
-      {viewMode === 'table' && filtered.length === 0 && (
+      {viewMode === 'table' && filtered.length === 0 && filteredUnstarted.length === 0 && (
         <div className="text-center py-16 border border-dashed border-gray-200 rounded-xl text-gray-400 bg-light">
-          {ims.length === 0
+          {ims.length === 0 && unstarted.length === 0
             ? 'No manuals created yet. Open a project and generate its IM.'
-            : 'No manuals match the current filters.'}
+            : 'Nothing matches the current filters.'}
+        </div>
+      )}
+
+      {/* To Do, table view — projects with no manual at all. A separate table because these
+          rows have no template, no version and no status of their own; forcing them into the
+          manuals table would mean six empty cells apiece. */}
+      {viewMode === 'table' && filteredUnstarted.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden mb-4">
+          <div className="px-4 py-2 border-b border-gray-100 bg-light/80 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${MANUAL_STATUS_META.to_do.classes}`}>
+              {STATUS_ICON.to_do} {MANUAL_STATUS_META.to_do.label}
+            </span>
+            <span className="text-xs font-semibold text-gray-700">
+              {filteredUnstarted.length} project{filteredUnstarted.length !== 1 ? 's' : ''}
+            </span>
+            <span className="text-[11px] text-gray-500">{MANUAL_STATUS_META.to_do.hint}</span>
+          </div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-50">
+              {filteredUnstarted.map(p => (
+                <tr key={p.projectId} className="hover:bg-light/60 transition-colors">
+                  <td className="px-4 py-3 font-semibold text-gray-800">{p.projectName}</td>
+                  <td className="px-4 py-3">
+                    {p.projectCode
+                      ? <span className="text-[11px] font-mono text-gray-500">{p.projectCode}</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {p.skus.length === 0 ? <span className="text-gray-300 text-xs">—</span> : (
+                      <div className="flex flex-wrap gap-1 max-w-[200px]">
+                        {p.skus.map(sku => (
+                          <span key={sku} className="text-[11px] font-mono bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded">{sku}</span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                      {p.categoryId ? (catMap[p.categoryId] ?? '—') : 'No category'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Link
+                      to={`/project/${p.projectId}/im-generator`}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors"
+                    >
+                      <Plus size={12} /> Start IM
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -369,15 +480,14 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">SKU</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Template</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Workflow step</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Last updated</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            {/* One tbody per status group: keeps a single table (so columns stay aligned)
-                while giving each group a spanning header row. */}
-            {/* Rows carry the LIVE review outcome so grouping agrees with statusOf. */}
-            {groupByStatus(filtered.map(im => ({ ...im, reviewDone: reviewStateOf(im).reviewDone })), isStale).map(({ status, items }) => {
+            {/* One tbody per workflow step, in workflow order: keeps a single table (so
+                columns stay aligned) while giving each step a spanning header row. */}
+            {groupByStatus(filtered.map(withReviewState), isStale).map(({ status, items }) => {
               const meta = MANUAL_STATUS_META[status];
               return (
               <tbody key={status} className="divide-y divide-gray-50">
@@ -455,48 +565,40 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {(() => {
                           const s = statusOf(im);
+                          const submitted = reviewStateOf(im).submitted;
                           return (
-                            <span
-                              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${MANUAL_STATUS_META[s].classes}`}
-                              title={
-                                im.isFinalized && im.finalizedAt ? `Marked final on ${fmtDate(im.finalizedAt)}`
-                                : s === 'in_review' && im.reviewRequestedAt ? `Sent for review on ${fmtDate(im.reviewRequestedAt)}`
-                                : undefined
-                              }
-                            >
-                              {STATUS_ICON[s]} {MANUAL_STATUS_META[s].label}
-                            </span>
-                          );
-                        })()}
-                        {statusOf(im) === 'in_review' && (
-                          <Link
-                            to={generatorHref(im)}
-                            className="text-[10px] font-semibold text-sky-700 underline hover:text-sky-900"
-                            title="Open the supplier review notes"
-                          >Open review</Link>
-                        )}
-                        {/* A final manual keeps its underlying publish state visible: "Final"
-                            says it's locked, not whether it was ever published. */}
-                        {im.isFinalized && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-500">
-                            {im.status === 'generated' ? 'Published' : 'Draft'}
-                          </span>
-                        )}
-                        {/* Only as a SECONDARY signal: when the row's own status is
-                            'needs_republish' the primary badge already says so. This is for a
-                            final manual whose sources drifted — locked, but out of date. */}
-                        {im.isFinalized && isStale(im) && (() => {
-                          const reasons = staleReasons(im);
-                          const blocks = reasons.filter(r => r.type === 'block').map(r => r.label);
-                          const others = reasons.filter(r => r.type !== 'block').map(r => r.label);
-                          const summary = [blocks.length ? `Block${blocks.length > 1 ? 's' : ''}: ${blocks.join(', ')}` : '', ...others].filter(Boolean).join(' · ');
-                          return (
-                            <span
-                              className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200"
-                              title={`Changed since last publish — ${summary}. Unlock and re-publish to update.`}
-                            >
-                              <RefreshCw size={10} /> Out of date
-                            </span>
+                            <>
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusClasses(s, submitted)}`}
+                                title={
+                                  im.isFinalized && im.finalizedAt ? `Marked Done on ${fmtDate(im.finalizedAt)}`
+                                  : isReviewStep(s) && im.reviewRequestedAt
+                                    ? `${MANUAL_STATUS_META[s].label} sent on ${fmtDate(im.reviewRequestedAt)}${submitted ? ' — the supplier has closed it' : ' — still with the supplier'}`
+                                    : MANUAL_STATUS_META[s].hint
+                                }
+                              >
+                                {statusIcon(s, submitted)} {statusLabel(s, submitted)}
+                              </span>
+                              {isReviewStep(s) && (
+                                <Link
+                                  to={generatorHref(im)}
+                                  className="text-[10px] font-semibold text-sky-700 underline hover:text-sky-900"
+                                  title="Open the supplier review notes"
+                                >Open review</Link>
+                              )}
+                              {/* Facts that are true ALONGSIDE the step and must not move the
+                                  card: drift, unpublished edits, a Done manual that was never
+                                  published. Each is suppressed where the step already says it. */}
+                              {manualFlagsOf(withReviewState(im), isStale(im)).map(flag => (
+                                <span
+                                  key={flag.key}
+                                  className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${flag.classes}`}
+                                  title={flag.title}
+                                >
+                                  <AlertTriangle size={10} /> {flag.label}
+                                </span>
+                              ))}
+                            </>
                           );
                         })()}
                       </div>
@@ -516,20 +618,14 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                           </div>
                         );
                       })()}
-                      {/* "What next" hint — quiet (null) when nothing is actionable. */}
+                      {/* "What next" hint — quiet (null) when nothing is actionable. The
+                          review link is NOT repeated here; it sits next to the step badge. */}
                       {(() => {
                         const hint = nextAction(im);
-                        const reviewLink = isInReview(im);
-                        if (!hint && !reviewLink) return null;
+                        if (!hint) return null;
                         return (
-                          <div className="text-[10px] text-gray-400 mt-1 max-w-[220px] flex items-center gap-1.5">
-                            {hint && <span className="truncate" title={hint}>↳ {hint}</span>}
-                            {reviewLink && (
-                              <Link to={generatorHref(im)}
-                                className="shrink-0 underline font-semibold text-sky-600 hover:text-sky-800"
-                                title="Open this manual's supplier review notes"
-                              >Open review</Link>
-                            )}
+                          <div className="text-[10px] text-gray-400 mt-1 max-w-[220px]">
+                            <span className="truncate block" title={hint}>↳ {hint}</span>
                           </div>
                         );
                       })()}
@@ -553,39 +649,97 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
         </div>
       )}
 
-      {/* Board — one column per derived status, ALWAYS all columns (an empty step is
-          information: nothing is waiting there). Statuses are derived, so cards are
-          not draggable; each card links into the generator where the action happens. */}
+      {/* Board — the workflow, left to right, one column per step:
+          To Do → In Progress → Draft Review → Adjust IM → Final Review → Done → Republish Needed.
+          Every column always renders, empty or not: "nothing is waiting at Final Review" is
+          information a queue has to be able to state.
+
+          Cards are NOT draggable, and that is the point. A step is derived from what is true
+          of the manual — you publish it, you send it for review, you mark it Done — so a card
+          can never be dropped into a state the data does not support. The card is a link into
+          the generator, where the action that actually moves it lives.
+
+          `unknown` renders only when the staleness check has failed; the banner above already
+          explains it, and an eighth column of nothing is noise on a healthy board. */}
       {viewMode === 'board' && (() => {
-        const decorated = filtered.map(im => ({ ...im, reviewDone: reviewStateOf(im).reviewDone }));
-        const byStatus = new Map<ManualStatus, typeof decorated>();
-        for (const im of decorated) {
-          const s = manualStatusOf(im, isStale(im));
+        const byStatus = new Map<ManualStatus, ProjectIMSummary[]>();
+        for (const im of filtered) {
+          const s = statusOf(im);
           if (!byStatus.has(s)) byStatus.set(s, []);
           byStatus.get(s)!.push(im);
         }
+        const columns = MANUAL_STATUS_ORDER.filter(
+          status => status !== 'unknown' || (byStatus.get(status)?.length ?? 0) > 0,
+        );
+
+        const columnCount = (status: ManualStatus) =>
+          status === 'to_do' ? filteredUnstarted.length : (byStatus.get(status)?.length ?? 0);
+
         return (
           <div className="flex gap-3 overflow-x-auto pb-3 items-start">
-            {MANUAL_STATUS_ORDER.map(status => {
+            {columns.map(status => {
               const meta = MANUAL_STATUS_META[status];
               const items = byStatus.get(status) ?? [];
+              const count = columnCount(status);
               return (
                 <div key={status} className="w-[250px] shrink-0 bg-light/70 border border-gray-200 rounded-xl flex flex-col max-h-[calc(100vh-330px)] min-h-[140px]">
                   <div className="px-3 py-2.5 border-b border-gray-100 flex items-center gap-2" title={meta.hint}>
                     <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>
                       {STATUS_ICON[status]} {meta.label}
                     </span>
-                    <span className="text-xs font-semibold text-gray-500 ml-auto">{items.length}</span>
+                    {/* Whose turn it is, stated in words — the hue says it too, but only to
+                        people who can see it. */}
+                    {meta.waiting && <span className="text-[9px] uppercase tracking-wide text-gray-400 font-semibold">waiting</span>}
+                    <span className="text-xs font-semibold text-gray-500 ml-auto">{count}</span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                    {items.length === 0 ? (
+                    {count === 0 && (
                       <div className="text-[11px] text-gray-400 italic text-center border border-dashed border-gray-200 rounded-lg py-6 px-2">
-                        No manuals at this step
+                        Nothing at this step
                       </div>
-                    ) : items.map(im => {
+                    )}
+
+                    {/* To Do holds projects, not manuals — there is no manual to link to yet,
+                        so the card offers the one action that exists: start one. */}
+                    {status === 'to_do' && filteredUnstarted.map(p => (
+                      <div key={p.projectId} className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                            <FileText size={9} /> NO IM
+                          </span>
+                          <span className="text-[9px] text-gray-300 ml-auto">{fmtDate(p.createdAt)}</span>
+                        </div>
+                        <Link
+                          to={`/project/${p.projectId}/im-generator`}
+                          className="block font-semibold text-sm text-gray-800 hover:text-indigo-700 truncate"
+                          title={`${p.projectName} — start its IM`}
+                        >
+                          {p.projectCode ? `${p.projectCode} — ` : ''}{p.projectName}
+                        </Link>
+                        <div className="text-[10px] text-gray-400 truncate">
+                          {p.categoryId ? (catMap[p.categoryId] ?? '') : 'No category'}
+                          {p.skus.length ? ` · ${p.skus.slice(0, 2).join(', ')}${p.skus.length > 2 ? ` +${p.skus.length - 2}` : ''}` : ''}
+                        </div>
+                        <Link
+                          to={`/project/${p.projectId}/im-generator`}
+                          className="inline-flex items-center gap-1 text-[10px] underline font-semibold text-indigo-600 hover:text-indigo-800 mt-1"
+                        ><Plus size={10} /> Start IM</Link>
+                      </div>
+                    ))}
+
+                    {items.map(im => {
                       const hint = nextAction(im);
+                      const submitted = reviewStateOf(im).submitted;
+                      const flags = manualFlagsOf(withReviewState(im), isStale(im));
+                      // The one visual difference the whole board turns on: a review the
+                      // supplier has closed is green and edged, so it reads as "ready" from
+                      // across the room rather than needing the label to be read.
+                      const closed = isReviewStep(status) && submitted;
                       return (
-                        <div key={im.id} className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow">
+                        <div
+                          key={im.id}
+                          className={`bg-white border rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow ${closed ? 'border-emerald-300 ring-1 ring-emerald-200' : 'border-gray-200'}`}
+                        >
                           <div className="flex items-center gap-1.5 mb-1">
                             {im.templateType === 'warning_leaflet'
                               ? <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"><AlertTriangle size={9} /> LEAFLET</span>
@@ -604,19 +758,41 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, categories, loading 
                             {im.categoryId ? (catMap[im.categoryId] ?? '') : ''}
                             {im.skus.length ? ` · ${im.skus.slice(0, 2).join(', ')}${im.skus.length > 2 ? ` +${im.skus.length - 2}` : ''}` : ''}
                           </div>
+
+                          {/* "Review closed" earns its own line in the card, not just a hue. */}
+                          {closed && (
+                            <div className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 size={10} /> Review closed
+                            </div>
+                          )}
+
+                          {flags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {flags.map(flag => (
+                                <span
+                                  key={flag.key}
+                                  className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${flag.classes}`}
+                                  title={flag.title}
+                                >
+                                  <AlertTriangle size={9} /> {flag.label}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
                           {isStale(im) && (
                             <button
                               onClick={() => setDiffTarget({ projectId: im.projectId, templateType: im.templateType, title: `${im.projectName}${im.templateType === 'warning_leaflet' ? ' — Warning Leaflet' : ''}` })}
-                              className="text-[10px] text-orange-600 underline font-semibold mt-1 hover:text-orange-800"
+                              className="block text-[10px] text-orange-600 underline font-semibold mt-1 hover:text-orange-800"
                               title="Show which sections a re-publish would change, per language"
                             >What changed?</button>
                           )}
                           {hint && <div className="text-[10px] text-gray-500 mt-1 truncate" title={hint}>↳ {hint}</div>}
-                          {isInReview(im) && (
+                          {isReviewStep(status) && (
                             <Link to={generatorHref(im)}
-                              className="inline-block text-[10px] underline font-semibold text-sky-600 hover:text-sky-800 mt-1"
+                              className="inline-flex items-center gap-1 text-[10px] underline font-semibold text-sky-600 hover:text-sky-800 mt-1"
                               title="Open this manual's supplier review notes"
-                            >Open review</Link>
+                            ><Send size={10} /> Open review</Link>
                           )}
                         </div>
                       );
@@ -892,6 +1068,9 @@ const IMDashboard: React.FC = () => {
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [templates, setTemplates] = useState<IMTemplate[]>([]);
   const [allIMs, setAllIMs] = useState<ProjectIMSummary[]>([]);
+  // Projects with no manual yet — the board's To Do column. Loaded beside the manuals
+  // because the two together are the work queue; one without the other is a partial picture.
+  const [unstartedProjects, setUnstartedProjects] = useState<ProjectWithoutIM[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [loadingIMs, setLoadingIMs] = useState(true);
   const [creatingId, setCreatingId] = useState<string | null>(null);
@@ -953,8 +1132,14 @@ const IMDashboard: React.FC = () => {
 
   const loadIMData = async () => {
     try {
-      const ims = await getAllProjectIMs();
-      setAllIMs(ims);
+      // Settled, not all: an unstarted-projects failure must not blank the manuals the PM
+      // came here for. A missing To Do column degrades to "nothing unstarted", which the
+      // console records — the manuals half stays truthful either way.
+      const [ims, unstarted] = await Promise.allSettled([getAllProjectIMs(), getProjectsWithoutIM()]);
+      if (ims.status === 'fulfilled') setAllIMs(ims.value);
+      else console.error('[IMDashboard] loadIMData manuals failed:', ims.reason);
+      if (unstarted.status === 'fulfilled') setUnstartedProjects(unstarted.value);
+      else console.error('[IMDashboard] loadIMData unstarted projects failed:', unstarted.reason);
     } catch (e) {
       console.error('[IMDashboard] loadIMData failed:', e);
     } finally {
@@ -1044,6 +1229,7 @@ const IMDashboard: React.FC = () => {
       {activeTab === 'manuals' && (
         <AllManualsTab
           ims={allIMs}
+          unstarted={unstartedProjects}
           categories={categories}
           loading={loadingIMs || loadingTemplates}
         />

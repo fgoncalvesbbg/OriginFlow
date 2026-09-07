@@ -20,6 +20,21 @@ export {
 } from './project-step.service';
 
 export {
+  getProjectTemplates,
+  getDefaultProjectTemplate,
+  saveProjectTemplate,
+  deleteProjectTemplate,
+  setDefaultProjectTemplate,
+  getTemplateSteps,
+  saveTemplateStep,
+  deleteTemplateStep,
+  getTemplateDocuments,
+  saveTemplateDocument,
+  deleteTemplateDocument,
+  getDefaultTemplateStructure
+} from './project-template.service';
+
+export {
   getProjectDocs,
   addDocument,
   updateDocumentMetadata,

@@ -86,6 +86,39 @@ export interface ProjectDocument {
   supplierComment?: string;
 }
 
+/**
+ * Admin-defined standard project structure — a named set of phases and, per phase, the
+ * documents a launch of this type always needs. createProject() reads the default template
+ * and stamps its steps/documents onto every new project (see ProjectStep/ProjectDocument
+ * above, which are the per-project instances these are copied into).
+ */
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  /** The template createProject() uses. Exactly one template carries this at a time. */
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface TemplateStep {
+  id: string;
+  templateId: string;
+  stepNumber: number;
+  name: string;
+}
+
+export interface TemplateDocument {
+  id: string;
+  templateId: string;
+  stepNumber: number;
+  title: string;
+  description?: string;
+  responsibleParty: ResponsibleParty;
+  isVisibleToSupplier: boolean;
+  isRequired: boolean;
+}
+
 export interface ProjectAttributeRequest {
   id: string;
   projectId: string;

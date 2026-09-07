@@ -8,6 +8,7 @@ import { isLive } from '../../config/environment.config';
 import { Project, ProjectOverallStatus, ProjectMilestones } from '../../types';
 import { mapProject } from '../../utils/mappers.utils';
 import { generateUUID } from '../../utils';
+import { getDefaultTemplateStructure } from './project-template.service';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
@@ -92,27 +93,40 @@ export const createProject = async (name: string, supplierId: string, projectId:
 
     const project = mapProject(created);
 
+    /**
+     * Phases and their required documents come from the admin-defined default project
+     * template (Admin panel → Project Templates) rather than being hardcoded here, so an
+     * admin can change what a new launch starts with without a code deploy.
+     */
     const seedChecklist = async () => {
         try {
-            const stepsPayload = [
-                { project_id: project.id, step_number: 1, name: 'RFQ', status: 'in_progress' },
-                { project_id: project.id, step_number: 2, name: 'Business Case & Development', status: 'not_started' },
-                { project_id: project.id, step_number: 3, name: 'Production', status: 'not_started' }
-            ];
+            const structure = await getDefaultTemplateStructure();
+            if (!structure || structure.steps.length === 0) {
+                console.error("No default project template configured. Set one under Admin panel > Project Templates.");
+                return;
+            }
+
+            const stepsPayload = structure.steps.map((step, i) => ({
+                project_id: project.id,
+                step_number: step.stepNumber,
+                name: step.name,
+                status: i === 0 ? 'in_progress' : 'not_started',
+            }));
 
             await db.insertMany('project_steps', stepsPayload);
 
-            const docsPayload = [
-                { project_id: project.id, step_number: 1, title: 'RFQ Specification', responsible_party: 'internal', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
-                { project_id: project.id, step_number: 1, title: 'Supplier Quote', responsible_party: 'supplier', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
-                { project_id: project.id, step_number: 2, title: '3D CAD Files', responsible_party: 'supplier', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
-                { project_id: project.id, step_number: 2, title: 'Product Photos', responsible_party: 'supplier', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
-                { project_id: project.id, step_number: 3, title: 'Final Design Specs', responsible_party: 'internal', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
-                { project_id: project.id, step_number: 3, title: 'Final IM', responsible_party: 'supplier', is_visible_to_supplier: true, is_required: true, status: 'not_started' },
-                { project_id: project.id, step_number: 3, title: 'Packaging Guidelines', responsible_party: 'internal', is_visible_to_supplier: true, is_required: true, status: 'not_started' }
-            ];
+            const docsPayload = structure.documents.map((doc) => ({
+                project_id: project.id,
+                step_number: doc.stepNumber,
+                title: doc.title,
+                description: doc.description,
+                responsible_party: doc.responsibleParty,
+                is_visible_to_supplier: doc.isVisibleToSupplier,
+                is_required: doc.isRequired,
+                status: 'not_started',
+            }));
 
-            await db.insertMany('project_documents', docsPayload);
+            if (docsPayload.length > 0) await db.insertMany('project_documents', docsPayload);
         } catch(e) {
             console.error("Failed to seed launch checklist. Check row-level-security permissions.", e);
         }

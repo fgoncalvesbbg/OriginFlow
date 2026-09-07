@@ -16,6 +16,24 @@ export const IM_TEMPLATE_TYPE_LABELS: Record<IMTemplateType, string> = {
   warning_leaflet: 'Warning Leaflet',
 };
 
+/**
+ * Which of the IM workflow's two supplier review steps a review round belongs to
+ * (migration 149).
+ *
+ *   'draft'  Draft Review — the supplier's first pass over a freshly published manual.
+ *   'final'  Final Review — the supplier confirming the adjustments made after that pass.
+ *
+ * Stored on the review LINK (im_shares.review_stage, immutable once minted) and mirrored
+ * onto the manual for the round currently in flight (project_ims.review_stage), which is
+ * what lets the dashboard place every manual in a column from one query.
+ */
+export type IMReviewStage = 'draft' | 'final';
+
+export const IM_REVIEW_STAGE_LABELS: Record<IMReviewStage, string> = {
+  draft: 'Draft Review',
+  final: 'Final Review',
+};
+
 export interface IMMasterPageOverride {
   background?: string;
   iconStrip?: string;
@@ -143,6 +161,12 @@ export interface ProjectIM {
   reviewRequestedAt?: string | null;
   reviewRequestedBy?: string | null;
   reviewVersion?: number | null;
+  // Which of the workflow's TWO review steps the current round is (migration 149):
+  // 'draft' -> Draft Review, 'final' -> Final Review. Mirrors im_shares.review_stage for
+  // the round stamped above. Null = never reviewed, or a round created before 149 — read
+  // as 'draft', because placing a legacy round in Final Review would claim a sign-off pass
+  // that may never have happened. See src/pages/im/im-manual-status.ts.
+  reviewStage?: IMReviewStage | null;
   // project_skus.id values this IM is bound to (the SKUs it covers). Empty/absent =
   // all of the project's SKUs (backward compatible). Bound SKUs drive resolution.
   boundSkuIds?: string[];

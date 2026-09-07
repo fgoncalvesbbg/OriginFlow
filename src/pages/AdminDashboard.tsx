@@ -25,7 +25,7 @@ import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../ut
 import type { ParsedAttributeRow } from '../utils';
 import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryTree, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
@@ -33,6 +33,7 @@ import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import PrintSettingsAdminSection from '../components/admin/PrintSettingsAdminSection';
 import TranslationMemoryAdmin from '../components/admin/translation-memory/TranslationMemoryAdmin';
 import FeedbackAdminSection from '../components/admin/FeedbackAdminSection';
+import ProjectTemplateAdminSection from '../components/admin/ProjectTemplateAdminSection';
 
 /**
  * Markets admin — the market → language mapping the print-export dialog offers as
@@ -219,7 +220,7 @@ const MarketsAdminSection: React.FC = () => {
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'prompts' | 'markets' | 'imPrint' | 'translationMemory' | 'feedback'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'projectTemplates' | 'prompts' | 'markets' | 'imPrint' | 'translationMemory' | 'feedback'>('users');
   const [refreshing, setRefreshing] = useState(false);
 
   // Core Data
@@ -1776,6 +1777,9 @@ const AdminDashboard: React.FC = () => {
         <button onClick={() => setActiveTab('projects')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'projects' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Package size={18} /> Projects
         </button>
+        <button onClick={() => setActiveTab('projectTemplates')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'projectTemplates' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <ListChecks size={18} /> Project Templates
+        </button>
         <button onClick={() => setActiveTab('prompts')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'prompts' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Sparkles size={18} /> AI Prompts
         </button>
@@ -1794,6 +1798,9 @@ const AdminDashboard: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-xl shadow border border-gray-200 min-h-[400px]">
+
+        {/* PROJECT TEMPLATES TAB — the phase/document structure createProject() seeds new projects with. */}
+        {activeTab === 'projectTemplates' && <ProjectTemplateAdminSection />}
 
         {/* MARKETS TAB */}
         {activeTab === 'markets' && <MarketsAdminSection />}

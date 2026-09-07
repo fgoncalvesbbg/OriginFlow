@@ -81,7 +81,19 @@ export {
   lookupJiraIssues,
   lookupJiraIssue,
   jiraFilterValue,
-  JIRA_NOT_FOUND_LABEL
+  JIRA_NOT_FOUND_LABEL,
+  getProjectTemplates,
+  getDefaultProjectTemplate,
+  saveProjectTemplate,
+  deleteProjectTemplate,
+  setDefaultProjectTemplate,
+  getTemplateSteps,
+  saveTemplateStep,
+  deleteTemplateStep,
+  getTemplateDocuments,
+  saveTemplateDocument,
+  deleteTemplateDocument,
+  getDefaultTemplateStructure
 } from './project';
 export type { CategorySku } from './project';
 export type { SiblingAttributeRequest } from './project';
@@ -114,6 +126,10 @@ export {
 // Shared services
 export {
   getDashboardStats,
+  getInboxSnapshot,
+  dismissInboxItem,
+  dismissInboxItems,
+  restoreInboxItem,
   getNotifications,
   getSupplierNotifications,
   markNotificationRead,
@@ -195,6 +211,7 @@ export {
   setProjectIMReviewRequested,
   deleteProjectIM,
   getAllProjectIMs,
+  getProjectsWithoutIM,
   getProjectIMBackups,
   ProjectIMConflictError,
   getIMBlocks,
@@ -321,6 +338,7 @@ export type {
   PublishResult,
   PublishHistoryEvent,
   ProjectIMBackup,
+  ProjectWithoutIM,
   IMMarket,
   StaleReason,
   StaleManual,

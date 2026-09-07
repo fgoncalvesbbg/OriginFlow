@@ -7,6 +7,7 @@
  */
 
 import type { IMReviewComment, IMReviewCommentStatus } from '../../../services';
+import type { IMReviewStage } from '../../../types';
 
 /** The bit of a chapter this module needs. Structural so tests don't build whole IMSections. */
 export interface ReviewSectionRef {
@@ -96,12 +97,23 @@ export const groupCommentsBySection = (
 export interface ReviewShareRef {
   submittedAt: string | null;
   manualVersion: number | null;
+  /** Which workflow review step the link was sent as. Null on pre-migration-149 links. */
+  reviewStage?: IMReviewStage | null;
 }
 
 export interface ReviewRoundState {
   /** A review link exists and hasn't been revoked. */
   isOpen: boolean;
-  /** The reviewer pressed "Submit review". */
+  /**
+   * Which of the workflow's two review steps this round is — the word the header chip, the
+   * stepper and the board all use for it. Null when no round is open.
+   *
+   * Taken from the NEWEST link in the round: if a PM sends the same manual to two suppliers
+   * they are the same step, and if a stage was ever corrected the correction is the newer
+   * link. A link minted before migration 149 has no stage and reads as 'draft'.
+   */
+  stage: IMReviewStage | null;
+  /** The reviewer pressed "Submit review" — the round is CLOSED and the card goes green. */
   isSubmitted: boolean;
   /**
    * The manual has been republished since the link went out, so the notes were written
@@ -125,10 +137,13 @@ export const reviewRoundStateOf = (
 ): ReviewRoundState => {
   const openCount = comments.filter(c => c.status === 'open').length;
   if (shares.length === 0) {
-    return { isOpen: false, isSubmitted: false, isStale: false, openCount };
+    return { isOpen: false, stage: null, isSubmitted: false, isStale: false, openCount };
   }
   return {
     isOpen: true,
+    // `shares` arrives newest-first (getIMShares orders by created_at desc), so the head is
+    // the most recently minted link in the round.
+    stage: shares[0]?.reviewStage ?? 'draft',
     isSubmitted: shares.every(s => s.submittedAt != null),
     // A link minted before versions were recorded (null) can't be judged stale — say no
     // rather than nagging the PM about a round we have no baseline for.

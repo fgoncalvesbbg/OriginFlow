@@ -17,12 +17,24 @@ const mapNotification = (n: any): Notification => ({
 });
 
 /**
- * Get all notifications for the current user
+ * Get the notifications addressed to one user.
+ *
+ * `userId` is required. This read used to take no argument and no filter — it selected the
+ * whole table, and the row-level-security policy of the day (`using (auth.role() =
+ * 'authenticated')`) let it succeed, so every signed-in user's bell rendered every other
+ * user's mail. Every row in the table is in fact supplier-directed, complete with a
+ * `/compliance/supplier/<token>` link, so the staff bell was also handing out supplier
+ * portal tokens. Migration 148 restricts the policy to own rows; the filter here states
+ * the same rule in the query, so a policy regression shows up as an empty bell rather
+ * than as somebody else's inbox.
  */
-export const getNotifications = async (): Promise<Notification[]> => {
-    if (!isLive) return [];
+export const getNotifications = async (userId: string): Promise<Notification[]> => {
+    if (!isLive || !userId) return [];
     const rows = await orEmpty(
-        db.select<Row>('notifications', { order: { column: 'created_at', ascending: false } }),
+        db.select<Row>('notifications', {
+            where: { user_id: userId, dismissed_at: { op: 'isNull' } },
+            order: { column: 'created_at', ascending: false },
+        }),
         'getNotifications',
     );
     return rows.map(mapNotification);
@@ -60,28 +72,21 @@ export const upsertSupplierNotification = async (payload: {
 
     // Best-effort throughout: a failed reminder must never surface to the user.
     try {
-        const existing = await db.selectMaybeOne<Row>('notifications', {
-            columns: 'id',
-            where: { supplier_id: payload.supplierId, link: payload.link },
-            limit: 1,
-        });
-
-        if (existing?.id) {
-            await db.updateWhere(
-                'notifications',
-                { message: payload.message, is_read: false },
-                { where: { id: existing.id } },
-            );
-            return;
-        }
-
-        await db.insertMany('notifications', [{
-            supplier_id: payload.supplierId,
-            message: payload.message,
-            link: payload.link,
-            is_read: false,
-            created_at: new Date().toISOString()
-        }]);
+        // One statement, not read-then-write. The old select-then-insert raced two app
+        // mounts against each other and left duplicates in the live table (two rows for
+        // the same link, 73ms apart, saying "overdue by 112 day(s)" and "153 day(s)").
+        // Migration 148 adds the partial unique index this conflict target needs, and
+        // dedupes what the race already produced.
+        await db.upsert(
+            'notifications',
+            {
+                supplier_id: payload.supplierId,
+                message: payload.message,
+                link: payload.link,
+                is_read: false,
+            },
+            { onConflict: 'supplier_id,link' },
+        );
     } catch (e) {
         console.warn('Failed to upsert supplier notification:', e);
     }

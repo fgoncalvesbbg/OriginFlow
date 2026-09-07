@@ -5,7 +5,7 @@
 
 import { auth, db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { ProjectIM, SKUContentValue, IMTemplateType, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef } from '../../types';
+import { ProjectIM, SKUContentValue, IMTemplateType, IMReviewStage, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef } from '../../types';
 import { saveWithRetry } from '../core/save-retry';
 
 const mapProjectIMRow = (data: any): ProjectIM => ({
@@ -24,6 +24,7 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   reviewRequestedAt: data.review_requested_at ?? null,
   reviewRequestedBy: data.review_requested_by ?? null,
   reviewVersion: data.review_version ?? null,
+  reviewStage: (data.review_stage ?? null) as IMReviewStage | null,
   boundSkuIds: data.bound_sku_ids ?? [],
   sectionAdditions: data.section_additions ?? {},
   extraSections: data.extra_sections ?? [],
@@ -260,19 +261,25 @@ export const setProjectIMFinalized = async (
  * Touches only the two review columns (migration 111), for the same reason
  * setProjectIMFinalized does: it must never race with the large content save payload.
  *
- * These columns are what makes "In Review" derivable everywhere — im-manual-status.ts reads
- * `reviewRequestedAt != null && reviewVersion === version`, so a republish (which bumps the
- * version) ends the round with no clearing write, and so does saving a draft. Nothing ever
- * writes them back to null; that is the design, not an omission.
+ * These columns are what makes the review steps derivable everywhere — im-manual-status.ts
+ * reads `reviewRequestedAt != null && reviewVersion === version`, so a republish (which bumps
+ * the version) ends the round with no clearing write, and so does saving a draft. Nothing
+ * ever writes them back to null; that is the design, not an omission.
  *
- * The columns predate this feature: they used to be stamped by the send-to-markup function.
- * The signal is the same, only the sender changed.
+ * `stage` (migration 149) says WHICH review step this is, and is what moves the manual's card
+ * into Draft Review or Final Review. It is written on every request rather than only on the
+ * first, because a manual goes round the loop more than once and the column must describe the
+ * round in flight, not the first one ever sent.
+ *
+ * The other columns predate this feature: they used to be stamped by the send-to-markup
+ * function. The signal is the same, only the sender changed.
  */
 export const setProjectIMReviewRequested = async (
   projectId: string,
   templateType: IMTemplateType,
   version: number | null,
-): Promise<{ reviewRequestedAt: string; reviewRequestedBy: string | null }> => {
+  stage: IMReviewStage = 'draft',
+): Promise<{ reviewRequestedAt: string; reviewRequestedBy: string | null; reviewStage: IMReviewStage }> => {
   const user = await auth.getUser();
   const reviewRequestedBy = user?.email ?? user?.id ?? null;
   const reviewRequestedAt = new Date().toISOString();
@@ -282,10 +289,11 @@ export const setProjectIMReviewRequested = async (
       review_requested_at: reviewRequestedAt,
       review_requested_by: reviewRequestedBy,
       review_version: version,
+      review_stage: stage,
     },
     { where: { project_id: projectId, template_type: templateType } },
   );
-  return { reviewRequestedAt, reviewRequestedBy };
+  return { reviewRequestedAt, reviewRequestedBy, reviewStage: stage };
 };
 
 // ---------------------------------------------------------------------------
@@ -417,8 +425,85 @@ export interface ProjectIMSummary {
    *  getReviewRoundsByManual, because it lives on the share links and the notes. */
   reviewRequestedAt: string | null;
   reviewVersion: number | null;
+  /** Which review step the current round is — decides Draft Review vs Final Review. */
+  reviewStage: IMReviewStage | null;
   skus: string[];            // SKU numbers on the project (a project can have several)
 }
+
+/**
+ * Projects that have no Instruction Manual at all — the workflow's "To Do" step.
+ *
+ * The board's other six steps are derived from a `project_ims` row, which means a project
+ * nobody has opened yet produces no card and is invisible on the very screen the IM team
+ * works from. It only surfaces when someone remembers it exists. These synthetic cards close
+ * that hole: a project with a category but no manual is work that has not been started, and
+ * a work queue has to be able to say so.
+ *
+ * Scoped to `template_type = 'im'`. A Warning Leaflet is optional per category, so a missing
+ * one is not an unstarted job and must not manufacture a To Do card for every project.
+ *
+ * Cancelled and archived projects are excluded — they are not work.
+ */
+export interface ProjectWithoutIM {
+  projectId: string;
+  projectCode: string | null;
+  projectName: string;
+  categoryId: string | null;
+  /** When the project was created — the only "last touched" signal it has. */
+  createdAt: string;
+  skus: string[];
+}
+
+export const getProjectsWithoutIM = async (): Promise<ProjectWithoutIM[]> => {
+  if (!isLive) return [];
+
+  const [projectRows, imRows, skuRows] = await Promise.all([
+    orEmpty(
+      db.select<Row>('projects', {
+        columns: 'id, name, category_id, project_id_code, status, created_at',
+        order: { column: 'created_at', ascending: false },
+      }),
+      '[getProjectsWithoutIM] projects',
+    ),
+    orEmpty(
+      db.select<Row>('project_ims', { columns: 'project_id, template_type' }),
+      '[getProjectsWithoutIM] manuals',
+    ),
+    orEmpty(
+      db.select<Row>('project_skus', {
+        columns: 'project_id, sku_number, sort_order',
+        order: { column: 'sort_order', ascending: true },
+      }),
+      '[getProjectsWithoutIM] skus',
+    ),
+  ]);
+
+  const withIM = new Set(
+    (imRows as any[]).filter(r => (r.template_type ?? 'im') === 'im').map(r => r.project_id),
+  );
+
+  const skusByProject = new Map<string, string[]>();
+  for (const r of skuRows as any[]) {
+    const num = (r.sku_number ?? '').trim();
+    if (!num) continue;
+    const arr = skusByProject.get(r.project_id) ?? [];
+    arr.push(num);
+    skusByProject.set(r.project_id, arr);
+  }
+
+  const DEAD = new Set(['cancelled', 'archived']);
+
+  return (projectRows as any[])
+    .filter(p => !withIM.has(p.id) && !DEAD.has(String(p.status ?? '')))
+    .map(p => ({
+      projectId: p.id,
+      projectCode: p.project_id_code ?? null,
+      projectName: p.name ?? 'Unknown Project',
+      categoryId: p.category_id ?? null,
+      createdAt: p.created_at,
+      skus: skusByProject.get(p.id) ?? [],
+    }));
+};
 
 /**
  * Fetch all project IM records with their project name, category, and template name.
@@ -442,6 +527,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       review_url,
       review_requested_at,
       review_version,
+      review_stage,
       review_done,
       review_status,
       review_active_threads,
@@ -495,6 +581,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       version: row.version ?? 0,
       reviewRequestedAt: row.review_requested_at ?? null,
       reviewVersion: row.review_version ?? null,
+      reviewStage: (row.review_stage ?? null) as IMReviewStage | null,
       skus,
     };
   });

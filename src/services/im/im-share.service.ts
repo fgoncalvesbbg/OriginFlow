@@ -7,7 +7,7 @@
 
 import { auth, db, portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import type { IMTemplateType } from '../../types';
+import type { IMTemplateType, IMReviewStage } from '../../types';
 
 export type IMShareMode = 'view' | 'review';
 
@@ -47,6 +47,14 @@ export interface IMShare {
   submittedBy: string | null;
   /** project_ims.version when the link was minted — lets a later republish be spotted. */
   manualVersion: number | null;
+  /**
+   * Which workflow review step this link was sent as — 'draft' (Draft Review) or 'final'
+   * (Final Review). Null on view-mode links and on rounds minted before migration 149.
+   *
+   * Immutable once minted: a link sent as a draft review stays a draft review in the
+   * history even after the manual has moved on to its final round.
+   */
+  reviewStage: IMReviewStage | null;
 }
 
 /** True once the link's TTL has passed (the RPC also enforces this server-side). */
@@ -70,6 +78,7 @@ const mapRow = (row: any): IMShare => ({
   submittedAt: row.submitted_at ?? null,
   submittedBy: row.submitted_by ?? null,
   manualVersion: row.manual_version ?? null,
+  reviewStage: (row.review_stage ?? null) as IMReviewStage | null,
 });
 
 /**
@@ -104,7 +113,10 @@ export const getIMShares = async (
  *
  * `mode: 'review'` makes it a supplier review link instead of a read-only one; pass
  * `manualVersion` (the project_ims.version being sent out) alongside it so a later republish
- * is detectable as "reviewed against v3, now on v4".
+ * is detectable as "reviewed against v3, now on v4", and `reviewStage` to say WHICH of the
+ * workflow's two review steps this is (Draft Review or Final Review) — that is what moves
+ * the manual's card into the right board column. Callers pick the default with
+ * `nextReviewStageFor`; the send dialog lets the PM override it.
  *
  * `expiresAt` defaults to 30 days from now when the caller OMITS the option entirely (e.g.
  * ProjectIMGenerator's "send for supplier review" flow). A caller that explicitly passes
@@ -117,7 +129,13 @@ export const getIMShares = async (
 export const createIMShare = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
-  opts?: { label?: string; expiresAt?: string | null; mode?: IMShareMode; manualVersion?: number | null },
+  opts?: {
+    label?: string;
+    expiresAt?: string | null;
+    mode?: IMShareMode;
+    manualVersion?: number | null;
+    reviewStage?: IMReviewStage | null;
+  },
 ): Promise<IMShare> => {
   const user = await auth.getUser();
   const createdBy = user?.email ?? user?.id ?? null;
@@ -132,6 +150,8 @@ export const createIMShare = async (
     expires_at: expiresAt,
     mode: opts?.mode ?? 'view',
     manual_version: opts?.manualVersion ?? null,
+    // Only a review link has a stage; a view link is not part of the workflow at all.
+    review_stage: opts?.mode === 'review' ? (opts?.reviewStage ?? 'draft') : null,
   });
   return mapRow(created);
 };
