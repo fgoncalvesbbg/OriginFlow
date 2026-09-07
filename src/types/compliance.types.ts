@@ -158,6 +158,16 @@ export interface ComplianceRequest {
 
 export type AttributeDataType = 'text' | 'integer' | 'decimal' | 'boolean' | 'enum' | 'image';
 
+/**
+ * Placeholder intake wizard gate (migration 142). 'regulatory' blocks a non-draft
+ * publish/print while any question at that tier is still pending (see
+ * ProjectIMGenerator.buildPublishIssues and render-print-prepare.ts). 'recommended' and
+ * 'optional' are advisory only. A parallel `PlaceholderTier` (im-placeholder-wizard.types.ts)
+ * carries the same three values for `im_adhoc_placeholders` rows, kept as a separate type so
+ * this file and that one don't need to import each other for one shared union.
+ */
+export type WizardTier = 'regulatory' | 'recommended' | 'optional';
+
 export interface AttributeValidationRules {
   unit?: string;
   min?: number;
@@ -190,4 +200,20 @@ export interface CategoryAttribute {
   ptAttributeId?: number | null;
   /** EPREL identifier from the ProductToolkit definition. Reference only. */
   eprelId?: string | null;
+  /** Placeholder intake wizard gate (migration 142). Absent/undefined reads as 'optional'. */
+  wizardTier?: WizardTier;
+  /** Always-visible short guidance shown under the question in the wizard. */
+  wizardHint?: string | null;
+  /** Longer guidance shown behind an expandable disclosure, not always visible. */
+  wizardNote?: string | null;
+  /** Pre-filled suggestion shown when no answer exists yet; never auto-committed as an answer. */
+  wizardDefaultValue?: string | null;
+  /**
+   * The single other attribute (or its absence) this question is sequenced behind in the
+   * wizard, in the same shape IM block refs already gate visibility with (reusing
+   * FeatureConditionFields rather than a parallel condition shape). Built from the five
+   * `wizard_depends_on_*` columns by `wizardConditionFromRow` (attribute-condition.utils.ts).
+   * Null/absent = no dependency, always eligible.
+   */
+  wizardCondition?: FeatureConditionFields | null;
 }

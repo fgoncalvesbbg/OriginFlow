@@ -9,6 +9,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 import { resolveIMShareToken, getPublishedManifestUrl } from '../../services';
+import { resolvePublishedUrl } from '../../services/im/im-publish.service';
 import { IMViewer, type ViewerSource } from '../../modules/im-viewer';
 
 const IMSharedManual: React.FC = () => {
@@ -67,9 +68,14 @@ const IMSharedManual: React.FC = () => {
     );
   }
 
+  // `im-published` is one of the two buckets closed off from permanent public URLs — every
+  // fetch the viewer makes (the manifest, then one per language switch) is re-signed here,
+  // authorized by THIS share token, never by anything the viewer itself could assert.
+  const resolveUrl = (url: string) => resolvePublishedUrl(url, { portalToken: token as string });
+
   return (
     <div className="h-screen w-screen bg-white">
-      <IMViewer source={source} />
+      <IMViewer source={source} resolveUrl={resolveUrl} />
     </div>
   );
 };

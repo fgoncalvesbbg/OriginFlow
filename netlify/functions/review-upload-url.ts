@@ -19,13 +19,8 @@
  *   SUPABASE_SERVICE_ROLE_KEY   — service role, so signing bypasses storage RLS
  */
 
-import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
-
-interface NetlifyEvent {
-  httpMethod: string;
-  body: string | null;
-}
+import { NetlifyEvent, json, serviceClient } from './lib/http';
 
 interface UploadUrlRequest {
   token: string;
@@ -41,19 +36,14 @@ const EXT_BY_TYPE: Record<string, string> = {
   'image/webp': 'webp',
 };
 
-const json = (statusCode: number, payload: unknown) => ({
-  statusCode,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload),
-});
-
 export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return json(500, { error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' });
+  let supabase: ReturnType<typeof serviceClient>;
+  try {
+    supabase = serviceClient();
+  } catch (e) {
+    return json(500, { error: e instanceof Error ? e.message : 'Server misconfiguration.' });
   }
 
   let req: UploadUrlRequest;
@@ -69,8 +59,6 @@ export const handler = async (event: NetlifyEvent) => {
   if (!ext) {
     return json(400, { error: 'Only JPEG, PNG and WebP images can be attached.' });
   }
-
-  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   // Service role bypasses RLS, so the token check is enforced here in TypeScript — the same
   // filters im_review_resolve applies. Deliberately NOT via that RPC: resolving bumps

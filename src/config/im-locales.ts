@@ -34,7 +34,7 @@
  * doing its own splitting will eventually disagree with this and produce content
  * written under a key nothing reads.
  */
-export const contentKeyForLocale = (locale: string): string =>
+const contentKeyForLocale = (locale: string): string =>
   (locale || 'en').trim().toLowerCase().split('-')[0];
 
 /** Normalize a locale to `ll` or `ll-RR` form: lowercase language, uppercase region. */
@@ -76,22 +76,6 @@ export const localeDistance = (requested: string, stored: string): number => {
   if (sto === stoBase) return 1;
   return 2;
 };
-
-/** True when a stored locale may be applied without a human looking at it. */
-export const isAutoApplicableLocale = (requested: string, stored: string): boolean =>
-  localeDistance(requested, stored) === 0;
-
-/**
- * The locales a market's manuals must cover.
- *
- * Today `im_markets.languages` holds 2-letter codes and this is the identity function —
- * DACH means `['de','en']`, so an Austrian and a German manual are byte-identical. That
- * is a real current limitation, not a bug: the market table models a territory to
- * language SET mapping and carries no per-variant wording. This function is the seam
- * where per-market variants land later without touching a single caller.
- */
-export const localesForMarket = (market: { languages: string[] }): string[] =>
-  (market.languages ?? []).map(normalizeLocale);
 
 /** The source locale every IM template authors in today. */
 export const DEFAULT_SOURCE_LOCALE = 'en';

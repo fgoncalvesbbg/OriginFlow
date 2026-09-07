@@ -10,16 +10,23 @@
  *
  *   Summary          -> a PERSON scanning the library.
  *   TCF description  -> the TECHNICAL FILE. What evidence a supplier owes.
- *   IM requirements  -> the pre-publish CHECKLIST. What a person verifies in the manual.
+ *   Obligations      -> the pre-publish CHECKLIST. What a person verifies in the manual.
  *   Notes            -> the AI CHECK's prompt. Scope narrowing, fed to the model.
  *   Markdown summary -> the AI CHECK's evidence. The only text the model is given.
  *
  * Split into its own file rather than living inside the library page: it is ~500 lines of
  * form on its own, and the detail page opens the same editor, so a shared component is the
  * only way both surfaces stay in step.
+ *
+ * Obligations (migration 141) replaced the free-text `checklist` blob as the structured
+ * source of truth. This editor only offers the blob as an editable textarea while a
+ * regulation has zero obligation rows — the one case where the checklist builder still
+ * falls back to it (see src/services/regulatory/regulation-checklist.ts). Once obligations
+ * exist, the blob is read-only history behind a "Legacy text" disclosure.
  */
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   AlertTriangle, Ban, CheckSquare, ChevronDown, ChevronUp, ExternalLink, FileText, Link2, Loader2,
   Scale, ShieldCheck, Upload, Trash2, X,
@@ -39,6 +46,13 @@ import type { CategoryL3, Regulation, RegulationInput, RegulationStatus } from '
 
 export interface RegulationDraft extends RegulationInput {
   id?: string;
+  /**
+   * How many `regulation_obligations` rows this regulation has (migration 141), so the
+   * editor knows whether the legacy `checklist` blob is still the live fallback or has
+   * been superseded. Undefined/0 for a brand-new draft — the fallback path. Set once, when
+   * the draft is built from a full `Regulation` row; never written back on save.
+   */
+  obligationsCount?: number;
 }
 
 export const emptyRegulationDraft = (): RegulationDraft => ({
@@ -81,6 +95,13 @@ const RegulationEditor: React.FC<Props> = ({
 }) => {
   const [showPreview, setShowPreview] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [showLegacyText, setShowLegacyText] = useState(false);
+
+  // Migration 141 superseded the free-text blob with structured obligation rows. Once a
+  // regulation has any, the blob is no longer read by the checklist builder (see
+  // src/services/regulatory/regulation-checklist.ts) — editing it here would silently do
+  // nothing, so it stops being offered as an editable field.
+  const hasObligations = (draft.obligationsCount ?? 0) > 0;
 
   const noteLines = parseRegulationNotes(draft.notes);
   const checklistLines = parseRegulationChecklist(draft.checklist);
@@ -353,41 +374,78 @@ const RegulationEditor: React.FC<Props> = ({
             </p>
           </div>
 
-          {/* --- IM requirements (the checklist) ---------------------------- */}
-          <div className="border border-emerald-200 rounded-lg p-3 bg-emerald-50/40">
-            <label className="text-xs font-semibold text-emerald-800 uppercase flex items-center gap-1.5">
-              <CheckSquare size={13} /> IM requirements
-            </label>
-            <textarea
-              value={draft.checklist ?? ''}
-              onChange={e => onChange({ ...draft, checklist: e.target.value })}
-              rows={4}
-              placeholder={'What the manual must contain, one per line.\n'
-                + 'Energy label is enclosed with the appliance\n'
-                + 'WEEE crossed-out bin symbol is on the rating plate\n'
-                + 'Declaration of conformity is included in the box'}
-              className={INPUT}
-            />
-            <p className={HINT}>
-              One item per line. Every regulation applying to a template contributes its items
-              to <strong>one combined checklist</strong> shown before a manual is published,
-              where each can be ticked or marked not applicable. Ticking never blocks a publish.
-            </p>
-            <p className={HINT}>
-              These are <strong>not</strong> sent to the AI check — it reads the template text,
-              so it can never see the rating plate or what is in the box.
-            </p>
-            {checklistLines.length > 0 && (
-              <ul className="mt-2 space-y-0.5 bg-white border rounded p-2">
-                {checklistLines.map((line, i) => (
-                  <li key={i} className="text-[11px] text-gray-600 flex gap-1.5">
-                    <CheckSquare size={11} className="text-gray-400 shrink-0 mt-0.5" />
-                    <span className="min-w-0 break-words">{line}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          {/* --- Obligations (migration 141 replaced the free-text blob) ---- */}
+          {hasObligations ? (
+            <div className="border border-gray-200 rounded-lg p-3 bg-light/60">
+              <button
+                type="button"
+                onClick={() => setShowLegacyText(v => !v)}
+                className="w-full flex items-center justify-between text-xs font-semibold text-gray-500 uppercase"
+              >
+                <span className="flex items-center gap-1.5">
+                  <CheckSquare size={13} /> Legacy text (superseded by Obligations)
+                </span>
+                {showLegacyText ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+              {showLegacyText && (
+                <>
+                  <textarea
+                    value={draft.checklist ?? ''}
+                    readOnly
+                    rows={4}
+                    className={`${INPUT} bg-gray-50 text-gray-500 cursor-not-allowed`}
+                  />
+                  <p className={HINT}>
+                    Replaced by structured Obligations — this text is no longer read by the
+                    checklist builder or anything else. Kept only for reference.
+                  </p>
+                </>
+              )}
+              <Link
+                to={`/regulations/${draft.id}`}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+              >
+                <ExternalLink size={12} /> Edit Obligations on the regulation page
+              </Link>
+            </div>
+          ) : (
+            <div className="border border-emerald-200 rounded-lg p-3 bg-emerald-50/40">
+              <label className="text-xs font-semibold text-emerald-800 uppercase flex items-center gap-1.5">
+                <CheckSquare size={13} /> Obligations (plain text — no rows recorded yet)
+              </label>
+              <textarea
+                value={draft.checklist ?? ''}
+                onChange={e => onChange({ ...draft, checklist: e.target.value })}
+                rows={4}
+                placeholder={'What the manual must contain, one per line.\n'
+                  + 'Energy label is enclosed with the appliance\n'
+                  + 'WEEE crossed-out bin symbol is on the rating plate\n'
+                  + 'Declaration of conformity is included in the box'}
+                className={INPUT}
+              />
+              <p className={HINT}>
+                One item per line. Every regulation applying to a template contributes its items
+                to <strong>one combined checklist</strong> shown before a manual is published,
+                where each can be ticked or marked not applicable. Ticking never blocks a publish.
+                Once this regulation has structured Obligations, this text stops being read and
+                is offered here only as read-only history.
+              </p>
+              <p className={HINT}>
+                These are <strong>not</strong> sent to the AI check — it reads the template text,
+                so it can never see the rating plate or what is in the box.
+              </p>
+              {checklistLines.length > 0 && (
+                <ul className="mt-2 space-y-0.5 bg-white border rounded p-2">
+                  {checklistLines.map((line, i) => (
+                    <li key={i} className="text-[11px] text-gray-600 flex gap-1.5">
+                      <CheckSquare size={11} className="text-gray-400 shrink-0 mt-0.5" />
+                      <span className="min-w-0 break-words">{line}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {/* --- Notes (for the model) ------------------------------------- */}
           <div>

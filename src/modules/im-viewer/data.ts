@@ -5,10 +5,30 @@
 
 import { Manifest, ResolvedManual } from './types';
 
-const fetchJson = async <T>(url: string, what: string): Promise<T> => {
+/**
+ * Rewrites a URL right before it is fetched — e.g. turning a public-bucket URL embedded in a
+ * manifest into a freshly minted, short-TTL signed one. Optional and host-supplied: this
+ * module stays dependency-free and knows nothing about signing, tokens or Supabase; a host
+ * that needs re-validated access (see `IMViewerProps.resolveUrl`) hands in a closure that does.
+ */
+export type UrlResolver = (url: string) => Promise<string>;
+
+const fetchOnce = (url: string, resolveUrl?: UrlResolver): Promise<Response> =>
+  Promise.resolve(resolveUrl ? resolveUrl(url) : url).then((target) =>
+    fetch(target, { headers: { Accept: 'application/json' } }),
+  );
+
+const fetchJson = async <T>(url: string, what: string, resolveUrl?: UrlResolver): Promise<T> => {
   let res: Response;
   try {
-    res = await fetch(url, { headers: { Accept: 'application/json' } });
+    res = await fetchOnce(url, resolveUrl);
+    // A signed URL can expire while this manual stays open (language switch after a long
+    // read, or a page left open past the TTL). One retry with a FRESH mint — not a cached
+    // one — turns that into an invisible recovery instead of a broken viewer; the host's
+    // `resolveUrl` is expected to hit its signing endpoint again each call, never memoize.
+    if (!res.ok && (res.status === 401 || res.status === 403) && resolveUrl) {
+      res = await fetchOnce(url, resolveUrl);
+    }
   } catch (e: any) {
     throw new Error(`Could not reach ${what} (${url}): ${e?.message ?? 'network error'}`);
   }
@@ -22,8 +42,8 @@ const fetchJson = async <T>(url: string, what: string): Promise<T> => {
   }
 };
 
-export const loadManifest = (url: string): Promise<Manifest> =>
-  fetchJson<Manifest>(url, 'manifest');
+export const loadManifest = (url: string, resolveUrl?: UrlResolver): Promise<Manifest> =>
+  fetchJson<Manifest>(url, 'manifest', resolveUrl);
 
-export const loadManual = (url: string): Promise<ResolvedManual> =>
-  fetchJson<ResolvedManual>(url, 'manual');
+export const loadManual = (url: string, resolveUrl?: UrlResolver): Promise<ResolvedManual> =>
+  fetchJson<ResolvedManual>(url, 'manual', resolveUrl);

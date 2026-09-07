@@ -27,8 +27,6 @@
  * Server env: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (session validation only).
  */
 
-import { createClient } from '@supabase/supabase-js';
-
 import {
   EURLEX_SPARQL_ENDPOINT,
   buildVersionQuery,
@@ -37,12 +35,7 @@ import {
   type EurLexFacts,
   type VersionState,
 } from './lib/eurlex';
-
-interface NetlifyEvent {
-  httpMethod: string;
-  body: string | null;
-  headers?: Record<string, string | undefined>;
-}
+import { NetlifyEvent, authenticate, AuthError, ConfigError } from './lib/http';
 
 const MAX_REGULATIONS = 60;
 /** Leave headroom under Netlify's ~10s synchronous limit so we return a real error, not a 502. */
@@ -101,17 +94,12 @@ const querySparql = async (query: string): Promise<any> => {
 export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return json(500, { error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' });
+  try {
+    await authenticate(event);
+  } catch (e) {
+    if (e instanceof ConfigError) return json(500, { error: e.message });
+    return json(401, { error: e instanceof AuthError ? e.message : 'Authentication required.' });
   }
-
-  const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
-  const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
-  if (!token) return json(401, { error: 'Authentication required.' });
-  const { data: userData, error: authErr } = await admin.auth.getUser(token);
-  if (authErr || !userData?.user) return json(401, { error: 'Invalid or expired session.' });
 
   let body: { regulations?: unknown };
   try {

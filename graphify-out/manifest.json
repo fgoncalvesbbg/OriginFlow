@@ -738,9 +738,9 @@
     "semantic_hash": ""
   },
   "netlify/functions/lib/print-render-shared.ts": {
-    "mtime": 1787842914.196808,
-    "seen": 1787843281.2440388,
-    "ast_hash": "085ac46256ab3676c3ed3703deb326db",
+    "mtime": 1788529562.8798025,
+    "seen": 1788530409.3678236,
+    "ast_hash": "6aa9c5b3cc967be0045935cd3b20d95c",
     "semantic_hash": ""
   },
   "netlify/functions/render-print-cleanup.ts": {
@@ -750,9 +750,9 @@
     "semantic_hash": ""
   },
   "netlify/functions/render-print-merge.ts": {
-    "mtime": 1787842981.8065403,
-    "seen": 1787843281.244042,
-    "ast_hash": "1d615cb6e9b812dc72d07ae79a1a35db",
+    "mtime": 1788529621.238953,
+    "seen": 1788530409.367834,
+    "ast_hash": "74fb95912bdfa2b0835d39377c222d7d",
     "semantic_hash": ""
   },
   "netlify/functions/render-print-part.ts": {
@@ -762,9 +762,9 @@
     "semantic_hash": ""
   },
   "netlify/functions/render-print-prepare.ts": {
-    "mtime": 1787842946.2528677,
-    "seen": 1787843281.244045,
-    "ast_hash": "b5ac85827a009b6b687f761cd378a132",
+    "mtime": 1788520207.683778,
+    "seen": 1788530409.3678396,
+    "ast_hash": "ae2c0da3e4889366ece007aa4c9758ff",
     "semantic_hash": ""
   },
   "netlify/functions/supplier-file-url.ts": {
@@ -1128,9 +1128,9 @@
     "semantic_hash": ""
   },
   "src/pages/ProjectDetail.tsx": {
-    "mtime": 1788439236.1971593,
-    "seen": 1788440230.3148136,
-    "ast_hash": "8095f29afa5e28a4e1de7c4cabf5c21c",
+    "mtime": 1788517301.904513,
+    "seen": 1788530409.3681533,
+    "ast_hash": "0d8e25c1247c59a934710309d32b4dc4",
     "semantic_hash": ""
   },
   "src/pages/SupplierAttributePortal.tsx": {
@@ -1224,9 +1224,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/IMTemplateEditor.tsx": {
-    "mtime": 1788189059.3076944,
-    "seen": 1788189582.8839018,
-    "ast_hash": "6ad29d719c623bf65f01509e9d010c40",
+    "mtime": 1788529821.9967997,
+    "seen": 1788530409.3682156,
+    "ast_hash": "e391dc491cbab9899707e5da5454754a",
     "semantic_hash": ""
   },
   "src/pages/im/IMViewerTab.tsx": {
@@ -1242,9 +1242,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/ProjectIMGenerator.tsx": {
-    "mtime": 1788345668.8521955,
-    "seen": 1788357134.316726,
-    "ast_hash": "f76e38deff35cbadcee8ed26e89d6a50",
+    "mtime": 1788517451.5580626,
+    "seen": 1788530409.3682332,
+    "ast_hash": "5d3af7a18b785867d64e389e2794483e",
     "semantic_hash": ""
   },
   "src/pages/im/ProjectImImportDialog.tsx": {
@@ -1260,9 +1260,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/editor/InlineBlockEditor.tsx": {
-    "mtime": 1787916643.306677,
-    "seen": 1787931266.2845557,
-    "ast_hash": "ec55eb8d0d1c42d425d0d68163165426",
+    "mtime": 1788512446.2420275,
+    "seen": 1788530409.3682551,
+    "ast_hash": "211308754eaa14bd994797e08aa84e6a",
     "semantic_hash": ""
   },
   "src/pages/im/editor/insertTarget.ts": {
@@ -1296,9 +1296,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/PrintExportDialog.tsx": {
-    "mtime": 1788333777.496027,
-    "seen": 1788357134.3167663,
-    "ast_hash": "f7c84ed55d2aead204359b059f30e91d",
+    "mtime": 1788529798.8883357,
+    "seen": 1788530409.3683097,
+    "ast_hash": "c1a8119e7a94ffac5cc9e97d0e436a23",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/im-content.utils.test.ts": {
@@ -1512,9 +1512,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-print-export.service.ts": {
-    "mtime": 1787843996.3940172,
-    "seen": 1787846808.341956,
-    "ast_hash": "0b82d92bf3e85d6bd6ee7af0ca09ff80",
+    "mtime": 1788529703.3902805,
+    "seen": 1788530409.3685973,
+    "ast_hash": "0c8a391b4cd4c206fa830a30c752ead4",
     "semantic_hash": ""
   },
   "src/services/im/im-print-html.test.ts": {
@@ -1524,9 +1524,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-print-html.ts": {
-    "mtime": 1787672286.054345,
-    "seen": 1787843281.2443752,
-    "ast_hash": "48ddbaab734fc4748e16ea2fa943008d",
+    "mtime": 1788521312.9474556,
+    "seen": 1788530409.3686123,
+    "ast_hash": "fefa10bf1b7a5d7fd9a7dd73f08754fc",
     "semantic_hash": ""
   },
   "src/services/im/im-publish.service.test.ts": {
@@ -1620,9 +1620,9 @@
     "semantic_hash": ""
   },
   "src/services/im/index.ts": {
-    "mtime": 1787843226.1305935,
-    "seen": 1787843281.2444537,
-    "ast_hash": "2a985bc6b335e51d8fc6a21989986763",
+    "mtime": 1788530211.3949354,
+    "seen": 1788530409.368803,
+    "ast_hash": "fe583e2fdf123bbe97082e210d8316a8",
     "semantic_hash": ""
   },
   "src/services/im/project-im.service.test.ts": {
@@ -1638,9 +1638,9 @@
     "semantic_hash": ""
   },
   "src/services/index.ts": {
-    "mtime": 1788352850.200031,
-    "seen": 1788357134.3170424,
-    "ast_hash": "d3b82e85f361e6cab3adf4d7d0ba096e",
+    "mtime": 1788517009.5820124,
+    "seen": 1788530409.3688152,
+    "ast_hash": "42790a2938a668a840171976c9ea675a",
     "semantic_hash": ""
   },
   "src/services/manufacturing/index.ts": {
@@ -2532,9 +2532,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/LeafletCoverageTab.tsx": {
-    "mtime": 1787738564.6607575,
-    "seen": 1787843281.2442286,
-    "ast_hash": "2aa82c95a0dd2c0456328e9eff9d2ce1",
+    "mtime": 1788530132.795611,
+    "seen": 1788530409.3682303,
+    "ast_hash": "2d9ce51ecabfe71367a7d091e61b4e77",
     "semantic_hash": ""
   },
   "src/pages/im/ProjectSupplierDiffImportDialog.tsx": {
@@ -2568,9 +2568,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/editor/im-image-markup.ts": {
-    "mtime": 1787598348.7190993,
-    "seen": 1787843281.244243,
-    "ast_hash": "4ce35724c700a97c1fa399502b2cb878",
+    "mtime": 1788512318.920888,
+    "seen": 1788530409.3682637,
+    "ast_hash": "4cffc8f43c018e6791c5cef904339f0e",
     "semantic_hash": ""
   },
   "src/pages/im/editor/usePrintColumn.ts": {
@@ -2676,15 +2676,15 @@
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/print-export-report.test.ts": {
-    "mtime": 1787690717.9592483,
-    "seen": 1787843281.244282,
-    "ast_hash": "e56bb400d106f7b1e41d4aed9fa6bb49",
+    "mtime": 1788517044.0452785,
+    "seen": 1788530409.3683515,
+    "ast_hash": "ad9df94cc5f1efd245de60524296bbef",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/print-export-report.ts": {
-    "mtime": 1787572241.555273,
-    "seen": 1787843281.2442834,
-    "ast_hash": "280e2199a17ce3ba548417115a1820df",
+    "mtime": 1788517282.335035,
+    "seen": 1788530409.3683543,
+    "ast_hash": "02f8502f7a12cf9e49dcee2755eaba93",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/publish-issues.test.ts": {
@@ -2892,9 +2892,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-print-settings.service.ts": {
-    "mtime": 1787583730.1672115,
-    "seen": 1787843281.24438,
-    "ast_hash": "0ff2f7a8e9b890750dd919104f19ce68",
+    "mtime": 1788517009.580012,
+    "seen": 1788530409.3686237,
+    "ast_hash": "5e6738d3326bb4f436acf3b967ab87f5",
     "semantic_hash": ""
   },
   "src/services/im/im-print-typography.test.ts": {
@@ -2904,9 +2904,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-print-typography.ts": {
-    "mtime": 1787590208.8309357,
-    "seen": 1787843281.2443821,
-    "ast_hash": "1343a400dea0be5a525e7a4cdb3e6573",
+    "mtime": 1788519302.7113829,
+    "seen": 1788530409.368629,
+    "ast_hash": "fdddb9a6357aae5ff0fef22ec2f7113e",
     "semantic_hash": ""
   },
   "src/services/im/im-publish-diff.service.test.ts": {
@@ -3546,15 +3546,15 @@
     "semantic_hash": ""
   },
   "src/pages/im/editor/DraftPrintExportDialog.tsx": {
-    "mtime": 1788333817.728204,
-    "seen": 1788357134.3167355,
-    "ast_hash": "c6d8e73484f47ac67c1a1179af1ab8d6",
+    "mtime": 1788529898.6930442,
+    "seen": 1788530409.36825,
+    "ast_hash": "87a9a2714a8bd218f893f337289a84ac",
     "semantic_hash": ""
   },
   "src/pages/im/editor/TypographySummary.tsx": {
-    "mtime": 1787843466.320343,
-    "seen": 1787846808.3417215,
-    "ast_hash": "ba54b6743f7e0a5ced5da26426a5171f",
+    "mtime": 1788519401.3946178,
+    "seen": 1788530409.3682578,
+    "ast_hash": "dcd3a7fe056903e3cb3e4e4d1d6bdf37",
     "semantic_hash": ""
   },
   "src/services/im/im-print-draft.test.ts": {
@@ -3969,6 +3969,42 @@
     "mtime": 1788437346.3038146,
     "seen": 1788440230.3150883,
     "ast_hash": "6e6f9904c2154715d011d09b51cfad49",
+    "semantic_hash": ""
+  },
+  "netlify/functions/lib/print-render-shared.test.ts": {
+    "mtime": 1788529973.9181252,
+    "seen": 1788530409.3678179,
+    "ast_hash": "b42faf0cf91029cecdf1df79b95ccb0b",
+    "semantic_hash": ""
+  },
+  "src/pages/im/editor/useDocCode.ts": {
+    "mtime": 1788529999.068537,
+    "seen": 1788530409.3682697,
+    "ast_hash": "6d68fceb609246dbc14a40a918f2cedc",
+    "semantic_hash": ""
+  },
+  "src/services/im/im-doc-code.test.ts": {
+    "mtime": 1788529538.7858598,
+    "seen": 1788530409.3685598,
+    "ast_hash": "bec82541230c282c63cfcf65ada2d1fe",
+    "semantic_hash": ""
+  },
+  "src/services/im/im-doc-code.ts": {
+    "mtime": 1788529347.8950744,
+    "seen": 1788530409.3685627,
+    "ast_hash": "94d9168f5a1f5dac926afe60ebb2e9b9",
+    "semantic_hash": ""
+  },
+  "src/services/im/im-print-compact2col.test.ts": {
+    "mtime": 1788521656.8799043,
+    "seen": 1788530409.3685894,
+    "ast_hash": "481e07ff4b6838d33e57604dcb388858",
+    "semantic_hash": ""
+  },
+  "docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf": {
+    "mtime": 1788515246.4667854,
+    "seen": 1788530409.3692987,
+    "ast_hash": "f4f77ae6c46e331c1aa9d3b3c7ed1379",
     "semantic_hash": ""
   }
 }

@@ -59,13 +59,7 @@ import {
   type SkuRow,
   type StoredSkuValue,
 } from '../../src/services/project/sku-akeneo-payload';
-
-interface NetlifyEvent {
-  httpMethod: string;
-  path?: string;
-  headers: Record<string, string | undefined>;
-  queryStringParameters: Record<string, string | undefined> | null;
-}
+import { NetlifyEvent } from './lib/http';
 
 const json = (statusCode: number, payload: unknown) => ({
   statusCode,
@@ -127,7 +121,10 @@ export const handler = async (event: NetlifyEvent) => {
     .select('id, project_id, sku_number, sku_title, category_id, attribute_values, is_final, pending_export, last_exported_at, updated_at')
     .eq('sku_number', skuNumber);
 
-  if (skuErr) return json(500, { error: `Could not read SKUs: ${skuErr.message}` });
+  if (skuErr) {
+    console.error('[sku-attributes] SKU read failed:', skuErr);
+    return json(500, { error: 'Could not read SKU records.', code: 'SKU_READ_FAILED' });
+  }
   if (!skus || skus.length === 0) {
     return json(404, { error: `No SKU with number "${skuNumber}".`, code: 'SKU_NOT_FOUND' });
   }
@@ -147,7 +144,10 @@ export const handler = async (event: NetlifyEvent) => {
       .not('submitted_data', 'is', null)
       .in('project_id', projectIds)
       .order('submitted_at', { ascending: true });
-    if (subErr) return json(500, { error: `Could not read submissions: ${subErr.message}` });
+    if (subErr) {
+      console.error('[sku-attributes] submission read failed:', subErr);
+      return json(500, { error: 'Could not read supplier submissions.', code: 'SUBMISSION_READ_FAILED' });
+    }
     // Ascending order + overwrite-on-set keeps the LAST (latest submitted_at) row per project.
     for (const row of submissions ?? []) {
       submissionByProjectId.set((row as any).project_id, (row as any).submitted_data ?? []);
@@ -170,7 +170,10 @@ export const handler = async (event: NetlifyEvent) => {
       .from('category_attributes')
       .select('id, akeneo_id, name, group, data_type')
       .in('id', referencedIds);
-    if (error) return json(500, { error: `Could not read attributes: ${error.message}` });
+    if (error) {
+      console.error('[sku-attributes] attribute read failed:', error);
+      return json(500, { error: 'Could not read attribute definitions.', code: 'ATTRIBUTE_READ_FAILED' });
+    }
     attributeRows = (data ?? []) as AttributeLookupRow[];
   }
   const byId = indexAttributes(attributeRows);

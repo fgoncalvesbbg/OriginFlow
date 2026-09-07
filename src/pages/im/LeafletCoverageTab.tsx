@@ -33,6 +33,12 @@ import {
 } from '../../services/im/leaflet-coverage.service';
 import { useAuth } from '../../context/AuthContext';
 import { useDocCodeResolver } from './editor/useDocCode';
+import { escapeCsvCell } from '../../utils/csv-escape.utils';
+// Signed-URL minting bypasses the barrel, matching every other reader of this bucket
+// (PrintExportDialog.tsx, ProjectIMGenerator.tsx, ProjectDetail.tsx) — im-print is closed off
+// from permanent public URLs. See downloadLeaflet below for the graceful-degrade fallback
+// while migration 147 (renderStoragePath) is not yet applied.
+import { getSignedPrintPdfUrlForPath } from '../../services/im/im-print-export.service';
 
 /** Human labels for the derived statuses. Kept beside the badge colours they pair with. */
 const STATUS_LABEL: Record<LeafletCoverageStatus, string> = {
@@ -69,6 +75,10 @@ const fmtDate = (iso: string | null) =>
 interface LeafletGroup {
   renderId: string;
   url: string | null;
+  /** For minting a signed URL (see downloadLeaflet). Null until migration 147 is applied. */
+  storagePath: string | null;
+  /** The project that produced this render — needed to authorize the signed-URL mint. */
+  renderProjectId: string | null;
   imVersion: number | null;
   languages: string[];
   pageSize: string | null;
@@ -116,6 +126,8 @@ const groupRows = (rows: LeafletCoverageRow[]): CategoryGroup[] => {
       const g = byRender.get(r.renderId) ?? {
         renderId: r.renderId,
         url: r.renderUrl,
+        storagePath: r.renderStoragePath,
+        renderProjectId: r.renderProjectId,
         imVersion: r.imVersion,
         languages: r.languages,
         pageSize: r.pageSize,
@@ -147,10 +159,8 @@ const groupRows = (rows: LeafletCoverageRow[]): CategoryGroup[] => {
   });
 };
 
-const csvCell = (v: string | number | null | undefined) => {
-  const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-};
+/** Stringify then apply the shared formula-injection guard + RFC 4180 quoting. */
+const csvCell = (v: string | number | null | undefined) => escapeCsvCell(v == null ? '' : String(v));
 
 /**
  * The list packaging and ops actually need: one line per SKU with the PDF it gets.
@@ -198,6 +208,38 @@ export const LeafletCoverageTab: React.FC = () => {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [savingMode, setSavingMode] = useState<string | null>(null);
+  // Downloading a leaflet PDF from this screen. Keyed by renderId (stable and unique per
+  // leaflet here, unlike storagePath which is null until migration 147 is applied).
+  const [downloadingRenderId, setDownloadingRenderId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  /**
+   * Open a leaflet's PDF. Mints a fresh signed URL from `storagePath` at click time — im-print
+   * is one of the two buckets closed off from permanent public URLs — UNLESS migration 147
+   * (db_migrations/147_leaflet_coverage_storage_path.sql) has not been applied yet, in which
+   * case `storagePath`/`renderProjectId` are absent and this degrades to the render's
+   * persisted (permanent, public) `url` exactly as before, rather than crash or dead-end.
+   *
+   * IMPORTANT: that fallback path is ONLY as safe as im-print itself — this download stops
+   * working correctly (or, if the bucket is flipped private before 147 lands, stops working
+   * at all) unless migration 147 is applied first. See migration 147's own header.
+   */
+  const downloadLeaflet = async (renderId: string, storagePath: string | null, renderProjectId: string | null, fallbackUrl: string | null) => {
+    if (!storagePath || !renderProjectId) {
+      if (fallbackUrl) window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setDownloadError(null);
+    setDownloadingRenderId(renderId);
+    try {
+      const url = await getSignedPrintPdfUrlForPath(storagePath, { projectId: renderProjectId });
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : 'Could not create a download link.');
+    } finally {
+      setDownloadingRenderId(null);
+    }
+  };
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -265,6 +307,12 @@ export const LeafletCoverageTab: React.FC = () => {
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {downloadError && (
+        <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+          {downloadError}
         </div>
       )}
 
@@ -386,14 +434,15 @@ export const LeafletCoverageTab: React.FC = () => {
                       {lf.imVersion != null && <span className="text-gray-400">v{lf.imVersion}</span>}
                       <span className="text-gray-400">issued {fmtDate(lf.issuedAt)}</span>
                       {lf.url && (
-                        <a
-                          href={lf.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2 py-0.5 border rounded hover:bg-gray-50"
+                        <button
+                          type="button"
+                          onClick={() => void downloadLeaflet(lf.renderId, lf.storagePath, lf.renderProjectId, lf.url)}
+                          disabled={downloadingRenderId === lf.renderId}
+                          className="px-2 py-0.5 border rounded hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-1"
                         >
-                          Download
-                        </a>
+                          {downloadingRenderId === lf.renderId && <Loader2 size={11} className="animate-spin" />}
+                          {downloadingRenderId === lf.renderId ? 'Preparing…' : 'Download'}
+                        </button>
                       )}
                     </div>
                   ))}
@@ -437,14 +486,15 @@ export const LeafletCoverageTab: React.FC = () => {
                       {r.imVersion != null && <span className="text-gray-400">v{r.imVersion}</span>}
                       <StatusBadge status={r.status} />
                       {r.renderUrl && (
-                        <a
-                          href={r.renderUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-indigo-600 hover:underline"
+                        <button
+                          type="button"
+                          onClick={() => void downloadLeaflet(r.renderId as string, r.renderStoragePath, r.renderProjectId, r.renderUrl)}
+                          disabled={downloadingRenderId === r.renderId}
+                          className="text-indigo-600 hover:underline disabled:opacity-50 inline-flex items-center gap-1"
                         >
-                          PDF
-                        </a>
+                          {downloadingRenderId === r.renderId && <Loader2 size={10} className="animate-spin" />}
+                          {downloadingRenderId === r.renderId ? '…' : 'PDF'}
+                        </button>
                       )}
                     </div>
                   ))}

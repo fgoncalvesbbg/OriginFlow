@@ -11,7 +11,7 @@
  * Web Lock). A public route missing from this list still renders, but slowly and for the
  * wrong reason — which is why the three token routes below were added alongside /review/im/.
  */
-export const PORTAL_ROUTE_PREFIXES = [
+const PORTAL_ROUTE_PREFIXES = [
   '/supplier/',
   '/supplier-dashboard/',
   '/compliance/supplier/',

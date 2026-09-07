@@ -19,6 +19,7 @@
 
 import { auth, db } from '../../data';
 import { isLive } from '../../config/environment.config';
+import { isDateOnlyDue } from '../../utils/date.utils';
 import type {
   Regulation,
   RegulationVersionDetail,
@@ -53,9 +54,16 @@ export const versionCheckAgeDays = (r: Regulation, now = Date.now()): number | n
   return Number.isFinite(t) ? Math.floor((now - t) / 86_400_000) : null;
 };
 
-/** True when a person is overdue to re-verify a row nothing can check automatically. */
-export const isReviewOverdue = (r: Regulation, today = new Date().toISOString().slice(0, 10)): boolean =>
-  !!r.reviewDueAt && r.reviewDueAt <= today;
+/**
+ * True when a person is overdue to re-verify a row nothing can check automatically.
+ *
+ * `review_due_at` is a DATE, not a timestamp — comparing it against a UTC-derived "today"
+ * string (as this used to) flips the flag a day early or late for the whole of CET, where
+ * this app is operated (see utils/date.utils.ts). A review due TODAY counts as due-now — the
+ * operator needs to see it that day, not the day after — so this uses isDateOnlyDue (`<=`),
+ * not isDateOnlyPast (`<`), matching the `<=` this replaces.
+ */
+export const isReviewOverdue = (r: Regulation): boolean => isDateOnlyDue(r.reviewDueAt);
 
 /**
  * Run the check for a set of regulations and persist each verdict.

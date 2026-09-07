@@ -6,6 +6,7 @@
 
 export { IMViewer } from './IMViewer';
 export type { IMViewerProps } from './IMViewer';
+export type { UrlResolver } from './data';
 export type {
   ViewerSource,
   Manifest,

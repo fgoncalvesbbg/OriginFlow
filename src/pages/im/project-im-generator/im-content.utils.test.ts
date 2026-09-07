@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { decodePlaceholderLabel, escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './im-content.utils';
-import type { CategoryAttribute, BlockRef } from '../../../types';
+import { decodePlaceholderLabel, escapeXml, getTokensInFragment, isPlaceholderKeyRegistered, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './im-content.utils';
+import type { AdhocPlaceholder, CategoryAttribute, BlockRef } from '../../../types';
 
 const attr = (dataType: CategoryAttribute['dataType']): CategoryAttribute => ({ dataType } as CategoryAttribute);
 
@@ -122,5 +122,27 @@ describe('refHasTable', () => {
     expect(refHasTable({ kind: 'inline', content: { en: '<p>Just a paragraph</p>' } } as unknown as BlockRef)).toBe(false);
     expect(refHasTable({ kind: 'inline' } as unknown as BlockRef)).toBe(false);
     expect(refHasTable({ kind: 'block', block_id: 'blk-1' } as unknown as BlockRef)).toBe(false);
+  });
+});
+
+// getItemsInSection / getSectionFragments / collectSectionInputs
+// are DOM-based (DOMParser) — exercised by the running app, not by this suite, which runs
+// under vitest's default `environment: 'node'` (no DOMParser available; see decodePlaceholderLabel's
+// tests above for the same constraint). isPlaceholderKeyRegistered is pulled out specifically so
+// the registry-membership rule those functions rely on stays covered without a DOM fixture.
+describe('isPlaceholderKeyRegistered', () => {
+  const attributesById = { 'attr-1': { id: 'attr-1' } as CategoryAttribute };
+  const adhocById = { 'chip-1': { id: 'adhoc-1', placeholderId: 'chip-1' } as unknown as AdhocPlaceholder };
+
+  it('resolves an attribute-bound key (chip data-id === attribute id, or a {{token}})', () => {
+    expect(isPlaceholderKeyRegistered('attr-1', attributesById, adhocById)).toBe(true);
+  });
+
+  it('resolves an unbound chip key registered as an ad-hoc placeholder', () => {
+    expect(isPlaceholderKeyRegistered('chip-1', attributesById, adhocById)).toBe(true);
+  });
+
+  it('is false for a key in neither registry', () => {
+    expect(isPlaceholderKeyRegistered('nowhere', attributesById, adhocById)).toBe(false);
   });
 });

@@ -65,8 +65,12 @@ import { StatusBadge } from '../components/StatusBadge';
 import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
-  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes, FileDown
+  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes, FileDown, Loader2
 } from 'lucide-react';
+// Signed-URL minting bypasses the barrel, matching PrintExportDialog.tsx/ProjectIMGenerator.tsx's
+// own imports of the same helper — im-print is one of the two buckets closed off from
+// permanent public URLs; every read of a PrintRender's PDF mints fresh from its storagePath.
+import { getSignedPrintPdfUrlForPath } from '../services/im/im-print-export.service';
 import * as XLSX from 'xlsx';
 import AttributeInput from '../components/common/AttributeInput';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
@@ -133,6 +137,11 @@ const ProjectDetail: React.FC = () => {
   // Historical print-PDF renders (PDFShift final versions), newest first — one list per doc type.
   const [imRenders, setImRenders] = useState<PrintRender[]>([]);
   const [leafletRenders, setLeafletRenders] = useState<PrintRender[]>([]);
+  // Downloading one of the timeline's historical PDFs mints a fresh signed URL from the
+  // render's own storagePath at click time (see renderPrintTimeline/downloadPrintRender) —
+  // never the render's persisted `.url`, which is a permanent link into im-print.
+  const [downloadingRenderPath, setDownloadingRenderPath] = useState<string | null>(null);
+  const [downloadRenderError, setDownloadRenderError] = useState<string | null>(null);
   // Publish events (digital JSON artifact), newest first — who published which languages, when.
   const [imPublishHistory, setImPublishHistory] = useState<import('../services').PublishHistoryEvent[]>([]);
   const [leafletPublishHistory, setLeafletPublishHistory] = useState<import('../services').PublishHistoryEvent[]>([]);
@@ -335,6 +344,35 @@ const ProjectDetail: React.FC = () => {
     return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
   };
 
+  // Mint a fresh signed URL from a render's storagePath and trigger the download — im-print
+  // is closed off from permanent public URLs, so this is minted at CLICK time (not earlier,
+  // which would let it expire while the page sits open), then downloaded via the anchor's own
+  // `download` attribute since a signed URL carries no `?download=` param for Supabase to turn
+  // into Content-Disposition. Mirrors PrintExportDialog.tsx/ProjectIMGenerator.tsx's own
+  // downloadPdf/downloadPrintRender.
+  const downloadPrintRender = async (r: PrintRender) => {
+    if (!project) return;
+    setDownloadRenderError(null);
+    setDownloadingRenderPath(r.storagePath);
+    try {
+      const url = await getSignedPrintPdfUrlForPath(r.storagePath, { projectId: project.id });
+      const layoutSlug = r.layout === 'compact2col' ? '_Compact' : '';
+      const docTypeSlug = (r.templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual') + layoutSlug;
+      const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${r.languages.map(l => l.toUpperCase()).join('-')}_${r.pageSize.toUpperCase()}.pdf`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.rel = 'noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setDownloadRenderError(e instanceof Error ? e.message : 'Could not create a download link.');
+    } finally {
+      setDownloadingRenderPath(null);
+    }
+  };
+
   // Vertical timeline of every generated print PDF (PDFShift final version) for one doc
   // type, newest first. Each node links to that exact historical PDF in storage.
   const renderPrintTimeline = (renders: PrintRender[], accent: 'indigo' | 'amber') => {
@@ -371,19 +409,27 @@ const ProjectDetail: React.FC = () => {
                   </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-2">
-                  <a
-                    href={r.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-light"
+                  <button
+                    type="button"
+                    onClick={() => void downloadPrintRender(r)}
+                    disabled={downloadingRenderPath === r.storagePath}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-light disabled:opacity-50"
                   >
-                    <Download size={13} /> Download
-                  </a>
+                    {downloadingRenderPath === r.storagePath ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Download size={13} />
+                    )}
+                    {downloadingRenderPath === r.storagePath ? 'Preparing…' : 'Download'}
+                  </button>
                 </div>
               </div>
             </li>
           ))}
         </ol>
+        {downloadRenderError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mt-3">{downloadRenderError}</p>
+        )}
       </div>
     );
   };
@@ -869,7 +915,10 @@ const ProjectDetail: React.FC = () => {
       // One token for the whole send: multiple SKUs going out together get ONE link and one
       // side-by-side grid to fill, instead of a separate page per SKU.
       const batchToken = toCreate.length > 1 ? generateUUID() : null;
-      const newReqs = await Promise.all(toCreate.map(s2 => {
+      // allSettled, not all: one failing SKU must not swallow the ones that DID commit —
+      // that would hide successfully-created rows from the UI, inviting a retry that sends
+      // duplicate requests to suppliers who already have one under the same batch token.
+      const results = await Promise.allSettled(toCreate.map(s2 => {
         let prefill = s2.status === 'submitted' && s2.submittedData?.length ? s2.submittedData : undefined;
         let copiedFrom: string | null = null;
         if (!prefill?.length) {
@@ -888,13 +937,29 @@ const ProjectDetail: React.FC = () => {
           batchToken
         );
       }));
-      setAttrRequests(prev => [...newReqs, ...prev]);
-      if (batchToken) {
+      const newReqs = results
+        .filter((r): r is PromiseFulfilledResult<ProjectAttributeRequest> => r.status === 'fulfilled')
+        .map(r => r.value);
+      const failedSkus = results
+        .map((r, i) => ({ r, sku: toCreate[i].skuNumber }))
+        .filter((x): x is { r: PromiseRejectedResult; sku: string } => x.r.status === 'rejected')
+        .map(x => x.sku);
+      if (newReqs.length) setAttrRequests(prev => [...newReqs, ...prev]);
+      // Refetch from the server so local state matches reality rather than trusting the
+      // merge above — a partial failure must never leave the UI out of sync with the DB.
+      await handleRefreshAttrRequests();
+      if (batchToken && newReqs.length) {
         const url = `${window.location.origin}/#/attribute-request-batch/${batchToken}`;
         setAttrLinkCopied(false);
         setAttrLinkModal({ open: true, url, count: newReqs.length });
-      } else {
+      } else if (newReqs.length && !failedSkus.length) {
         showNotification(`${newReqs.length} production request(s) created.`, 'success');
+      }
+      if (failedSkus.length) {
+        showNotification(
+          `${newReqs.length} of ${toCreate.length} production request(s) created — ${failedSkus.length} failed (SKU${failedSkus.length > 1 ? 's' : ''}: ${failedSkus.join(', ')}). Retry ${failedSkus.length > 1 ? 'those' : 'that one'} individually.`,
+          'error'
+        );
       }
     } catch (e: any) {
       showNotification('Failed to create production requests: ' + e.message, 'error');
@@ -951,7 +1016,10 @@ const ProjectDetail: React.FC = () => {
       // One token for the whole send: multiple SKUs going out together get ONE link and one
       // side-by-side grid to fill, instead of a separate page per SKU.
       const batchToken = toSend.length > 1 ? generateUUID() : null;
-      const newReqs = await Promise.all(toSend.map(sku => {
+      // allSettled, not all: one failing SKU must not swallow the ones that DID commit —
+      // that would hide successfully-created rows from the UI, inviting a retry that sends
+      // duplicate requests to suppliers who already have one under the same batch token.
+      const results = await Promise.allSettled(toSend.map(sku => {
         let prefill: SkuAttributeValue[] | undefined = sku.attributeValues?.filter(v => v.value) ?? [];
         let copiedFrom: string | null = null;
         if (!prefill.length) {
@@ -970,13 +1038,29 @@ const ProjectDetail: React.FC = () => {
           batchToken
         );
       }));
-      setAttrRequests(prev => [...newReqs, ...prev]);
-      if (batchToken) {
+      const newReqs = results
+        .filter((r): r is PromiseFulfilledResult<ProjectAttributeRequest> => r.status === 'fulfilled')
+        .map(r => r.value);
+      const failedSkus = results
+        .map((r, i) => ({ r, sku: toSend[i].skuNumber }))
+        .filter((x): x is { r: PromiseRejectedResult; sku: string } => x.r.status === 'rejected')
+        .map(x => x.sku);
+      if (newReqs.length) setAttrRequests(prev => [...newReqs, ...prev]);
+      // Refetch from the server so local state matches reality rather than trusting the
+      // merge above — a partial failure must never leave the UI out of sync with the DB.
+      await handleRefreshAttrRequests();
+      if (batchToken && newReqs.length) {
         const url = `${window.location.origin}/#/attribute-request-batch/${batchToken}`;
         setAttrLinkCopied(false);
         setAttrLinkModal({ open: true, url, count: newReqs.length });
-      } else {
+      } else if (newReqs.length && !failedSkus.length) {
         showNotification(`${newReqs.length} SKU(s) sent for supplier review.`, 'success');
+      }
+      if (failedSkus.length) {
+        showNotification(
+          `${newReqs.length} of ${toSend.length} SKU(s) sent — ${failedSkus.length} failed (SKU${failedSkus.length > 1 ? 's' : ''}: ${failedSkus.join(', ')}). Retry ${failedSkus.length > 1 ? 'those' : 'that one'} individually.`,
+          'error'
+        );
       }
     } catch (e: any) {
       showNotification('Failed to send SKUs: ' + e.message, 'error');
@@ -1029,6 +1113,13 @@ const ProjectDetail: React.FC = () => {
   };
 
   const handleStartEditAttr = (req: ProjectAttributeRequest) => {
+    // Both editors share editingAttrValues (and, less obviously, the SKU editor's Save
+    // path reads whatever is currently in that shared buffer). Opening this editor must
+    // fully close the SKU editor — id AND its own draft fields — or a stale SKU Save
+    // could silently write this attribute snapshot's values into the SKU row.
+    setEditingSkuId(null);
+    setSkuDraftNumber('');
+    setSkuDraftTitle('');
     setEditingAttrReqId(req.id);
     setEditingAttrValues(Object.fromEntries((req.submittedData || []).map(d => [d.attributeId, d.value])));
     // Seed the input mode per attribute from its definition: numeric range-capable

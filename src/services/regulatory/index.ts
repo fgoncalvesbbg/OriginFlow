@@ -46,8 +46,6 @@ export {
   applyRegulationImport,
   findExistingRegulation,
   toRegulationInput,
-  diffStructure,
-  REGULATION_IMPORT_SCHEMA_VERSION,
 } from './regulation-import.service';
 export type {
   RegulationImportDoc,
@@ -65,13 +63,11 @@ export {
   getRegulationStructure,
   createClause,
   updateClause,
-  deleteClause,
   createObligation,
   updateObligation,
   deleteObligation,
   clauseSortKey,
   inferClauseKind,
-  compareClauses,
 } from './regulation-clause.service';
 export {
   CARRIERS,
@@ -90,7 +86,6 @@ export {
   resolveEffective,
   isBlocking,
   collectBlocks,
-  describeBlock,
   summarizeBlocks,
   indexRegulations,
   MAX_REPLACEMENT_DEPTH,

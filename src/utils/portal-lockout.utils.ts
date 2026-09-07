@@ -36,7 +36,3 @@ export const asPortalLockedError = (e: unknown): PortalLockedError | null => {
   const m = msg.match(LOCK_RE);
   return m ? new PortalLockedError(parseInt(m[1], 10)) : null;
 };
-
-/** True when the error is a portal lockout. */
-export const isPortalLockedError = (e: unknown): boolean =>
-  e instanceof PortalLockedError || asPortalLockedError(e) !== null;

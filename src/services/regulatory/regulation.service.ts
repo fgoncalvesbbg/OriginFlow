@@ -23,7 +23,7 @@
  * for non-admins so a PM never sees an opaque policy error.
  */
 
-import { db, withDeadline, orEmpty, orUndefined, type Row } from '../../data';
+import { db, withDeadline, orEmpty, orUndefined, mustRead, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import type {
   Regulation, RegulationInput, RegulationStatus, RegulationStructure,
@@ -307,8 +307,14 @@ export const updateRegulation = async (
 export const getRegulationUsageCounts = async (): Promise<Record<string, number>> => {
   if (!isLive) return {};
 
+  // Every read here feeds deleteRegulation's guard, so none of them may degrade to empty on
+  // failure — that would silently under-count usage and let a still-in-use regulation through.
+  // The category-derived half only needs `status` + `applicable_categories`, so this reads
+  // those two columns directly rather than going through the public getRegulations() (which
+  // is deliberately fault-tolerant for the library page, and also isn't in the delete guard's
+  // way, so a bare mustRead(getRegulations(), ...) would not have re-thrown here at all).
   const [assignments, templates, library] = await Promise.all([
-    orEmpty(
+    mustRead(
       withDeadline(
         (signal) => db.select<Row>('im_template_regulations', {
           columns: 'regulation_id,template_id',
@@ -319,7 +325,7 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
       ),
       `${TAG} getRegulationUsageCounts`,
     ),
-    orEmpty(
+    mustRead(
       withDeadline(
         (signal) => db.select<Row>('im_templates', { columns: 'id,category_id', signal }),
         READ_TIMEOUT_MS,
@@ -327,7 +333,17 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
       ),
       `${TAG} getRegulationUsageCounts`,
     ),
-    getRegulations(),
+    mustRead(
+      withDeadline(
+        (signal) => db.select<Row>('regulations', {
+          columns: 'id,status,applicable_categories',
+          signal,
+        }),
+        READ_TIMEOUT_MS,
+        'getRegulationUsageCounts:regulations',
+      ),
+      `${TAG} getRegulationUsageCounts`,
+    ),
   ]);
 
   // templateIds per regulation, so a template that is both explicitly assigned and
@@ -352,8 +368,8 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
     // Everything except 'superseded' derives by category — expired regulations included, so
     // that expiring one BLOCKS its templates rather than quietly dropping off their lists
     // (migration 140). Superseded is the retire path and must not reach new templates.
-    if (regulation.status === 'superseded') continue;
-    for (const cat of regulation.applicableCategories) {
+    if ((regulation.status ?? 'active') === 'superseded') continue;
+    for (const cat of (regulation.applicable_categories ?? [])) {
       for (const templateId of templatesByCategory.get(cat) ?? []) add(regulation.id, templateId);
     }
   }
@@ -372,7 +388,9 @@ export const getRegulationUsageCounts = async (): Promise<Record<string, number>
  */
 export const getRegulationTcfCounts = async (): Promise<Record<string, number>> => {
   if (!isLive) return {};
-  const rows = await orEmpty(
+  // Feeds deleteRegulation's guard alongside getRegulationUsageCounts — degrading to {} on a
+  // failed read would let a regulation still cited by a TCF requirement be deleted.
+  const rows = await mustRead(
     withDeadline(
       (signal) => db.select<Row>('compliance_requirements', { columns: 'regulation_id', signal }),
       READ_TIMEOUT_MS,

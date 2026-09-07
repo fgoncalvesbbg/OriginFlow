@@ -70,6 +70,10 @@ const SupplierCompliancePortal: React.FC = () => {
   // locks only 'approved' and 'completed', so a rejected declaration can still be
   // corrected and resubmitted. Terminal-looking UI here would be a dead end.
   const [returned, setReturned] = useState(false);
+  // Being actively assessed by a reviewer right now. Read-only like `submitted`, but with
+  // its own banner — a supplier overwriting a declaration mid-review is exactly the bug
+  // this state exists to prevent (see the deny-by-default status check in handleLogin).
+  const [underReview, setUnderReview] = useState(false);
 
   // Draft save
   const [savingDraft, setSavingDraft] = useState(false);
@@ -107,10 +111,17 @@ const SupplierCompliancePortal: React.FC = () => {
       try {
           const requestData = await verifySupplierAccess(token, accessCodeInput.trim());
           setReq(requestData);
+          // Deny-by-default: the only statuses that genuinely invite supplier input are
+          // 'pending_supplier' (falls through, form stays editable) and 'rejected'
+          // (editable for correction, flagged via `returned`). Everything else — submitted,
+          // under_review, approved, and any status added later that nobody has explicitly
+          // allowed — is locked, so a reviewer's in-progress assessment can never be
+          // silently overwritten.
           if (requestData.status === 'rejected') {
               setReturned(true);
-          } else if (['submitted', 'approved'].includes(requestData.status)) {
+          } else if (requestData.status !== 'pending_supplier') {
               setSubmitted(true);
+              if (requestData.status === 'under_review') setUnderReview(true);
           }
           if (requestData.respondentName) setRespondentName(requestData.respondentName);
           if (requestData.respondentPosition) setRespondentPosition(requestData.respondentPosition);
@@ -462,11 +473,22 @@ const SupplierCompliancePortal: React.FC = () => {
       </div>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
-        {submitted && (
+        {submitted && !underReview && (
             <div className="mb-8 bg-emerald-50 border border-emerald-200 rounded-xl p-10 text-center animate-in fade-in slide-in-from-top-4">
                 <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-100 rounded-full text-emerald-600 mb-4"><CheckCircle size={32} /></div>
                 <h1 className="text-3xl font-bold text-emerald-900 mb-2">Form Successfully Submitted</h1>
                 <p className="text-emerald-800 max-w-md mx-auto">Your technical compliance response has been recorded. Our team will review the declaration.</p>
+            </div>
+        )}
+
+        {underReview && (
+            <div className="mb-8 bg-sky-50 border border-sky-200 rounded-xl p-10 text-center animate-in fade-in slide-in-from-top-4">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-sky-100 rounded-full text-sky-600 mb-4"><Lock size={32} /></div>
+                <h1 className="text-3xl font-bold text-sky-900 mb-2">Under Review</h1>
+                <p className="text-sky-800 max-w-md mx-auto">
+                    This declaration is currently being reviewed by our team and can no longer be
+                    edited here. Please contact us if something needs to change.
+                </p>
             </div>
         )}
 

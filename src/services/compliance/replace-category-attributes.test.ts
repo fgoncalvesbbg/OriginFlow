@@ -30,6 +30,7 @@ const row = (over: Partial<FakeRow> & { id: string; name: string }): FakeRow => 
 
 vi.mock('../../data', () => ({
   orEmpty: async (p: Promise<unknown>) => p,
+  mustRead: async (p: Promise<unknown>) => p,
   portalDb: { select: async () => rows },
   db: {
     select: async (_t: string, opts?: any) =>
@@ -117,6 +118,24 @@ describe('replaceCategoryAttributes', () => {
     expect(res.created).toBe(0);
     expect(res.skipped).toBe(1); // the global already applies here
     expect(rows.filter(r => r.akeneo_id === 'total_power')).toHaveLength(1);
+  });
+
+  it('never demotes an existing global attribute to category scope', async () => {
+    // Same Akeneo code as the global 'Power', but this row's group is the default
+    // 'Category Specific' (not one of the predefined/global groups) and carries no explicit
+    // scope — exactly the shape that used to slip through and call saveCategoryAttribute
+    // with forceScope:'category', moving the attribute's category_id to Angled Hoods and
+    // silently stripping it from every OTHER category that relies on it. It must instead be
+    // left exactly as it is: still global, still one row, still applying everywhere.
+    const res = await replaceCategoryAttributes(ANGLED, [
+      ptRow({ name: 'Power', akeneoId: 'total_power' }),
+    ]);
+    const kept = rows.find(r => r.akeneo_id === 'total_power')!;
+    expect(kept.id).toBe('glob-1');
+    expect(kept.category_id).toBeNull();                          // still global
+    expect(rows.filter(r => r.akeneo_id === 'total_power')).toHaveLength(1); // not duplicated
+    expect(res.created).toBe(0);
+    expect(res.deletedGlobals).toBe(0);
   });
 
   it('keeps a sibling-owned attribute shared in, without churning it', async () => {

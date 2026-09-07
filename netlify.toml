@@ -10,6 +10,44 @@
   targetPort = 5173
   framework = "#custom"
 
+# Security response headers for every path. CSP is shipped as Report-Only (see below) rather
+# than enforcing: index.html loads Tailwind's play CDN (https://cdn.tailwindcss.com), which
+# needs 'unsafe-eval' (its runtime JIT compiler) and 'unsafe-inline' (the inline
+# `tailwind.config = {...}` script, plus the <style> tags it injects at runtime) to render at
+# all — a CSP loose enough to allow that provides little real script-injection protection, and
+# getting it wrong would take the whole app down. Report-Only lets violations be observed
+# (via the browser console / a report-to endpoint, once one exists) with zero risk of breaking
+# the app, so the policy below can be tightened with evidence before it is ever enforced. It
+# becomes enforcing (rename to Content-Security-Policy) once Tailwind is compiled locally at
+# build time instead of pulled from the CDN, removing the unsafe-eval/unsafe-inline need for
+# script-src (style-src will still need 'unsafe-inline' for inline utility styles unless a
+# nonce/hash pipeline is added).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    # Origins referenced, verified by grepping index.html and src/config for every external
+    # fetch/asset the app makes from the BROWSER (server-side-only calls — PDFShift, Jira,
+    # regulatory-check's own Anthropic call — are made from netlify/functions or
+    # supabase/functions and are not subject to the page's CSP, so they are deliberately not
+    # listed here):
+    #   - https://cdn.tailwindcss.com        index.html:15, the Tailwind play CDN <script>
+    #   - https://fonts.googleapis.com       index.html:12,14, Inter stylesheet
+    #   - https://fonts.gstatic.com          index.html:13, the font files that stylesheet pulls
+    #   - https://ecueltibpmpnhnaxlskx.supabase.co / wss://...   src/config/im.constants.ts:20
+    #     (public storage asset) and the live REST/Realtime/Edge-Function connection built from
+    #     VITE_SUPABASE_URL (src/config/environment.config.ts, src/data/supabase/client.ts) —
+    #     update this if the project's Supabase URL ever changes
+    #   - https://res.cloudinary.com         SKU thumbnails (src/pages/products/SkuCatalog.tsx)
+    #     and IM brand logos (src/config/im.constants.ts)
+    #   - https://producttoolkit.chal-tec.local   ProductToolkit is called directly by the
+    #     browser, not proxied (see the [functions] comment below) — VITE_PRODUCTTOOLKIT_URL
+    #     overrides it for local dev, which this CSP does not need to cover
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https://res.cloudinary.com https://ecueltibpmpnhnaxlskx.supabase.co; connect-src 'self' https://ecueltibpmpnhnaxlskx.supabase.co wss://ecueltibpmpnhnaxlskx.supabase.co https://producttoolkit.chal-tec.local; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
 # Server-side functions (PDF render, supplier file signed-URL issuer, IM
 # translation proxy, Markup.io review upload, Jira project lookup).
 # NOTE: the AI regulatory check is deliberately NOT here — it lives in

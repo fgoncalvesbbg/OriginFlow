@@ -10,6 +10,7 @@
  */
 
 import { auth, db, storage, orEmpty, type Row } from '../../data';
+import type { SignedUrlAuth } from '../../data/ports/storage.port';
 import { isLive } from '../../config/environment.config';
 import { IM_LANGUAGE_CODES, orderIMLanguages } from '../../config/im-languages';
 import {
@@ -366,6 +367,61 @@ export const getPublishedManualUrl = (
 ): string | null => {
   if (!isLive) return null;
   return storage.publicUrl(BUCKET, `${projectId}/${templateType}/${language}.json`);
+};
+
+// ---------------------------------------------------------------------------
+// Signed-URL siblings of the two functions above — see netlify/functions/im-file-url.ts.
+//
+// `getPublishedManifestUrl`/`getPublishedManualUrl` are deliberately left UNCHANGED (still
+// synchronous, still `storage.publicUrl`): im-print-preflight.service.ts calls
+// `getPublishedManualUrl` synchronously and is out of this change's scope, so its signature
+// cannot become async without breaking that caller. The two functions below are additive —
+// callers that need an access-revalidated, short-TTL URL (the IM viewer and its host pages)
+// use these instead; nothing that already worked is touched.
+// ---------------------------------------------------------------------------
+
+/**
+ * Signed URL (short TTL, minted by `im-file-url`) of a project's published manifest — the
+ * access-revalidated sibling of `getPublishedManifestUrl`. `auth` must carry either a staff
+ * `projectId` or a portal `portalToken` (see `SignedUrlAuth`); never falls back to the public
+ * URL on failure, since that would silently reinstate the hole this exists to close.
+ */
+export const getSignedManifestUrl = (
+  projectId: string,
+  templateType: 'im' | 'warning_leaflet' = 'im',
+  auth: SignedUrlAuth,
+): Promise<string> => storage.signedUrl(BUCKET, `${projectId}/${templateType}/manifest.json`, auth);
+
+/**
+ * Rewrites a public `im-published` URL — as embedded in a manifest's `languages[].url` (see
+ * `uploadJson` below) or returned by `getPublishedManifestUrl`/`getPublishedManualUrl` — into a
+ * freshly signed one. Returns the input UNCHANGED when it doesn't look like one of ours (e.g.
+ * the Viewer tab's "paste a manifest/manual URL" box, which can point anywhere).
+ *
+ * Why this exists at all: the manifest a publish writes bakes in a PERMANENT public URL for
+ * each language (`languages[].url`, from `uploadJson`'s own `storage.publicUrl` call) — an
+ * external render service reads that file by contract (see this file's header), so the
+ * manifest's on-disk shape cannot change to carry a path instead of a URL. Fetching the
+ * manifest itself through a signed URL therefore is not enough: every per-language URL inside
+ * it still needs re-signing before use. Meant to be handed to
+ * `<IMViewer resolveUrl={(url) => resolvePublishedUrl(url, auth)}>`, which calls it for the
+ * manifest fetch AND every subsequent per-language fetch.
+ *
+ * `auth.portalToken`, when given, is used as-is (the portal never knows a project id up
+ * front). Otherwise the STAFF path's project id is taken from the URL's OWN path — every
+ * object here lives at `<projectId>/…` — rather than requiring the caller to already know and
+ * pass one: `authorizeProject` re-derives the real access decision from the session regardless
+ * of what's asserted here, so there is nothing to gain by requiring it, and requiring it broke
+ * the Viewer tab's "paste a URL" box whenever no manual was selected from its dropdown.
+ */
+export const resolvePublishedUrl = async (url: string, auth: { portalToken?: string } = {}): Promise<string> => {
+  const m = url.match(/\/storage\/v1\/object\/(?:public|sign)\/im-published\/([^?]+)/);
+  if (!m) return url;
+  const path = decodeURIComponent(m[1]);
+  const resolvedAuth: SignedUrlAuth = auth.portalToken
+    ? { portalToken: auth.portalToken }
+    : { projectId: path.split('/')[0] };
+  return storage.signedUrl(BUCKET, path, resolvedAuth);
 };
 
 /** Upsert a JSON string to a deterministic path in the public bucket; return its public URL. */

@@ -16,7 +16,7 @@ import { isLive } from '../../config/environment.config';
 import type { IMTemplateType } from '../../types';
 
 /** Public bucket the review images live in (db_migrations/132). */
-export const REVIEW_UPLOAD_BUCKET = 'im-review-uploads';
+const REVIEW_UPLOAD_BUCKET = 'im-review-uploads';
 
 /** One image attached to a note, as stored in im_review_comments.attachments. */
 export interface ReviewAttachment {
@@ -336,29 +336,4 @@ export const getReviewRoundsByManual = async (): Promise<Map<string, ReviewRound
     entry(r.project_id, r.template_type).openCount += 1;
   }
   return out;
-};
-
-/**
- * Open-note counts per manual, for the IM Dashboard's status column.
- *
- * One query for the whole board rather than one per manual: the dashboard renders dozens of
- * rows, and the Markup.io polling this replaces was a per-manual network call each.
- */
-export const getOpenReviewCommentCounts = async (
-  projectIds: string[],
-  templateType: IMTemplateType = 'im',
-): Promise<Record<string, number>> => {
-  if (!isLive || projectIds.length === 0) return {};
-  const rows = await orEmpty(
-    db.select<Row>('im_review_comments', {
-      columns: 'project_id',
-      where: { project_id: projectIds, template_type: templateType, status: 'open' },
-    }),
-    '[getOpenReviewCommentCounts]',
-  );
-  const counts: Record<string, number> = {};
-  for (const row of rows as any[]) {
-    counts[row.project_id] = (counts[row.project_id] ?? 0) + 1;
-  }
-  return counts;
 };

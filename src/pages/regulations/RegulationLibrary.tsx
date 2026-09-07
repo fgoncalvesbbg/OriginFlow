@@ -75,14 +75,25 @@ export const RegulationLibraryContent: React.FC = () => {
   const [importing, setImporting] = useState(false);
 
   const loadData = useCallback(async () => {
-    const [regs, cats, counts, tcfCounts] = await Promise.all([
-      getRegulations(), getCategories(), getRegulationUsageCounts(), getRegulationTcfCounts(),
-    ]);
-    setRegulations(regs);
-    setCategories(cats);
-    setUsage(counts);
-    setTcfUsage(tcfCounts);
-    setLoading(false);
+    // getRegulationUsageCounts/getRegulationTcfCounts deliberately THROW on a failed read
+    // rather than degrading to {} — a zero usage count is what unlocks the delete button, so
+    // a silent empty result could let an in-use regulation be deleted. That makes this load
+    // rejectable, so it must be handled here: without a catch the spinner would latch on
+    // forever and the rejection would surface only as an unhandled promise.
+    try {
+      setListError('');
+      const [regs, cats, counts, tcfCounts] = await Promise.all([
+        getRegulations(), getCategories(), getRegulationUsageCounts(), getRegulationTcfCounts(),
+      ]);
+      setRegulations(regs);
+      setCategories(cats);
+      setUsage(counts);
+      setTcfUsage(tcfCounts);
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : 'Could not load the regulation library.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -176,6 +187,7 @@ export const RegulationLibraryContent: React.FC = () => {
       reviewDueAt: source.reviewDueAt ?? '',
       sourceUrl: source.sourceUrl ?? '',
       celexId: source.celexId ?? '',
+      obligationsCount: source.obligations?.length ?? 0,
     });
   };
 
@@ -322,7 +334,16 @@ export const RegulationLibraryContent: React.FC = () => {
         {visible.map(r => {
           const templates = usage[r.id] ?? 0;
           const tcf = tcfUsage[r.id] ?? 0;
-          const checklistItems = parseRegulationChecklist(r.checklist).length;
+          // Obligations (migration 141) supersede the free-text blob as the source of truth;
+          // counting the blob once a regulation has obligation rows would under/over-report
+          // what it actually contains. Same fallback rule as the checklist builder itself.
+          const hasObligationRows = (r.obligations?.length ?? 0) > 0;
+          const obligationCount = hasObligationRows
+            ? (r.obligations?.length ?? 0)
+            : parseRegulationChecklist(r.checklist).length;
+          const obligationTitles = hasObligationRows
+            ? (r.obligations ?? []).map(o => o.text).join('\n')
+            : parseRegulationChecklist(r.checklist).join('\n');
           const edition = editionLine(r);
           return (
             <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow flex flex-col hover:shadow-md transition-all">
@@ -394,12 +415,12 @@ export const RegulationLibraryContent: React.FC = () => {
                 >
                   {templates} template{templates === 1 ? '' : 's'}
                 </span>
-                {checklistItems > 0 && (
+                {obligationCount > 0 && (
                   <span
                     className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
-                    title={parseRegulationChecklist(r.checklist).join('\n')}
+                    title={obligationTitles}
                   >
-                    <CheckSquare size={9} /> {checklistItems} IM item{checklistItems === 1 ? '' : 's'}
+                    <CheckSquare size={9} /> {obligationCount} obligation{obligationCount === 1 ? '' : 's'}
                   </span>
                 )}
               </div>

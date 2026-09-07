@@ -9,7 +9,6 @@
  * the render. See lib/print-render-shared.ts for why this pipeline is split.
  */
 
-import { createClient } from '@supabase/supabase-js';
 import {
   PDFDocument, degrees, rgb,
   PDFArray, PDFDict, PDFName, PDFNumber, PDFRef, type PDFFont,
@@ -22,9 +21,18 @@ import {
 import { embedStampFonts } from './lib/fonts/inter-stamp';
 import {
   NetlifyEvent,
+  json,
+  serviceClient,
+  authenticate,
+  authorizeProject,
+  assertJobId,
+  AuthError,
+  ForbiddenError,
+  ValidationError,
+} from './lib/http';
+import {
   RenderRequestBase,
   isValidBase,
-  json,
   loadManuals,
   buildParts,
   renderPartPdf,
@@ -35,8 +43,8 @@ import {
   resolveDocCode,
   tempPartPath,
   draftPdfPath,
+  assertRenderProjectId,
   BUCKET,
-  AuthError,
   PermanentError,
 } from './lib/print-render-shared';
 
@@ -485,13 +493,18 @@ export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
   const apiKey = process.env.PDFSHIFT_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!apiKey) return json(500, { error: 'PDFSHIFT_API_KEY is not configured on the server.' });
-  if (!supabaseUrl || !serviceRoleKey) {
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  let supabase: ReturnType<typeof serviceClient>;
+  try {
+    supabase = serviceClient();
+  } catch (e) {
+    return json(500, { error: e instanceof Error ? e.message : 'Server misconfiguration.' });
+  }
+  if (!supabaseUrl) {
     return json(500, { error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' });
   }
-  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   let req: MergeRequest;
   try {
@@ -502,13 +515,16 @@ export const handler = async (event: NetlifyEvent) => {
   if (!isValidMergeRequest(req)) return json(400, { error: 'Invalid request body.' });
 
   try {
-    const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
-    if (!token) throw new AuthError('Authentication required.');
-    const { data: userData, error: authErr } = await supabase.auth.getUser(token);
-    if (authErr || !userData?.user) throw new AuthError('Invalid or expired session.');
-    const createdBy = userData.user.email ?? userData.user.id;
+    // Every parameter interpolated into a Storage key is validated before it is used.
+    const { value: projectId, isDraft } = assertRenderProjectId(req.projectId);
+    assertJobId(req.jobId);
 
-    const { manuals, ordered } = await loadManuals(supabase, supabaseUrl, req);
+    // AUTHORIZATION, not just authentication — see render-print-prepare.ts's comment.
+    // `authorizeProject` also returns the caller's identity, reused below as
+    // im_print_renders.created_by instead of a second auth.getUser call.
+    const createdBy = isDraft ? await authenticate(event) : await authorizeProject(event, projectId);
+
+    const { manuals, ordered } = await loadManuals(supabase, req);
     const { parts, compact } = buildParts(manuals, req);
     // Range-checked global print typography — drives the cover re-render below and where
     // the footer / page numbers are stamped.
@@ -519,9 +535,13 @@ export const handler = async (event: NetlifyEvent) => {
     // not a recoverable condition here.
     const partPdfs: Uint8Array[] = [];
     for (let i = 0; i < parts.length; i++) {
-      const path = tempPartPath(req.projectId, req.templateType, req.jobId, i);
+      const path = tempPartPath(projectId, req.templateType, req.jobId, i);
       const { data, error } = await supabase.storage.from(BUCKET).download(path);
-      if (error || !data) throw new PermanentError(`Missing rendered part ${i} (${path}) — render every part before merging.`);
+      if (error || !data) {
+        // Log the storage path server-side only — never echo it to the caller.
+        console.error(`[render-print-merge] missing rendered part ${i} (${path}):`, error);
+        throw new PermanentError(`Missing rendered part ${i} — render every part before merging.`);
+      }
       partPdfs.push(new Uint8Array(await data.arrayBuffer()));
     }
 
@@ -619,18 +639,31 @@ export const handler = async (event: NetlifyEvent) => {
     // bytes into a blob before triggering cleanup, so the operator keeps the file even
     // though the server side of it is gone.
     if (req.draft) {
-      const draftPath = draftPdfPath(req.projectId, req.templateType, req.jobId);
+      const draftPath = draftPdfPath(projectId, req.templateType, req.jobId);
       const { error: draftUpErr } = await supabase.storage.from(BUCKET).upload(draftPath, pdf, {
         upsert: true,
         contentType: 'application/pdf',
         cacheControl: '0',
       });
-      if (draftUpErr) throw new Error(`Draft upload failed (${draftPath}): ${draftUpErr.message}`);
-      const { data: { publicUrl: draftUrl } } = supabase.storage
+      if (draftUpErr) {
+        console.error(`[render-print-merge] draft upload failed (${draftPath}):`, draftUpErr);
+        throw new Error('Draft upload failed.');
+      }
+      // Signed rather than public: `im-print` is one of the two buckets being closed off from
+      // permanent public URLs (see im-file-url.ts). This one is safe to mint directly with the
+      // service role we already hold — the caller just paid to render it (authenticate() above),
+      // the client (requestDraftPrintPdf) fetches it within seconds, and the object is deleted
+      // moments later by the job's own cleanup call regardless. A short TTL is only ever a
+      // formality here, never a functional constraint.
+      const { data: signedDraft, error: draftSignErr } = await supabase.storage
         .from(BUCKET)
-        .getPublicUrl(draftPath, { download: buildDownloadName(req) });
+        .createSignedUrl(draftPath, 300, { download: buildDownloadName(req) });
+      if (draftSignErr || !signedDraft?.signedUrl) {
+        console.error(`[render-print-merge] signing draft failed (${draftPath}):`, draftSignErr);
+        throw new Error('Could not prepare the draft download.');
+      }
       return json(200, {
-        url: draftUrl,
+        url: signedDraft.signedUrl,
         storagePath: draftPath,
         bytes: pdf.byteLength,
         pages: totalPages,
@@ -646,7 +679,7 @@ export const handler = async (event: NetlifyEvent) => {
     // on a merge that actually completed server-side, its retry re-runs this function and
     // lands on the SAME path instead of producing a second PDF, a second history row, and
     // a second PDFShift cover charge. History across jobs is still never overwritten.
-    const storagePath = `${req.projectId}/${req.templateType}/${name}-v${req.version ?? 0}-${req.jobId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}.pdf`;
+    const storagePath = `${projectId}/${req.templateType}/${name}-v${req.version ?? 0}-${req.jobId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}.pdf`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(storagePath, pdf, {
       upsert: false,
       contentType: 'application/pdf',
@@ -654,7 +687,10 @@ export const handler = async (event: NetlifyEvent) => {
     });
     if (upErr) {
       const alreadyExists = /already exists|duplicate/i.test(upErr.message) || (upErr as { statusCode?: string | number }).statusCode === '409';
-      if (!alreadyExists) throw new Error(`Upload failed (${storagePath}): ${upErr.message}`);
+      if (!alreadyExists) {
+        console.error(`[render-print-merge] upload failed (${storagePath}):`, upErr);
+        throw new Error('Upload failed.');
+      }
       // A previous invocation of THIS job already finished — return its result instead
       // of failing (and instead of inserting a duplicate history row).
       const { data: existingRow } = await supabase
@@ -677,7 +713,7 @@ export const handler = async (event: NetlifyEvent) => {
     // The row is the compliance changelog entry for this PDF — retry once, and if it still
     // fails, say so in the response instead of silently returning an unrecorded artifact.
     const renderRow = {
-      project_id: req.projectId,
+      project_id: projectId,
       template_type: req.templateType,
       im_version: req.version ?? null,
       languages: ordered,
@@ -715,10 +751,13 @@ export const handler = async (event: NetlifyEvent) => {
     });
   } catch (e) {
     if (e instanceof AuthError) return json(401, { error: e.message });
-    const message = e instanceof Error ? e.message : 'Print merge failed.';
-    // Permanent failures get 422 — not in the client's transient-retry set, so it
-    // fails immediately instead of re-running a merge that can never succeed.
-    if (e instanceof PermanentError) return json(422, { error: message });
-    return json(502, { error: message });
+    if (e instanceof ForbiddenError) return json(403, { error: e.message });
+    if (e instanceof ValidationError) return json(400, { error: e.message });
+    // Permanent failures get 422 — not in the client's transient-retry set, so it fails
+    // immediately instead of re-running a merge that can never succeed. These messages
+    // are hand-crafted to be safe to show — never a raw driver/storage-path string.
+    if (e instanceof PermanentError) return json(422, { error: e.message });
+    console.error('[render-print-merge] failed:', e);
+    return json(502, { error: 'Print merge failed. Please try again or contact support.', code: 'MERGE_FAILED' });
   }
 };

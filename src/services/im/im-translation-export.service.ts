@@ -48,8 +48,10 @@ import { decodeInlineXliff, encodeInlineXliff, sameMarkerSet } from './im-xliff-
 import { collectTranslationFragments, TranslationFragment } from './im-translation-fragments';
 import { getTranslationVerbatims } from '../ai/translation-verbatim.service';
 import { planKey, type TmPlanResult } from './im-tm-translate';
+import { escapeHtmlText } from '../../utils/html-escape.utils';
+import { downloadBlob } from '../../utils/download.utils';
 
-const escXml = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escXml = escapeHtmlText;
 
 const verbatimEntriesFor = (verbatims: TranslationVerbatim[], targetLang: string): VerbatimEntry[] =>
   verbatims.map(v => ({ phrase: v.phrase, replacement: v.translations?.[targetLang] }));
@@ -262,10 +264,6 @@ ${units.join('\n')}
 /** Blob-download the XLIFF document (mirrors the existing translate-report download). */
 export const downloadTranslationXliff = (xml: string, templateName: string, targetLangs: string[]): void => {
   const blob = new Blob([xml], { type: 'application/xliff+xml' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
   const langsPart = targetLangs.map(l => l.toUpperCase()).join('+');
-  a.download = `${templateName.replace(/\s+/g, '_')}.${langsPart}.xliff`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlob(blob, `${templateName.replace(/\s+/g, '_')}.${langsPart}.xliff`);
 };

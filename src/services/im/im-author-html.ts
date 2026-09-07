@@ -46,7 +46,7 @@ const VISIBLE_LENGTH_RE = /(?:^|[^\d.])(?:[1-9]\d*(?:\.\d+)?|0?\.\d+)\s*(?:px|pt
 export const styleOf = (tag: string): string => tag.match(STYLE_ATTR_RE)?.[2] ?? '';
 
 /** Drop the inline style declarations `drop` selects, leaving the rest of the tag intact. */
-export const withoutDeclarations = (
+const withoutDeclarations = (
   tag: string,
   drop: (declaration: string) => boolean,
 ): string =>

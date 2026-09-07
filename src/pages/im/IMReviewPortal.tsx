@@ -29,6 +29,7 @@ import {
   type IMReviewSession,
   type ReviewAttachment,
 } from '../../services';
+import { resolvePublishedUrl } from '../../services/im/im-publish.service';
 import { IMViewer, type ViewerSource, type ViewerTextSelection } from '../../modules/im-viewer';
 import { buildReviewAnchor, MAX_QUOTE_CHARS } from './review-anchor';
 import { formatReviewStamp, reviewStampTitle } from './project-im-generator/review-comments.utils';
@@ -323,7 +324,13 @@ const IMReviewPortal: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-white flex overflow-hidden">
       <div className="flex-1 min-w-0 relative">
-        <IMViewer source={source} onSelectText={onSelectText} />
+        {/* `im-published` is one of the two buckets closed off from permanent public URLs —
+            every fetch the viewer makes is re-signed here, authorized by THIS review token. */}
+        <IMViewer
+          source={source}
+          onSelectText={onSelectText}
+          resolveUrl={(url) => resolvePublishedUrl(url, { portalToken: token as string })}
+        />
 
         {/* Floats over the manual next to whatever the reviewer just highlighted. */}
         {selection && !composerFor && (

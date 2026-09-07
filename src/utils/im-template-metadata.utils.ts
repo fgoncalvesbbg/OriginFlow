@@ -1,6 +1,6 @@
 import { IMTemplateMetadata } from '../types';
 
-export const DEFAULT_IM_TEMPLATE_METADATA: IMTemplateMetadata = {
+const DEFAULT_IM_TEMPLATE_METADATA: IMTemplateMetadata = {
   // A5 is the house's normal booklet size — a template that never chose explicitly
   // models, previews and exports as A5.
   pageSize: 'a5',

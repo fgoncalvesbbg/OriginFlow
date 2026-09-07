@@ -38,7 +38,8 @@ const ComplianceDashboard: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [statusFilter, setStatusFilter] = useState<'all' | ComplianceRequestStatus>('all');
+
   // Deletion State
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [requestToDelete, setRequestToDelete] = useState<ComplianceRequest | null>(null);
@@ -76,9 +77,10 @@ const ComplianceDashboard: React.FC = () => {
     return p?.projectId || '-';
   };
 
-  const filteredRequests = requests.filter(r => 
-    r.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.requestId.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredRequests = requests.filter(r =>
+    (statusFilter === 'all' || r.status === statusFilter) &&
+    (r.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.requestId.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const getStatusColor = (status: ComplianceRequestStatus) => {
@@ -160,9 +162,22 @@ const ComplianceDashboard: React.FC = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-light text-sm">
-          <Filter size={16} /> Filter
-        </button>
+        <div className="relative">
+          <Filter size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | ComplianceRequestStatus)}
+            className="pl-8 pr-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 bg-white hover:bg-light appearance-none"
+            title="Filter by status"
+          >
+            <option value="all">All statuses</option>
+            <option value={ComplianceRequestStatus.PENDING_SUPPLIER}>Pending supplier</option>
+            <option value={ComplianceRequestStatus.SUBMITTED}>Submitted</option>
+            <option value={ComplianceRequestStatus.UNDER_REVIEW}>Under review</option>
+            <option value={ComplianceRequestStatus.APPROVED}>Approved</option>
+            <option value={ComplianceRequestStatus.REJECTED}>Rejected</option>
+          </select>
+        </div>
       </div>
 
       {/* List */}

@@ -52,11 +52,19 @@ export const Breadcrumbs: React.FC = () => {
 
         let label = routeLabels[value] || value.replace(/-/g, ' ');
 
+        // "create" means something different depending on its parent — a TCF request here,
+        // a new project elsewhere — so the flat lookup above is wrong for one of them. Kept
+        // as the one user-visible name for that artefact everywhere (page title, dashboard
+        // button, and here) rather than three different phrasings for the same thing.
+        if (value === 'create' && pathnames[index - 1] === 'compliance') {
+          label = 'New TCF Request';
+        }
+
         // Contextual renaming for IDs
         if (isId) {
           const prev = pathnames[index - 1];
           if (prev === 'project') label = 'Project Details';
-          else if (prev === 'request') label = 'Request Details';
+          else if (prev === 'request') label = 'TCF Request Details';
           else label = 'Details';
         }
 

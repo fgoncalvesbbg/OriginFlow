@@ -114,7 +114,7 @@ const compiledCache = new Map<string, CompiledExceptions>();
  * Merged, memoized exception set for a language: the universal list plus the
  * language's own. Unknown languages get the universal list alone.
  */
-export const exceptionsFor = (lang: string): CompiledExceptions => {
+const exceptionsFor = (lang: string): CompiledExceptions => {
   const key = (lang || 'en').toLowerCase().split('-')[0];
   const cached = compiledCache.get(key);
   if (cached) return cached;

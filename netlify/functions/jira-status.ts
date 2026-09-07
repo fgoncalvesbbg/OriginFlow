@@ -55,7 +55,6 @@
  *   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   session validation
  */
 
-import { createClient } from '@supabase/supabase-js';
 import {
   SAFE_CODE,
   buildJql,
@@ -64,12 +63,7 @@ import {
   type CodeResult,
   type JiraSearchIssue,
 } from './lib/jira-match';
-
-interface NetlifyEvent {
-  httpMethod: string;
-  body: string | null;
-  headers?: Record<string, string | undefined>;
-}
+import { NetlifyEvent, authenticate, AuthError, ConfigError } from './lib/http';
 
 const MAX_CODES = 60;
 /** Jira caps page size at 100; two searches x 100 is well inside the 10s function budget. */
@@ -191,18 +185,13 @@ const resolveProjectIdField = async (
 export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return json(500, { error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' });
-  }
-
   // Auth first: never let an unauthenticated caller probe the Jira backlog.
-  const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
-  const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
-  if (!token) return json(401, { error: 'Authentication required.' });
-  const { data: userData, error: authErr } = await admin.auth.getUser(token);
-  if (authErr || !userData?.user) return json(401, { error: 'Invalid or expired session.' });
+  try {
+    await authenticate(event);
+  } catch (e) {
+    if (e instanceof ConfigError) return json(500, { error: e.message });
+    return json(401, { error: e instanceof AuthError ? e.message : 'Authentication required.' });
+  }
 
   const rawBase = (process.env.JIRA_BASE_URL || '').trim().replace(/\/+$/, '');
   const email = (process.env.JIRA_EMAIL || '').trim();
@@ -263,9 +252,13 @@ export const handler = async (event: NetlifyEvent) => {
     // OriginFlow project and its Epic. Without it there is no honest answer, and
     // guessing from the summary would risk showing the wrong launch's status.
     if (!fieldId) {
+      // The account email is an internal config detail (JIRA_EMAIL) — log it server-side
+      // for whoever fixes the field name, but never echo it to the client.
+      console.error(`[jira-status] No Jira field named "${projectIdFieldName}" is visible to ${email}.`);
       return json(502, {
-        error: `No Jira field named "${projectIdFieldName}" is visible to ${email}. ` +
+        error: `No Jira field named "${projectIdFieldName}" is visible to the configured Jira account. ` +
           'Set JIRA_PROJECT_ID_FIELD to its exact display name, or check the account can see it.',
+        code: 'JIRA_FIELD_NOT_FOUND',
       });
     }
 

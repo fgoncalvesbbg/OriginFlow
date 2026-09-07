@@ -96,6 +96,20 @@ export const deleteProjectSku = async (id: string): Promise<void> => {
 // Pure helpers (no DB) — shared by ProjectDetail and the IM generator
 // ---------------------------------------------------------------------------
 
+/**
+ * Sort key for a submission's timestamp. `submittedAt` is nullable (and a stray unparsable
+ * value is possible too), and `new Date(null-ish).getTime()` is NaN — a NaN comparator result
+ * makes Array.prototype.sort's outcome unspecified, so a submission with no timestamp could
+ * end up anywhere, including first. Missing/unparsable sorts as -Infinity — i.e. treated as
+ * the OLDEST possible — so it can never silently outrank a submission that DOES carry a real
+ * timestamp; the only way it wins is if every candidate is equally undated.
+ */
+const submissionTime = (r: ProjectAttributeRequest): number => {
+  if (!r.submittedAt) return -Infinity;
+  const t = new Date(r.submittedAt).getTime();
+  return Number.isFinite(t) ? t : -Infinity;
+};
+
 /** Latest submitted attribute request for a SKU number (newest first), if any. */
 const getLatestSkuSubmission = (
   skuNumber: string,
@@ -103,7 +117,7 @@ const getLatestSkuSubmission = (
 ): ProjectAttributeRequest | undefined =>
   attrRequests
     .filter(r => r.skuNumber === skuNumber && r.status === 'submitted' && r.submittedData && r.submittedData.length > 0)
-    .sort((a, b) => new Date(b.submittedAt!).getTime() - new Date(a.submittedAt!).getTime())[0];
+    .sort((a, b) => submissionTime(b) - submissionTime(a))[0];
 
 /**
  * Effective value for one attribute on one SKU: the latest supplier-submitted value wins,

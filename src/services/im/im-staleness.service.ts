@@ -24,7 +24,7 @@
  * published (its own pending edits are a separate concern).
  */
 
-import { db, orEmpty, type Row } from '../../data';
+import { db, mustRead, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { IMBlock, IMSection, IMTemplate, IMTemplateType, CategoryAttribute } from '../../types';
 import { getIMTemplates, getIMTemplateById } from './im-template.service';
@@ -65,7 +65,11 @@ interface SnapshotIndex {
 const loadSnapshots = async (projectId?: string): Promise<SnapshotIndex> => {
   const hashes = new Map<string, string>();
   const publishedAt = new Map<string, string>();
-  const rows = await orEmpty(
+  // A failed read here must NOT read as "no snapshots published yet" — every published
+  // manual would then look stale in every language (no hash to compare against), and the
+  // dashboard's "Re-publish selected/all" would bump and republish the entire fleet from a
+  // read failure, not an actual content change.
+  const rows = await mustRead(
     db.select<Row>('im_publish_snapshots', {
       columns: 'project_id, template_type, language, content_hash, published_at',
       // `undefined` when unscoped, so the whole-library and single-project cases share one query.

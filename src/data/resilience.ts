@@ -52,9 +52,21 @@ export const orUndefined = <T>(read: Promise<T | null>, context: string): Promis
     return undefined;
   });
 
-/** Resolve to `fallback` if the read fails, logging why. */
-export const orValue = <T>(read: Promise<T>, fallback: T, context: string): Promise<T> =>
+/**
+ * The explicit counterpart to `orEmpty`/`orUndefined`: a read whose failure MUST NOT be
+ * degraded, because something downstream WRITES or GATES on the result.
+ *
+ * The bug class this exists to prevent: wrapping a lookup in `orEmpty` upstream of a
+ * find-or-create or a safety check. A failed read then looks identical to "no rows", so the
+ * caller happily creates a duplicate row, republishes everything as stale, or lets a delete
+ * through because the usage count came back empty. Degrading a read is only ever safe when
+ * nothing acts on the emptiness.
+ *
+ * This does not add retries - it re-throws with call-site context so the failure is
+ * attributable instead of silent.
+ */
+export const mustRead = <T>(read: Promise<T>, context: string): Promise<T> =>
   read.catch((e) => {
-    console.error(`[read] ${context} failed`, e);
-    return fallback;
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(`[read] ${context} failed and cannot be degraded: ${detail}`, { cause: e });
   });

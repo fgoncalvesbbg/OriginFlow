@@ -11,6 +11,13 @@ import type { IMTemplateType } from '../../types';
 
 export type IMShareMode = 'view' | 'review';
 
+/**
+ * Default TTL for a share link that does not specify one explicitly (see `createIMShare`).
+ * A share token grants unauthenticated, unlogged-in read access to a manual — "forever" must
+ * be something a caller opts into, not something it gets by omission.
+ */
+const DEFAULT_SHARE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 export interface IMShare {
   id: string;
   token: string;
@@ -98,6 +105,14 @@ export const getIMShares = async (
  * `mode: 'review'` makes it a supplier review link instead of a read-only one; pass
  * `manualVersion` (the project_ims.version being sent out) alongside it so a later republish
  * is detectable as "reviewed against v3, now on v4".
+ *
+ * `expiresAt` defaults to 30 days from now when the caller OMITS the option entirely (e.g.
+ * ProjectIMGenerator's "send for supplier review" flow). A caller that explicitly passes
+ * `expiresAt` — including `null`, meaning "no expiry" (e.g. the Viewer tab's "Never" choice) —
+ * is honored exactly as passed: `'expiresAt' in opts` distinguishes "the key is absent" from
+ * "the key is present with value null", which a plain `opts?.expiresAt ?? default` cannot —
+ * that would silently turn every omitted-expiry caller into a link that never expires, which
+ * is the bug this default exists to close.
  */
 export const createIMShare = async (
   projectId: string,
@@ -106,12 +121,15 @@ export const createIMShare = async (
 ): Promise<IMShare> => {
   const user = await auth.getUser();
   const createdBy = user?.email ?? user?.id ?? null;
+  const expiresAt = opts && 'expiresAt' in opts
+    ? opts.expiresAt
+    : new Date(Date.now() + DEFAULT_SHARE_TTL_MS).toISOString();
   const created = await db.insert<Row>('im_shares', {
     project_id: projectId,
     template_type: templateType,
     created_by: createdBy,
     label: opts?.label?.trim() || null,
-    expires_at: opts?.expiresAt ?? null,
+    expires_at: expiresAt,
     mode: opts?.mode ?? 'view',
     manual_version: opts?.manualVersion ?? null,
   });

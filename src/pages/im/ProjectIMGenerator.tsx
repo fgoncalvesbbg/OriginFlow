@@ -13,14 +13,15 @@ import {
     addDocument, uploadFile, getProjectDocs, generatedDocTitle, GENERATED_DOC_STEP, getCategoryAttributes, getAttributeRequestsByProject,
     getIMBlocks, resolveManual, publishResolvedManuals, normalizeResolverData,
     getProjectSkus, collapseSkuAttributeValues, isPrintExportAvailable,
-    getProjectIMStaleReasons, getPrintRenders, getPublishedManifestUrl,
+    getProjectIMStaleReasons, getPrintRenders,
     updateProjectIMPlaceholders, getProjectRequiredLanguages, getProjectPrintedLanguages,
     getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
     getIMShares, createIMShare, getIMReviewUrl,
     getReviewComments, setReviewCommentStatus, setProjectIMReviewRequested,
     getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
     getRegulations, collectBlocks, summarizeBlocks,
-    getTemplateChecklistState, summarizeChecklist, groupChecklistByRegulation
+    getTemplateChecklistState, summarizeChecklist, groupChecklistByRegulation,
+    getWizardQuestions
 } from '../../services';
 import type { ChecklistItem, ChecklistItemState, ChecklistItemStatus } from '../../services';
 import type { IMReviewComment, IMReviewCommentStatus, IMShare } from '../../services';
@@ -37,12 +38,16 @@ import { markTranslatedFromEn } from '../../services/im/im-translation-marker';
 import { IM_LANGUAGE_NAMES, IM_LANGUAGE_CODES, IM_TEMPLATE_LANGUAGE_OPTIONS, orderIMLanguages } from '../../config/im-languages';
 import { DEFAULT_IM_LOGO_URL } from '../../config/im.constants';
 import { uploadIMAsset, externalizeHtmlImages, externalizeFormDataImages } from '../../services/im/im-asset.service';
+import { getSignedManifestUrl } from '../../services/im/im-publish.service';
+// Signed-URL minting bypasses the barrel, matching PrintExportDialog.tsx's own import of the
+// same helper — im-print is one of the two buckets closed off from permanent public URLs.
+import { getSignedPrintPdfUrlForPath } from '../../services/im/im-print-export.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
-import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle } from '../../types';
+import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle, WizardQuestion } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
 import { printedManualStatusOf, MANUAL_STATUS_META } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2 } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
@@ -52,7 +57,7 @@ import { ProjectSupplierDiffImportDialog } from './ProjectSupplierDiffImportDial
 import { getAttributesForCategory, sanitizeHtml } from '../../utils';
 import { getIMThemeVariables } from './styles/im-theme';
 import { DEFAULT_MASTER_PAGES, getBackgroundStyle, joinAttrValues } from './project-im-generator/im-layout.utils';
-import { decodePlaceholderLabel, escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
+import { collectSectionInputs, decodePlaceholderLabel, escapeXml, getTokensInFragment, matchesConditionValue, refHasCondition, refHasTable, refIsOverridable } from './project-im-generator/im-content.utils';
 import { blockTypeToVariant, isExtraSection, isInlineBlockEmpty, newInlineBlock, sectionToInlineBlocks, seedPlaceholderBlocks } from './project-im-generator/im-blocks.utils';
 import { PREVIEW_SECTION_ATTR, findPreviewSection, findByDataAttr, previewScrollTopFor } from './project-im-generator/preview-scroll.utils';
 import { ReviewCommentsPanel } from './project-im-generator/ReviewCommentsPanel';
@@ -60,6 +65,7 @@ import { groupCommentsBySection, reviewCommentCounts, reviewRoundStateOf } from 
 import { markQuoteInHtml } from './review-anchor';
 import { buildSectionOutline, findExcludedAncestor, METADATA_SECTION_TITLE } from './project-im-generator/section-outline.utils';
 import { FILL_ANCHOR_ATTR, fillAnchors, summarizePublishIssues, type PublishIssue } from './project-im-generator/publish-issues';
+import PlaceholderIntakeWizard from './project-im-wizard/PlaceholderIntakeWizard';
 import PublishReviewPanel from './project-im-generator/PublishReviewPanel';
 import EditorSideRail, { type SidePanelId, type SideRailItem } from './project-im-generator/EditorSideRail';
 import TranslationStatusPanel from './project-im-generator/TranslationStatusPanel';
@@ -239,6 +245,12 @@ const ProjectIMGenerator: React.FC = () => {
   // identical to what's already live. Carries the prior artifacts to show instead of republishing.
   const [noChangesPrompt, setNoChangesPrompt] = useState<{ manifestUrl: string | null; lastRender: PrintRender | null } | null>(null);
   const [checkingChanges, setCheckingChanges] = useState(false);
+  // Downloading a print render's PDF outside the export dialog (the "Already up to date"
+  // prompt and the Printed IM panel's "Download latest") never uses the render's persisted
+  // `.url` — im-print is closed off from permanent public URLs. Both mint a fresh signed URL
+  // from the render's own `storagePath` at click time; see downloadPrintRender below.
+  const [downloadingRenderPath, setDownloadingRenderPath] = useState<string | null>(null);
+  const [downloadRenderError, setDownloadRenderError] = useState<string | null>(null);
   // Auto-translation of project-authored content (added/edited sections). English is
   // always the source; template content is translated in the template editor, not here.
   // Language picker (same modal as the category template editor's "Manual Languages").
@@ -696,6 +708,71 @@ const ProjectIMGenerator: React.FC = () => {
       return () => { alive = false; };
   }, [template?.id, template?.categoryId, projectId, templateType]);
 
+  // --- Placeholder intake wizard registry (migrations 142/143) --------------
+  // Fetched here (not derived in buildPublishIssues, which runs synchronously on every
+  // render) because getWizardQuestions is an async DB read — same reason regBlocks above
+  // is state built from an effect rather than computed inline. Project-scope only: no
+  // wizard UI exists yet to write a SKU-scoped answer, so this is the read path Phase 1
+  // needs (see the wizard plan §5) without yet needing a "current SKU" context here.
+  const [wizardQuestions, setWizardQuestions] = useState<WizardQuestion[]>([]);
+
+  useEffect(() => {
+      if (!selectedTemplateId || !projectId) { setWizardQuestions([]); return; }
+      let alive = true;
+      getWizardQuestions(selectedTemplateId, projectId)
+          .then(qs => { if (alive) setWizardQuestions(qs); })
+          .catch(e => console.error('[ProjectIMGenerator] wizard questions unavailable:', e));
+      return () => { alive = false; };
+  }, [selectedTemplateId, projectId, instance?.id]);
+
+  // --- Placeholder intake wizard shell (project-im-wizard/) ------------------
+  // Full-screen overlay, not a second route — see PlaceholderIntakeWizard's own doc
+  // comment. `wizardOpen` is a NEW name distinct from the `wizardQuestions` state above
+  // (that state stays untouched, per the wizard plan's constraints); the wizard fetches
+  // its own live-recomputed question list independently once open.
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  // resolveManual needs the FULL IMBlock map (id/slug/title/…), not the trimmed
+  // { content, blockType } shape `availableBlocks` keeps for the preview renderer — mirrors
+  // loadResolveContext's own blocksById construction above.
+  const wizardBlocksById = useMemo(() => {
+      const m: Record<string, IMBlock> = {};
+      for (const b of blockLibrary) m[b.id] = b;
+      return m;
+  }, [blockLibrary]);
+  const wizardAttributesById = useMemo(
+      () => allAttributes.reduce<Record<string, CategoryAttribute>>((m, a) => { m[a.id] = a; return m; }, {}),
+      [allAttributes],
+  );
+
+  // Wraps buildPlaceholderData with a single-key override, for LivePreviewPane's candidate
+  // resolve — the same flat shape buildPlaceholderData already produces for every other save
+  // path (submittedAttrValues + formData + cond_/secvis_/refvis_/meta), just with one field
+  // swapped in before formData itself has necessarily re-rendered with it.
+  const buildWizardCandidateData = (overrideKey: string, overrideValue: string): Record<string, string> =>
+      buildPlaceholderData(overrideKey ? { ...formData, [overrideKey]: overrideValue } : formData);
+
+  // Guarantees a project_ims row exists before the wizard's first answer write
+  // (saveWizardAnswer throws otherwise — see its own doc comment). Reuses the existing
+  // draft-save path rather than reimplementing "create the first draft" here.
+  const ensureProjectImId = async (): Promise<string | undefined> => {
+      if (instance?.id) return instance.id;
+      const saved = await persistDraft({ silent: true });
+      return saved?.id;
+  };
+
+  // Auto-open once per mount, the moment a template is selected for a project that has
+  // never had a manual saved (no `existingInstance` in loadData — `instance` stays null
+  // until the wizard's own first save, or an existing manual is loaded). Guarded by a ref
+  // so it never reopens itself after the user closes it in this session.
+  const wizardAutoOpenedRef = useRef(false);
+  useEffect(() => {
+      if (loading || wizardAutoOpenedRef.current) return;
+      if (!selectedTemplateId || instance) return;
+      wizardAutoOpenedRef.current = true;
+      setWizardOpen(true);
+  }, [loading, selectedTemplateId, instance]);
+
   const regChecklistSummary = summarizeChecklist(regChecklist, regChecklistState);
   // The same items, split by the regulation that imposes them — how a reviewer reads a
   // checklist. Derived rather than stored: the grouping is a view of `regAssignments`.
@@ -1041,24 +1118,39 @@ const ProjectIMGenerator: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handler);
   });
 
+  // In-flight persistDraft call, if any — shared so a SECOND caller (a wizard answer's
+  // ensureProjectImId racing the 4s background autosave — the common case, since the
+  // wizard's own edit is exactly what dirtied formData and armed that autosave) WAITS for
+  // and reuses that result instead of bailing and silently losing whatever triggered it.
+  // See ensureProjectImId's doc comment and the wizard's commitAnswer.
+  const persistDraftInFlightRef = useRef<Promise<ProjectIM | undefined> | null>(null);
+
   // Persist the draft to the server. `silent` drives background autosave: no blocking
   // overlay, no success tick, and a failure is logged (and retried on the next change)
   // rather than alerted — the local backup remains the crash net either way.
-  const persistDraft = async (opts?: { silent?: boolean }) => {
-      if (!projectId || !selectedTemplateId) return;
+  // Returns the saved row (so callers like `ensureProjectImId` can read its id straight
+  // back) or undefined when the save was skipped/failed — every existing caller ignores
+  // the return value, so this is additive.
+  const persistDraft = async (opts?: { silent?: boolean }): Promise<ProjectIM | undefined> => {
+      if (!projectId || !selectedTemplateId) return undefined;
       // A FINAL manual is read-only — never persist (this also short-circuits autosave).
-      if (locked) return;
+      if (locked) return undefined;
       // A detected concurrent-edit conflict halts all saves until the operator reloads —
       // saving would overwrite the other person's version.
-      if (saveConflict) return;
-      // Never let a save start on top of another operation (Publish/Translate/another Save):
-      // overlapping writes to the same row queue behind each other's row lock (see data/resilience.ts).
-      if (isBusy) return;
+      if (saveConflict) return undefined;
+      // Another persistDraft call (the background autosave, or another caller) is already
+      // writing this exact row — JOIN it instead of starting a second overlapping write or
+      // bailing outright, so this caller still gets the real saved row back.
+      if (persistDraftInFlightRef.current) return persistDraftInFlightRef.current;
+      // Never let a save start on top of a DIFFERENT operation (Publish/Translate/Finalize):
+      // those don't share a promise this can join, so refuse rather than race them.
+      if (isBusy) return undefined;
       const silent = opts?.silent ?? false;
       if (silent) setAutosaving(true);
       else { setSavedTick(false); setSaving(true); await yieldToPaint(); }
 
-      try {
+      const run = (async (): Promise<ProjectIM | undefined> => {
+        try {
           // Move any base64 images out of the row (formData + overlay content) into storage
           // first, so the persisted JSONB stays small and can't trip the DB write timeout.
           const cache = new Map<string, string>();
@@ -1080,7 +1172,8 @@ const ProjectIMGenerator: React.FC = () => {
               setSavedTick(true);
               setTimeout(() => setSavedTick(false), 2500);
           }
-      } catch (e) {
+          return saved;
+        } catch (e) {
           console.error(e);
           if (e instanceof ProjectIMConflictError) {
               // Same handling for manual save and autosave: halt saving, show the banner.
@@ -1091,9 +1184,18 @@ const ProjectIMGenerator: React.FC = () => {
           } else {
               console.warn('[ProjectIMGenerator] autosave failed — will retry on next change (work is backed up locally).');
           }
-      } finally {
+          return undefined;
+        } finally {
           if (silent) setAutosaving(false);
           else setSaving(false);
+        }
+      })();
+
+      persistDraftInFlightRef.current = run;
+      try {
+        return await run;
+      } finally {
+        persistDraftInFlightRef.current = null;
       }
   };
 
@@ -1350,7 +1452,6 @@ const ProjectIMGenerator: React.FC = () => {
       const nextVersion = (instance?.version ?? 0) + 1;
 
       try {
-          setPublishStatus('Saving…');
           await yieldToPaint();
           // Move any base64 images out of the row (formData + overlay content) into storage
           // first, so the persisted JSONB stays small and can't trip the DB write timeout.
@@ -1363,10 +1464,34 @@ const ProjectIMGenerator: React.FC = () => {
           setBlockOverrides(extOv.blockOverrides);
           setExtraSections(extOv.extraSections);
           const dataToSave = buildPlaceholderData(extForm);
-          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides, { baselineUpdatedAt: instance?.updatedAt ?? null });
-          setInstance(savedIM);
-          // Baseline = exactly what we persisted, so the local draft clears.
-          markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
+
+          // Resolve + publish FIRST, before any version bump is persisted. publish can still
+          // veto the whole operation (temp-highlight check, the FINAL-manual verbatim check,
+          // or a Storage upload failure) — if it does, saveProjectIM below never runs, so
+          // `version`/`status` are never advanced past whatever manifest currently exists.
+          // Reordering this the other way (as before) let a vetoed publish still bump the
+          // saved version, so a version no manifest ever had could get stamped into
+          // im_print_renders.im_version. `candidateIM` mirrors exactly what saveProjectIM is
+          // about to persist (same placeholderData/overlays/version) without writing it yet.
+          const candidateIM: ProjectIM = {
+              ...(instance ?? {
+                  id: '',
+                  templateId: selectedTemplateId,
+                  templateType,
+                  status: 'draft' as const,
+                  updatedAt: new Date().toISOString(),
+              }),
+              templateType,
+              placeholderData: dataToSave,
+              skuContent: skuContent ?? {},
+              boundSkuIds,
+              sectionAdditions: extOv.sectionAdditions,
+              extraSections: extOv.extraSections,
+              sectionOverrides: extOv.sectionOverrides,
+              sectionSkus,
+              blockOverrides: extOv.blockOverrides,
+              version: nextVersion,
+          };
 
           // Publish the structured ResolvedManual (one JSON per language + manifest) to the
           // public im-published bucket. This IS the publish output — the print-ready PDF is
@@ -1374,16 +1499,25 @@ const ProjectIMGenerator: React.FC = () => {
           // the project's documents when that render succeeds (attachPrintPdfToProject).
           setPublishStatus('Publishing languages…');
           await publishResolvedManuals(
-              project.id, template, sections, savedIM,
+              project.id, template, sections, candidateIM,
               (done, total, lang) => setPublishStatus(`Publishing ${done}/${total} (${lang.toUpperCase()})…`),
           );
+
+          // Only now persist the version bump — the manifest this version number describes
+          // already exists.
+          setPublishStatus('Saving…');
+          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides, { baselineUpdatedAt: instance?.updatedAt ?? null });
+          setInstance(savedIM);
+          // Baseline = exactly what we persisted, so the local draft clears.
+          markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
+
           // No confirmation screen — Publish is one of three quick menu actions now (see the
           // header's Publish dropdown), not a one-off event needing its own modal. Straight
           // into the same print-export dialog every other export goes through (scoped to
           // every required language, unlike Print Version's reduced subset), so exporting a
           // full-language PDF right after publishing is still one step, not a hunt for a
           // second button — dismiss it if a PDF isn't needed right now.
-          if (isPrintExportAvailable()) openPrintDialog();
+          if (isPrintExportAvailable()) await openPrintDialog();
 
       } catch (e: any) {
           console.error("Publish failed", e);
@@ -1408,7 +1542,11 @@ const ProjectIMGenerator: React.FC = () => {
   // so an unrelated render here can't silently change what the supplier sees.
   const attachPrintPdfToProject = async (res: PrintPdfResult, langs: string[], pageSize: 'a4' | 'a5') => {
       if (!project) throw new Error('Project not loaded.');
-      const resp = await fetch(res.url);
+      // `res.url` is the permanent (soon to be non-working) public URL — im-print is one of
+      // the two buckets closed off from permanent public URLs. Re-upload from a freshly
+      // minted signed URL instead, matching every other read of this bucket.
+      const signedUrl = await getSignedPrintPdfUrlForPath(res.storagePath, { projectId: project.id });
+      const resp = await fetch(signedUrl);
       if (!resp.ok) throw new Error(`Could not download the rendered PDF (${resp.status}).`);
       const blob = await resp.blob();
       // The layout is part of the slug, so a compact render is a document of its own rather
@@ -1440,6 +1578,35 @@ const ProjectIMGenerator: React.FC = () => {
       });
 
       await uploadFile(targetDoc.id, file, false);
+  };
+
+  // Download a print render's PDF from OUTSIDE the export dialog (the "Already up to date"
+  // prompt, and the Printed IM panel's "Download latest"). Mirrors PrintExportDialog's own
+  // downloadPdf: mint a fresh signed URL from the render's `storagePath` at CLICK time (not
+  // earlier — a URL minted when the render list loaded would expire while the page sits
+  // open), then trigger the download via the anchor's own `download` attribute, since a
+  // signed URL carries no `?download=` param for Supabase to turn into Content-Disposition.
+  const downloadPrintRender = async (r: PrintRender) => {
+      if (!project) return;
+      setDownloadRenderError(null);
+      setDownloadingRenderPath(r.storagePath);
+      try {
+          const url = await getSignedPrintPdfUrlForPath(r.storagePath, { projectId: project.id });
+          const layoutSlug = r.layout === 'compact2col' ? '_Compact' : '';
+          const docTypeSlug = (templateType === 'warning_leaflet' ? 'Warning_Leaflet' : 'Manual') + layoutSlug;
+          const fileName = `${project.name.replace(/\s+/g, '_')}_${docTypeSlug}_${r.languages.map(l => l.toUpperCase()).join('-')}_${r.pageSize.toUpperCase()}.pdf`;
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          a.rel = 'noreferrer';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+      } catch (e) {
+          setDownloadRenderError(e instanceof Error ? e.message : 'Could not create a download link.');
+      } finally {
+          setDownloadingRenderPath(null);
+      }
   };
 
   // Remember the cover choices made in the print dialog (logo / cover image) as this
@@ -2098,101 +2265,12 @@ const ProjectIMGenerator: React.FC = () => {
       return doc.body.innerHTML;
   };
 
-  const getItemsInSection = (html: string) => {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      const items: { id: string; kind: 'placeholder' | 'condition'; type?: 'text' | 'image'; featureId?: string; label?: string; conditionLabel?: string; always?: boolean }[] = [];
-
-      const placeholders = doc.querySelectorAll('.im-placeholder');
-      placeholders.forEach((el) => {
-          const id = el.getAttribute('data-id');
-          const type = el.getAttribute('data-type');
-          const label = decodePlaceholderLabel(el.getAttribute('data-label'), el.textContent ?? '', type === 'text' ? 'Text Input' : 'Image Upload');
-
-          if (id && type) items.push({ id, kind: 'placeholder', type: type as 'text'|'image', label });
-      });
-
-      const conditionNodes = doc.querySelectorAll('.im-condition');
-      conditionNodes.forEach((el) => {
-          const id = el.getAttribute('data-id');
-          const featureId = el.getAttribute('data-feature-id');
-          const contentEncoded = el.getAttribute('data-content');
-          if (id && featureId) {
-              const always = el.getAttribute('data-always') === 'true';
-              let snippet = '';
-              let conditionLabel = '';
-              if (contentEncoded) {
-                  try {
-                      const content = decodeURIComponent(contentEncoded);
-                      snippet = content.length > 40 ? content.substring(0, 40) + '...' : content;
-                  } catch (e) { snippet = 'Error decoding content'; }
-              }
-              try {
-                  const cv = el.getAttribute('data-condition-value');
-                  if (cv && cv !== '*') conditionLabel = decodeURIComponent(cv);
-              } catch (e) {}
-              const featureName = el.getAttribute('data-feature-name') || '';
-              if (always) {
-                  items.push({ id, kind: 'condition', featureId, label: featureName, conditionLabel: '', always: true });
-              } else if (contentEncoded) {
-                  items.push({ id, kind: 'condition', featureId, label: snippet, conditionLabel });
-              }
-          }
-      });
-      return items;
-  };
-
-  /** Extract {{attributeId}} token names from an HTML/text fragment. */
-
-  /**
-   * All content fragments that make up a section in a given language: its own
-   * inline content plus every inline ref and shared block it references. Mirrors
-   * buildSectionHtml so the config form sees exactly what the preview renders.
-   */
-  const getSectionFragments = (section: IMSection, lang: string): string[] => {
-      const refs = section.blockRefs ?? [];
-      const hasInlineRef = refs.some(r => r.kind === 'inline');
-      const frags: string[] = [];
-      if (!hasInlineRef) frags.push(section.content[lang] || section.content['en'] || '');
-      for (const ref of refs) {
-          if (ref.kind === 'inline') {
-              frags.push((ref as any).content?.[lang] || (ref as any).content?.['en'] || '');
-          } else if (ref.kind === 'block') {
-              const blk = availableBlocks[(ref as any).block_id];
-              if (blk) frags.push(blk.content[lang] || blk.content['en'] || '');
-          }
-      }
-      return frags.filter(Boolean);
-  };
-
-  /**
-   * Every input a section needs across all its content sources:
-   *  - items: placeholders + conditions (deduped by id)
-   *  - attrTokens: {{attributeId}} tokens (e.g. SKU number, power) pulled from
-   *    inline content AND shared blocks, so bound spec values are verifiable here.
-   */
-  const collectSectionInputs = (section: IMSection, lang: string) => {
-      const seenItems = new Set<string>();
-      const items: ReturnType<typeof getItemsInSection> = [];
-      const seenTokens = new Set<string>();
-      const attrTokens: string[] = [];
-      for (const html of getSectionFragments(section, lang)) {
-          for (const it of getItemsInSection(html)) {
-              if (!seenItems.has(it.id)) { seenItems.add(it.id); items.push(it); }
-          }
-          for (const tok of getTokensInFragment(html)) {
-              if (!seenTokens.has(tok)) { seenTokens.add(tok); attrTokens.push(tok); }
-          }
-      }
-      return { items, attrTokens };
-  };
-
   const calculateCompletion = (lang: string) => {
       let total = 0;
       let filled = 0;
-      
+
       sections.forEach(s => {
-          const { items, attrTokens } = collectSectionInputs(s, lang);
+          const { items, attrTokens } = collectSectionInputs(s, lang, availableBlocks);
           items.forEach(i => {
               if (i.kind === 'placeholder' || (i.kind === 'condition' && i.always)) {
                   total++;
@@ -3406,6 +3484,22 @@ const ProjectIMGenerator: React.FC = () => {
       });
     }
 
+    // Hard requirement: every regulatory-tier placeholder wizard question (migrations
+    // 142/143) must be answered before publish — a pending one is left out of no
+    // resolved output today, but a skipped REGULATORY value is a compliance gap, not a
+    // style choice. Advisory tiers (recommended/optional) never block here.
+    for (const q of wizardQuestions) {
+      if (q.tier !== 'regulatory') continue;
+      if (q.currentAnswer && q.currentAnswer.status !== 'pending') continue; // answered or not_applicable
+      issues.push({
+        key: `blocking:im-registry:${q.key}`,
+        kind: 'blocking',
+        label: q.label,
+        detail: 'This is a regulatory-tier value and must be filled before publishing.',
+        target: { pane: 'fill', anchor: fillAnchors.value(q.key) },
+      });
+    }
+
     // Hard requirement: an IM must be bound to at least one SKU (and the project must have one).
     const boundCount = boundSkuIds.length ? projectSkus.filter(s => boundSkuIds.includes(s.id)).length : projectSkus.length;
     if (projectSkus.length === 0) {
@@ -3430,7 +3524,7 @@ const ProjectIMGenerator: React.FC = () => {
     for (const section of orderedSections) {
       if (!isSectionEffectivelyVisible(section)) continue;
       const secTitle = localizedSectionTitle(section, 'en');
-      const { items, attrTokens } = collectSectionInputs(section, 'en');
+      const { items, attrTokens } = collectSectionInputs(section, 'en', availableBlocks);
       // Placeholder values + value-conditions are filled once and shared across languages.
       for (const it of items) {
         if (it.kind === 'condition' && !it.always) continue; // visibility toggles, not required values
@@ -3697,8 +3791,17 @@ ${url}`);
         const reasons = await getProjectIMStaleReasons(project.id, templateType);
         if (!reasons.length) {
           const renders = await getPrintRenders(project.id, templateType);
+          // `im-published` is one of the two buckets closed off from permanent public URLs —
+          // this "Open" link is re-signed here, re-validated against THIS project via the
+          // caller's own session (authorizeProject), rather than built as a bare public URL.
+          let manifestUrl: string | null = null;
+          try {
+            manifestUrl = await getSignedManifestUrl(project.id, templateType, { projectId: project.id });
+          } catch (signErr) {
+            console.error('Could not sign the manifest URL for the "already up to date" prompt.', signErr);
+          }
           setNoChangesPrompt({
-            manifestUrl: getPublishedManifestUrl(project.id, templateType),
+            manifestUrl,
             lastRender: renders[0] ?? null,
           });
           return;
@@ -3741,16 +3844,28 @@ ${url}`);
   // so Full IM and Print Version are two chips apart inside it rather than two separate
   // trips through this page. Both PDFs are therefore reachable from wherever the dialog was
   // opened, which is the point: a PDF must never require a republish to obtain.
-  const openPrintDialog = (langs: string[] = requiredLanguages) => {
+  const openPrintDialog = async (langs: string[] = requiredLanguages) => {
     if (!project) return;
-    const manifestUrl = getPublishedManifestUrl(project.id, templateType) ?? '';
+    // `im-published` is one of the two buckets closed off from permanent public URLs. This
+    // manifestUrl is re-signed and re-validated against THIS project — and, unlike the old
+    // public URL, a signed URL is bound to ONE object, so it can no longer be turned into
+    // another language's URL by string substitution (see the `languages` map below).
+    let manifestUrl = '';
+    try {
+      manifestUrl = await getSignedManifestUrl(project.id, templateType, { projectId: project.id });
+    } catch (signErr) {
+      console.error('Could not sign the manifest URL for the print dialog.', signErr);
+    }
     setPrintScope(langs);
     setPublishResult({
       manifestUrl,
       manifestPath: `${project.id}/${templateType}/manifest.json`,
+      // Per-language `.url` is left blank rather than derived from `manifestUrl` (a signed URL
+      // can't be restrung into another object's URL the way the old public one could) —
+      // PrintExportDialog only ever reads `.language` off this array, never `.url`.
       languages: requiredLanguages.map(language => ({
         language,
-        url: manifestUrl.replace(/manifest\.json(\?.*)?$/, `${language}.json$1`),
+        url: '',
         storagePath: `${project.id}/${templateType}/${language}.json`,
         contentHash: '',
         warnings: [],
@@ -4593,14 +4708,29 @@ ${url}`);
                        {' · '}{new Date(noChangesPrompt.lastRender.createdAt).toLocaleDateString()}
                      </div>
                    </div>
-                   <a href={noChangesPrompt.lastRender.url} target="_blank" rel="noreferrer" className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50 flex items-center gap-1 shrink-0">
-                     <Download size={12} /> Download
-                   </a>
+                   <button
+                     type="button"
+                     onClick={() => void downloadPrintRender(noChangesPrompt.lastRender as PrintRender)}
+                     disabled={downloadingRenderPath === noChangesPrompt.lastRender.storagePath}
+                     className="text-xs px-2 py-1.5 border rounded hover:bg-gray-50 flex items-center gap-1 shrink-0 disabled:opacity-50"
+                   >
+                     {downloadingRenderPath === noChangesPrompt.lastRender.storagePath ? (
+                       <Loader2 size={12} className="animate-spin" />
+                     ) : (
+                       <Download size={12} />
+                     )}
+                     {downloadingRenderPath === noChangesPrompt.lastRender.storagePath ? 'Preparing…' : 'Download'}
+                   </button>
                  </div>
                ) : (
                  <div className="px-3 py-2.5 text-xs text-muted">No print PDF has been rendered for this version yet.</div>
                )}
              </div>
+             {downloadRenderError && (
+               <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-4">
+                 {downloadRenderError}
+               </div>
+             )}
 
              <div className="flex items-center gap-2 pt-4 border-t border-gray-100">
                {/* Render a (new) PDF from the already-published version — no republish needed.
@@ -5002,6 +5132,7 @@ ${url}`);
                        { label: 'Data', items: [
                          { key: 'import-json', icon: <FileJson size={15} />, label: 'Replace from manual JSON…', hint: 'Overwrites this manual with a reviewed JSON export', onClick: () => setShowImport(true), disabled: loading || isBusy || locked },
                          ...(instance ? ([{ key: 'backups', icon: <RotateCcw size={15} />, label: 'Restore daily backup', hint: 'Load one of the last 3 daily snapshots into the editor', onClick: () => { void openBackups(); }, disabled: loading || isBusy || locked }] as ToolbarMenuItem[]) : []),
+                         { key: 'wizard', icon: <Wand2 size={15} />, label: 'Guided intake wizard', hint: 'Re-run the guided question-and-answer pass for this manual', onClick: () => setWizardOpen(true), disabled: loading || isBusy || locked },
                        ] },
                        { items: [
                          { key: 'delete', icon: instance ? <Trash2 size={15} /> : <RotateCcw size={15} />, label: instance ? 'Delete Draft' : 'Reset', tone: 'danger', hint: instance ? 'Removes this project manual and everything authored in it' : 'Clear the editor back to the template', onClick: handleDeleteDraft, disabled: loading || isBusy || locked },
@@ -5319,14 +5450,24 @@ ${url}`);
                                    className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                                  ><Printer size={12} /> {printedRenderCandidate && !printedIsStale ? 'Render again' : 'Render print PDF'}</button>
                                  {printedRenderCandidate && (
-                                   <a
-                                     href={printedRenderCandidate.url}
-                                     target="_blank"
-                                     rel="noreferrer"
-                                     className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-white flex items-center gap-1.5"
-                                   ><Download size={12} /> Download latest</a>
+                                   <button
+                                     type="button"
+                                     onClick={() => void downloadPrintRender(printedRenderCandidate)}
+                                     disabled={downloadingRenderPath === printedRenderCandidate.storagePath}
+                                     className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-white flex items-center gap-1.5 disabled:opacity-50"
+                                   >
+                                     {downloadingRenderPath === printedRenderCandidate.storagePath ? (
+                                       <Loader2 size={12} className="animate-spin" />
+                                     ) : (
+                                       <Download size={12} />
+                                     )}
+                                     {downloadingRenderPath === printedRenderCandidate.storagePath ? 'Preparing…' : 'Download latest'}
+                                   </button>
                                  )}
                                </div>
+                             )}
+                             {downloadRenderError && (
+                               <p className="text-[11px] text-red-600 mt-1.5">{downloadRenderError}</p>
                              )}
                            </div>
                          </div>
@@ -5550,7 +5691,7 @@ ${url}`);
                            // Collect inputs from ALL content sources for the ACTIVE language:
                            // inline content, inline refs, and shared blocks (incl. {{attribute}} tokens).
                            const contentHtml = section.content[activeLang] || '';
-                           const { items, attrTokens } = collectSectionInputs(section, activeLang);
+                           const { items, attrTokens } = collectSectionInputs(section, activeLang, availableBlocks);
                            const slotRefs = (section.blockRefs ?? []).filter(r => r.kind === 'sku_slot') as SKUSlotRef[];
 
                            // Skip a section only when it has no inputs of any kind to configure
@@ -5902,6 +6043,30 @@ ${url}`);
                     templateType={templateType}
                     onClose={() => setShowDiffImport(false)}
                     onImported={() => { setShowDiffImport(false); loadData(); }}
+                />
+            )}
+
+            {wizardOpen && template && selectedTemplateId && projectId && (
+                <PlaceholderIntakeWizard
+                    templateId={selectedTemplateId}
+                    templateType={templateType}
+                    projectId={projectId}
+                    projectImId={instance?.id}
+                    sections={sections}
+                    blocksById={wizardBlocksById}
+                    attributesById={wizardAttributesById}
+                    template={template}
+                    projectSkus={projectSkus}
+                    boundSkuIds={boundSkuIds}
+                    instance={instance}
+                    activeLang={activeLang}
+                    formData={formData}
+                    setFormData={setFormData}
+                    conditions={conditions}
+                    setConditions={setConditions}
+                    buildCandidateData={buildWizardCandidateData}
+                    ensureProjectImId={ensureProjectImId}
+                    onClose={() => setWizardOpen(false)}
                 />
             )}
 

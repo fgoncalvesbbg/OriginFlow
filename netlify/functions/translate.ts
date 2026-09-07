@@ -47,13 +47,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@supabase/supabase-js';
-
-interface NetlifyEvent {
-  httpMethod: string;
-  body: string | null;
-  headers?: Record<string, string | undefined>;
-}
+import { NetlifyEvent, json, serviceClient, authenticate, AuthError, ConfigError } from './lib/http';
 
 const PROMPT_KEY = 'im_translation';
 const QA_PROMPT_KEY = 'im_translation_qa';
@@ -107,11 +101,11 @@ const FALLBACK_QA_SYSTEM_TEMPLATE =
   `5. If the fragment is already correct, return it unchanged.\n` +
   `6. Output ONLY the corrected HTML fragment — no explanations, no markdown code fences.`;
 
-const json = (statusCode: number, payload: unknown) => ({
-  statusCode,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload),
-});
+/** ~20KB — every legitimate call is a single chip-frozen chunk capped at MAX_CHUNK_CHARS
+ *  (2500 chars, see src/services/ai/translation-chunk.ts), so this is generous headroom
+ *  for real traffic while still capping a caller who bypasses the browser's chunking and
+ *  hits this proxy directly (this endpoint spends Anthropic credits per call). */
+const MAX_TEXT_BYTES = 20 * 1024;
 
 const LANG_NAMES: Record<string, string> = {
   en: 'English', bg: 'Bulgarian', hr: 'Croatian', cs: 'Czech', da: 'Danish',
@@ -130,21 +124,24 @@ export const handler = async (event: NetlifyEvent) => {
     return json(500, { error: 'ANTHROPIC_API_KEY is not configured on the server.' });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return json(500, { error: 'Server is not configured for translation.' });
-  }
-
   // This proxy spends Anthropic credits, so it must never be callable anonymously.
   // Require a valid Supabase session, exactly like the print-render pipeline does —
-  // translation is a staff-only IM-editor feature.
-  const admin = createClient(supabaseUrl, serviceRoleKey);
-  const token = (event.headers?.authorization || event.headers?.Authorization || '')
-    .replace(/^Bearer\s+/i, '');
-  if (!token) return json(401, { error: 'Authentication required.' });
-  const { data: userData, error: authErr } = await admin.auth.getUser(token);
-  if (authErr || !userData?.user) return json(401, { error: 'Invalid or expired session.' });
+  // translation is a staff-only IM-editor feature. `serviceClient`/`authenticate` also
+  // fix a real drift: this handler used to build its Supabase client WITHOUT
+  // `persistSession: false` (every other handler had it) — the shared factory can't
+  // omit it.
+  let admin: ReturnType<typeof serviceClient>;
+  try {
+    admin = serviceClient();
+  } catch {
+    return json(500, { error: 'Server is not configured for translation.' });
+  }
+  try {
+    await authenticate(event);
+  } catch (e) {
+    if (e instanceof ConfigError) return json(500, { error: 'Server is not configured for translation.' });
+    return json(401, { error: e instanceof AuthError ? e.message : 'Authentication required.' });
+  }
 
   let text: string;
   let sourceLang: string | undefined;
@@ -162,6 +159,15 @@ export const handler = async (event: NetlifyEvent) => {
       error: isQa
         ? 'Request must include non-empty "text" and "targetLang".'
         : 'Request must include non-empty "text", "sourceLang" and "targetLang".',
+    });
+  }
+  // Abuse/cost cap: reject an oversized payload before it reaches the model. Legitimate
+  // callers never hit this — see MAX_TEXT_BYTES's comment.
+  const textBytes = Buffer.byteLength(text, 'utf8');
+  if (textBytes > MAX_TEXT_BYTES) {
+    return json(413, {
+      error: `text is too large (${textBytes} bytes; max ${MAX_TEXT_BYTES}).`,
+      code: 'TEXT_TOO_LARGE',
     });
   }
 

@@ -67,6 +67,19 @@ describe('getEffectiveSkuValue', () => {
   it('returns empty string when neither source has a value', () => {
     expect(getEffectiveSkuValue(makeSku({ id: 's1', skuNumber: 'A' }), [], 'color')).toBe('');
   });
+
+  it('never lets a submission with no timestamp outrank a properly dated one', () => {
+    // A null submittedAt in the middle of the list used to produce NaN in the sort
+    // comparator, making Array.prototype.sort's result unspecified — a superseded value
+    // could then win over the actual newest submission depending on engine/order.
+    const sku = makeSku({ id: 's1', skuNumber: 'A' });
+    const reqs = [
+      makeRequest({ skuNumber: 'A', submittedAt: '2026-01-01T00:00:00Z', submittedData: [{ attributeId: 'color', name: 'Color', value: 'Old' }] }),
+      makeRequest({ skuNumber: 'A', submittedAt: null, submittedData: [{ attributeId: 'color', name: 'Color', value: 'Undated' }] }),
+      makeRequest({ skuNumber: 'A', submittedAt: '2026-03-01T00:00:00Z', submittedData: [{ attributeId: 'color', name: 'Color', value: 'New' }] }),
+    ];
+    expect(getEffectiveSkuValue(sku, reqs, 'color')).toBe('New');
+  });
 });
 
 // ---------------------------------------------------------------------------

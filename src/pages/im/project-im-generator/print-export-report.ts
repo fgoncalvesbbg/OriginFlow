@@ -7,6 +7,7 @@
  */
 
 import type { PrintPdfResult, PrintRender, PrintLeafletLayout } from '../../../services';
+import type { IMTemplateType } from '../../../types';
 
 /**
  * How far apart per-language page counts may sit before it is worth a look.
@@ -119,6 +120,57 @@ export interface PreflightSummary {
   /** Nothing here needs the operator's attention. */
   clean: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Download filename — mirrors render-print-merge.ts's own `buildDownloadName` (server-side),
+// which is what previously reached the browser via the public URL's `?download=` query param
+// (Supabase turns that into a Content-Disposition header). A SIGNED url minted through
+// im-file-url.ts carries no such param — it only ever returns `{ url, expiresIn }` — so once a
+// download goes through a signed URL instead of the stored public one, the friendly name has to
+// be supplied a different way: as the anchor's own `download` attribute, computed client-side
+// from data already on hand (the print-export dialog's current cover title/SKUs, plus the
+// render's own template type/layout/version). This is necessarily a client-side RECONSTRUCTION,
+// not a readout of what the server actually named the file at render time — for a still-current
+// render it matches exactly; for an older history row whose title/SKUs have since changed in the
+// dialog, the downloaded BYTES are still exactly right, only the suggested filename may show the
+// current title rather than the one in effect when that PDF was produced.
+// ---------------------------------------------------------------------------
+
+export interface PrintDownloadNameInput {
+  templateType: IMTemplateType;
+  layout: PrintLeafletLayout;
+  /** The document code (see im-doc-code.ts), or null when none is configured for this category. */
+  docCode: string | null;
+  /** The IM version this render was built from, or null when unknown (legacy rows). */
+  version: number | null;
+  skus: string[];
+  title: string;
+}
+
+const sanitizeFilenamePart = (s: string): string =>
+  s.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+
+/** Same shape as render-print-merge.ts's `buildDownloadName` — see the section header above. */
+export const buildPrintDownloadFilename = ({
+  templateType,
+  layout,
+  docCode,
+  version,
+  skus,
+  title,
+}: PrintDownloadNameInput): string => {
+  const kind =
+    templateType === 'warning_leaflet'
+      ? layout === 'compact2col'
+        ? 'Warning Leaflet (Compact)'
+        : 'Warning Leaflet'
+      : 'Instruction Manual';
+  const sku = skus.map((s) => s.trim()).filter(Boolean).join(', ');
+  const name = title.trim();
+  const stamp = [docCode ?? '', version ? `v${version}` : ''].filter(Boolean).join(' ');
+  const base = [stamp, sku, name, kind].map(sanitizeFilenamePart).filter(Boolean).join(' - ');
+  return `${base || kind}.pdf`;
+};
 
 export const summarisePreflight = (
   preflight: PrintPdfResult['preflight'],

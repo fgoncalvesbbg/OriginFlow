@@ -16,7 +16,7 @@ const SAFE_HREF_SCHEMES = ['http:', 'https:', 'mailto:'];
  * True when `url` is safe to place in an href/src: an http(s)/mailto absolute URL,
  * or a site-relative path (which can never be a `javascript:` URL).
  */
-export const isSafeUrl = (url: string | null | undefined): boolean => {
+const isSafeUrl = (url: string | null | undefined): boolean => {
   if (!url) return false;
   const trimmed = url.trim();
   if (!trimmed) return false;
@@ -39,7 +39,7 @@ export const safeHref = (url: string | null | undefined): string | undefined =>
   isSafeUrl(url) ? url!.trim() : undefined;
 
 /** True only for an ABSOLUTE http(s) URL — used to validate user-entered links. */
-export const isExternalHttpUrl = (url: string | null | undefined): boolean => {
+const isExternalHttpUrl = (url: string | null | undefined): boolean => {
   if (!url) return false;
   try {
     const parsed = new URL(url.trim());

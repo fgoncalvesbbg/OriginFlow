@@ -6,8 +6,13 @@
  * - PM (authenticated): create a signed URL directly with the session via the
  *   authenticated storage policy.
  *
- * Both fall back to the originally stored URL if signing fails, so the app keeps
- * working while the bucket is still public (during the migration window).
+ * Failure handling is deliberately asymmetric. An explicit REFUSAL from the issuer
+ * (401/403/404 - wrong token, or a document not visible to suppliers) must NEVER fall back
+ * to the stored URL: for an `im-print` file that URL is still publicly readable until the
+ * bucket flip, so falling back would quietly undo the server-side
+ * `is_visible_to_supplier` check the issuer performs. Only a transport/5xx failure falls
+ * back, and that fallback is the last remnant of the public-bucket migration window - it
+ * should be deleted once `im-print` is private.
  */
 
 import { storage } from '../../data';
@@ -31,7 +36,7 @@ interface PortalUrlOpts {
   supplierToken?: string;
   /** supplier access code, required with supplierToken */
   accessCode?: string;
-  /** stored URL to fall back to if signing fails (e.g. bucket still public) */
+  /** stored URL, used ONLY when the issuer could not be reached (never on a refusal) */
   fallbackUrl?: string;
 }
 
@@ -54,10 +59,18 @@ export const getPortalDocumentUrl = async (docId: string, opts: PortalUrlOpts): 
     if (res.ok) {
       const { url } = await res.json();
       if (url) return url;
-    } else {
-      console.warn('getPortalDocumentUrl: function returned', res.status);
+      console.warn('getPortalDocumentUrl: issuer returned no url');
+      return undefined;
     }
+    // The issuer answered and REFUSED. Surface that as "no document" rather than handing
+    // back a URL it just declined to sign - see the asymmetry note in the file header.
+    if (res.status === 401 || res.status === 403 || res.status === 404) {
+      console.warn('getPortalDocumentUrl: access refused', res.status);
+      return undefined;
+    }
+    console.warn('getPortalDocumentUrl: issuer error', res.status);
   } catch (e) {
+    // Transport failure - the issuer never rendered a verdict.
     console.warn('getPortalDocumentUrl failed', e);
   }
   return opts.fallbackUrl;
@@ -67,7 +80,7 @@ export const getPortalDocumentUrl = async (docId: string, opts: PortalUrlOpts): 
  * PM (authenticated) signed URL for a stored document URL. Falls back to the
  * original URL if signing fails.
  */
-export const getSignedDocumentUrl = async (fileUrl: string): Promise<string> => {
+const getSignedDocumentUrl = async (fileUrl: string): Promise<string> => {
   const path = toStoragePath(fileUrl);
   if (!path) return fileUrl;
   try {

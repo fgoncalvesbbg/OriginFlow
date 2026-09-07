@@ -34,12 +34,7 @@ import {
   type PrintLeafletLayout,
 } from '../../../src/services/im/im-print-typography';
 import { isValidDocCode } from '../../../src/services/im/im-doc-code';
-
-export interface NetlifyEvent {
-  httpMethod: string;
-  body: string | null;
-  headers: Record<string, string | undefined>;
-}
+import { assertUuid } from './http';
 
 /** Fields common to every request in the pipeline (prepare / part / merge). */
 export interface RenderRequestBase {
@@ -118,19 +113,7 @@ export interface RenderRequestBase {
 }
 
 export const BUCKET = 'im-print';
-export const PDFSHIFT_ENDPOINT = 'https://api.pdfshift.io/v3/convert/pdf';
-
-export const json = (statusCode: number, payload: unknown) => ({
-  statusCode,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload),
-});
-
-export const fetchJson = async <T>(url: string): Promise<T> => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
-  return (await res.json()) as T;
-};
+const PDFSHIFT_ENDPOINT = 'https://api.pdfshift.io/v3/convert/pdf';
 
 export const isValidBase = (b: unknown): b is RenderRequestBase => {
   const r = b as Partial<RenderRequestBase>;
@@ -152,20 +135,32 @@ export const isValidBase = (b: unknown): b is RenderRequestBase => {
   );
 };
 
-/** Bearer-token auth shared by every function in the pipeline; throws on failure. */
-export const authenticate = async (
-  supabase: SupabaseClient,
-  event: NetlifyEvent,
-): Promise<string> => {
-  const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
-  if (!token) throw new AuthError('Authentication required.');
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) throw new AuthError('Invalid or expired session.');
-  return data.user.email ?? data.user.id;
+/**
+ * Validate + classify a print-pipeline `projectId`. Two shapes are legal:
+ *
+ *   - a real project UUID (a production render) — `projects` carries PM-scoped RLS
+ *     (db_migrations/81_pm_scoped_rls_v2.sql), so this is what `authorizeProject`
+ *     (lib/http.ts) checks the caller against.
+ *   - `draft-<uuid>` (see RenderRequestBase.draft above) — a storage NAMESPACE for a
+ *     throwaway template-editor preview, never a row in `projects`. There is nothing to
+ *     authorize a draft against beyond "is this caller signed in" (`im_templates` RLS
+ *     already grants every authenticated account full access — db_migrations/46), which
+ *     is why the four render-print-*.ts handlers call plain `authenticate` instead of
+ *     `authorizeProject` for this shape.
+ *
+ * The shape is classified HERE from the string itself, deliberately NOT from the
+ * client-supplied `draft` flag: a caller cannot claim `draft: true` while pointing
+ * `projectId` at a real project's UUID to dodge `authorizeProject`, because that
+ * shape is classified as a production id regardless of what `draft` says (and a
+ * caller cannot claim a real project by putting its UUID after `draft-`, because
+ * that string never equals a `projects.id`).
+ */
+export const assertRenderProjectId = (projectId: unknown): { value: string; isDraft: boolean } => {
+  if (typeof projectId === 'string' && /^draft-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(projectId)) {
+    return { value: projectId, isDraft: true };
+  }
+  return { value: assertUuid(projectId, 'projectId'), isDraft: false };
 };
-
-/** Thrown by `authenticate` — handlers catch this to return 401 instead of 502. */
-export class AuthError extends Error {}
 
 /**
  * A failure that retrying cannot fix (bad input HTML, a part missing from storage,
@@ -243,21 +238,51 @@ export const marginFor = (typography: PrintTypography): PageMargin => ({
   right: `${typography.margins.right}mm`,
 });
 
-/** Fetch the published manifest + each requested language's ResolvedManual JSON. */
+const PUBLISHED_BUCKET = 'im-published';
+
+/**
+ * Fetch the published manifest + each requested language's ResolvedManual JSON.
+ *
+ * Reads through the SERVICE-ROLE storage client rather than over a public URL. This used to
+ * build `<base>/storage/v1/object/public/im-published/...` by hand and plain-`fetch` it,
+ * which meant the entire print pipeline (prepare + part + merge all call this via
+ * `loadManuals`) would break the moment the `im-published` bucket is flipped private.
+ * A service-role download is unaffected by the bucket's public/private flag.
+ *
+ * The manifest still stores a permanent public `url` per language — that field is an
+ * external contract we deliberately keep writing — so those URLs are converted back to
+ * object paths here instead of being fetched directly.
+ */
 export const fetchManifestAndManuals = async (
-  supabaseUrl: string,
+  supabase: SupabaseClient,
   req: RenderRequestBase,
 ): Promise<{ manuals: PrintManual[]; ordered: string[] }> => {
-  const base = supabaseUrl.replace(/\/$/, '');
-  const manifestUrl = `${base}/storage/v1/object/public/im-published/${req.projectId}/${req.templateType}/manifest.json`;
-  const manifest = await fetchJson<{ languages: Array<{ lang: string; url: string }> }>(manifestUrl);
+  const downloadJson = async <T>(path: string): Promise<T> => {
+    const { data, error } = await supabase.storage.from(PUBLISHED_BUCKET).download(path);
+    if (error || !data) {
+      throw new Error(`Could not read ${PUBLISHED_BUCKET}/${path}: ${error?.message ?? 'no data returned'}`);
+    }
+    return JSON.parse(await data.text()) as T;
+  };
+
+  /** `.../object/public/im-published/<path>` (or an already-bare path) -> `<path>`. */
+  const toObjectPath = (url: string): string => {
+    const marker = `/${PUBLISHED_BUCKET}/`;
+    const i = url.indexOf(marker);
+    const path = i === -1 ? url : url.slice(i + marker.length);
+    return path.replace(/^\/+/, '').split('?')[0];
+  };
+
+  const manifest = await downloadJson<{ languages: Array<{ lang: string; url: string }> }>(
+    `${req.projectId}/${req.templateType}/manifest.json`,
+  );
   const byLang = new Map(manifest.languages.map((l) => [l.lang, l.url]));
 
   const ordered = req.languages.filter((l) => byLang.has(l));
   if (!ordered.length) throw new PermanentError('None of the requested languages are published for this IM.');
 
   const manuals: PrintManual[] = [];
-  for (const lang of ordered) manuals.push(await fetchJson<PrintManual>(byLang.get(lang)!));
+  for (const lang of ordered) manuals.push(await downloadJson<PrintManual>(toObjectPath(byLang.get(lang)!)));
   return { manuals, ordered };
 };
 
@@ -344,7 +369,7 @@ export const draftPdfPath = (projectId: string, templateType: string, jobId: str
  * client's requested language order verbatim — unlike the published path there is no
  * manifest to intersect against, so nothing can be silently dropped.
  */
-export const fetchDraftManuals = async (
+const fetchDraftManuals = async (
   supabase: SupabaseClient,
   req: RenderRequestBase,
 ): Promise<{ manuals: PrintManual[]; ordered: string[] }> => {
@@ -354,15 +379,19 @@ export const fetchDraftManuals = async (
     const path = draftManualPath(req.projectId, req.templateType, req.jobId, lang);
     const { data, error } = await supabase.storage.from(BUCKET).download(path);
     if (error || !data) {
+      // Log the storage path server-side only — it is an internal detail (bucket layout,
+      // job namespace), not something a client error message should echo back.
+      console.error(`[print-render-shared] draft manual download failed (${path}):`, error);
       throw new PermanentError(
-        `The draft manual for ${lang.toUpperCase()} is missing (${path}). Every selected language ` +
+        `The draft manual for ${lang.toUpperCase()} is missing. Every selected language ` +
         'must be uploaded before rendering — close the dialog and try again.',
       );
     }
     try {
       manuals.push(JSON.parse(await data.text()) as PrintManual);
     } catch (e) {
-      throw new PermanentError(`The draft manual for ${lang.toUpperCase()} is not valid JSON: ${(e as Error).message}`);
+      console.error(`[print-render-shared] draft manual is not valid JSON (${path}):`, e);
+      throw new PermanentError(`The draft manual for ${lang.toUpperCase()} is not valid JSON.`);
     }
   }
   return { manuals, ordered: [...req.languages] };
@@ -375,7 +404,123 @@ export const fetchDraftManuals = async (
  */
 export const loadManuals = async (
   supabase: SupabaseClient,
-  supabaseUrl: string,
   req: RenderRequestBase,
 ): Promise<{ manuals: PrintManual[]; ordered: string[] }> =>
-  req.draft ? fetchDraftManuals(supabase, req) : fetchManifestAndManuals(supabaseUrl, req);
+  req.draft ? fetchDraftManuals(supabase, req) : fetchManifestAndManuals(supabase, req);
+
+// ---------------------------------------------------------------------------
+// Placeholder wizard registry gate (migrations 142/143). See render-print-prepare.ts's
+// third check.
+// ---------------------------------------------------------------------------
+
+export interface PendingRegulatoryAnswer {
+  /** category_attributes.id or im_adhoc_placeholders.placeholder_id. */
+  key: string;
+  label: string;
+}
+
+/**
+ * Every regulatory-tier placeholder wizard question for this project+template that has no
+ * ANSWERED/NOT_APPLICABLE project-scope row yet in `im_placeholder_answers`.
+ *
+ * Queries live answer-store state directly rather than scanning resolved HTML: an unanswered
+ * chip leaves no scannable artifact once resolved (`resolveLegacyChips` replaces it with
+ * label text or nothing), unlike a literal `{{token}}`, so this can't reuse
+ * `findUnresolvedTokens` the way check 2 does.
+ *
+ * Deliberately does NOT go through `src/data`'s `db` port / `getWizardQuestions` — that
+ * composition root binds to the BROWSER Supabase client (Vite env vars, `isLive` gated), which
+ * is not what this Netlify Function runs with. Every query here uses the SERVICE-ROLE
+ * `supabase` client already constructed by the caller, the same one the two checks above
+ * query through.
+ *
+ * Also does not use `DOMParser` (no DOM in this runtime, unlike `im-content.utils.ts`'s
+ * section scanner): an attribute-bound placeholder's containment in a section is checked by
+ * a cheap string/JSON search instead of a real HTML parse — safe here because the search is
+ * membership-only ("does this known attribute id appear anywhere in these sections"), not
+ * full extraction of an unknown set of ids.
+ */
+export const findPendingRegulatoryAnswers = async (
+  supabase: SupabaseClient,
+  projectId: string,
+  templateType: 'im' | 'warning_leaflet',
+): Promise<PendingRegulatoryAnswer[]> => {
+  // FAIL CLOSED: this is a compliance gate, not an advisory one. category_attributes.wizard_tier
+  // (migration 142) and im_placeholder_answers (migration 143) are NOT applied in every
+  // environment yet — before this fix, an error reading either of those (a missing column, a
+  // missing table) resulted in `data` being undefined, `?? []` turning that into an empty
+  // result, and the gate silently reporting "nothing pending" for every project. Every read
+  // below is therefore checked for `error` and thrown as a real exception (mapped to a 5xx by
+  // the caller — see render-print-prepare.ts) rather than treated as "no rows".
+  const { data: projectIm, error: projectImErr } = await supabase
+    .from('project_ims')
+    .select('id, template_id')
+    .eq('project_id', projectId)
+    .eq('template_type', templateType)
+    .maybeSingle();
+  if (projectImErr) throw new Error(`Could not read project_ims for the regulatory gate: ${projectImErr.message}`);
+  // No manual saved yet for this project+type — nothing to gate here; checks 1/2 above
+  // already require a publish to exist before this point is ever reached in practice.
+  if (!projectIm) return [];
+
+  const projectImId = projectIm.id as string;
+  const templateId = projectIm.template_id as string;
+
+  const { data: templateRow, error: templateErr } = await supabase
+    .from('im_templates')
+    .select('category_id')
+    .eq('id', templateId)
+    .maybeSingle();
+  if (templateErr) throw new Error(`Could not read im_templates for the regulatory gate: ${templateErr.message}`);
+  const categoryId = (templateRow?.category_id as string | null | undefined) ?? null;
+
+  const [
+    { data: sections, error: sectionsErr },
+    { data: adhocRows, error: adhocErr },
+    { data: attrRows, error: attrErr },
+  ] = await Promise.all([
+    supabase.from('im_sections').select('content, block_refs').eq('template_id', templateId),
+    supabase
+      .from('im_adhoc_placeholders')
+      .select('placeholder_id, label')
+      .eq('template_id', templateId)
+      .eq('wizard_tier', 'regulatory'),
+    supabase.from('category_attributes').select('id, name, category_id, assigned_category_ids').eq('wizard_tier', 'regulatory'),
+  ]);
+  if (sectionsErr) throw new Error(`Could not read im_sections for the regulatory gate: ${sectionsErr.message}`);
+  if (adhocErr) throw new Error(`Could not read im_adhoc_placeholders for the regulatory gate: ${adhocErr.message}`);
+  if (attrErr) throw new Error(`Could not read category_attributes for the regulatory gate: ${attrErr.message}`);
+
+  // Regulatory-tier attributes actually usable by this category — mirrors
+  // getAttributesForCategory's filter (global, owned, or shared-in) without pulling the
+  // browser-side attribute-validation util into a Netlify Function.
+  const candidateAttrs = (attrRows ?? []).filter(
+    (a: any) => a.category_id === categoryId || a.category_id === null || (a.assigned_category_ids ?? []).includes(categoryId),
+  );
+
+  // Membership check: does this attribute id appear as a chip (`data-id="…"`) or a
+  // `{{token}}` anywhere in the template's sections? A raw JSON/string search over the
+  // section rows, not a DOM parse — see the doc comment above for why that is safe here.
+  const haystack = JSON.stringify(sections ?? []);
+  const referencedAttrs = candidateAttrs.filter(
+    (a: any) => haystack.includes(`"${a.id}"`) || haystack.includes(`{{${a.id}}}`) || haystack.includes(`{{ ${a.id} }}`),
+  );
+
+  const candidates: PendingRegulatoryAnswer[] = [
+    ...referencedAttrs.map((a: any) => ({ key: a.id as string, label: (a.name as string) ?? a.id })),
+    ...(adhocRows ?? []).map((p: any) => ({ key: p.placeholder_id as string, label: (p.label as string) || p.placeholder_id })),
+  ];
+  if (!candidates.length) return [];
+
+  const { data: answerRows, error: answersErr } = await supabase
+    .from('im_placeholder_answers')
+    .select('placeholder_key, status')
+    .eq('project_im_id', projectImId)
+    .eq('scope', 'project');
+  if (answersErr) throw new Error(`Could not read im_placeholder_answers for the regulatory gate: ${answersErr.message}`);
+  const settledKeys = new Set(
+    (answerRows ?? []).filter((r: any) => r.status !== 'pending').map((r: any) => r.placeholder_key as string),
+  );
+
+  return candidates.filter((c) => !settledKeys.has(c.key));
+};

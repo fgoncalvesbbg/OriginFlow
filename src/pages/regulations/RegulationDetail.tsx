@@ -18,7 +18,7 @@
  * only way anyone notices.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, Building, CalendarClock, CheckSquare, Clock, Edit2, ExternalLink,
@@ -120,14 +120,21 @@ const RegulationDetail: React.FC = () => {
   const [checkError, setCheckError] = useState('');
   const [editingObligations, setEditingObligations] = useState(false);
 
+  // Bumped on every load() call so a slower, older fetch can never overwrite state a newer
+  // one already applied — matters both when regulationId changes quickly (navigating the
+  // library) and when handleCheck/handleSave's own `await load()` races a fresh navigation.
+  const loadSeq = useRef(0);
+
   const load = useCallback(async () => {
     if (!regulationId) return;
+    const seq = ++loadSeq.current;
     const [reg, cats, usage, lib] = await Promise.all([
       getRegulationById(regulationId),
       getCategories(),
       getRegulationUsage(regulationId),
       getRegulations(),
     ]);
+    if (loadSeq.current !== seq) return; // a newer load has already landed; discard this one
     if (!reg) { setNotFound(true); setLoading(false); return; }
     setRegulation(reg);
     setCategories(cats);
@@ -241,6 +248,7 @@ const RegulationDetail: React.FC = () => {
       reviewDueAt: regulation.reviewDueAt ?? '',
       sourceUrl: regulation.sourceUrl ?? '',
       celexId: regulation.celexId ?? '',
+      obligationsCount: regulation.obligations?.length ?? 0,
     });
   };
 
@@ -513,7 +521,15 @@ const RegulationDetail: React.FC = () => {
               <p className="text-xs text-gray-400">
                 Nothing in the TCF asks for evidence against this regulation yet. Link a
                 requirement to it from the{' '}
-                <Link to="/compliance/library" className="text-indigo-600 hover:underline">compliance library</Link>.
+                <Link
+                  to={regulation.applicableCategories.length === 1
+                    ? `/compliance/library?category=${regulation.applicableCategories[0]}`
+                    : '/compliance/library'}
+                  className="text-indigo-600 hover:underline"
+                >
+                  compliance library
+                </Link>
+                {regulation.applicableCategories.length === 1 && ` (${categoryName(regulation.applicableCategories[0])})`}.
               </p>
             ) : (
               <div className="space-y-3">
@@ -646,27 +662,53 @@ const RegulationDetail: React.FC = () => {
         <Section
           icon={<CheckSquare size={14} className="text-emerald-600" />}
           title="Instruction manual (IM)"
-          subtitle="What the manual must contain, and which templates answer for this regulation."
+          subtitle="Which templates answer for this regulation, and — while it has no structured Obligations — what the manual must contain."
           accent="border-emerald-200"
         >
-          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            {checklistItems.length} IM requirement{checklistItems.length === 1 ? '' : 's'}
-          </div>
-          {checklistItems.length === 0 ? (
-            <p className="text-xs text-gray-400">
-              No IM requirements recorded. These are the obligations a person verifies by hand
-              before a manual is published — the AI check reads the template text, so it can
-              never see the rating plate or what is in the box.
-            </p>
+          {clauseGroups.length === 0 ? (
+            <>
+              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                {checklistItems.length} obligation{checklistItems.length === 1 ? '' : 's'}
+              </div>
+              {checklistItems.length === 0 ? (
+                <p className="text-xs text-gray-400">
+                  No obligations recorded. These are verified by hand before a manual is
+                  published — the AI check reads the template text, so it can never see the
+                  rating plate or what is in the box.
+                </p>
+              ) : (
+                <ul className="space-y-1">
+                  {checklistItems.map((item, i) => (
+                    <li key={i} className="text-sm text-gray-700 flex gap-2">
+                      <CheckSquare size={13} className="text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="min-w-0">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           ) : (
-            <ul className="space-y-1">
-              {checklistItems.map((item, i) => (
-                <li key={i} className="text-sm text-gray-700 flex gap-2">
-                  <CheckSquare size={13} className="text-emerald-500 shrink-0 mt-0.5" />
-                  <span className="min-w-0">{item}</span>
-                </li>
-              ))}
-            </ul>
+            // Structured Obligations exist (the "Chapters & obligations" section above), so
+            // the legacy blob is no longer live content — it is folded away here rather than
+            // shown as a second, differently-worded list of the same obligations.
+            checklistItems.length > 0 && (
+              <details className="group">
+                <summary className="cursor-pointer text-xs font-semibold text-gray-500 uppercase inline-flex items-center gap-1.5 select-none">
+                  <CheckSquare size={12} /> Legacy text (superseded by Obligations)
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {checklistItems.map((item, i) => (
+                    <li key={i} className="text-[11px] text-gray-500 flex gap-2">
+                      <CheckSquare size={11} className="text-gray-300 shrink-0 mt-0.5" />
+                      <span className="min-w-0">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  Replaced by the obligations above — no longer read by anything.
+                </p>
+              </details>
+            )
           )}
 
           <div className="mt-4 pt-4 border-t border-gray-100">

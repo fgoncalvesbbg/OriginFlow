@@ -392,7 +392,7 @@ const SupplierDashboard: React.FC = () => {
     const isCorrect = !!verified;
 
     // Log the attempt (fire-and-forget with error handling)
-    logAccessCodeAttempt(supplier.id, enteredAccessCode, 'unknown', isCorrect)
+    logAccessCodeAttempt(supplier.id, 'unknown', isCorrect)
       .catch((err: any) => {
         if (err.name !== 'AbortError') {
           console.error('Failed to log access attempt:', err);

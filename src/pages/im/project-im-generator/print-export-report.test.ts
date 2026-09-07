@@ -13,6 +13,7 @@ import {
   findComparableRender,
   spreadTolerance,
   sameLanguageSet,
+  buildPrintDownloadFilename,
 } from './print-export-report';
 
 const render = (over: Partial<PrintRender>): PrintRender => ({
@@ -155,6 +156,45 @@ describe('summarisePageBudget', () => {
     expect(budget.total).toBeNull();
     expect(budget.perLanguage).toEqual([]);
     expect(budget.delta).toBeNull();
+  });
+});
+
+describe('buildPrintDownloadFilename', () => {
+  const base = {
+    templateType: 'im' as const,
+    layout: 'classic' as const,
+    docCode: 'IM-RAN-ANGLED-8MJ-A5',
+    version: 3,
+    skus: ['10045123', '10045124'],
+    title: 'Angled Sunlounger',
+  };
+
+  it('leads with the document code and version, then SKUs, title and kind', () => {
+    expect(buildPrintDownloadFilename(base)).toBe(
+      'IM-RAN-ANGLED-8MJ-A5 v3 - 10045123, 10045124 - Angled Sunlounger - Instruction Manual.pdf',
+    );
+  });
+
+  it('names a leaflet "Warning Leaflet" and a compact one "Warning Leaflet (Compact)"', () => {
+    expect(buildPrintDownloadFilename({ ...base, templateType: 'warning_leaflet' }))
+      .toContain('Warning Leaflet.pdf');
+    expect(buildPrintDownloadFilename({ ...base, templateType: 'warning_leaflet', layout: 'compact2col' }))
+      .toContain('Warning Leaflet (Compact).pdf');
+  });
+
+  it('omits empty parts instead of leaving stray " - " separators', () => {
+    expect(buildPrintDownloadFilename({ ...base, docCode: null, version: null, skus: [] }))
+      .toBe('Angled Sunlounger - Instruction Manual.pdf');
+  });
+
+  it('falls back to just the kind when every other part is empty', () => {
+    expect(buildPrintDownloadFilename({ ...base, docCode: null, version: null, skus: [], title: '' }))
+      .toBe('Instruction Manual.pdf');
+  });
+
+  it('strips filesystem-illegal characters from the title', () => {
+    expect(buildPrintDownloadFilename({ ...base, docCode: null, version: null, skus: [], title: 'A/B: "Deluxe"' }))
+      .toBe('AB Deluxe - Instruction Manual.pdf');
   });
 });
 

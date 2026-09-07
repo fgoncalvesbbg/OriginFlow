@@ -10,16 +10,25 @@
  * across four functions instead of one.
  */
 
-import { createClient } from '@supabase/supabase-js';
 import {
   NetlifyEvent,
+  json,
+  serviceClient,
+  authenticate,
+  authorizeProject,
+  assertJobId,
+  AuthError,
+  ForbiddenError,
+  ValidationError,
+} from './lib/http';
+import {
   RenderRequestBase,
   isValidBase,
-  json,
   loadManuals,
   buildParts,
   leafletLayoutOf,
-  AuthError,
+  findPendingRegulatoryAnswers,
+  assertRenderProjectId,
   PermanentError,
 } from './lib/print-render-shared';
 import { findUnresolvedTokens } from '../../src/services/im/im-print-html';
@@ -28,11 +37,16 @@ export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
   const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
+  let supabase: ReturnType<typeof serviceClient>;
+  try {
+    supabase = serviceClient();
+  } catch (e) {
+    return json(500, { error: e instanceof Error ? e.message : 'Server misconfiguration.' });
+  }
+  if (!supabaseUrl) {
+    // serviceClient() already guarantees this, but keeps the type non-optional below.
     return json(500, { error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' });
   }
-  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   let req: RenderRequestBase;
   try {
@@ -43,12 +57,20 @@ export const handler = async (event: NetlifyEvent) => {
   if (!isValidBase(req)) return json(400, { error: 'Invalid request body.' });
 
   try {
-    const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
-    if (!token) throw new AuthError('Authentication required.');
-    const { error: authErr } = await supabase.auth.getUser(token);
-    if (authErr) throw new AuthError('Invalid or expired session.');
+    // Every parameter interpolated into a Storage key is validated before it is used for
+    // anything. `assertRenderProjectId` also decides, from the id's own shape (never from
+    // the client-supplied `draft` flag), whether this is a real project (authorize against
+    // it) or a template-editor draft namespace (session only — see its doc comment).
+    const { value: projectId, isDraft } = assertRenderProjectId(req.projectId);
+    if (req.jobId !== undefined) assertJobId(req.jobId);
 
-    const { manuals, ordered } = await loadManuals(supabase, supabaseUrl, req);
+    // AUTHORIZATION, not just authentication: a valid session used to be enough to prepare
+    // a render for ANY project. `authorizeProject` re-checks the caller against `projects`
+    // (PM-scoped RLS) AS THE CALLER, so a PM can no longer prepare another PM's project.
+    if (isDraft) await authenticate(event);
+    else await authorizeProject(event, projectId);
+
+    const { manuals, ordered } = await loadManuals(supabase, req);
 
     // Prepare is the cheap gate before any PDFShift credit is spent — fail loudly here
     // rather than silently shipping a defective booklet. 422 is deliberate: it is not in
@@ -90,6 +112,22 @@ export const handler = async (event: NetlifyEvent) => {
          `text (a project fills these in): ${unresolvedSummary()}.`]
       : [];
 
+    // 3. Every regulatory-tier placeholder wizard question (migrations 142/143) must be
+    // answered before a production print — production-only, same as check 2: a draft
+    // render happens before any project-scoped answer can exist, so it would trivially
+    // fail this on every regulatory question and defeat the point of a draft preview.
+    if (!req.draft) {
+      const pending = await findPendingRegulatoryAnswers(supabase, req.projectId, req.templateType);
+      if (pending.length) {
+        const sample = pending.slice(0, 5).map((p) => p.label).join(', ');
+        return json(422, {
+          error: `${pending.length} regulatory value${pending.length === 1 ? ' is' : 's are'} still pending in the ` +
+            `placeholder wizard: ${sample}${pending.length > 5 ? ` — and ${pending.length - 5} more` : ''}. ` +
+            `Answer ${pending.length === 1 ? 'it' : 'them'} before publishing.`,
+        });
+      }
+    }
+
     const { parts } = buildParts(manuals, req);
 
     return json(200, {
@@ -109,10 +147,17 @@ export const handler = async (event: NetlifyEvent) => {
     });
   } catch (e) {
     if (e instanceof AuthError) return json(401, { error: e.message });
-    const message = e instanceof Error ? e.message : 'Print render preparation failed.';
-    // Permanent failures (a draft manual missing from tmp, no published language) get 422 —
-    // not in the client's transient-retry set, so the job fails immediately with the message.
-    if (e instanceof PermanentError) return json(422, { error: message });
-    return json(502, { error: message });
+    if (e instanceof ForbiddenError) return json(403, { error: e.message });
+    if (e instanceof ValidationError) return json(400, { error: e.message });
+    // Permanent failures (a draft manual missing from tmp, no published language, a
+    // regulatory-gate read failure) get 422 — not in the client's transient-retry set, so
+    // the job fails immediately. These messages are always hand-crafted to be safe to show
+    // (see print-render-shared.ts) — never a raw driver/storage-path string.
+    if (e instanceof PermanentError) return json(422, { error: e.message });
+    // Anything else (including the fail-closed regulatory-gate errors, which are Supabase
+    // driver errors) is logged in full server-side and answered with a generic message —
+    // never echo internal error text or storage paths back to the caller.
+    console.error('[render-print-prepare] failed:', e);
+    return json(502, { error: 'Print render preparation failed. Please try again or contact support.', code: 'PREPARE_FAILED' });
   }
 };

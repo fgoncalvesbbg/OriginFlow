@@ -27,6 +27,8 @@
  * can't tolerate, that's the point to reach for a real XML parser instead.
  */
 
+import { escapeHtmlText } from '../../utils/html-escape.utils';
+
 const PAIRED_TAGS = new Set([
   'p', 'h1', 'h2', 'h3', 'strong', 'em', 'u',
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
@@ -35,8 +37,7 @@ const PAIRED_TAGS = new Set([
 /** Splits into {{FRZ_n}} tokens, HTML tags, and plain-text runs, in document order. */
 const SEGMENT_RE = /(\{\{FRZ_\d+\}\}|<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s[^<>]*)?\/?>)/;
 
-const escText = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escText = escapeHtmlText;
 
 /**
  * Decode the XLIFF/HTML entity forms this codec emits back to plain characters.

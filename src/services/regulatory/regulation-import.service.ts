@@ -37,7 +37,7 @@ import type {
   RegulationStatus,
 } from '../../types';
 import { generateUUID } from '../../utils';
-import { getComplianceRequirements, saveRequirement } from '../compliance/compliance-requirement.service';
+import { getComplianceRequirementsOrThrow, saveRequirement } from '../compliance/compliance-requirement.service';
 import { CARRIERS } from './obligation-parse';
 import {
   createClause, createObligation, getRegulationStructure, updateClause,
@@ -46,7 +46,7 @@ import {
   MAX_SUMMARY_BYTES, createRegulation, summaryByteLength, updateRegulation,
 } from './regulation.service';
 
-export const REGULATION_IMPORT_SCHEMA_VERSION = 1;
+const REGULATION_IMPORT_SCHEMA_VERSION = 1;
 
 const CLAUSE_KINDS = ['clause', 'annex', 'article', 'part', 'section'] as const;
 const STATUSES: RegulationStatus[] = ['active', 'superseded', 'expired'];
@@ -470,7 +470,7 @@ export const toRegulationInput = (
 };
 
 /** Which clauses/obligations still need writing, given what is already stored. */
-export const diffStructure = (
+const diffStructure = (
   doc: RegulationImportDoc,
   existingClauses: RegulationClause[],
   existingObligationTexts: string[],
@@ -599,7 +599,9 @@ export const applyRegulationImport = async (
   // Skipping silently would be wrong; the dialog says the count it will create.
   let tcfRequirementsCreated = 0;
   if (tcfCategoryId && doc.tcfRequirements?.length) {
-    const existingRequirements = await getComplianceRequirements();
+    // Non-degrading read: a failed one would leave `already` empty and re-create every
+    // TCF requirement this category already has.
+    const existingRequirements = await getComplianceRequirementsOrThrow();
     const already = new Set(existingRequirements
       .filter(r => r.categoryId === tcfCategoryId)
       .map(r => norm(r.title)));

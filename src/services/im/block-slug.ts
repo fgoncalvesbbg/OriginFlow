@@ -3,7 +3,7 @@
  * editor (IMBlockLibrary) to derive collision-resistant slugs from a title.
  */
 
-export const toSnake = (s: string): string =>
+const toSnake = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
 
 export const makeUid = (): string => Math.random().toString(36).slice(2, 8);

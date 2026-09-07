@@ -22,6 +22,10 @@ import {
   brandLogoUrl,
 } from '../../../config/im.constants';
 import { requestPrintPdf, getPrintRenders, getIMMarkets, checkPrintImageWeights, PrintPdfResult, PrintRender, IMMarket, PrintImageReport } from '../../../services';
+// Signed-URL minting bypasses the barrel, matching how ProjectIMGenerator/IMSharedManual
+// already import getSignedManifestUrl/resolvePublishedUrl directly from their own service file.
+import { getSignedPrintPdfUrlForPath } from '../../../services/im/im-print-export.service';
+import { buildPrintDownloadFilename } from './print-export-report';
 import {
   getLeafletPolicies,
   getLeafletIssues,
@@ -356,6 +360,44 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     setConfirmCredit(false);
   }, [pageSize, activeLayout, selected.join(',')]);
 
+  // Downloading a rendered PDF (the just-rendered `result`, the current-selection `match`, or
+  // any row in `renders`) never uses the persisted/returned public `.url` — `im-print` is one
+  // of the two buckets closed off from permanent public URLs. Every download instead mints a
+  // fresh signed URL from the render's own `storagePath` at click time.
+  const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const downloadPdf = async (storagePath: string, layout: PrintLeafletLayout, imVersion: number | null) => {
+    setDownloadError(null);
+    setDownloadingPath(storagePath);
+    try {
+      const url = await getSignedPrintPdfUrlForPath(storagePath, { projectId });
+      // The signed URL carries no `?download=` param (unlike the old public one), so Supabase
+      // sets no Content-Disposition — the friendly filename has to come from the anchor's own
+      // `download` attribute instead. Honored cross-origin by every current browser for a
+      // direct, user-initiated click like this one.
+      const filename = buildPrintDownloadFilename({
+        templateType,
+        layout,
+        docCode: docCode || null,
+        version: imVersion,
+        skus: skuText.split(',').map((s) => s.trim()).filter(Boolean),
+        title,
+      });
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : 'Could not create a download link.');
+    } finally {
+      setDownloadingPath(null);
+    }
+  };
+
   const toggleLang = (lang: string) => {
     // A hand-edited selection is no longer the market's set — drop the stamp.
     setMarketCode('');
@@ -402,6 +444,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     setElapsed(0);
     setProgress(null);
     setError(null);
+    setDownloadError(null);
     setResult(null);
     setAttachState('idle');
     setAttachParams(null);
@@ -825,6 +868,18 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             );
           })()}
 
+          {/* The image-weight preflight above could not even REACH some languages' published
+              manual (a signed-URL minting error) — distinct from those languages simply not
+              being published, which is silently ignored. Surfaced so this never reads as "no
+              heavy images found" when it actually means "could not check". */}
+          {imageReport && imageReport.unreachable.length > 0 && (
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Could not check images for {imageReport.unreachable.join(', ')} — the published manual
+              could not be reached (not confirmed as missing). This is advisory only and does not
+              block generating.
+            </div>
+          )}
+
           {/* Existing-version / regeneration guard for the current selection */}
           {!loadingHistory && match && (
             <div
@@ -853,9 +908,19 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                     </>
                   )}
                   <div className="mt-1.5">
-                    <a href={match.url} target="_blank" rel="noreferrer" className="underline font-medium inline-flex items-center gap-1">
-                      <Download size={13} /> Download existing
-                    </a>
+                    <button
+                      type="button"
+                      onClick={() => void downloadPdf(match.storagePath, match.layout, match.imVersion)}
+                      disabled={downloadingPath === match.storagePath}
+                      className="underline font-medium inline-flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {downloadingPath === match.storagePath ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Download size={13} />
+                      )}
+                      {downloadingPath === match.storagePath ? 'Preparing…' : 'Download existing'}
+                    </button>
                   </div>
                   {needsConfirm && (
                     <label className="mt-2 flex items-center gap-2 cursor-pointer">
@@ -951,9 +1016,14 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                           {picking ? 'Cancel' : 'Issue for SKUs (' + skus.length + ')'}
                         </button>
                       )}
-                      <a href={r.url} target="_blank" rel="noreferrer" className="px-2 py-1 border rounded hover:bg-gray-50">
-                        Download
-                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void downloadPdf(r.storagePath, r.layout, r.imVersion)}
+                        disabled={downloadingPath === r.storagePath}
+                        className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {downloadingPath === r.storagePath ? 'Preparing…' : 'Download'}
+                      </button>
                     </div>
                    </div>
                    {/* Pre-filled with this manual's bound SKUs — precisely the group whose data
@@ -1014,6 +1084,12 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </details>
           )}
 
+          {downloadError && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+              {downloadError}
+            </div>
+          )}
+
           {busy && (
             <div>
               <div className="flex justify-between text-xs text-muted mb-1">
@@ -1046,14 +1122,23 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
                   )}
                   {attachState === 'saved' && <span className="text-emerald-700/80">Saved to project documents.</span>}
                 </span>
-                <a
-                  href={result.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="shrink-0 text-sm px-3 py-1.5 bg-emerald-600 text-white rounded hover:opacity-90 flex items-center gap-1.5"
+                <button
+                  type="button"
+                  onClick={() => void downloadPdf(
+                    result.storagePath,
+                    result.render?.layout ?? activeLayout,
+                    result.render?.imVersion ?? version ?? null,
+                  )}
+                  disabled={downloadingPath === result.storagePath}
+                  className="shrink-0 text-sm px-3 py-1.5 bg-emerald-600 text-white rounded hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  <Download size={14} /> Download
-                </a>
+                  {downloadingPath === result.storagePath ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                  {downloadingPath === result.storagePath ? 'Preparing…' : 'Download'}
+                </button>
               </div>
             </div>
           )}

@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, Link2, Share2, Copy, Check, X, Ban, Loader2, User as UserIcon, Clock } from 'lucide-react';
 import { getPublishedManifestUrl, createIMShare, getIMShareUrl, getIMReviewUrl, getIMShares, revokeIMShare } from '../../services';
 import { isShareExpired, type IMShare, type IMShareMode } from '../../services/im/im-share.service';
+import { resolvePublishedUrl } from '../../services/im/im-publish.service';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { IMViewer, type ViewerSource } from '../../modules/im-viewer';
 
@@ -334,7 +335,12 @@ export const IMViewerTab: React.FC<{ ims: ProjectIMSummary[] }> = ({ ims }) => {
       {/* Viewer */}
       {source ? (
         <div className="border border-gray-200 rounded-xl overflow-hidden h-[calc(100vh-300px)] min-h-[480px] bg-white shadow-sm">
-          <IMViewer source={source} />
+          {/* `im-published` is one of the two buckets closed off from permanent public URLs.
+              A generated manual re-signs as THIS staff session (authorizeProject re-derives
+              access from the project embedded in the URL itself); a pasted external URL (the
+              "paste a URL" box below) doesn't match the pattern resolvePublishedUrl looks for,
+              so it passes through unchanged. */}
+          <IMViewer source={source} resolveUrl={resolvePublishedUrl} />
         </div>
       ) : (
         <div className="border border-dashed border-gray-300 rounded-xl h-[360px] flex flex-col items-center justify-center text-gray-400 gap-2">

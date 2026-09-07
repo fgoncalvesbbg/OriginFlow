@@ -26,7 +26,7 @@
  */
 export const SAFE_CODE = /^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,63}$/;
 /** Jira returns custom fields as `customfield_10260`; JQL wants `cf[10260]`. */
-export const CUSTOM_FIELD_ID = /^customfield_(\d+)$/;
+const CUSTOM_FIELD_ID = /^customfield_(\d+)$/;
 
 /** Normalized issue shape returned to the client. Mirrored in src/types/project.types.ts. */
 export interface JiraIssueRef {

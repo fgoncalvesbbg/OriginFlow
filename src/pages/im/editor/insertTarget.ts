@@ -29,9 +29,6 @@ export const insertToActiveEditor = (html: string): boolean => {
   return true;
 };
 
-/** Whether an editor is currently registered as the insert target. */
-export const hasInsertTarget = () => !!insertHtmlFn;
-
 /** Point the placeholder fan-out (all-languages) commit at the active row. */
 export const setCommitPlaceholderTarget = (fn: InsertFn | undefined) => { commitPlaceholderFn = fn; };
 

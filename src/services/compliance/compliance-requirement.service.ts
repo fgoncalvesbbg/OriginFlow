@@ -3,21 +3,20 @@
  * Manages compliance requirements and category attributes
  */
 
-import { db, portalDb, orEmpty, type Row } from '../../data';
+import { db, portalDb, orEmpty, mustRead, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
 import { generateUUID } from '../../utils';
 import { PREDEFINED_ATTRIBUTE_GROUPS, compareAttributes } from '../../config/compliance.constants';
 import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
-import { buildSyncWrite, resolvesToGlobal, planAttributeSync, type SyncPlan, type AttributeUsage } from './attribute-sync-plan';
+import { wizardConditionFromRow } from '../../utils/attribute-condition.utils';
+import { buildSyncWrite, resolvesToGlobal, planAttributeSync, type SyncPlan, type SyncItem, type AttributeUsage } from './attribute-sync-plan';
 
 /**
  * Get all compliance requirements
  */
-export const getComplianceRequirements = async (): Promise<ComplianceRequirement[]> => {
-    if (!isLive) return [];
-    const rows = await orEmpty(portalDb.select<Row>('compliance_requirements'), 'getComplianceRequirements');
-    return rows.map((r: any) => ({
+const mapComplianceRequirementRows = (rows: any[]): ComplianceRequirement[] =>
+    rows.map((r: any) => ({
         ...r,
         categoryId: r.category_id,
         condition: r.condition ?? null,
@@ -32,6 +31,25 @@ export const getComplianceRequirements = async (): Promise<ComplianceRequirement
         selfDeclarationAccepted: r.self_declaration_accepted,
         testReportOrigin: r.test_report_origin
     }));
+
+export const getComplianceRequirements = async (): Promise<ComplianceRequirement[]> => {
+    if (!isLive) return [];
+    const rows = await orEmpty(portalDb.select<Row>('compliance_requirements'), 'getComplianceRequirements');
+    return mapComplianceRequirementRows(rows);
+};
+
+/**
+ * Non-degrading read of the same rows. Use this ANYWHERE the result gates a write.
+ *
+ * `getComplianceRequirements` degrades a failed read to `[]`, which is right for its many
+ * display callers and dangerous for a de-duplication check: an empty set reads as
+ * "nothing exists yet", so an importer re-creates every requirement it meant to skip.
+ * See the TCF requirement loop in regulation-import.service.ts.
+ */
+export const getComplianceRequirementsOrThrow = async (): Promise<ComplianceRequirement[]> => {
+    if (!isLive) return [];
+    const rows = await mustRead(portalDb.select<Row>('compliance_requirements'), 'getComplianceRequirementsOrThrow');
+    return mapComplianceRequirementRows(rows);
 };
 
 /**
@@ -115,28 +133,56 @@ export const addStandardRequirements = async (categoryId: string): Promise<void>
     for (const d of defaults) await saveRequirement(d);
 };
 
+const mapCategoryAttributeRow = (a: any): CategoryAttribute => ({
+    id: a.id,
+    categoryId: a.category_id ?? null,
+    assignedCategoryIds: a.assigned_category_ids ?? [],
+    name: a.name,
+    dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
+    validationRules: a.validation_rules ?? undefined,
+    group: a.group ?? 'Category Specific',
+    akeneoId: a.akeneo_id ?? undefined,
+    // Absent column or NULL reads as visible: the flag only ever hides on purpose.
+    supplierVisible: a.supplier_visible !== false,
+    sortOrder: a.sort_order ?? 0,
+    ptAttributeId: a.pt_attribute_id ?? null,
+    eprelId: a.eprel_id ?? null,
+    // Placeholder intake wizard registry (migration 142). Absent column reads as
+    // 'optional'/undefined — no existing attribute is retroactively gated.
+    wizardTier: a.wizard_tier ?? undefined,
+    wizardHint: a.wizard_hint ?? null,
+    wizardNote: a.wizard_note ?? null,
+    wizardDefaultValue: a.wizard_default_value ?? null,
+    wizardCondition: wizardConditionFromRow(a),
+});
+
 /**
  * Get all category attributes
  */
 export const getCategoryAttributes = async (): Promise<CategoryAttribute[]> => {
     if (!isLive) return [];
     const rows = await orEmpty(portalDb.select<Row>('category_attributes'), 'getCategoryAttributes');
-    return rows.map((a: any) => ({
-        id: a.id,
-        categoryId: a.category_id ?? null,
-        assignedCategoryIds: a.assigned_category_ids ?? [],
-        name: a.name,
-        dataType: (a.data_type === 'number' ? 'decimal' : (a.data_type || 'text')) as AttributeDataType,
-        validationRules: a.validation_rules ?? undefined,
-        group: a.group ?? 'Category Specific',
-        akeneoId: a.akeneo_id ?? undefined,
-        // Absent column or NULL reads as visible: the flag only ever hides on purpose.
-        supplierVisible: a.supplier_visible !== false,
-        sortOrder: a.sort_order ?? 0,
-        ptAttributeId: a.pt_attribute_id ?? null,
-        eprelId: a.eprel_id ?? null,
     // Sorted once here so every consumer gets the same order without re-sorting.
-    })).sort(compareAttributes);
+    return rows.map(mapCategoryAttributeRow).sort(compareAttributes);
+};
+
+/**
+ * Same read as getCategoryAttributes, but the failure is NOT degraded to an empty list.
+ *
+ * For callers about to WRITE based on "what already exists" — importCategoryAttributes and
+ * replaceCategoryAttributes both match incoming rows against this list before deciding what
+ * to create. A failed read masquerading as "no attributes exist yet" makes every incoming
+ * row look new: importCategoryAttributes would create duplicates instead of reusing/linking
+ * existing ones, and replaceCategoryAttributes would both duplicate-create AND treat nothing
+ * as "still in the definition" (since its own diffing also depends on this same list read
+ * elsewhere) — the same find-or-create failure mode Bug 1 exists to close, just on this table.
+ * Kept private and used only by those two writers; every other caller (there are many, all
+ * display) keeps the fault-tolerant getCategoryAttributes().
+ */
+const getCategoryAttributesOrThrow = async (): Promise<CategoryAttribute[]> => {
+    if (!isLive) return [];
+    const rows = await mustRead(portalDb.select<Row>('category_attributes'), 'getCategoryAttributes:for-write');
+    return rows.map(mapCategoryAttributeRow).sort(compareAttributes);
 };
 
 /**
@@ -261,7 +307,7 @@ export const importCategoryAttributes = async (
     categoryId: string,
     rows: ParsedAttributeRow[],
 ): Promise<ImportAttributesResult> => {
-    const existing = await getCategoryAttributes();
+    const existing = await getCategoryAttributesOrThrow();
     const norm = (s: string) => (s ?? '').trim().toLowerCase();
     const result: ImportAttributesResult = { created: 0, linked: 0, skipped: 0 };
     const consumedIds = new Set<string>();
@@ -396,6 +442,17 @@ export interface ApplySyncResult {
 }
 
 /**
+ * True when writing `item` would demote an existing GLOBAL attribute to category scope —
+ * the 'scope-demotion' risk planAttributeSync flags as 'breaking'. A global already applies
+ * to every category, including whichever one is being synced/replaced, so there is nothing
+ * to gain by narrowing it — and doing so silently strips it (and every value captured under
+ * it) from every OTHER category that relies on it. The fix mirrors how a sibling-owned
+ * attribute is already handled: leave ownership alone rather than rewrite it.
+ */
+const wouldDemoteGlobal = (item: SyncItem): boolean =>
+    item.existing?.categoryId === null && !!item.incoming && !resolvesToGlobal(item.incoming);
+
+/**
  * Apply a reviewed ProductToolkit sync plan.
  *
  * Only the items the reviewer ticked are written, and only creates/updates — an 'absent'
@@ -429,6 +486,14 @@ export const applyAttributeSync = async (
         const owner = item.existing?.categoryId;
         if (owner && owner !== categoryId) {
             await assignAttributeToCategory(item.existing!.id, categoryId);
+            result.updated++;
+            continue;
+        }
+
+        // Existing is GLOBAL and the incoming row would demote it to this category: it
+        // already applies here (and everywhere else), so leave it untouched rather than
+        // stripping it from every other category — see wouldDemoteGlobal.
+        if (wouldDemoteGlobal(item)) {
             result.updated++;
             continue;
         }
@@ -489,7 +554,7 @@ export const replaceCategoryAttributes = async (
     // supplier submission, review flag and IM condition references an attribute by id, so a
     // Replace silently stranded all of them — the very outcome the sync planner exists to
     // prevent. Reusing the planner keeps ids stable for anything still in the definition.
-    const all = await getCategoryAttributes();
+    const all = await getCategoryAttributesOrThrow();
     const applies = all.filter(a =>
         a.categoryId === categoryId ||
         a.categoryId === null ||
@@ -512,6 +577,15 @@ export const replaceCategoryAttributes = async (
         const owner = item.existing?.categoryId;
         if (owner && owner !== categoryId) {
             await assignAttributeToCategory(item.existing!.id, categoryId);
+            updated++;
+            continue;
+        }
+
+        // Existing is GLOBAL and this definition's row would demote it to category scope
+        // (planAttributeSync's 'scope-demotion' breaking risk): it already applies to this
+        // category — and every other one — so leave it exactly as it is instead of narrowing
+        // it down and silently stripping it from every category that isn't this one.
+        if (wouldDemoteGlobal(item)) {
             updated++;
             continue;
         }

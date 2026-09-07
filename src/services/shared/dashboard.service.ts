@@ -6,6 +6,7 @@
 import { db, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { DashboardStats, DeadlineItem, ProjectOverallStatus } from '../../types';
+import { daysUntilDateOnly } from '../../utils/date.utils';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
@@ -64,8 +65,9 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
 
     // Process TCF deadlines
     const tcfDeadlines = tcf.filter(r => r.deadline).map(r => {
-        const dDate = new Date(r.deadline);
-        const diff = Math.ceil((dDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+        // `deadline` is a DATE-ONLY value; comparing it to the current instant made a
+        // deadline dated today read as overdue from 00:00 CET. Compare calendar dates.
+        const diff = daysUntilDateOnly(r.deadline) ?? 0;
         return {
             id: r.id,
             projectId: r.project_id,
@@ -78,8 +80,8 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
     });
 
     const docDeadlines = deadlineDocs.map((d: any) => {
-        const dDate = new Date(d.deadline);
-        const diff = Math.ceil((dDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+        // Same date-only correction as the TCF deadlines above.
+        const diff = daysUntilDateOnly(d.deadline) ?? 0;
         return {
             id: d.id,
             projectId: d.project_id,

@@ -75,6 +75,14 @@ export interface LeafletCoverageRow {
   pageSize: string | null;
   market: string | null;
   renderUrl: string | null;
+  /**
+   * The render's storage path, for minting a short-TTL signed URL (getSignedPrintPdfUrlForPath)
+   * instead of relying on `renderUrl`, a permanent public link into im-print. NULL until
+   * migration 147 (db_migrations/147_leaflet_coverage_storage_path.sql, NOT YET APPLIED) is
+   * run — the view exposes no such column before then, so callers must fall back to
+   * `renderUrl` while this is null rather than crash.
+   */
+  renderStoragePath: string | null;
   pages: number | null;
   renderedAt: string | null;
   renderComment: string | null;
@@ -112,6 +120,9 @@ const mapCoverage = (r: Row): LeafletCoverageRow => ({
   pageSize: r.page_size ?? null,
   market: r.market ?? null,
   renderUrl: r.url ?? null,
+  // Absent (undefined, not null) until migration 147 is applied — the view has no such
+  // column before then, and `r.storage_path` simply won't be a key on the row.
+  renderStoragePath: r.storage_path ?? null,
   pages: r.pages ?? null,
   renderedAt: r.rendered_at ?? null,
   renderComment: r.render_comment ?? null,
@@ -327,10 +338,4 @@ export const issueLeafletForSkus = async (
     result.reassigned = staleIds.length;
   }
   return result;
-};
-
-/** Withdraw one issue. The affected SKUs fall back to the category-wide leaflet, or to a gap. */
-export const withdrawLeafletIssue = async (issueId: string): Promise<void> => {
-  if (!isLive) throw new Error('Database not configured.');
-  await db.delete('im_leaflet_issues', { where: { id: issueId } });
 };

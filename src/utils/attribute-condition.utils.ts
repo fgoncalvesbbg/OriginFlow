@@ -73,3 +73,35 @@ export const passesFeatureGate = (
   }
   return true;
 };
+
+/** The five `wizard_depends_on_*` columns shared by category_attributes and im_adhoc_placeholders. */
+export interface WizardDependsOnRow {
+  wizard_depends_on_attribute_id?: string | null;
+  wizard_depends_on_label?: string | null;
+  wizard_depends_on_num_min?: string | null;
+  wizard_depends_on_num_max?: string | null;
+  wizard_depends_on_absent?: boolean | null;
+}
+
+/**
+ * Builds the placeholder wizard's dependency gate (migration 142) into the same
+ * `FeatureConditionFields` shape IM block refs already use with `passesFeatureGate`, so a
+ * wizard question's visibility is computed by the identical gate rather than a parallel one.
+ *
+ * The DB models a wizard dependency as ONE attribute plus a present/absent flag —
+ * `wizard_depends_on_absent` chooses which half of FeatureConditionFields it becomes,
+ * since a wizard question only ever depends on one prior answer (never an independent
+ * presence-of-X-AND-absence-of-Y pair, which is what the fuller `requires_feature` +
+ * `requires_feature_absent` combination on a block ref can express).
+ */
+export const wizardConditionFromRow = (row: WizardDependsOnRow): FeatureConditionFields | null => {
+  const attrId = row.wizard_depends_on_attribute_id;
+  if (!attrId) return null;
+  if (row.wizard_depends_on_absent) return { requires_feature_absent: attrId };
+  return {
+    requires_feature: attrId,
+    requires_feature_label: row.wizard_depends_on_label ?? null,
+    requires_feature_num_min: row.wizard_depends_on_num_min ?? null,
+    requires_feature_num_max: row.wizard_depends_on_num_max ?? null,
+  };
+};

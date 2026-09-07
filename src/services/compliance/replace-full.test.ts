@@ -13,6 +13,7 @@ let rows: R[] = [];
 
 vi.mock('../../data', () => ({
   orEmpty: async (p: Promise<unknown>) => p,
+  mustRead: async (p: Promise<unknown>) => p,
   portalDb: { select: async () => rows },
   db: {
     select: async (_t: string, o?: any) => rows.filter(r => !o?.where?.akeneo_id || r.akeneo_id === o.where.akeneo_id),

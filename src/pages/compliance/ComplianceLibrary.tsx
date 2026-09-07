@@ -1,7 +1,13 @@
 
-/** Compliance library: manage categories, requirements, attributes (with AI-assisted authoring). */
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+/**
+ * Compliance library: manage categories, requirements, attributes (with AI-assisted authoring).
+ *
+ * The selected category lives in `?category=` rather than component state, so a category's
+ * Requirements view is linkable, refresh-safe and back-button-able without a new route —
+ * `/compliance/library` (the App.tsx route) matches exactly regardless of the query string.
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
   getCategories, getComplianceRequirements,
@@ -82,7 +88,19 @@ const ComplianceLibrary: React.FC = () => {
   const [newSectionInput, setNewSectionInput] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const [selectedCategoryForReqs, setSelectedCategoryForReqs] = useState<string | null>(null);
+  /**
+   * The selected category, kept in the URL (`?category=`) rather than component state
+   * (migration: compliance library category deep-link). A category view with no URL meant
+   * it could not be linked to, survive a refresh, or be reached with the back button — which
+   * is exactly why RegulationDetail could only send an operator to the library's index and
+   * make them re-find the category by hand. `GLOBAL_VIEW`'s sentinel value round-trips
+   * through the query string the same as any category id.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCategoryForReqs = searchParams.get('category');
+  const setSelectedCategoryForReqs = useCallback((id: string | null) => {
+    setSearchParams(id ? { category: id } : {});
+  }, [setSearchParams]);
 
   // Category-table filters for the requirements picker.
   const [reqSearch, setReqSearch] = useState('');

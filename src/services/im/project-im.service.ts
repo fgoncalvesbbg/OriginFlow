@@ -158,14 +158,23 @@ export const saveProjectIM = async (
     // write never touches) — never the full jsonb row, which would download the whole
     // payload again after every save. Echoing is_finalized keeps a publish/save of a
     // FINAL manual from wrongly clearing the lock in the caller's mapped instance.
-    const context = existing ? 'saveProjectIM update' : 'saveProjectIM insert';
+    const context = existing ? 'saveProjectIM update' : 'saveProjectIM create';
     const cols = 'id, version, updated_at, is_finalized, finalized_at';
     type EchoedColumns = { id: string; version: number; updated_at: string; is_finalized: boolean; finalized_at: string | null };
 
     const runWrite = (timeoutMs: number) => withDeadline(
         (signal) => existing
           ? db.update<EchoedColumns>('project_ims', payload, { where: { id: existing.id }, columns: cols, signal })
-          : db.insert<EchoedColumns>('project_ims', payload, { columns: cols, signal }),
+          // Upsert, not a plain insert: saveWithRetry retries this factory on a transient
+          // failure (timeout/client-side abort), and such an abort can still mean attempt 1
+          // actually committed server-side. A plain insert's retry would then hit
+          // project_ims_project_type_uniq (migration 53, unique on (project_id,
+          // template_type)) with a duplicate-key error — which save-retry.ts's
+          // isPermanentError classifies as PERMANENT (never retried), so a save that had in
+          // fact succeeded surfaced as "save failed". Upserting on that same constraint makes
+          // the retry a no-op update onto the row the first attempt already created instead
+          // of a conflict, so the create path is idempotent under retry.
+          : db.upsertReturning<EchoedColumns>('project_ims', payload, { onConflict: 'project_id,template_type', columns: cols, signal }),
         timeoutMs,
         context,
     );

@@ -3,7 +3,7 @@
  * Manages instruction manual templates
  */
 
-import { db, orEmpty, orUndefined, type Row } from '../../data';
+import { db, orEmpty, orUndefined, mustRead, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { BlockRef, IMSection, IMTemplate, IMTemplateType } from '../../types';
 import { generateUUID } from '../../utils';
@@ -107,8 +107,17 @@ export const duplicateIMTemplate = async (
 ): Promise<IMTemplate> => {
   const source = await getIMTemplateById(sourceTemplateId);
   if (!source) throw new Error('Source template not found.');
-  const existing = await getIMTemplateByCategoryId(targetCategoryId, source.templateType);
-  if (existing) throw new Error('The target category already has a template of this type.');
+  // Non-degrading existence check. getIMTemplateByCategoryId wraps its read in
+  // `orUndefined`, so a FAILED read is indistinguishable from "no template here" — which
+  // would turn this duplicate guard into a no-op and clone a second template into a
+  // category that already has one.
+  const existingRow = await mustRead(
+    db.selectMaybeOne<Row>('im_templates', {
+      where: { category_id: targetCategoryId, template_type: source.templateType },
+    }),
+    'duplicateIMTemplate:existing',
+  );
+  if (existingRow) throw new Error('The target category already has a template of this type.');
 
   const data = await db.insert<Row>('im_templates', {
     id: generateUUID(),
@@ -171,7 +180,10 @@ export const BLANK_TEMPLATE_NAME = 'Blank Standardized Template';
 export const getOrCreateBlankTemplate = async (
   templateType: IMTemplateType = 'im',
 ): Promise<IMTemplate> => {
-    const existing = await orEmpty(
+    // This is a find-or-create: a failed lookup must NOT read as "no blank template exists
+    // yet", or the insert below mints a second one. category_id IS NULL isn't caught by the
+    // unique index, so two "blank" templates can coexist and projects split across them.
+    const existing = await mustRead(
         db.select<Row>('im_templates', {
             // A null scalar in `where` means IS NULL — this is the category-less template.
             where: { category_id: null, template_type: templateType },

@@ -44,7 +44,6 @@ import type {
 // Thresholds
 // ---------------------------------------------------------------------------
 
-export const TM_EXACT = 100;
 /** Floor for applying a fuzzy match without a human. The one knob worth tuning. */
 export const TM_AUTO_APPLY_MIN = 95;
 /**

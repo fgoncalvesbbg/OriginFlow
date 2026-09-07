@@ -1,6 +1,6 @@
 
 /** Compliance request detail: review a request, its requirements, and supplier responses. */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
 import Layout from '../../components/Layout';
@@ -13,12 +13,13 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useRefetchOnFocus } from '../../hooks';
 import { passesFeatureGate } from '../../utils';
+import { isDateOnlyPast } from '../../utils/date.utils';
 import {
   ComplianceRequest, ComplianceRequirement,
   CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
   DocStatus, ResponsibleParty, Supplier, Project, Regulation
 } from '../../types';
-import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertCircle, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck, RefreshCw } from 'lucide-react';
+import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertCircle, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck, RefreshCw, Scale } from 'lucide-react';
 
 const ConfirmationModal: React.FC<{
   isOpen: boolean;
@@ -55,6 +56,7 @@ const ComplianceRequestDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -64,6 +66,15 @@ const ComplianceRequestDetail: React.FC = () => {
   // Editable Form State
   const [answers, setAnswers] = useState<Record<string, ComplianceResponseStatus>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
+  // True once the reviewer has touched an answer/comment this session. `loadData` runs not
+  // just on mount but on every window focus (useRefetchOnFocus below) and on manual Refresh —
+  // without this guard, any of those would silently overwrite an in-progress review with
+  // whatever is on the server, discarding what the reviewer just typed.
+  const [dirty, setDirty] = useState(false);
+  // Bumped on every loadData() call so a slower, older request can never overwrite the
+  // state a newer one already applied — otherwise switching between requests quickly (or a
+  // focus refetch racing a manual Refresh) can let a stale response win.
+  const loadSeq = useRef(0);
 
   useEffect(() => {
     if (!id) return;
@@ -74,6 +85,7 @@ const ComplianceRequestDetail: React.FC = () => {
 
   const loadData = async () => {
     if (!id) return;
+    const seq = ++loadSeq.current;
     try {
       const [r, allReqs, allCats, allRegs] = await Promise.all([
         getComplianceRequestById(id),
@@ -81,6 +93,7 @@ const ComplianceRequestDetail: React.FC = () => {
         getCategories(),
         getRegulations()
       ]);
+      if (loadSeq.current !== seq) return; // a newer load has already landed; discard this one
       setRegulations(allRegs);
 
       if (r) {
@@ -99,6 +112,7 @@ const ComplianceRequestDetail: React.FC = () => {
               return null;
             }) : null
           ]).then(([supplierData, projectData]) => {
+            if (loadSeq.current !== seq) return;
             if (supplierData) setSupplier(supplierData);
             if (projectData) setProject(projectData);
           });
@@ -115,19 +129,23 @@ const ComplianceRequestDetail: React.FC = () => {
       });
       setRequirements(applicableReqs);
 
-      const initialAnswers: Record<string, ComplianceResponseStatus> = {};
-      const initialComments: Record<string, string> = {};
-      r.responses.forEach(resp => {
-        initialAnswers[resp.requirementId] = resp.status;
-        if (resp.comment) initialComments[resp.requirementId] = resp.comment;
-      });
-      setAnswers(initialAnswers);
-      setComments(initialComments);
+      // Never reseed a form the reviewer is mid-edit on — a focus refetch or a manual
+      // Refresh must not discard answers/comments typed since the last load.
+      if (!dirty) {
+        const initialAnswers: Record<string, ComplianceResponseStatus> = {};
+        const initialComments: Record<string, string> = {};
+        r.responses.forEach(resp => {
+          initialAnswers[resp.requirementId] = resp.status;
+          if (resp.comment) initialComments[resp.requirementId] = resp.comment;
+        });
+        setAnswers(initialAnswers);
+        setComments(initialComments);
+      }
     }
     } catch (err: any) {
       console.error('Error loading compliance request:', err);
     } finally {
-      setLoading(false);
+      if (loadSeq.current === seq) setLoading(false);
     }
   };
 
@@ -191,6 +209,7 @@ LaunchFlow PLM Platform`;
   const handleSave = async () => {
     if (!req || !user) return;
     setSaving(true);
+    setSaveError('');
 
     const responseItems: ComplianceResponseItem[] = requirements.map(r => ({
       requirementId: r.id,
@@ -202,7 +221,7 @@ LaunchFlow PLM Platform`;
     const allAnswered = requirements.every(r => answers[r.id]);
 
     let newStatus = ComplianceRequestStatus.SUBMITTED;
-    
+
     if (allAnswered) {
       if (hasRejection) {
         newStatus = ComplianceRequestStatus.REJECTED;
@@ -211,9 +230,16 @@ LaunchFlow PLM Platform`;
       }
     }
 
-    await submitComplianceResponse(req.id, responseItems, newStatus, user.name);
-    await loadData(); 
-    setSaving(false);
+    try {
+      await submitComplianceResponse(req.id, responseItems, newStatus, user.name);
+      setDirty(false);
+      await loadData();
+    } catch (e: any) {
+      console.error('Error saving compliance response:', e);
+      setSaveError(e?.message || 'Failed to save. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
   
   const handleDeleteRequest = async () => {
@@ -399,7 +425,7 @@ LaunchFlow PLM Platform`;
   
   if (loading || !req) return <Layout><div>Loading...</div></Layout>;
 
-  const isOverdue = req.deadline && new Date(req.deadline) < new Date() && req.status === ComplianceRequestStatus.PENDING_SUPPLIER;
+  const isOverdue = isDateOnlyPast(req.deadline) && req.status === ComplianceRequestStatus.PENDING_SUPPLIER;
 
   // The supplier's declaration is final once submitted — internal users can review it
   // here but must not be able to rewrite what was answered.
@@ -425,6 +451,16 @@ LaunchFlow PLM Platform`;
     }
     return out;
   }, [requirements, regulations]);
+
+  /**
+   * Regulations by id, reusing the `regulations` already fetched for the expiry check above
+   * (migration 139/141) — so showing provenance on every requirement row costs nothing extra
+   * rather than an N+1 fetch.
+   */
+  const regulationById = useMemo(
+    () => new Map(regulations.map(r => [r.id, r])),
+    [regulations],
+  );
 
   const groupedReqs = requirements.reduce((acc, r) => {
       const sec = r.section || 'General Requirements';
@@ -551,6 +587,22 @@ LaunchFlow PLM Platform`;
                             <div className="flex flex-col md:flex-row gap-6">
                             <div className="flex-1">
                                 <h4 className="font-bold text-primary">{r.title}</h4>
+                                {(() => {
+                                    const reg = r.regulationId ? regulationById.get(r.regulationId) : null;
+                                    if (!reg) return null;
+                                    const clause = r.clauseId ? reg.clauses?.find(c => c.id === r.clauseId) : null;
+                                    return (
+                                        <p className="text-[11px] mt-0.5">
+                                            <Link
+                                                to={`/regulations/${reg.id}`}
+                                                className="inline-flex items-center gap-1 font-mono font-semibold text-sky-700 hover:text-sky-900 hover:underline"
+                                            >
+                                                <Scale size={10} /> {reg.referenceCode}
+                                                {clause && <span className="text-sky-500">§{clause.number}</span>}
+                                            </Link>
+                                        </p>
+                                    );
+                                })()}
                                 {blockedRequirementIds.has(r.id) && (
                                     <p className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded px-2 py-1 my-1 inline-flex items-center gap-1.5">
                                         <AlertCircle size={11} className="shrink-0" />
@@ -600,7 +652,7 @@ LaunchFlow PLM Platform`;
                                             className="text-emerald-600"
                                             checked={currentAnswer === ComplianceResponseStatus.COMPLY}
                                             disabled={isLocked}
-                                            onChange={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY})}
+                                            onChange={() => { setDirty(true); setAnswers({...answers, [r.id]: ComplianceResponseStatus.COMPLY}); }}
                                         />
                                         <span className="text-sm font-medium">Accept</span>
                                     </label>
@@ -611,7 +663,7 @@ LaunchFlow PLM Platform`;
                                             className="text-rose-600"
                                             checked={currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY}
                                             disabled={isLocked}
-                                            onChange={() => setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY})}
+                                            onChange={() => { setDirty(true); setAnswers({...answers, [r.id]: ComplianceResponseStatus.CANNOT_COMPLY}); }}
                                         />
                                         <span className="text-sm font-medium">Reject</span>
                                     </label>
@@ -622,7 +674,7 @@ LaunchFlow PLM Platform`;
                                     placeholder="Add comment..."
                                     value={comments[r.id] || ''}
                                     disabled={isLocked}
-                                    onChange={(e) => setComments({...comments, [r.id]: e.target.value})}
+                                    onChange={(e) => { setDirty(true); setComments({...comments, [r.id]: e.target.value}); }}
                                 />
                             </div>
                             </div>
@@ -635,11 +687,18 @@ LaunchFlow PLM Platform`;
       </div>
 
       {!isLocked && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg flex justify-end gap-3 z-30 md:pl-64">
-           <button onClick={() => navigate('/compliance')} className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded font-medium">Cancel</button>
-           <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded font-bold shadow disabled:opacity-50 flex items-center gap-2">
-              <Save size={18} /> {saving ? 'Saving...' : 'Save & Update Status'}
-           </button>
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg flex justify-between items-center gap-3 z-30 md:pl-64">
+           {saveError ? (
+             <p className="text-sm text-rose-600 flex items-center gap-1.5">
+               <AlertTriangle size={14} className="shrink-0" /> {saveError}
+             </p>
+           ) : <span />}
+           <div className="flex gap-3 shrink-0">
+             <button onClick={() => navigate('/compliance')} className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded font-medium">Cancel</button>
+             <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded font-bold shadow disabled:opacity-50 flex items-center gap-2">
+                <Save size={18} /> {saving ? 'Saving...' : 'Save & Update Status'}
+             </button>
+           </div>
         </div>
       )}
     </Layout>

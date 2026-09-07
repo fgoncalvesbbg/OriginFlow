@@ -6,13 +6,36 @@ import {
   getProjects, getSuppliers, getCategories, createComplianceRequest,
   getComplianceRequirements, getCategoryAttributes,
   getProjectSkus, getAttributeRequestsByProject, getEffectiveSkuValue,
-  getRegulations, collectBlocks,
+  getRegulations, collectBlocks, getComplianceRequests,
 } from '../../services';
 import { Project, Supplier, CategoryL3, ComplianceRequirement, CategoryAttribute, Regulation } from '../../types';
 import { CategorySelect } from '../../components/common/CategorySelect';
 import { getAttributesForCategory } from '../../utils';
 import AttributeInput from '../../components/common/AttributeInput';
 import { AlertCircle, ArrowLeft, Loader2, Lock, GitBranch, Scale } from 'lucide-react';
+
+/**
+ * A human-readable TCF request id, e.g. "TCF-2026-483920".
+ *
+ * `requestId` has no DB-level uniqueness constraint — it is a display label, not the
+ * routing key (that's the row's `id`) — so a collision would not break anything
+ * structurally, but it WOULD show two different requests under the same label on reports,
+ * emails and filenames. Guarded two ways: a 6-digit random component (a million-wide space,
+ * versus the previous 4-digit one) and an explicit check against every request id already
+ * in the system, retried until clear. The year is read live rather than hardcoded, so this
+ * does not go stale the way the previous constant did after 2025.
+ */
+const generateRequestId = (existingIds: ReadonlySet<string>): string => {
+  const year = new Date().getFullYear();
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const suffix = Math.floor(Math.random() * 1_000_000).toString().padStart(6, '0');
+    const candidate = `TCF-${year}-${suffix}`;
+    if (!existingIds.has(candidate)) return candidate;
+  }
+  // Implausible at a million-wide space, but never emit a known duplicate: fall back to a
+  // component derived from the clock, which nothing else in this batch can also draw.
+  return `TCF-${year}-${Date.now().toString(36).toUpperCase()}`;
+};
 
 const CreateComplianceRequest: React.FC = () => {
   const navigate = useNavigate();
@@ -36,7 +59,7 @@ const CreateComplianceRequest: React.FC = () => {
   // Form State
   const [selectedProjectId, setSelectedProjectId] = useState(searchParams.get('projectId') || '');
   const [projectName, setProjectName] = useState('');
-  const [requestId, setRequestId] = useState(`TCF-2025-${Math.floor(Math.random()*10000).toString().padStart(4, '0')}`);
+  const [requestId, setRequestId] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -48,13 +71,14 @@ const CreateComplianceRequest: React.FC = () => {
         setLoading(true);
         // Load data in parallel. We wrap each in a catch to log errors but ideally allow others to succeed if possible,
         // though for this form most are critical.
-        const [pData, sData, cData, rData, aData, regData] = await Promise.all([
+        const [pData, sData, cData, rData, aData, regData, existingRequests] = await Promise.all([
            getProjects(),
            getSuppliers(),
            getCategories(),
            getComplianceRequirements(),
            getCategoryAttributes(),
            getRegulations(),
+           getComplianceRequests(),
         ]);
 
         setProjects(pData);
@@ -63,6 +87,7 @@ const CreateComplianceRequest: React.FC = () => {
         setRequirements(rData);
         setAttributes(aData);
         setRegulations(regData);
+        setRequestId(generateRequestId(new Set(existingRequests.map(r => r.requestId))));
 
       } catch (err: any) {
         console.error("Critical load error", err);
@@ -84,6 +109,9 @@ const CreateComplianceRequest: React.FC = () => {
             if (selectedProjectId !== targetId) setSelectedProjectId(targetId);
             if (!projectName) setProjectName(proj.name);
             if (!supplierId) setSupplierId(proj.supplierId);
+            // The project already has a category — prefill it, but only if nothing has
+            // been chosen yet, so this never clobbers a deliberate change.
+            if (!categoryId && proj.categoryId) setCategoryId(proj.categoryId);
         }
     }
   }, [projects, searchParams, selectedProjectId]); // Depend on projects loading
@@ -166,6 +194,9 @@ const CreateComplianceRequest: React.FC = () => {
     if (proj) {
       setProjectName(proj.name);
       setSupplierId(proj.supplierId);
+      // Prefill from the project's own category — still editable afterwards, this just
+      // saves re-entering a fact the project record already holds.
+      if (proj.categoryId) setCategoryId(proj.categoryId);
     } else {
        if (pid === '') {
            // Clear if unselected
@@ -200,13 +231,11 @@ const CreateComplianceRequest: React.FC = () => {
     try {
         const conditionAttributes: Record<string, string> = {};
         condAttrIds.forEach(id => { if (condValues[id]?.trim()) conditionAttributes[id] = condValues[id].trim(); });
-        await createComplianceRequest(selectedProjectId, projectName, requestId, supplierId, categoryId, [], deadline || undefined, conditionAttributes);
-        
-        if (selectedProjectId) {
-           navigate(`/project/${selectedProjectId}`);
-        } else {
-           navigate('/compliance');
-        }
+        const created = await createComplianceRequest(selectedProjectId, projectName, requestId, supplierId, categoryId, [], deadline || undefined, conditionAttributes);
+
+        // Land on the request just created, not the project — otherwise the operator has
+        // to re-find it (it was buried in the project's own compliance list before).
+        navigate(`/compliance/request/${created.id}`);
     } catch (e: any) {
         console.error("Submit Error:", e);
         // Fix: Stringify object if message is not present
@@ -242,7 +271,7 @@ const CreateComplianceRequest: React.FC = () => {
           <ArrowLeft size={16} className="mr-1" /> Back
         </button>
 
-        <h1 className="text-3xl font-bold text-primary mb-6">Create Compliance Request</h1>
+        <h1 className="text-3xl font-bold text-primary mb-6">Create TCF Request</h1>
         
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow border border-gray-200 space-y-6">
           
@@ -274,7 +303,21 @@ const CreateComplianceRequest: React.FC = () => {
 
              <div>
                <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
-               <input required type="text" className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. New Product Launch" />
+               <input
+                 required={!selectedProjectId}
+                 disabled={!!selectedProjectId}
+                 type="text"
+                 className={`w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none ${
+                   selectedProjectId ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''
+                 }`}
+                 value={projectName}
+                 onChange={e => setProjectName(e.target.value)}
+                 placeholder="e.g. New Product Launch"
+                 title={selectedProjectId ? 'Derived from the linked project.' : undefined}
+               />
+               {selectedProjectId && (
+                 <p className="text-xs text-gray-400 mt-1">Derived from the linked project.</p>
+               )}
              </div>
 
              <div>

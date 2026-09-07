@@ -36,8 +36,11 @@ import type { IMTemplate, Regulation, TemplateRegulation } from '../../types';
 import { IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { TemplateComplianceChecklist } from './IMTemplateChecklist';
+import { formatBytes } from '../../utils';
 
-const kb = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} kB`;
+// No file this panel shows has ever been MB-scale, so this never switches units — only the
+// casing changes from the old local helper's "kB" to formatBytes's "KB" (see task report).
+const kb = (bytes: number) => formatBytes(bytes, { allowMB: false });
 
 interface PanelProps {
   template: IMTemplate;

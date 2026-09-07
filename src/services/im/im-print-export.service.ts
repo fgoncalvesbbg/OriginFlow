@@ -36,6 +36,7 @@
  */
 
 import { auth, db, orEmpty, storage, type Row } from '../../data';
+import type { SignedUrlAuth } from '../../data/ports/storage.port';
 import { isLive } from '../../config/environment.config';
 import { generateUUID } from '../../utils';
 import type { IMTemplateType } from '../../types';
@@ -261,20 +262,20 @@ export const getLatestRendersByManual = async (): Promise<Map<string, LatestRend
 };
 
 /**
- * Deterministic public URL of a previously rendered print PDF. Mirrors getPublishedManifestUrl —
- * no DB round-trip. Returns null off-line.
+ * Signed URL for an EXACT, already-known print-PDF storage path — i.e. `PrintRender.storagePath`
+ * (a persisted render's history row) or a just-finished render's `PrintPdfResult.storagePath`.
+ *
+ * This does not reconstruct a path — it signs the one it is given. That distinction matters:
+ * any deterministic `{type}-{langs}-{size}.pdf` guess predates render-print-merge.ts's move to a
+ * UNIQUE, job-id-keyed object name (`{type}-{layout}{langs}-{size}-v{version}-{jobId}.pdf`, see
+ * its own comment on why — idempotency across a client retry), so such a guess no longer matches
+ * what is actually stored. A caller that already has the real path (every render row does) must
+ * sign that path directly rather than re-derive a guess that will not resolve.
  */
-export const getPrintPdfUrl = (
-  projectId: string,
-  templateType: IMTemplateType,
-  languages: string[],
-  pageSize: 'a4' | 'a5',
-): string | null => {
-  if (!isLive) return null;
-  const name = `${templateType}-${languages.join('-')}-${pageSize}`;
-  const path = `${projectId}/${templateType}/${name}.pdf`;
-  return storage.publicUrl(BUCKET, path);
-};
+export const getSignedPrintPdfUrlForPath = (
+  storagePath: string,
+  auth: SignedUrlAuth,
+): Promise<string> => storage.signedUrl(BUCKET, storagePath, auth);
 
 /** Thrown by `postJson` — carries the HTTP status so callers can decide whether to retry. */
 class PrintApiError extends Error {
@@ -626,11 +627,22 @@ export const requestDraftPrintPdf = async (
   return runRenderJob(base, token, jobId, params.onProgress, uploadManuals, async (merged, prep) => {
     // Pull the bytes in NOW: this runs before the job's cleanup deletes the temp object,
     // and the blob is the only copy that outlives this call.
+    //
+    // `merged.url` here is ALREADY a short-TTL signed URL, not a permanent public one — see
+    // render-print-merge.ts's draft branch: it mints it directly with the service role
+    // (independent of im-print's public/private flag either way) because the draft's storage
+    // path lives under a `tmp/draft-<templateId>/…` prefix that can never pass `im-file-url.ts`'s
+    // path validation (its first segment must be a real project UUID). There is no path here
+    // through which a fresher signed URL could be re-derived client-side, so trusting the
+    // server-provided one is correct, not a leftover of the old public-URL behaviour.
     params.onProgress?.('Downloading…', 1, 1);
     const res = await fetch(merged.url);
     if (!res.ok) throw new Error(`Could not download the draft PDF (${res.status}).`);
     const blob = await res.blob();
-    const fallback = `${params.templateType === 'warning_leaflet' ? 'Warning Leaflet' : 'Instruction Manual'} (draft).pdf`;
+    const kind = params.templateType === 'warning_leaflet'
+      ? (params.leafletLayout === 'compact2col' ? 'Warning Leaflet (Compact)' : 'Warning Leaflet')
+      : 'Instruction Manual';
+    const fallback = `${kind} (draft).pdf`;
     return {
       blobUrl: URL.createObjectURL(blob),
       filename: downloadNameFromUrl(merged.url, fallback),

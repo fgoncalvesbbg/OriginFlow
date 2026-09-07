@@ -86,7 +86,6 @@ export type { PublishDiff, PublishDiffEntry } from './im-publish-diff.service';
 export {
   requestPrintPdf,
   requestDraftPrintPdf,
-  getPrintPdfUrl,
   getPrintRenders,
   getLatestRendersByManual,
   isPrintExportAvailable,
@@ -111,7 +110,6 @@ export {
   getLeafletIssues,
   issueCategoryLeaflet,
   issueLeafletForSkus,
-  withdrawLeafletIssue,
 } from './leaflet-coverage.service';
 export type {
   LeafletMode,
@@ -142,7 +140,6 @@ export {
   submitReview,
   getReviewComments,
   setReviewCommentStatus,
-  getOpenReviewCommentCounts,
   uploadReviewImage,
   reviewImageUrl,
   getReviewRoundsByManual,
@@ -230,3 +227,17 @@ export type {
   TmDivergence,
   TmReuseEvent,
 } from './im-tm-write.service';
+
+// Placeholder intake wizard — registry-backed answer store (migrations 142/143).
+export {
+  mapPlaceholderAnswer,
+  mapAdhocPlaceholder,
+  mapPlaceholderAnswerLogEntry,
+  getEffectivePlaceholderValue,
+  collapsePlaceholderAnswers,
+  inferAnswerAction,
+  saveWizardAnswer,
+  recomputePlaceholderData,
+  getWizardQuestions,
+} from './im-placeholder-answer.service';
+export type { SaveWizardAnswerInput } from './im-placeholder-answer.service';

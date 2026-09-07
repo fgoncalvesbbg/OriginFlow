@@ -154,7 +154,7 @@ const OUTCOME_FIX: Record<ReplacementOutcome, string> = {
 };
 
 /** Turn a blocking regulation into the sentence a person acts on. */
-export const describeBlock = (
+const describeBlock = (
   regulation: Regulation,
   resolution: ReplacementResolution,
 ): RegulationBlock => ({

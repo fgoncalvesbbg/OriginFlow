@@ -172,14 +172,17 @@ export const reassignProjectPM = async (projectId: string, newPmId: string): Pro
 
 export const logAccessCodeAttempt = async (
     supplierId: string,
-    accessCode: string,
     ipAddress: string,
     success: boolean
 ): Promise<void> => {
     try {
+        // The attempted code is deliberately NOT persisted. supplier_access_logs is
+        // anon-insertable and readable by every authenticated user, so storing the typed
+        // code there put the live supplier access codes in a widely-readable table.
+        // Real attempt tracking and lockout live server-side in portal_access_attempts
+        // via portal_rl_guard(); this row is only a coarse success/failure trail.
         await portalDb.insertMany('supplier_access_logs', [{
             supplier_id: supplierId,
-            access_code: accessCode,
             ip_address: ipAddress,
             success,
             created_at: new Date().toISOString()

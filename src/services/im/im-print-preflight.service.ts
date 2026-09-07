@@ -4,17 +4,27 @@
  * Supplier images go into the print HTML at their original stored size; one 8 MB
  * PNG makes PDFShift slow (or time out — a wasted 422 under the pipeline's
  * permanent-failure rules) and bloats the booklet PDF for every language it
- * appears in. This preflight reads the PUBLISHED resolved-manual JSONs (public
- * bucket, no auth), collects every image URL with the sections/languages using
- * it, and HEAD-requests each unique URL for its Content-Length.
+ * appears in. This preflight reads the PUBLISHED resolved-manual JSONs, collects
+ * every image URL with the sections/languages using it, and HEAD-requests each
+ * unique URL for its Content-Length.
+ *
+ * The manual JSONs themselves live in `im-published`, one of the two buckets closed off
+ * from permanent public URLs (see im-file-url.ts) — so each language's URL is re-signed via
+ * `resolvePublishedUrl` (staff path: this dialog always runs from an authenticated project
+ * page, never the public share/review portal) immediately before the fetch. The images
+ * REFERENCED INSIDE a manual (uploaded IM assets) are a separate, still-public bucket and are
+ * fetched as before — only the manual container itself needed re-signing.
  *
  * Best-effort by design: a CORS-blocked HEAD (external image) or a missing
  * Content-Length yields bytes=null ("size unknown") rather than an error, and
- * callers treat the whole check as advisory — it never blocks a render.
+ * callers treat the whole check as advisory — it never blocks a render. The one exception is
+ * a signed-URL MINTING failure (network/auth error reaching im-file-url) — that is reported
+ * separately as `unreachable`, never folded into "this language isn't published", because the
+ * two mean very different things to an operator deciding whether a manual is safe to print.
  */
 
 import type { IMTemplateType, ResolvedManual } from '../../types';
-import { getPublishedManualUrl } from './im-publish.service';
+import { getPublishedManualUrl, resolvePublishedUrl } from './im-publish.service';
 
 /** Flag images at or above this many bytes (1 MB). */
 export const HEAVY_IMAGE_BYTES = 1_000_000;
@@ -36,6 +46,14 @@ export interface PrintImageReport {
   checked: number;
   /** Of those, how many sizes could not be determined. */
   unknown: number;
+  /**
+   * Uppercased languages whose published manual could not even be REACHED because minting a
+   * signed URL for it failed (network/auth error) — distinct from a language simply not
+   * being published (which is silently skipped, as before). A minting failure says nothing
+   * about whether the manual exists; conflating it with "missing" would make this advisory
+   * check lie about publish state.
+   */
+  unreachable: string[];
 }
 
 const IMG_SRC_RE = /<img\b[^>]*?\bsrc\s*=\s*"([^"]+)"/gi;
@@ -87,13 +105,28 @@ export const checkPrintImageWeights = async (
 ): Promise<PrintImageReport> => {
   // url → { sections, languages }, aggregated across the published JSONs.
   const usage = new Map<string, { sections: Set<string>; languages: Set<string> }>();
+  const unreachable: string[] = [];
 
   await Promise.all(languages.map(async (lang) => {
     const url = getPublishedManualUrl(projectId, templateType, lang);
-    if (!url) return;
+    if (!url) return; // offline (!isLive) — nothing to check at all, not a per-language state
+
+    let signedUrl: string;
     try {
-      const res = await fetch(url);
-      if (!res.ok) return;
+      // Staff path — this preflight only ever runs from the (authenticated) print-export
+      // dialog, never the public share/review portal, so no portalToken to pass.
+      signedUrl = await resolvePublishedUrl(url);
+    } catch (e) {
+      // Minting failed — NOT the same as "this language isn't published". Keep it out of the
+      // silent-skip path below so it can be surfaced as its own distinct state.
+      console.error(`[im-print-preflight] Could not sign the published manual URL for ${lang}:`, e);
+      unreachable.push(lang.toUpperCase());
+      return;
+    }
+
+    try {
+      const res = await fetch(signedUrl);
+      if (!res.ok) return; // genuinely missing/not published — advisory, as before
       const resolved = (await res.json()) as ResolvedManual;
       for (const [imgUrl, titles] of collectManualImages(resolved)) {
         if (!usage.has(imgUrl)) usage.set(imgUrl, { sections: new Set(), languages: new Set() });
@@ -128,6 +161,7 @@ export const checkPrintImageWeights = async (
       .filter((i) => i.bytes !== null && i.bytes >= HEAVY_IMAGE_BYTES)
       .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0)),
     checked: infos.length,
+    unreachable,
     unknown: infos.filter((i) => i.bytes === null).length,
   };
 };

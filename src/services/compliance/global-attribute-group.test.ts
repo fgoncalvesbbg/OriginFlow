@@ -24,6 +24,7 @@ let rows: FakeRow[] = [];
 
 vi.mock('../../data', () => ({
   orEmpty: async (p: Promise<unknown>) => p,
+  mustRead: async (p: Promise<unknown>) => p,
   portalDb: { select: async () => rows },
   db: {
     select: async (_t: string, opts?: any) =>

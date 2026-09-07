@@ -40,7 +40,8 @@ export type {
   ComplianceRequest,
   CategoryAttribute,
   AttributeDataType,
-  AttributeValidationRules
+  AttributeValidationRules,
+  WizardTier
 } from './compliance.types';
 
 // IM types
@@ -136,3 +137,16 @@ export type {
   RegulatoryCheckReport,
   RegulatoryCheckRun
 } from './regulatory.types';
+
+// IM placeholder intake wizard types (migrations 142/143)
+export type {
+  PlaceholderTier,
+  PlaceholderAnswerStatus,
+  PlaceholderAnswerScope,
+  PlaceholderAnswerSource,
+  PlaceholderAnswerLogAction,
+  AdhocPlaceholder,
+  WizardQuestion,
+  PlaceholderAnswer,
+  PlaceholderAnswerLogEntry
+} from './im-placeholder-wizard.types';

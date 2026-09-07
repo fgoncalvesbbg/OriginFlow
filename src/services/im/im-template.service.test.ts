@@ -24,6 +24,7 @@ vi.mock('../../data', () => ({
   },
   orEmpty: (p: Promise<any>) => p,
   orUndefined: (p: Promise<any>) => p.then((v: any) => v ?? undefined),
+  mustRead: (p: Promise<any>) => p,
 }));
 
 vi.mock('../../config/environment.config', () => ({ isLive: true }));

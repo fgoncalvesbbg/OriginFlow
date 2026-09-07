@@ -4,6 +4,7 @@
  * (Akeneo yes/no format). Pure and testable; the page turns the result into a CSV via SheetJS.
  */
 import type { CategoryAttribute, ProjectSku } from '../types';
+import { neutralizeCsvFormula } from './csv-escape.utils';
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
@@ -13,7 +14,11 @@ export const akeneoColumnCode = (attr: CategoryAttribute): string => attr.akeneo
 const formatValue = (attr: CategoryAttribute, value: string): string => {
   if (value == null || value === '') return '';
   if (attr.dataType === 'boolean') return value === 'true' ? '1' : value === 'false' ? '0' : value;
-  return value;
+  // Guard against CSV formula injection: a supplier-submitted value (e.g. a free-text attribute)
+  // can reach this export verbatim once a PM saves it, and the row is written to CSV via the
+  // xlsx lib (bookType: 'csv'), which quotes commas/quotes for us but does nothing about a
+  // leading =/+/-/@ — that still runs as a formula the moment Excel opens the file.
+  return neutralizeCsvFormula(value);
 };
 
 export type AkeneoExportRow = Record<string, string>;
@@ -38,7 +43,10 @@ export function buildAkeneoRows(
   }
 
   const rows = skus.map(sku => {
-    const row: AkeneoExportRow = { sku: sku.skuNumber, sku_title: sku.skuTitle };
+    const row: AkeneoExportRow = {
+      sku: neutralizeCsvFormula(sku.skuNumber ?? ''),
+      sku_title: neutralizeCsvFormula(sku.skuTitle ?? ''),
+    };
     for (const { code, attr } of cols) {
       const raw = sku.attributeValues.find(v => v.attributeId === attr.id)?.value ?? '';
       row[code] = formatValue(attr, raw);

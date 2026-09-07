@@ -102,7 +102,7 @@ const mapObligation = (r: any): RegulationObligation => ({
 });
 
 /** Order clauses the way the document prints them. */
-export const compareClauses = (a: RegulationClause, b: RegulationClause): number =>
+const compareClauses = (a: RegulationClause, b: RegulationClause): number =>
   a.sortKey.localeCompare(b.sortKey) || a.number.localeCompare(b.number);
 
 /**
@@ -253,14 +253,6 @@ export const updateClause = async (
     console.error(TAG, 'updateClause failed', e);
     throw describeClauseFailure(e, updates.number);
   }
-};
-
-/**
- * Delete a clause. Its obligations survive with `clause_id = NULL` (ON DELETE SET NULL) —
- * losing a chapter heading must not delete the obligations stated under it.
- */
-export const deleteClause = async (id: string): Promise<void> => {
-  await db.delete('regulation_clauses', { where: { id } });
 };
 
 const obligationPayload = (input: Partial<RegulationObligationInput>): Row => {

@@ -8,7 +8,7 @@
 export { isLive } from '../config/environment.config';
 
 // Storage module
-export { getPortalDocumentUrl, getSignedDocumentUrl, openSignedDocument } from './storage/signed-url.service';
+export { getPortalDocumentUrl, openSignedDocument } from './storage/signed-url.service';
 
 // Auth module
 export {
@@ -232,7 +232,6 @@ export {
   getPublishDiff,
   requestPrintPdf,
   requestDraftPrintPdf,
-  getPrintPdfUrl,
   getPrintRenders,
   getLatestRendersByManual,
   isPrintExportAvailable,
@@ -256,7 +255,6 @@ export {
   submitReview,
   getReviewComments,
   setReviewCommentStatus,
-  getOpenReviewCommentCounts,
   uploadReviewImage,
   reviewImageUrl,
   getReviewRoundsByManual,
@@ -295,7 +293,15 @@ export {
   getLeafletIssues,
   issueCategoryLeaflet,
   issueLeafletForSkus,
-  withdrawLeafletIssue
+  mapPlaceholderAnswer,
+  mapAdhocPlaceholder,
+  mapPlaceholderAnswerLogEntry,
+  getEffectivePlaceholderValue,
+  collapsePlaceholderAnswers,
+  inferAnswerAction,
+  saveWizardAnswer,
+  recomputePlaceholderData,
+  getWizardQuestions
 } from './im';
 export type {
   ImImportDoc,
@@ -365,7 +371,8 @@ export type {
   LeafletCoverageRow,
   LeafletPolicy,
   LeafletIssue,
-  IssueForSkusResult
+  IssueForSkusResult,
+  SaveWizardAnswerInput
 } from './im';
 
 // Sourcing module
@@ -409,13 +416,11 @@ export {
   getRegulationStructure,
   createClause,
   updateClause,
-  deleteClause,
   createObligation,
   updateObligation,
   deleteObligation,
   clauseSortKey,
   inferClauseKind,
-  compareClauses,
   CARRIERS,
   parseObligationLine,
   parseObligationBlock,
@@ -425,7 +430,6 @@ export {
   resolveEffective,
   isBlocking,
   collectBlocks,
-  describeBlock,
   summarizeBlocks,
   indexRegulations,
   deriveCelex,

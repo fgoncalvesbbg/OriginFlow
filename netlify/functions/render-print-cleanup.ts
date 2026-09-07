@@ -9,8 +9,18 @@
  * on its own terms by the time cleanup runs.
  */
 
-import { createClient } from '@supabase/supabase-js';
-import { NetlifyEvent, BUCKET, tempJobPrefix, AuthError } from './lib/print-render-shared';
+import {
+  NetlifyEvent,
+  json,
+  serviceClient,
+  authenticate,
+  authorizeProject,
+  assertJobId,
+  AuthError,
+  ForbiddenError,
+  ValidationError,
+} from './lib/http';
+import { BUCKET, tempJobPrefix, assertRenderProjectId } from './lib/print-render-shared';
 
 interface CleanupRequest {
   projectId: string;
@@ -20,45 +30,58 @@ interface CleanupRequest {
 
 const isValid = (b: unknown): b is CleanupRequest => {
   const r = b as Partial<CleanupRequest>;
-  return !!r && typeof r.projectId === 'string' && typeof r.templateType === 'string' && typeof r.jobId === 'string' && !!r.jobId;
+  return (
+    !!r &&
+    typeof r.projectId === 'string' &&
+    (r.templateType === 'im' || r.templateType === 'warning_leaflet') &&
+    typeof r.jobId === 'string' && !!r.jobId
+  );
 };
 
 export const handler = async (event: NetlifyEvent) => {
-  if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured on the server.' }) };
+  let supabase: ReturnType<typeof serviceClient>;
+  try {
+    supabase = serviceClient();
+  } catch (e) {
+    return json(500, { error: e instanceof Error ? e.message : 'Server misconfiguration.' });
   }
-  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   let req: CleanupRequest;
   try {
     req = JSON.parse(event.body || '{}');
   } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body.' }) };
+    return json(400, { error: 'Invalid JSON body.' });
   }
-  if (!isValid(req)) return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request body.' }) };
+  if (!isValid(req)) return json(400, { error: 'Invalid request body.' });
 
   try {
-    const token = (event.headers?.authorization || event.headers?.Authorization || '').replace(/^Bearer\s+/i, '');
-    if (!token) throw new AuthError('Authentication required.');
-    const { error: authErr } = await supabase.auth.getUser(token);
-    if (authErr) throw new AuthError('Invalid or expired session.');
+    // Every parameter interpolated into a Storage key is validated before it is used.
+    // Draftness is derived from the id's own shape (see assertRenderProjectId) — this
+    // request has no explicit `draft` flag of its own to trust.
+    const { value: projectId, isDraft } = assertRenderProjectId(req.projectId);
+    assertJobId(req.jobId);
 
-    const prefix = tempJobPrefix(req.projectId, req.templateType, req.jobId);
+    // AUTHORIZATION, not just authentication — see render-print-prepare.ts's comment.
+    if (isDraft) await authenticate(event);
+    else await authorizeProject(event, projectId);
+
+    const prefix = tempJobPrefix(projectId, req.templateType, req.jobId);
     const { data: files, error: listErr } = await supabase.storage.from(BUCKET).list(prefix);
     if (listErr) throw new Error(listErr.message);
     if (files?.length) {
       await supabase.storage.from(BUCKET).remove(files.map((f) => `${prefix}/${f.name}`));
     }
-    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    return json(200, { ok: true });
   } catch (e) {
-    if (e instanceof AuthError) return { statusCode: 401, body: JSON.stringify({ error: e.message }) };
+    if (e instanceof AuthError) return json(401, { error: e.message });
+    if (e instanceof ForbiddenError) return json(403, { error: e.message });
+    if (e instanceof ValidationError) return json(400, { error: e.message });
     // Non-fatal — see file header. Orphaned tmp/ files can be swept later by a
-    // scheduled job if this ever becomes a meaningful storage-cost concern.
+    // scheduled job if this ever becomes a meaningful storage-cost concern. Never
+    // echoed to the caller — just logged, same as before.
     console.error('[render-print-cleanup] cleanup failed (non-fatal):', e);
-    return { statusCode: 200, body: JSON.stringify({ ok: false }) };
+    return json(200, { ok: false });
   }
 };

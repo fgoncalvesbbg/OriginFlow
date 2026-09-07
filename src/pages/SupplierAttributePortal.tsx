@@ -32,6 +32,11 @@ const SupplierAttributePortal: React.FC = () => {
   // Image attributes that already have a value: a supplier may upload an image once,
   // but once set only a PM can replace it (locked read-only here).
   const [lockedImageIds, setLockedImageIds] = useState<Set<string>>(new Set());
+  // Attributes that arrived with a non-empty value (prefilled from a previous submission).
+  // A field the supplier deliberately CLEARS still needs to be sent — as an explicit empty
+  // value — or the payload simply omits it and getEffectiveSkuValue falls back to the old
+  // stored value, silently un-clearing what was just cleared.
+  const [prefilledIds, setPrefilledIds] = useState<Set<string>>(new Set());
 
   // Other requests created together with this one (same project + category + step).
   // Populated even for a lone SKU (then empty) — see getSiblingAttributeRequests.
@@ -68,6 +73,7 @@ const SupplierAttributePortal: React.FC = () => {
         });
         // Pre-fill if previously submitted
         const locked = new Set<string>();
+        const prefilled = new Set<string>();
         if (req.submittedData) {
           req.submittedData.forEach(d => {
             initValues[d.attributeId] = d.value;
@@ -75,9 +81,11 @@ const SupplierAttributePortal: React.FC = () => {
             // An image carried over from a previous submission/stage is locked for suppliers.
             const attr = catAttrs.find(a => a.id === d.attributeId);
             if (attr?.dataType === 'image' && d.value) locked.add(d.attributeId);
+            if (d.value) prefilled.add(d.attributeId);
           });
         }
         setLockedImageIds(locked);
+        setPrefilledIds(prefilled);
         setValues(initValues);
         setTypes(initTypes);
       } catch (e: any) {
@@ -146,9 +154,13 @@ const SupplierAttributePortal: React.FC = () => {
 
     setSubmitting(true);
     try {
+      // Include a field with no current value when it was previously prefilled — the
+      // supplier deliberately cleared it, and that clear must reach the server as an
+      // explicit empty value rather than being omitted (which would leave the old stored
+      // value in place, as if nothing had changed).
       const payload = catAttrs
-        .filter(a => values[a.id])
-        .map(a => ({ attributeId: a.id, name: a.name, value: values[a.id], type: types[a.id] }));
+        .filter(a => values[a.id] || prefilledIds.has(a.id))
+        .map(a => ({ attributeId: a.id, name: a.name, value: values[a.id] || '', type: types[a.id] }));
       // Only ids the supplier both marked AND actually filled in reach the server — an
       // empty marked field has nothing to copy.
       const sharedIds = Array.from(sharedAttrIds).filter(id => payload.some(p => p.attributeId === id));

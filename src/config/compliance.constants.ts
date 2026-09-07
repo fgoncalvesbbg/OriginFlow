@@ -9,7 +9,7 @@ import type { CategoryAttribute } from '../types/compliance.types';
 // When referenced in an IM template it resolves to the project's SKU number(s), joined with
 // ", " when the project defines multiple SKUs.
 export const SKU_ATTRIBUTE_ID = '__sku';
-export const SKU_ATTRIBUTE_NAME = 'SKU';
+const SKU_ATTRIBUTE_NAME = 'SKU';
 
 // Synthetic CategoryAttribute used to offer "SKU" in attribute pickers (IM template editor)
 // and to resolve its display name in the IM generator. Not persisted — built on demand.
