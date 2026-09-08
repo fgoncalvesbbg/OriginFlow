@@ -159,7 +159,8 @@ const buildMatchers = (brands: string[]): Matcher[] => {
       priority: 4,
       re: new RegExp(
         '(?<=\\b(?:Fig|Figure|Abb|Abbildung|Table|Tab|Tabelle|Section|Sect|Chapter|Chap|Kapitel'
-          + '|Step|Schritt|No|Nr|Item|Pos|see|refer to|siehe|voir|vea|vease|vedi|zie|patrz)'
+          + '|Step|Schritt|No|Nr|Item|Pos|Attachment|Attachments|Anlage|Anlagen|Annexe|Anexo'
+          + '|Allegato|Bijlage|Załącznik|see|refer to|siehe|voir|vea|vease|vedi|zie|patrz)'
           + '\\.?\\s)\\d+(?:\\.\\d+)*\\b',
         'gi',
       ),

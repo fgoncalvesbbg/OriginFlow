@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_db_migrations_151_revoke_trigger_fn_execute_from_public_sql", "label": "151_revoke_trigger_fn_execute_from_public.sql", "file_type": "code", "source_file": "db_migrations/151_revoke_trigger_fn_execute_from_public.sql", "source_location": null}], "edges": []}

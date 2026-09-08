@@ -580,5 +580,8 @@ export const resolveManual = (
     searchIndex,
     warnings,
     primarySkuQrSvg,
+    // Carried through unchanged — never localized, never walked into `sections`. Identical
+    // for every language's resolve of this project (see ProjectAttachmentEntry).
+    attachments: projectIM?.attachments ?? [],
   };
 };

@@ -8,7 +8,7 @@ import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
 import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import { Card } from '../components/common/Card';
-import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
+import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown, LayoutGrid, Table2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
 import { useInbox } from '../components/inbox/InboxContext';
@@ -16,6 +16,16 @@ import { useInbox } from '../components/inbox/InboxContext';
 // Column keys used for per-column filtering and sorting in the projects table.
 type ProjectColKey = 'name' | 'projectId' | 'pm' | 'supplier' | 'step' | 'status' | 'jira';
 type SortDir = 'asc' | 'desc';
+type ViewMode = 'kanban' | 'table';
+
+// Column order for the kanban board. Archived projects get their own board (mirroring
+// the table's "Show Archived" toggle) rather than a fifth column mixed in with the rest.
+const KANBAN_STATUSES: ProjectOverallStatus[] = [
+  ProjectOverallStatus.IN_PROGRESS,
+  ProjectOverallStatus.ON_HOLD,
+  ProjectOverallStatus.CANCELLED,
+  ProjectOverallStatus.COMPLETED,
+];
 
 /** Clickable table header that toggles sorting for its column. */
 const SortableTh: React.FC<{
@@ -54,6 +64,11 @@ const PMDashboard: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  // Kanban grouped by status is the default landing view; Table is the detailed,
+  // filterable/sortable alternative.
+  const [viewMode, setViewMode] = useState<ViewMode>('kanban');
+  const [dragProjectId, setDragProjectId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
   // Per-column filters + sort state for the projects table.
   const [colFilters, setColFilters] = useState<Record<ProjectColKey, string>>({ name: '', projectId: '', pm: '', supplier: '', step: '', status: 'all', jira: 'all' });
   const [sortKey, setSortKey] = useState<ProjectColKey>('name');
@@ -157,17 +172,21 @@ const PMDashboard: React.FC = () => {
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  const filteredProjects = projects
+  // Search + archived toggle only — shared base for both views.
+  // RLS policies on the database handle PM access control server-side.
+  const searchFiltered = projects.filter(p => {
+    if (!showArchived && p.status === ProjectOverallStatus.ARCHIVED) return false;
+    if (showArchived && p.status !== ProjectOverallStatus.ARCHIVED) return false;
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      if (!p.name.toLowerCase().includes(q) && !p.projectId.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const filteredProjects = searchFiltered
     .filter(p => {
-      if (!showArchived && p.status === ProjectOverallStatus.ARCHIVED) return false;
-      if (showArchived && p.status !== ProjectOverallStatus.ARCHIVED) return false;
-
-      // Global search across name + human project ID.
-      if (searchTerm) {
-        const q = searchTerm.toLowerCase();
-        if (!p.name.toLowerCase().includes(q) && !p.projectId.toLowerCase().includes(q)) return false;
-      }
-
       // Per-column filters. Status/PM are exact-match dropdowns ('all' = no filter); the rest are substring.
       for (const key of ['name', 'projectId', 'pm', 'supplier', 'step', 'status', 'jira'] as ProjectColKey[]) {
         const f = colFilters[key];
@@ -177,13 +196,39 @@ const PMDashboard: React.FC = () => {
         else if (!v.includes(f.toLowerCase())) return false;
       }
       return true;
-      // RLS policies on the database handle PM access control server-side
     })
     .sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1;
       if (sortKey === 'step') return (a.currentStep - b.currentStep) * dir;
       return colValue(a, sortKey).localeCompare(colValue(b, sortKey), undefined, { numeric: true }) * dir;
     });
+
+  // Kanban board: same statuses as the visible column set (archived gets its own
+  // single-column board via the same "Show Archived" toggle used by the table).
+  const kanbanStatuses = showArchived ? [ProjectOverallStatus.ARCHIVED] : KANBAN_STATUSES;
+  const kanbanProjects = [...searchFiltered].sort((a, b) => a.name.localeCompare(b.name));
+  const projectsByStatus = kanbanStatuses.reduce<Record<string, Project[]>>((acc, status) => {
+    acc[status] = kanbanProjects.filter(p => p.status === status);
+    return acc;
+  }, {});
+
+  /** Drop a card onto a column: optimistic status update, reverted if the write fails. */
+  const handleKanbanDrop = async (status: ProjectOverallStatus) => {
+    const id = dragProjectId;
+    setDragProjectId(null);
+    setDragOverStatus(null);
+    if (!id) return;
+    const project = projects.find(p => p.id === id);
+    if (!project || project.status === status) return;
+    const prevStatus = project.status;
+    setProjects(prev => prev.map(p => (p.id === id ? { ...p, status } : p)));
+    try {
+      await updateProject(id, { status });
+    } catch (e: any) {
+      setProjects(prev => prev.map(p => (p.id === id ? { ...p, status: prevStatus } : p)));
+      setErrorMsg(e.message || 'Failed to update project status.');
+    }
+  };
 
   // Fall back to the old narrow count only when the page renders outside the app shell.
   const reviewCount = inboxCtx?.inbox.reviewCount ?? stats?.pendingReviews ?? 0;
@@ -207,6 +252,12 @@ const PMDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {errorMsg && (
+        <div className="mb-4 px-4 py-2 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-700">
+          {errorMsg}
+        </div>
+      )}
 
       {/* ACTION WIDGETS */}
       {stats && !showArchived && (
@@ -312,6 +363,28 @@ const PMDashboard: React.FC = () => {
           />
         </div>
         <div className="flex gap-2 w-full sm:w-auto items-center">
+          <div className="flex items-center bg-light border border-gray-200 rounded-lg p-0.5 mr-2">
+            <button
+              type="button"
+              onClick={() => setViewMode('kanban')}
+              aria-pressed={viewMode === 'kanban'}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'kanban' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <LayoutGrid size={15} /> Board
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              aria-pressed={viewMode === 'table'}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'table' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Table2 size={15} /> Table
+            </button>
+          </div>
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer mr-2 select-none">
              <input 
                type="checkbox" 
@@ -330,7 +403,85 @@ const PMDashboard: React.FC = () => {
         </div>
       </Card>
 
+      {/* Kanban board — default view, grouped by status. */}
+      {viewMode === 'kanban' && (
+        loading ? (
+          <Card className="p-12 flex flex-col items-center gap-2 text-muted">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            <span>Loading projects...</span>
+          </Card>
+        ) : kanbanProjects.length === 0 ? (
+          <Card className="p-12 flex flex-col items-center gap-2 text-muted opacity-50">
+            <Search size={32} />
+            <span>No projects found.</span>
+          </Card>
+        ) : (
+          <div className="flex gap-4 overflow-x-auto pb-2">
+            {kanbanStatuses.map(status => {
+              const items = projectsByStatus[status] ?? [];
+              return (
+                <div
+                  key={status}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverStatus(status); }}
+                  onDragLeave={() => setDragOverStatus(prev => (prev === status ? null : prev))}
+                  onDrop={(e) => { e.preventDefault(); void handleKanbanDrop(status); }}
+                  className={`flex-shrink-0 w-80 rounded-xl border transition-colors ${
+                    dragOverStatus === status ? 'border-indigo-400 bg-indigo-50/40' : 'border-gray-200 bg-light'
+                  }`}
+                >
+                  <div className="px-4 py-3 flex items-center justify-between border-b border-gray-200">
+                    <StatusBadge status={status} type="project" />
+                    <span className="text-xs font-semibold text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5">
+                      {items.length}
+                    </span>
+                  </div>
+                  <div className="p-3 space-y-3 min-h-[140px] max-h-[calc(100vh-360px)] overflow-y-auto">
+                    {items.length === 0 ? (
+                      <div className="text-xs text-gray-400 italic text-center py-6">No projects</div>
+                    ) : items.map(project => (
+                      <div
+                        key={project.id}
+                        draggable
+                        onDragStart={(e) => { setDragProjectId(project.id); e.dataTransfer.setData('text/plain', project.id); e.dataTransfer.effectAllowed = 'move'; }}
+                        onDragEnd={() => { setDragProjectId(null); setDragOverStatus(null); }}
+                        className={`bg-white border border-gray-200 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-indigo-300 hover:shadow-sm transition-all ${
+                          dragProjectId === project.id ? 'opacity-50' : ''
+                        }`}
+                      >
+                        <div className="font-bold text-primary text-sm mb-1">{project.name}</div>
+                        <div className="text-[11px] text-muted font-mono mb-2">{project.projectId}</div>
+                        <div className="flex items-center justify-between text-xs text-gray-500 mb-2 gap-2">
+                          <span className="truncate">{getPmName(project.pmId)}</span>
+                          <span className="inline-flex items-center flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                            Step {project.currentStep}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 truncate mb-2">{getSupplierName(project.supplierId)}</div>
+                        {jiraConfigured && (
+                          <div className="mb-2">
+                            <JiraStatusBadge lookup={jira[project.projectId]} loading={jiraLoading && !jira[project.projectId]} />
+                          </div>
+                        )}
+                        <div className="flex justify-end pt-1 border-t border-gray-100">
+                          <Link
+                            to={`/project/${project.id}`}
+                            className="inline-flex items-center text-indigo-600 hover:text-blue-800 text-xs font-bold gap-0.5"
+                          >
+                            View <ChevronRight size={14} />
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
       {/* Table */}
+      {viewMode === 'table' && (
       <Card className="overflow-hidden min-h-[400px]">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -474,6 +625,7 @@ const PMDashboard: React.FC = () => {
           </table>
         </div>
       </Card>
+      )}
     </Layout>
   );
 };

@@ -1098,9 +1098,9 @@
     "semantic_hash": ""
   },
   "src/pages/AdminDashboard.tsx": {
-    "mtime": 1788437292.1229987,
-    "seen": 1788440230.314801,
-    "ast_hash": "19afa0c7b125b3a432dc503df0770d81",
+    "mtime": 1788807139.5038877,
+    "seen": 1788807813.0466807,
+    "ast_hash": "c35648f3e1396f4042cc9565d720c660",
     "semantic_hash": ""
   },
   "src/pages/AdminTestEmail.tsx": {
@@ -1638,9 +1638,9 @@
     "semantic_hash": ""
   },
   "src/services/index.ts": {
-    "mtime": 1788798744.7302833,
-    "seen": 1788800243.990788,
-    "ast_hash": "e4bf3b0ff961e278e31479aef91eb6a4",
+    "mtime": 1788806992.7619507,
+    "seen": 1788807813.047227,
+    "ast_hash": "7e0d010ff3b32a29cd1d7203c0dee257",
     "semantic_hash": ""
   },
   "src/services/manufacturing/index.ts": {
@@ -1656,9 +1656,9 @@
     "semantic_hash": ""
   },
   "src/services/project/index.ts": {
-    "mtime": 1788186932.3005798,
-    "seen": 1788188453.8913531,
-    "ast_hash": "c951f5c1073b1b9c588270f25cf762c3",
+    "mtime": 1788806984.5970855,
+    "seen": 1788807813.0472343,
+    "ast_hash": "7c51695743169ce6a5f62ee59587f6a9",
     "semantic_hash": ""
   },
   "src/services/project/project-attribute-request.service.ts": {
@@ -1692,9 +1692,9 @@
     "semantic_hash": ""
   },
   "src/services/project/project.service.ts": {
-    "mtime": 1785413963.7831316,
-    "seen": 1787843281.2444727,
-    "ast_hash": "f650c62be0b8455baed866f1cdc8d5cc",
+    "mtime": 1788807009.119792,
+    "seen": 1788807813.0472524,
+    "ast_hash": "931bdb0b8d6ca1dcb20ca1495f643f0f",
     "semantic_hash": ""
   },
   "src/services/project/sku-attribute-review.service.ts": {
@@ -1806,9 +1806,9 @@
     "semantic_hash": ""
   },
   "src/types/index.ts": {
-    "mtime": 1788798655.414379,
-    "seen": 1788800243.9908948,
-    "ast_hash": "5ac5f302a2f589c1e07dd61cd088af95",
+    "mtime": 1788806961.9505744,
+    "seen": 1788807813.0473757,
+    "ast_hash": "7297f224d22caedea386a60ee546438c",
     "semantic_hash": ""
   },
   "src/types/manufacturing.types.ts": {
@@ -1818,9 +1818,9 @@
     "semantic_hash": ""
   },
   "src/types/project.types.ts": {
-    "mtime": 1788186932.2995727,
-    "seen": 1788188453.8914518,
-    "ast_hash": "8bd55f67e6c6c70b5f7721ce9e9a0b6e",
+    "mtime": 1788806960.4657269,
+    "seen": 1788807813.0473797,
+    "ast_hash": "998fe6588032c2a8b5b5ded98e0a9804",
     "semantic_hash": ""
   },
   "src/types/sourcing.types.ts": {
@@ -4026,9 +4026,9 @@
     "semantic_hash": ""
   },
   "db_migrations/146_stop_storing_plaintext_access_codes.sql": {
-    "mtime": 1788631270.1506906,
-    "seen": 1788794980.0548441,
-    "ast_hash": "1f65f5dfd1d8f39285a633c349e5b6ff",
+    "mtime": 1788806660.6085775,
+    "seen": 1788807813.0462437,
+    "ast_hash": "16ab3d3f314791e3c7d857944594a5d2",
     "semantic_hash": ""
   },
   "db_migrations/147_leaflet_coverage_storage_path.sql": {
@@ -4221,6 +4221,42 @@
     "mtime": 1788797962.3284168,
     "seen": 1788800243.9908934,
     "ast_hash": "8ad608e22992d2f0ecb62ee887289981",
+    "semantic_hash": ""
+  },
+  "db_migrations/150_audit_remediation.sql": {
+    "mtime": 1788807046.7152212,
+    "seen": 1788807813.046256,
+    "ast_hash": "5bed8b768b5c82ab2a50c1db7ac59a32",
+    "semantic_hash": ""
+  },
+  "db_migrations/151_revoke_trigger_fn_execute_from_public.sql": {
+    "mtime": 1788806646.1901326,
+    "seen": 1788807813.0462582,
+    "ast_hash": "d089be2d14d4a12962ab1742e491f45a",
+    "semantic_hash": ""
+  },
+  "db_migrations/152_project_phase_document_templates.sql": {
+    "mtime": 1788807037.4315822,
+    "seen": 1788807813.0462606,
+    "ast_hash": "7123c2ec3d844da21dea349cec290689",
+    "semantic_hash": ""
+  },
+  "src/components/admin/ProjectTemplateAdminSection.tsx": {
+    "mtime": 1788807114.1930327,
+    "seen": 1788807813.0465212,
+    "ast_hash": "3d6978df9d892340642aba6e6fa59c6e",
+    "semantic_hash": ""
+  },
+  "src/services/project/project-template.service.ts": {
+    "mtime": 1788806979.7331178,
+    "seen": 1788807813.0472505,
+    "ast_hash": "02ac70684e1431c345bdd43e8e7a19f9",
+    "semantic_hash": ""
+  },
+  "SUPABASE_AUDIT_2026-09-07.md": {
+    "mtime": 1788801065.8638644,
+    "seen": 1788807813.047548,
+    "ast_hash": "6cc4ef721cf9ae9dee0a888eb99d89c4",
     "semantic_hash": ""
   }
 }

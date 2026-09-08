@@ -116,6 +116,14 @@ describe('cross-references', () => {
   it('keeps a dotted section reference whole', () => {
     expect(valuesOf('Described in section 4.2 of this manual.')).toEqual(['4.2']);
   });
+
+  it('placeholders the number in an Attachment citation, leaving the word translatable', () => {
+    const r = ex('See Attachment 3 for the leg assembly.');
+    expect(r.detected).toHaveLength(1);
+    expect(r.detected[0].type).toBe('xref');
+    expect(r.detected[0].value).toBe('3');
+    expect(r.patternText).toBe('See Attachment {{P0}} for the leg assembly.');
+  });
 });
 
 describe('brands', () => {

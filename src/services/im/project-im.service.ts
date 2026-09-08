@@ -5,7 +5,7 @@
 
 import { auth, db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { ProjectIM, SKUContentValue, IMTemplateType, IMReviewStage, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef } from '../../types';
+import { ProjectIM, SKUContentValue, IMTemplateType, IMReviewStage, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef, ProjectAttachmentEntry } from '../../types';
 import { saveWithRetry } from '../core/save-retry';
 
 const mapProjectIMRow = (data: any): ProjectIM => ({
@@ -31,6 +31,7 @@ const mapProjectIMRow = (data: any): ProjectIM => ({
   sectionOverrides: data.section_overrides ?? {},
   sectionSkus: data.section_skus ?? {},
   blockOverrides: data.block_overrides ?? {},
+  attachments: data.attachments ?? [],
 });
 
 /**
@@ -96,6 +97,9 @@ export const saveProjectIM = async (
   sectionSkus?: Record<string, string[]>,
   // Per-project inline block overrides: sectionId → refIndexOrIdKey → replacement inline block.
   blockOverrides?: Record<string, Record<string, InlineBlockRef>>,
+  // Shared, never-translated "Attachments" content (image-only step sequences).
+  // See ProjectAttachmentEntry — resolved and printed exactly once, not per language.
+  attachments?: ProjectAttachmentEntry[],
   // Optimistic-concurrency baseline: the updated_at of the row the caller loaded/last
   // saved. When provided and the stored row is newer AND was last written by someone
   // else, the save throws ProjectIMConflictError instead of silently overwriting the
@@ -147,6 +151,7 @@ export const saveProjectIM = async (
         section_overrides: sectionOverrides ?? {},
         section_skus: sectionSkus ?? {},
         block_overrides: blockOverrides ?? {},
+        attachments: attachments ?? [],
         status,
         updated_at: new Date().toISOString(),
         updated_by: updatedBy,

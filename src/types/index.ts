@@ -62,6 +62,7 @@ export type {
   ProjectIM,
   ProjectBlockAddition,
   ProjectExtraSection,
+  ProjectAttachmentEntry,
   // Block refs
   InlineBlockRef,
   SharedBlockRef,

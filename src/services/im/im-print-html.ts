@@ -35,6 +35,7 @@ import {
 import { interFontFaceCss } from './fonts/inter-webfont';
 import { ISO_CALLOUT_ICONS, ISO_M002 } from './iso-icons';
 import { escapeHtmlAttr } from '../../utils/html-escape.utils';
+import type { ProjectAttachmentEntry } from '../../types';
 
 export type PrintPageSize = 'a4' | 'a5';
 
@@ -103,6 +104,14 @@ export interface PrintManual {
    * compact header (buildLeafletHeader) — absent when the manual has no SKU to encode.
    */
   primarySkuQrSvg?: string;
+  /**
+   * The project's shared "Attachments" content (see ProjectAttachmentEntry in
+   * ../../types) — image-only assembly-step sequences identical for every language.
+   * Every PrintManual for the same project carries the same value; buildPrintPartsHtml
+   * reads it once from `manuals[0]`, the same way it reads `manuals[0].metadata` for
+   * the shared cover/back pages.
+   */
+  attachments?: ProjectAttachmentEntry[];
 }
 
 /**
@@ -757,6 +766,37 @@ const buildBackPage = (opts: PrintBackOptions, companyName: string, versionLabel
   `;
 };
 
+/**
+ * The shared "Attachments" section — image-only assembly-step sequences identical for
+ * every language (see ProjectAttachmentEntry). Built exactly ONCE, the same way the
+ * cover/back pages are: outside the per-language loop, from plain (non-i18n) content,
+ * so it never reprints once per selected language. Numbered by array position
+ * (1-indexed: "Attachment 01", "Attachment 02", …) — the number a body citation
+ * ("see Attachment 03") points at. No heading/step text is ever localized; this
+ * section carries no translatable content by design.
+ */
+const buildAttachmentsPage = (attachments: ProjectAttachmentEntry[]): string => {
+  if (!attachments.length) return '';
+  const entries = attachments
+    .map(
+      (a, i) => `
+        <div class="im-attachment">
+          <h3 class="im-attachment-title">Attachment ${String(i + 1).padStart(2, '0')}</h3>
+          <ol class="imv-steps">${a.steps
+            .map((s) => (s.image?.url ? `<li class="imv-step"><img class="imv-step-img" src="${s.image.url}" alt="" /></li>` : ''))
+            .join('')}</ol>
+        </div>
+      `,
+    )
+    .join('');
+  return `
+    <section class="im-page im-break im-page-content im-attachments">
+      <h2 class="im-section-title">Attachments</h2>
+      ${entries}
+    </section>
+  `;
+};
+
 // ---------------------------------------------------------------------------
 // CSS
 // ---------------------------------------------------------------------------
@@ -1133,6 +1173,11 @@ const buildStyles = (
     .im-section-content h2 { font-size: ${pt(headingPt * 0.806)}; }
     .im-section-content h3 { font-size: ${pt(headingPt * 0.726)}; }
 
+    /* Shared "Attachments" section — image-only step sequences, no body text. */
+    .im-attachment { margin: 0 0 ${mm(6)}; }
+    .im-attachment-title { margin: 0 0 ${mm(3)}; color: ${primaryColor}; font-size: ${pt(headingPt * 0.806)}; break-after: avoid; }
+    .im-attachments .imv-step-img { max-width: ${mm(70)}; }
+
     /* Rich content (ported from im-viewer.css) */
     .imv-content { line-height: ${lineHeight}; color: #374151; }
     .imv-content ul { list-style: disc; padding-left: 1.5em; margin: 0 0 ${paraGap}; }
@@ -1329,6 +1374,8 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
     })
     .join('');
 
+  const attachments = buildAttachmentsPage(manuals[0].attachments ?? []);
+
   const back = buildBackPage(
     resolveBackOpts(opts, base),
     opts.cover.companyName ?? base?.companyName ?? '',
@@ -1345,6 +1392,7 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
   <body>
     ${cover}
     ${body}
+    ${attachments}
     ${back}
   </body>
 </html>`;
@@ -1490,6 +1538,8 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
       tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,
     });
   });
+  const attachmentsHtml = buildAttachmentsPage(manuals[0].attachments ?? []);
+  if (attachmentsHtml) parts.push({ html: wrapStandalone(attachmentsHtml, styles), tab: null });
   parts.push({ html: wrapStandalone(buildBackPage(resolveBackOpts(opts, base), opts.cover.companyName ?? base?.companyName ?? '', versionLabel), styles), tab: null });
   return parts;
 };

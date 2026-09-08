@@ -87,7 +87,7 @@ describe('saveProjectIM', () => {
     readResult.current = { id: 'existing-id', updated_at: 't2', updated_by: 'colleague@example.com' };
     await expect(
       saveProjectIM('proj-1', 'tmpl-1', { a: '1' }, 'draft', undefined, 'im', undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined, { baselineUpdatedAt: 't1' }),
+        undefined, undefined, undefined, undefined, undefined, undefined, { baselineUpdatedAt: 't1' }),
     ).rejects.toBeInstanceOf(ProjectIMConflictError);
     expect(writeQueue.length).toBe(0); // no write attempted
   });
@@ -98,7 +98,7 @@ describe('saveProjectIM', () => {
     readResult.current = { id: 'existing-id', updated_at: 't2', updated_by: 'tester@example.com' };
     writeQueue.push(() => Promise.resolve({ id: 'existing-id', version: 3, updated_at: 't3' }));
     const result = await saveProjectIM('proj-1', 'tmpl-1', { a: '1' }, 'draft', undefined, 'im', undefined,
-      undefined, undefined, undefined, undefined, undefined, undefined, { baselineUpdatedAt: 't1' });
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, { baselineUpdatedAt: 't1' });
     expect(result.updatedAt).toBe('t3');
   });
 

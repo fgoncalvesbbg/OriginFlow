@@ -193,6 +193,10 @@ export interface ProjectIM {
   // project only. Absent = the template block is used unchanged. Never applied to shared
   // or sku_slot refs, so approval-gated content and typed slots stay locked.
   blockOverrides?: Record<string /* sectionId */, Record<string /* refIndex */, InlineBlockRef>>;
+  // Shared, never-translated "Attachments" content — image-only assembly-step
+  // sequences identical for every language (see ProjectAttachmentEntry below).
+  // Resolved and printed exactly once, outside the per-language section walk.
+  attachments?: ProjectAttachmentEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +220,20 @@ export interface ProjectExtraSection {
   // (standardized) blocks from im_blocks. Shared refs resolve read-only via the
   // block library — the resolver already handles `kind:'block'` in a section's refs.
   blocks: Array<InlineBlockRef | SharedBlockRef>;
+}
+
+/**
+ * One entry in the project's shared "Attachments" section — an ordered sequence of
+ * image-only assembly steps (no text: these diagrams are identical for every
+ * language, so there is nothing to translate). Displayed/cited as 1-indexed array
+ * position ("Attachment 01", "Attachment 02", …); body prose elsewhere in the
+ * manual may reference an entry as "see Attachment 03" (kept translation-safe by
+ * the `xref` cue in im-tm-placeholders.ts).
+ */
+export interface ProjectAttachmentEntry {
+  id: string;   // stable id for React keys / reorder
+  order: number;
+  steps: Array<{ asset_id?: string; image?: { url: string; width: number; height: number } }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +481,14 @@ export interface ResolvedManual {
    * Optional only so older published manifests predating this field still type-check.
    */
   primarySkuQrSvg?: string;
+  /**
+   * The project's shared "Attachments" content (see ProjectAttachmentEntry), carried
+   * through unchanged for every language's resolve — never localized, never part of
+   * `sections`. Identical across every ResolvedManual produced for the same project,
+   * by design: the print pipeline renders it exactly once (see buildPrintPartsHtml),
+   * not once per language.
+   */
+  attachments?: ProjectAttachmentEntry[];
 }
 
 /**

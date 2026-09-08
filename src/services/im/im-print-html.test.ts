@@ -71,6 +71,42 @@ describe('buildPrintHtml — section ordering + pagination', () => {
   });
 });
 
+describe('shared "Attachments" section', () => {
+  const attachments = [
+    { id: 'att-1', order: 0, steps: [{ image: { url: 'https://x/1.png', width: 100, height: 100 } }] },
+    { id: 'att-2', order: 1, steps: [{ image: { url: 'https://x/2.png', width: 100, height: 100 } }] },
+  ];
+  const withAttachments: PrintManual = { ...manual, attachments };
+
+  it('renders exactly once for a multi-language booklet, not once per language', () => {
+    const de: PrintManual = { ...manual, language: 'de' };
+    const parts = buildPrintPartsHtml([withAttachments, de], opts);
+    const attachmentParts = parts.filter((p) => p.html.includes('im-attachments"'));
+    expect(attachmentParts).toHaveLength(1);
+    // Positioned after both language bodies, before the shared back page.
+    const idx = parts.indexOf(attachmentParts[0]);
+    expect(idx).toBe(parts.length - 2);
+    expect(attachmentParts[0].tab).toBeNull();
+  });
+
+  it('numbers attachments 1-indexed by array order', () => {
+    const [, , attachmentsPart] = buildPrintPartsHtml([withAttachments], opts);
+    expect(attachmentsPart.html).toContain('Attachment 01');
+    expect(attachmentsPart.html).toContain('Attachment 02');
+  });
+
+  it('emits no Attachments part when there are none', () => {
+    const parts = buildPrintPartsHtml([manual], opts);
+    expect(parts.some((p) => p.html.includes('im-attachments"'))).toBe(false);
+  });
+
+  it('buildPrintHtml (single-document variant) includes it once too', () => {
+    const html = buildPrintHtml([withAttachments], opts);
+    expect(html.match(/im-attachments"/g) ?? []).toHaveLength(1);
+    expect(html.indexOf('im-attachments"')).toBeLessThan(html.indexOf('<section class="im-page im-break im-page-end">'));
+  });
+});
+
 describe('buildPrintPartsHtml — Warning Leaflet compact layout', () => {
   const de: PrintManual = { ...manual, language: 'de' };
 

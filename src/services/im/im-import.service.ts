@@ -491,6 +491,7 @@ export const importProjectIMFromDoc = async (
     [],               // boundSkuIds (all SKUs)
     {},               // sectionSkus
     {},               // blockOverrides
+    [],               // attachments
   );
 
   return { projectId, templateType, sectionCount: extraSections.length, imageNeedCount };
@@ -648,6 +649,7 @@ export const importSupplierDraftIntoProject = async (
     existing?.boundSkuIds ?? [],
     existing?.sectionSkus ?? {},
     existing?.blockOverrides ?? {},
+    existing?.attachments ?? [],
   );
 
   return {

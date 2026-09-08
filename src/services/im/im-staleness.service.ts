@@ -246,7 +246,7 @@ export const republishProjectIM = async (
   const saved = await saveProjectIM(
     projectId, im.templateId, im.placeholderData, 'generated', im.skuContent, templateType,
     im.sectionAdditions, im.extraSections, im.sectionOverrides, nextVersion,
-    im.boundSkuIds, im.sectionSkus, im.blockOverrides,
+    im.boundSkuIds, im.sectionSkus, im.blockOverrides, im.attachments,
   );
   return publishResolvedManuals(projectId, template, sections, saved);
 };

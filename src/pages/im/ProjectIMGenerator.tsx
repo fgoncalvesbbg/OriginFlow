@@ -43,14 +43,14 @@ import { getSignedManifestUrl } from '../../services/im/im-publish.service';
 // same helper — im-print is one of the two buckets closed off from permanent public URLs.
 import { getSignedPrintPdfUrlForPath } from '../../services/im/im-print-export.service';
 import { SaveProgressOverlay } from '../../components/common/SaveProgressOverlay';
-import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMReviewStage, IM_REVIEW_STAGE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle, WizardQuestion } from '../../types';
+import { Project, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, IMReviewStage, IM_REVIEW_STAGE_LABELS, IMSection, IMBlock, ProjectIM, DocStatus, ResponsibleParty, CategoryAttribute, IMMasterLayoutName, IMMasterPageOverride, SKUContentValue, SKUSlotRef, RichTextContent, LegendTableContent, StepSequenceContent, AnnotatedImageSetContent, AnnotatedImage, ProjectBlockAddition, ProjectExtraSection, ProjectAttachmentEntry, CalloutVariant, InlineBlockRef, SharedBlockRef, BlockRef, FeatureConditionFields, ProjectSku, ProjectAttributeRequest, localizedSectionTitle, WizardQuestion } from '../../types';
 import type { PublishResult, PrintPdfResult, PrintRender } from '../../services';
 import {
   printedManualStatusOf, PRINTED_STATUS_META, manualStatusOf, nextReviewStageFor,
   MANUAL_STATUS_META, statusClasses, statusLabel, isReviewStep, type ManualStatus,
 } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, CheckCircle2, RefreshCw, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2 } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, CheckCircle2, RefreshCw, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2, Paperclip } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
@@ -86,6 +86,10 @@ import { usePrintColumn } from './editor/usePrintColumn';
 import { imContentPrintScale, imContentVars } from './editor/im-content-style';
 import { previewZoomFor, CSS_PX_PER_MM, PAGE_WIDTH_MM, PAGE_HEIGHT_MM } from '../../services/im/im-print-geometry';
 
+// Sentinel selection id for the pinned "Attachments" row in the section tree — never a
+// real im_sections/extraSection id, so it can't collide with one.
+const ATTACHMENTS_PANEL_ID = '__attachments__';
+
 // The full set of editable, persisted state captured in a crash-safe local draft. Mirrors
 // exactly what saveProjectIM writes, so a restored draft reproduces the unsaved session.
 interface DraftState {
@@ -100,6 +104,7 @@ interface DraftState {
   sectionOverrides: Record<string, InlineBlockRef[]>;
   sectionSkus: Record<string, string[]>;
   blockOverrides: Record<string, Record<string, InlineBlockRef>>;
+  attachments: ProjectAttachmentEntry[];
   boundSkuIds: string[];
   activeLang: string;
 }
@@ -146,6 +151,10 @@ const ProjectIMGenerator: React.FC = () => {
   // Per-project override of a single inline template block (e.g. an edited table),
   // keyed by sectionId → refIndex → replacement inline block. Template stays untouched.
   const [blockOverrides, setBlockOverrides] = useState<Record<string, Record<string, InlineBlockRef>>>({});
+  // Shared, never-translated "Attachments" section: image-only assembly-step sequences,
+  // identical for every language. Resolved/printed exactly once (see im-print-html.ts),
+  // never walked per-language like sectionAdditions/extraSections above.
+  const [attachments, setAttachments] = useState<ProjectAttachmentEntry[]>([]);
   // Left panel mode: fill placeholder values, or author project-specific content.
   const [editorMode, setEditorMode] = useState<'fill' | 'content'>('fill');
   // Editor/preview split. Both panes had widths fixed in the markup, so filling in a long form
@@ -452,7 +461,8 @@ const ProjectIMGenerator: React.FC = () => {
             if (existingInstance.sectionOverrides) setSectionOverrides(existingInstance.sectionOverrides);
             if (existingInstance.sectionSkus) setSectionSkus(existingInstance.sectionSkus);
             if (existingInstance.blockOverrides) setBlockOverrides(existingInstance.blockOverrides);
-            
+            if (existingInstance.attachments) setAttachments(existingInstance.attachments);
+
             // Restore conditions from saved data
             const loadedConds: Record<string, boolean> = {};
             const loadedSecVis: Record<string, boolean> = {};
@@ -633,6 +643,7 @@ const ProjectIMGenerator: React.FC = () => {
               setExtraSections(structuredClone(sourceIM.extraSections ?? []));
               setSectionOverrides(structuredClone(sourceIM.sectionOverrides ?? {}));
               setBlockOverrides(structuredClone(sourceIM.blockOverrides ?? {}));
+              setAttachments(structuredClone(sourceIM.attachments ?? []));
           }
           // Same template as the sibling — that's what makes the copied section/ref
           // toggles meaningful. Nothing is persisted until the user saves.
@@ -972,7 +983,7 @@ const ProjectIMGenerator: React.FC = () => {
   // image-externalized copies so the baseline matches exactly what was persisted.
   const buildDraftState = (over: Partial<DraftState> = {}): DraftState => ({
     formData, fieldBindings, conditions, sectionVisibility, refVisibility, skuContent,
-    sectionAdditions, extraSections, sectionOverrides, sectionSkus, blockOverrides,
+    sectionAdditions, extraSections, sectionOverrides, sectionSkus, blockOverrides, attachments,
     boundSkuIds, activeLang, ...over,
   });
   const serializeDraft = (over: Partial<DraftState> = {}) => JSON.stringify(buildDraftState(over));
@@ -998,6 +1009,7 @@ const ProjectIMGenerator: React.FC = () => {
     setSectionOverrides(s.sectionOverrides ?? {});
     setSectionSkus(s.sectionSkus ?? {});
     setBlockOverrides(s.blockOverrides ?? {});
+    setAttachments(s.attachments ?? []);
     if (Array.isArray(s.boundSkuIds)) setBoundSkuIds(s.boundSkuIds);
     if (s.activeLang) setActiveLang(s.activeLang);
   };
@@ -1053,6 +1065,7 @@ const ProjectIMGenerator: React.FC = () => {
       sectionOverrides: im.sectionOverrides ?? {},
       sectionSkus: im.sectionSkus ?? {},
       blockOverrides: im.blockOverrides ?? {},
+      attachments: im.attachments ?? [],
       boundSkuIds: im.boundSkuIds ?? [],
       activeLang: data['__meta_language'] || activeLang,
     };
@@ -1110,7 +1123,7 @@ const ProjectIMGenerator: React.FC = () => {
       }
     } catch { /* quota / private mode — best-effort */ }
   }, [formData, fieldBindings, conditions, sectionVisibility, refVisibility, skuContent,
-      sectionAdditions, extraSections, sectionOverrides, sectionSkus, blockOverrides,
+      sectionAdditions, extraSections, sectionOverrides, sectionSkus, blockOverrides, attachments,
       boundSkuIds, activeLang, loading, pendingDraft, draftKey]);
 
   // Warn before leaving (tab close / reload) with unsaved edits or a save in flight.
@@ -1170,7 +1183,7 @@ const ProjectIMGenerator: React.FC = () => {
           setBlockOverrides(ext.blockOverrides);
           setExtraSections(ext.extraSections);
           const dataToSave = buildPlaceholderData(extForm);
-          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides, { baselineUpdatedAt: instance?.updatedAt ?? null });
+          const saved = await saveProjectIM(projectId, selectedTemplateId, dataToSave, 'draft', skuContent, templateType, ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides, attachments, { baselineUpdatedAt: instance?.updatedAt ?? null });
           setInstance(saved);
           // Baseline = exactly what we persisted, so the local draft clears and nothing shows dirty.
           markSaved({ formData: extForm, sectionAdditions: ext.sectionAdditions, sectionOverrides: ext.sectionOverrides, blockOverrides: ext.blockOverrides, extraSections: ext.extraSections });
@@ -1314,7 +1327,9 @@ const ProjectIMGenerator: React.FC = () => {
    * bindings declared below the early returns, which is what broke this in the first place.
    */
   useEffect(() => {
-    if (editorMode !== 'content' || !selectedContentSectionId) return;
+    // The pinned Attachments row has no anchor in the per-language preview — it isn't
+    // part of any resolved section tree (see ATTACHMENTS_PANEL_ID) — so there is nothing to jump to.
+    if (editorMode !== 'content' || !selectedContentSectionId || selectedContentSectionId === ATTACHMENTS_PANEL_ID) return;
     // A frame's grace so the preview has committed any layout change from the selection.
     const raf = requestAnimationFrame(() => jumpToPreviewSection(selectedContentSectionId));
     return () => cancelAnimationFrame(raf);
@@ -1514,7 +1529,7 @@ const ProjectIMGenerator: React.FC = () => {
           // Only now persist the version bump — the manifest this version number describes
           // already exists.
           setPublishStatus('Saving…');
-          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides, { baselineUpdatedAt: instance?.updatedAt ?? null });
+          const savedIM = await saveProjectIM(project.id, selectedTemplateId, dataToSave, 'generated', skuContent, templateType, extOv.sectionAdditions, extOv.extraSections, extOv.sectionOverrides, nextVersion, boundSkuIds, sectionSkus, extOv.blockOverrides, attachments, { baselineUpdatedAt: instance?.updatedAt ?? null });
           setInstance(savedIM);
           // Baseline = exactly what we persisted, so the local draft clears.
           markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
@@ -2128,6 +2143,7 @@ const ProjectIMGenerator: React.FC = () => {
           boundSkuIds,
           sectionSkus,
           blockOverrides,
+          attachments,
       };
   };
 
@@ -2690,6 +2706,38 @@ const ProjectIMGenerator: React.FC = () => {
   // SKU content helpers
   const updateSkuSlot = (slot: string, value: SKUContentValue) =>
     setSkuContent(prev => ({ ...prev, [slot]: value }));
+
+  // ---------------- SHARED "ATTACHMENTS" SECTION ----------------
+  // Image-only assembly-step sequences, identical for every language — see
+  // ProjectAttachmentEntry. Displayed/cited by 1-indexed array position ("Attachment 01",
+  // "02", …), so add/remove always renumbers the rest.
+  const addAttachment = () =>
+    setAttachments(prev => [...prev, { id: `att-${Math.random().toString(36).slice(2, 11)}`, order: prev.length, steps: [] }]);
+
+  const removeAttachment = (id: string) =>
+    setAttachments(prev => prev.filter(a => a.id !== id).map((a, i) => ({ ...a, order: i })));
+
+  const addAttachmentStep = (attachmentId: string) =>
+    setAttachments(prev => prev.map(a => a.id === attachmentId ? { ...a, steps: [...a.steps, {}] } : a));
+
+  const removeAttachmentStep = (attachmentId: string, stepIndex: number) =>
+    setAttachments(prev => prev.map(a => a.id === attachmentId ? { ...a, steps: a.steps.filter((_, i) => i !== stepIndex) } : a));
+
+  const uploadAttachmentStepImage = async (attachmentId: string, stepIndex: number, file: File) => {
+    const key = `attachment-${attachmentId}-step-${stepIndex}`;
+    setUploadingSlot(key);
+    try {
+      const url = await uploadIMAsset(file, 'sku');
+      setAttachments(prev => prev.map(a => a.id === attachmentId
+        ? { ...a, steps: a.steps.map((s, i) => i === stepIndex ? { ...s, image: { url, width: 0, height: 0 } } : s) }
+        : a));
+    } catch (err: any) {
+      console.error('[ProjectIMGenerator] attachment step image upload failed:', err);
+      alert(err?.message ?? 'Upload failed — see console.');
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
 
   const renderSkuSlotForm = (ref: SKUSlotRef) => {
     const label = ref.label[activeLang] ?? ref.label['en'] ?? ref.slot;
@@ -3266,6 +3314,7 @@ const ProjectIMGenerator: React.FC = () => {
         const saved = await saveProjectIM(
           projectId, selectedTemplateId, buildPlaceholderData(extForm), 'draft', skuContent, templateType,
           ext.sectionAdditions, ext.extraSections, ext.sectionOverrides, undefined, boundSkuIds, sectionSkus, ext.blockOverrides,
+          attachments,
           { baselineUpdatedAt: instance?.updatedAt ?? null },
         );
         setInstance(saved);
@@ -4460,30 +4509,100 @@ const ProjectIMGenerator: React.FC = () => {
           })() : roots.length ? roots.map((s, idx) => renderProjectTreeRow(s, `${idx + 1}.`, 0))
             : <div className="text-xs text-gray-400 text-center py-6">No sections yet.</div>}
         </div>
+        {/* Pinned "Attachments" — always last, never reordered with the chapters above: shared,
+            never-translated image-only content, printed exactly once at the end of the booklet. */}
+        <div className="border-t border-gray-100 p-2">
+          <div
+            onClick={() => setSelectedContentSectionId(ATTACHMENTS_PANEL_ID)}
+            className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm transition-colors ${selectedContentSectionId === ATTACHMENTS_PANEL_ID ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200' : 'text-gray-600 hover:bg-light border border-transparent'}`}
+          >
+            <Paperclip size={13} className="text-gray-400 shrink-0" />
+            <span className="truncate flex-1">Attachments</span>
+            {attachments.length > 0 && <span className="text-[10px] font-mono bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{attachments.length}</span>}
+          </div>
+        </div>
       </div>
     );
   };
 
+  const renderAttachmentsEditor = () => (
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+        <span className="min-w-0 truncate text-xs font-bold text-gray-700">Attachments</span>
+        <button onClick={addAttachment} className="text-xs text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1"><Plus size={12} /> Attachment</button>
+      </div>
+      <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2 mb-4">
+        <Paperclip size={14} className="mt-0.5 shrink-0" />
+        <span>Image-only assembly steps that are identical for every language — e.g. an "attach the legs" diagram with no text. Printed exactly once, near the end of the manual, regardless of how many languages are published. Cite one from chapter text as "see Attachment 01".</span>
+      </div>
+      <div className="space-y-3">
+        {attachments.map((a, ai) => (
+          <div key={a.id} className="border border-violet-200 rounded-lg p-3 bg-violet-50/40">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-gray-700">Attachment {String(ai + 1).padStart(2, '0')}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => addAttachmentStep(a.id)} className="text-xs text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1"><Plus size={12} /> Step image</button>
+                <button onClick={() => removeAttachment(a.id)} title="Delete attachment" className="text-gray-300 hover:text-rose-500"><Trash2 size={13} /></button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {a.steps.map((step, si) => {
+                const key = `attachment-${a.id}-step-${si}`;
+                return (
+                  <div key={si} className="bg-white border rounded-lg p-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-400">STEP {si + 1}</span>
+                      <button onClick={() => removeAttachmentStep(a.id, si)} className="text-gray-300 hover:text-rose-500"><X size={12} /></button>
+                    </div>
+                    {step.image?.url && <img src={step.image.url} alt="" className="w-full h-20 object-cover rounded border" />}
+                    <label className={`flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded border cursor-pointer transition-colors ${step.image?.url ? 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'} ${uploadingSlot === key ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {uploadingSlot === key ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                      {uploadingSlot === key ? 'Uploading…' : (step.image?.url ? 'Replace image' : 'Upload image')}
+                      <input type="file" accept="image/*" className="hidden" onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) void uploadAttachmentStepImage(a.id, si, file);
+                        e.target.value = '';
+                      }} />
+                    </label>
+                  </div>
+                );
+              })}
+              {a.steps.length === 0 && <p className="text-xs text-gray-400 italic col-span-3">No step images yet. Click "+ Step image" to add.</p>}
+            </div>
+          </div>
+        ))}
+        {attachments.length === 0 && <p className="text-xs text-gray-400 italic">No attachments yet. Click "+ Attachment" to start one.</p>}
+      </div>
+    </div>
+  );
+
   const renderContentEditor = () => {
     const selectable = orderedSections.filter(s => s.title !== '__METADATA__');
-    const selectedSection = selectable.find(s => s.id === selectedContentSectionId) ?? selectable[0];
+    const attachmentsSelected = selectedContentSectionId === ATTACHMENTS_PANEL_ID;
+    const selectedSection = !attachmentsSelected
+      ? (selectable.find(s => s.id === selectedContentSectionId) ?? selectable[0])
+      : undefined;
     return (
       <div className="flex-1 flex gap-3 p-4 overflow-hidden min-h-0">
         {renderProjectSectionTree()}
         <div className="flex-1 min-w-0 overflow-y-auto">
-          <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2 mb-4">
-            <FilePlus2 size={14} className="mt-0.5 shrink-0" />
-            <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section — or any sub-section inside it — that doesn't apply; it (and everything nested under it) won't appear in the generated IM. A single standardized block can be left out on its own with <strong>Exclude</strong> above it. Standardized text and tables can be tweaked with <strong>Edit for this project</strong>, and reset back to the template at any time — nothing here changes the shared template or any other manual. Shared library blocks stay locked, but can still be excluded.</span>
-          </div>
-          {selectedSection && (
-            <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
-              <span className="min-w-0 truncate text-xs font-bold text-gray-700">
-                {localizedSectionTitle(selectedSection, activeLang)}
-              </span>
-              {renderJumpToPreview(selectedSection)}
-            </div>
+          {attachmentsSelected ? renderAttachmentsEditor() : (
+            <>
+              <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs text-indigo-800 flex items-start gap-2 mb-4">
+                <FilePlus2 size={14} className="mt-0.5 shrink-0" />
+                <span>Select a chapter on the left to edit it for this project. Use the <strong>eye</strong> icon to <strong>hide</strong> a standardized section — or any sub-section inside it — that doesn't apply; it (and everything nested under it) won't appear in the generated IM. A single standardized block can be left out on its own with <strong>Exclude</strong> above it. Standardized text and tables can be tweaked with <strong>Edit for this project</strong>, and reset back to the template at any time — nothing here changes the shared template or any other manual. Shared library blocks stay locked, but can still be excluded.</span>
+              </div>
+              {selectedSection && (
+                <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                  <span className="min-w-0 truncate text-xs font-bold text-gray-700">
+                    {localizedSectionTitle(selectedSection, activeLang)}
+                  </span>
+                  {renderJumpToPreview(selectedSection)}
+                </div>
+              )}
+              {selectedSection ? renderSectionContentEditor(selectedSection) : <div className="text-sm text-gray-400 text-center py-10">No sections yet.</div>}
+            </>
           )}
-          {selectedSection ? renderSectionContentEditor(selectedSection) : <div className="text-sm text-gray-400 text-center py-10">No sections yet.</div>}
         </div>
       </div>
     );

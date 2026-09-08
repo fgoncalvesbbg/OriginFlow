@@ -722,6 +722,10 @@ const AdminDashboard: React.FC = () => {
 
   const switchImportSource = (source: 'csv' | 'producttoolkit') => {
     setImportSource(source);
+    // ProductToolkit is the source of truth for a category's attributes: this import must always
+    // create what's missing, update what's changed in place, and delete what's no longer there, or
+    // the two platforms drift apart. CSV keeps the manual add/replace choice.
+    setImportMode(source === 'producttoolkit' ? 'replace' : 'add');
     setSyncPlan(null);
     setSyncRemap({});
     setImportRows([]);
@@ -2932,16 +2936,23 @@ const AdminDashboard: React.FC = () => {
                 Change any row's <strong>Group</strong> below before importing to move it between scopes. Re-importing updates existing rows instead of duplicating them.
               </p>
 
-              <div className="flex items-center gap-4 mb-3 text-xs">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" checked={importMode === 'add'} onChange={() => setImportMode('add')} />
-                  <span className={importMode === 'add' ? 'font-semibold text-gray-800' : 'text-gray-600'}>Add missing only</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
-                  <span className={importMode === 'replace' ? 'font-semibold text-rose-700' : 'text-gray-600'}>Replace this category's attributes</span>
-                </label>
-              </div>
+              {importSource === 'producttoolkit' ? (
+                <div className="mb-3 text-xs text-gray-600">
+                  <span className="font-semibold text-rose-700">Full sync</span> — ProductToolkit is the
+                  source of truth for this category, so add/replace isn't a choice here.
+                </div>
+              ) : (
+                <div className="flex items-center gap-4 mb-3 text-xs">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" checked={importMode === 'add'} onChange={() => setImportMode('add')} />
+                    <span className={importMode === 'add' ? 'font-semibold text-gray-800' : 'text-gray-600'}>Add missing only</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
+                    <span className={importMode === 'replace' ? 'font-semibold text-rose-700' : 'text-gray-600'}>Replace this category's attributes</span>
+                  </label>
+                </div>
+              )}
               {importMode === 'replace' && (
                 <div className="mb-4 flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
