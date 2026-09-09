@@ -8,6 +8,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
+import ProjectDocumentsTab from '../components/documents/ProjectDocumentsTab';
 import {
   getProjectById,
   getProjectSteps,
@@ -41,6 +42,7 @@ import {
   getProductionUpdates,
   saveProductionUpdate,
   createAttributeRequest,
+  getClearedAttributeIds,
   getAttributeRequestsByProject,
   deleteAttributeRequest,
   updateAttributeRequestData,
@@ -165,6 +167,17 @@ const ProjectDetail: React.FC = () => {
   const [attrReqSkuNumber, setAttrReqSkuNumber] = useState('');
   const [attrReqSkuTitle, setAttrReqSkuTitle] = useState('');
   const [attrReqSelectedSkuId, setAttrReqSelectedSkuId] = useState('');
+  /**
+   * Attributes the selected SKU has been deliberately CLEARED on — recorded as "this product
+   * genuinely has none of that". They are excluded from the request by default, so a supplier
+   * is not asked again for data somebody already ruled out.
+   *
+   * Read from the row store rather than the SKU's JSONB, because the JSONB cannot express a
+   * clear at all: it mirrors as '' and reads as "not filled in yet".
+   */
+  const [attrReqNotApplicable, setAttrReqNotApplicable] = useState<Set<string>>(new Set());
+  /** The PM's override: ask for them anyway. Off by default — the record said they do not apply. */
+  const [attrReqAskCleared, setAttrReqAskCleared] = useState(false);
   const [attrReqSourceStep2, setAttrReqSourceStep2] = useState<ProjectAttributeRequest | null>(null);
   const [attrReqNote, setAttrReqNote] = useState('');
   // Optional due date shown to the supplier. Without one the request has no urgency
@@ -182,7 +195,7 @@ const ProjectDetail: React.FC = () => {
   const [attrReqRefreshing, setAttrReqRefreshing] = useState(false);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'checklist' | 'attributes' | 'compliance' | 'timeline' | 'im' | 'manufacturing'>('checklist');
+  const [activeTab, setActiveTab] = useState<'checklist' | 'attributes' | 'documents' | 'compliance' | 'timeline' | 'im' | 'manufacturing'>('checklist');
 
   // Attributes tab: track which historical snapshots are expanded
   const [expandedAttrHistoryId, setExpandedAttrHistoryId] = useState<string | null>(null);
@@ -890,7 +903,9 @@ const ProjectDetail: React.FC = () => {
         attrReqNote.trim() || undefined,
         prefill,
         attrReqDeadline || null,
-        copiedFrom
+        copiedFrom,
+        null,
+        attrReqAskCleared ? [] : [...attrReqNotApplicable]
       );
       const url = `${window.location.origin}/#/attribute-request/${req.token}`;
       setAttrRequests(prev => [req, ...prev]);
@@ -1549,6 +1564,9 @@ const ProjectDetail: React.FC = () => {
         <button onClick={() => setActiveTab('attributes')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'attributes' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Layers size={16} /> Attributes
         </button>
+        <button onClick={() => setActiveTab('documents')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'documents' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <BookOpen size={16} /> Documents
+        </button>
         <button onClick={() => setActiveTab('compliance')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'compliance' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <ShieldCheck size={16} /> Compliance
         </button>
@@ -2137,8 +2155,22 @@ const ProjectDetail: React.FC = () => {
                             </>
                           ) : (
                             <>
-                              <button onClick={() => handleStartEditSku(sku)} className="flex items-center gap-1 text-xs text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg font-medium"><Pencil size={12} /> Edit</button>
-                              <button onClick={() => handleDeleteSku(sku)} className="p-1.5 text-gray-300 hover:text-rose-500 rounded" title="Delete SKU"><Trash2 size={14} /></button>
+                              {/* A signed-off SKU is refused by the database (migrations 158 and
+                                  160), so the editor is not offered. Not offering it is the
+                                  honest version of the refusal: otherwise somebody fills in
+                                  sixty fields and only then finds out none of it can be saved.
+                                  Unlocking lives in the Attribute Viewer, which owns sign-off. */}
+                              {sku.isFinal ? (
+                                <span
+                                  className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-emerald-700"
+                                  title="This SKU is signed off. Unlock it in the Attribute Viewer to edit its values."
+                                >
+                                  <Lock size={12} /> Final
+                                </span>
+                              ) : (
+                                <button onClick={() => handleStartEditSku(sku)} className="flex items-center gap-1 text-xs text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg font-medium"><Pencil size={12} /> Edit</button>
+                              )}
+                              <button onClick={() => handleDeleteSku(sku)} disabled={sku.isFinal} className="p-1.5 text-gray-300 hover:text-rose-500 rounded disabled:opacity-40 disabled:hover:text-gray-300" title={sku.isFinal ? 'Unlock the SKU before deleting it' : 'Delete SKU'}><Trash2 size={14} /></button>
                             </>
                           )}
                         </div>
@@ -2392,6 +2424,17 @@ const ProjectDetail: React.FC = () => {
       })()}
 
       {/* COMPLIANCE TAB */}
+      {/* DOCUMENTS CONTENT — the SOP & Documents registry, scoped to this project.
+          Self-contained: it owns its own loading and binding, and reports through this
+          page's existing notification channel rather than introducing a second one. */}
+      {activeTab === 'documents' && project && (
+        <ProjectDocumentsTab
+          projectId={project.id}
+          onSuccess={msg => showNotification(msg, 'success')}
+          onError={msg => showNotification(msg, 'error')}
+        />
+      )}
+
       {activeTab === 'compliance' && (
         <div>
            <div className="flex justify-between items-center mb-6">
@@ -2936,6 +2979,12 @@ const ProjectDetail: React.FC = () => {
                       setAttrReqSelectedSkuId(e.target.value);
                       setAttrReqSkuNumber(s?.skuNumber ?? '');
                       setAttrReqSkuTitle(s?.skuTitle ?? '');
+                      setAttrReqAskCleared(false);
+                      // Soft: an unreachable value store must not stop a request being sent, so
+                      // a failure here just means nothing is excluded.
+                      void getClearedAttributeIds(e.target.value)
+                        .then(setAttrReqNotApplicable)
+                        .catch(() => setAttrReqNotApplicable(new Set()));
                     }}
                   >
                     <option value="">— Select a SKU —</option>
@@ -2943,6 +2992,45 @@ const ProjectDetail: React.FC = () => {
                       <option key={s.id} value={s.id}>{s.skuNumber}{s.skuTitle ? ` — ${s.skuTitle}` : ''}</option>
                     ))}
                   </select>
+                )}
+
+                {/* Shown rather than silently applied. Excluding fields from what a supplier is
+                    asked is a decision worth seeing before it is made — and the person sending
+                    the request may know the record is out of date. */}
+                {attrReqNotApplicable.size > 0 && (
+                  <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 p-2.5 text-xs text-violet-900">
+                    <p className="font-semibold">
+                      {attrReqNotApplicable.size} field
+                      {attrReqNotApplicable.size === 1 ? '' : 's'} recorded as not applicable for
+                      this SKU
+                    </p>
+                    <p className="mt-0.5">
+                      Somebody marked {attrReqNotApplicable.size === 1 ? 'it' : 'them'} as
+                      “this product genuinely has none”, so the supplier will not be asked
+                      {attrReqNotApplicable.size === 1 ? ' for it' : ' for them'}.
+                    </p>
+                    <ul className="mt-1 space-y-0.5">
+                      {[...attrReqNotApplicable]
+                        .map(id => projectCatAttrs.find(a => a.id === id)?.name)
+                        .filter((n): n is string => !!n)
+                        .slice(0, 8)
+                        .map(name => (
+                          <li key={name}>• {name}</li>
+                        ))}
+                      {attrReqNotApplicable.size > 8 && (
+                        <li>• …and {attrReqNotApplicable.size - 8} more</li>
+                      )}
+                    </ul>
+                    <label className="mt-1.5 flex items-start gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={attrReqAskCleared}
+                        onChange={e => setAttrReqAskCleared(e.target.checked)}
+                        className="mt-0.5 accent-violet-600"
+                      />
+                      <span>Ask for them anyway — the record may be out of date</span>
+                    </label>
+                  </div>
                 )}
               </div>
             )}

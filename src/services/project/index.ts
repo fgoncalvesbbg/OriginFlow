@@ -79,7 +79,6 @@ export {
 } from './project-sku.service';
 
 export {
-  getCatalogSkus,
   createCatalogSku,
   bulkUpsertCatalogSkus
 } from './sku-catalog.service';
@@ -97,12 +96,30 @@ export type { ChangeActor, SkuFieldChange } from './sku-log.service';
 
 export {
   getSkusByCategory,
+  getCategorySkuIndex,
   getFlagsForSkus,
   upsertSkuAttributeFlag,
   setSkuAttributeFlagResolved,
   deleteSkuAttributeFlag
 } from './sku-attribute-review.service';
-export type { CategorySku } from './sku-attribute-review.service';
+export type { CategorySku, CategorySkuSummary } from './sku-attribute-review.service';
+
+export {
+  getValuesForSkus,
+  getValuesForAttribute,
+  getClearedAttributeIds,
+  setSkuAttributeValue,
+  clearSkuAttributeValue,
+  bulkSetSkuAttributeValue,
+  copySkuAttributeValues,
+  syncValueRowsFromJsonb,
+  isValueStoreAvailable,
+  mapSkuAttributeValue
+} from './sku-attribute-value.service';
+export type { ValueActor, BulkWriteResult } from './sku-attribute-value.service';
+
+export { lookupEprelRecords } from './eprel.service';
+export type { EprelLookupResult } from './eprel.service';
 
 export {
   lookupJiraIssues,

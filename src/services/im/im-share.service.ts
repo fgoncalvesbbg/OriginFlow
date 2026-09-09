@@ -1,22 +1,41 @@
 /**
- * IM share links — public, unguessable-token URLs that render a generated manual in the
- * read-only IMViewer with no login. The manual JSON itself is already anonymously readable
- * by URL (im-published bucket); this service just manages the token -> (project, template
- * type) mapping in `im_shares` (see db_migrations/84_create_im_shares.sql).
+ * IM share links — the Instruction Manual's adapter over the shared review module.
+ *
+ * The implementation moved to `src/services/review/review-share.service.ts` in migration
+ * 162, when `im_shares` became `review_shares` so the Design Specs module could run the
+ * identical round. This file is what is left that is genuinely IM-specific:
+ *
+ *   * an IM round is addressed by (projectId, templateType) and has no per-version subject
+ *     row, so `subject_id` is always null here — see migration 119 for why the IM has never
+ *     used an FK to project_ims;
+ *   * the IM's own field names (templateType, manualVersion) are kept on `IMShare` so the
+ *     surfaces written before the generalization are untouched;
+ *   * the /share/im/ and /review/im/ URLs.
+ *
+ * Add nothing else here. A rule that should hold for every reviewable document belongs in
+ * the shared module, or the two will drift — which is the whole point of 162.
  */
 
-import { auth, db, portalDb, orEmpty, type Row } from '../../data';
-import { isLive } from '../../config/environment.config';
 import type { IMTemplateType, IMReviewStage } from '../../types';
+import type { ReviewShare, ReviewSubject } from '../../types/review.types';
+import {
+  getReviewShares, createReviewShare, revokeReviewShare, resolveShareToken, appUrl,
+  DEFAULT_SHARE_TTL_MS,
+} from '../review/review-share.service';
 
 export type IMShareMode = 'view' | 'review';
 
-/**
- * Default TTL for a share link that does not specify one explicitly (see `createIMShare`).
- * A share token grants unauthenticated, unlogged-in read access to a manual — "forever" must
- * be something a caller opts into, not something it gets by omission.
- */
-const DEFAULT_SHARE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/** The subject an IM round belongs to: a manual, identified by project and template type. */
+const imSubject = (
+  projectId: string,
+  templateType: IMTemplateType,
+  manualVersion?: number | null,
+): ReviewSubject => ({
+  type: templateType,
+  projectId,
+  id: null,
+  version: manualVersion ?? null,
+});
 
 export interface IMShare {
   id: string;
@@ -32,7 +51,7 @@ export interface IMShare {
   expiresAt: string | null;
   /** Free-text purpose/recipient ("DE distributor") so a list of links is tellable-apart. */
   label: string | null;
-  /** When the public token was last successfully resolved (viewer opened). Null = never opened. */
+  /** When the public token was last successfully resolved. Null = never opened. */
   lastUsedAt: string | null;
   /** How many times the public token has been successfully resolved. */
   useCount: number;
@@ -57,29 +76,30 @@ export interface IMShare {
   reviewStage: IMReviewStage | null;
 }
 
+/** Project the shared row onto the IM's own field names. */
+const toIMShare = (s: ReviewShare): IMShare => ({
+  id: s.id,
+  token: s.token,
+  projectId: s.projectId,
+  templateType: s.subjectType as IMTemplateType,
+  createdBy: s.createdBy,
+  createdAt: s.createdAt,
+  revokedAt: s.revokedAt,
+  revokedBy: s.revokedBy,
+  expiresAt: s.expiresAt,
+  label: s.label,
+  lastUsedAt: s.lastUsedAt,
+  useCount: s.useCount,
+  mode: s.mode as IMShareMode,
+  submittedAt: s.submittedAt,
+  submittedBy: s.submittedBy,
+  manualVersion: s.subjectVersion,
+  reviewStage: s.reviewStage as IMReviewStage | null,
+});
+
 /** True once the link's TTL has passed (the RPC also enforces this server-side). */
 export const isShareExpired = (share: IMShare): boolean =>
   !!share.expiresAt && new Date(share.expiresAt).getTime() <= Date.now();
-
-const mapRow = (row: any): IMShare => ({
-  id: row.id,
-  token: row.token,
-  projectId: row.project_id,
-  templateType: row.template_type,
-  createdBy: row.created_by,
-  createdAt: row.created_at,
-  revokedAt: row.revoked_at,
-  revokedBy: row.revoked_by ?? null,
-  expiresAt: row.expires_at ?? null,
-  label: row.label ?? null,
-  lastUsedAt: row.last_used_at ?? null,
-  useCount: row.use_count ?? 0,
-  mode: (row.mode ?? 'view') as IMShareMode,
-  submittedAt: row.submitted_at ?? null,
-  submittedBy: row.submitted_by ?? null,
-  manualVersion: row.manual_version ?? null,
-  reviewStage: (row.review_stage ?? null) as IMReviewStage | null,
-});
 
 /**
  * Active (non-revoked) share links for a manual, most recent first.
@@ -92,20 +112,8 @@ export const getIMShares = async (
   templateType: IMTemplateType = 'im',
   mode?: IMShareMode,
 ): Promise<IMShare[]> => {
-  if (!isLive) return [];
-  const rows = await orEmpty(
-    db.select<Row>('im_shares', {
-      where: {
-        project_id: projectId,
-        template_type: templateType,
-        revoked_at: { op: 'isNull' },
-        mode,
-      },
-      order: { column: 'created_at', ascending: false },
-    }),
-    '[getIMShares]',
-  );
-  return rows.map(mapRow);
+  const shares = await getReviewShares(imSubject(projectId, templateType), mode);
+  return shares.map(toIMShare);
 };
 
 /**
@@ -118,13 +126,11 @@ export const getIMShares = async (
  * the manual's card into the right board column. Callers pick the default with
  * `nextReviewStageFor`; the send dialog lets the PM override it.
  *
- * `expiresAt` defaults to 30 days from now when the caller OMITS the option entirely (e.g.
- * ProjectIMGenerator's "send for supplier review" flow). A caller that explicitly passes
- * `expiresAt` — including `null`, meaning "no expiry" (e.g. the Viewer tab's "Never" choice) —
- * is honored exactly as passed: `'expiresAt' in opts` distinguishes "the key is absent" from
- * "the key is present with value null", which a plain `opts?.expiresAt ?? default` cannot —
- * that would silently turn every omitted-expiry caller into a link that never expires, which
- * is the bug this default exists to close.
+ * `expiresAt` defaults to 30 days from now when the caller OMITS the option entirely. A
+ * caller that explicitly passes `expiresAt` — including `null`, meaning "no expiry" (e.g.
+ * the Viewer tab's "Never" choice) — is honored exactly as passed. The distinction between
+ * an absent key and a present-but-null one is made in the shared module; see
+ * DEFAULT_SHARE_TTL_MS there for why a `??` default would be a bug.
  */
 export const createIMShare = async (
   projectId: string,
@@ -137,62 +143,48 @@ export const createIMShare = async (
     reviewStage?: IMReviewStage | null;
   },
 ): Promise<IMShare> => {
-  const user = await auth.getUser();
-  const createdBy = user?.email ?? user?.id ?? null;
-  const expiresAt = opts && 'expiresAt' in opts
-    ? opts.expiresAt
-    : new Date(Date.now() + DEFAULT_SHARE_TTL_MS).toISOString();
-  const created = await db.insert<Row>('im_shares', {
-    project_id: projectId,
-    template_type: templateType,
-    created_by: createdBy,
-    label: opts?.label?.trim() || null,
-    expires_at: expiresAt,
-    mode: opts?.mode ?? 'view',
-    manual_version: opts?.manualVersion ?? null,
-    // Only a review link has a stage; a view link is not part of the workflow at all.
-    review_stage: opts?.mode === 'review' ? (opts?.reviewStage ?? 'draft') : null,
-  });
-  return mapRow(created);
+  const created = await createReviewShare(
+    imSubject(projectId, templateType, opts?.manualVersion),
+    opts && 'expiresAt' in opts
+      ? {
+        label: opts.label,
+        expiresAt: opts.expiresAt,
+        mode: opts.mode,
+        reviewStage: opts.reviewStage,
+      }
+      // Deliberately omits the key rather than passing undefined, so the shared module's
+      // `'expiresAt' in opts` test still sees an absent key and applies the 30-day default.
+      : { label: opts?.label, mode: opts?.mode, reviewStage: opts?.reviewStage },
+  );
+  return toIMShare(created);
 };
 
 /** Revoke a share link — the public URL stops resolving immediately. Records who revoked. */
-export const revokeIMShare = async (id: string): Promise<void> => {
-  const user = await auth.getUser();
-  await db.updateWhere('im_shares', {
-    revoked_at: new Date().toISOString(),
-    revoked_by: user?.email ?? user?.id ?? null,
-  }, { where: { id } });
-};
+export const revokeIMShare = (id: string): Promise<void> => revokeReviewShare(id);
 
 /**
- * Resolve a public token to its (project, template type), via the anon-callable
- * `get_im_share_by_token` routine. Returns null for an unknown or revoked token.
+ * Resolve a public token to its (project, template type). Returns null for an unknown,
+ * revoked or expired token.
  */
 export const resolveIMShareToken = async (
   token: string,
 ): Promise<{ projectId: string; templateType: IMTemplateType } | null> => {
-  if (!isLive) return null;
-  let data: Row | Row[] | null;
-  try {
-    data = await portalDb.rpc<Row | Row[] | null>('get_im_share_by_token', { p_token: token });
-  } catch (e) {
-    console.error('[resolveIMShareToken] error:', e);
-    return null;
-  }
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) return null;
-  return { projectId: row.project_id, templateType: row.template_type as IMTemplateType };
+  const resolved = await resolveShareToken(token);
+  if (!resolved) return null;
+  return {
+    projectId: resolved.projectId,
+    templateType: resolved.subjectType as IMTemplateType,
+  };
 };
 
 /** Build the public, shareable URL for a token (app uses HashRouter). */
-export const getIMShareUrl = (token: string): string =>
-  `${window.location.origin}${window.location.pathname}#/share/im/${token}`;
+export const getIMShareUrl = (token: string): string => appUrl(`/share/im/${token}`);
 
 /**
  * Build the supplier review URL for a token. Separate page from getIMShareUrl because the
  * review portal adds the commenting rail on top of the same read-only viewer; a review token
  * still opens read-only at the /share/im/ URL, which is harmless.
  */
-export const getIMReviewUrl = (token: string): string =>
-  `${window.location.origin}${window.location.pathname}#/review/im/${token}`;
+export const getIMReviewUrl = (token: string): string => appUrl(`/review/im/${token}`);
+
+export { DEFAULT_SHARE_TTL_MS };

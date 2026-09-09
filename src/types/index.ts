@@ -26,11 +26,32 @@ export type {
   ProjectSku,
   CatalogSku,
   SkuAttributeValue,
+  SkuAttributeValueRecord,
+  SkuValueSource,
+  SkuCellState,
   SkuAttributeFlag,
   SkuChangeLogEntry,
   JiraIssueRef,
   JiraLookup
 } from './project.types';
+
+// SOP & Documents types
+export { DOCUMENT_TYPES, DOCUMENT_TYPE_LABELS } from './document.types';
+export type {
+  DocumentType,
+  DocumentAudience,
+  RegisteredDocument,
+  RegisteredDocumentRow,
+  FinalVersionSummary,
+  DocumentVersion,
+  DocumentVersionEvent,
+  SupplierDocument,
+  SupplierDocumentVersion,
+  SupplierProjectDocument,
+  InternalProjectDocument,
+  DocumentBinding,
+  DocumentRegistryFilters
+} from './document.types';
 
 // Compliance types
 export { ComplianceRequestStatus, ComplianceResponseStatus } from './compliance.types';
@@ -158,3 +179,23 @@ export type {
   PlaceholderAnswer,
   PlaceholderAnswerLogEntry
 } from './im-placeholder-wizard.types';
+
+// Shared supplier-review layer (migration 162) — links, notes, replies and anchors for
+// EVERY reviewable document. The IM's own IMShare/IMReviewComment shapes are adapters over
+// these; see src/services/review/.
+export type {
+  ReviewSubjectType,
+  ReviewShareMode,
+  ReviewStage,
+  ReviewCommentStatus,
+  ReviewSubject,
+  ReviewAttachment,
+  TextReviewAnchor,
+  PdfReviewAnchor,
+  ReviewAnchor,
+  ReviewShare,
+  ReviewComment,
+  ReviewReply,
+  ReviewSession
+} from './review.types';
+export { isPdfAnchor, isReviewShareExpired } from './review.types';

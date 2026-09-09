@@ -6,6 +6,7 @@ import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import { ProjectSku, SkuAttributeValue, ProjectAttributeRequest } from '../../types';
 import { SKU_ATTRIBUTE_ID } from '../../config/compliance.constants';
+import { syncValueRowsFromJsonb } from './sku-attribute-value.service';
 
 export const MAX_SKUS_PER_PROJECT = 20;
 
@@ -20,6 +21,9 @@ export const mapProjectSku = (r: any): ProjectSku => ({
   isFinal: r.is_final ?? false,
   pendingExport: r.pending_export ?? false,
   lastExportedAt: r.last_exported_at ?? null,
+  finalizedAt: r.finalized_at ?? null,
+  finalizedBy: r.finalized_by ?? null,
+  reopenReason: r.reopen_reason ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -84,6 +88,24 @@ export const updateProjectSku = async (
   if (updates.categoryId !== undefined) payload.category_id = updates.categoryId;
 
   const updated = await db.update<Row>('project_skus', payload, { where: { id } });
+
+  // Keep the row-level value store (sku_attribute_values, migration 155) in line with the
+  // array this just wrote. It is the authoritative store; attribute_values is its mirror.
+  // Done here rather than at the three call sites so a fourth cannot forget.
+  //
+  // Failures are logged, not thrown: the array write above has already succeeded and is
+  // what every current reader uses (the ProductToolkit readback API, the IM placeholder
+  // wizard, the request-prefill paths). Turning a successful SKU save into an
+  // error because a secondary sync failed — or because migration 155 is not applied yet —
+  // would be a worse outcome than a mirror that is briefly ahead of the rows.
+  if (updates.attributeValues !== undefined) {
+    try {
+      await syncValueRowsFromJsonb({ projectSkuId: id, values: updates.attributeValues });
+    } catch (e) {
+      console.error('[updateProjectSku] value-row sync failed; attribute_values was still saved', e);
+    }
+  }
+
   return map(updated);
 };
 

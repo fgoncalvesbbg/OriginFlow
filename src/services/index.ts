@@ -17,7 +17,8 @@ export {
   logout,
   getProfiles,
   getUserProfile,
-  updateUserRole
+  updateUserRole,
+  setSuperAdmin
 } from './auth';
 
 // Project module
@@ -65,11 +66,21 @@ export {
   getEffectiveSkuValue,
   collapseSkuAttributeValues,
   getSkusByCategory,
+  getCategorySkuIndex,
   getFlagsForSkus,
   upsertSkuAttributeFlag,
   setSkuAttributeFlagResolved,
   deleteSkuAttributeFlag,
-  getCatalogSkus,
+  getValuesForSkus,
+  getValuesForAttribute,
+  getClearedAttributeIds,
+  setSkuAttributeValue,
+  clearSkuAttributeValue,
+  bulkSetSkuAttributeValue,
+  copySkuAttributeValues,
+  syncValueRowsFromJsonb,
+  isValueStoreAvailable,
+  lookupEprelRecords,
   createCatalogSku,
   bulkUpsertCatalogSkus,
   setSkuFinal,
@@ -95,10 +106,11 @@ export {
   deleteTemplateDocument,
   getDefaultTemplateStructure
 } from './project';
-export type { CategorySku } from './project';
+export type { CategorySku, CategorySkuSummary } from './project';
 export type { SiblingAttributeRequest } from './project';
 export type { ParsedSkuRow, BulkUpsertSkuResult, ChangeActor, SkuFieldChange } from './project';
 export type { JiraLookupResponse } from './project';
+export type { ValueActor, BulkWriteResult } from './project';
 
 // Supplier module
 export {
@@ -115,6 +127,25 @@ export {
   regenerateSupplierAccessCode,
   logAccessCodeAttempt
 } from './supplier';
+
+// SOP & Documents module. HTTP-only by design: doc_* is server-side, see
+// services/documents/document.service.ts.
+export {
+  getDocuments,
+  createDocument,
+  updateDocument,
+  getVersions,
+  createVersion,
+  finalizeVersion,
+  unfinalizeVersion,
+  getProjectBindings,
+  bindDocumentToProject,
+  unbindDocumentFromProject,
+  latestVersionUrl,
+  getSupplierProjectDocuments,
+  getInternalProjectDocuments,
+  downloadDocument
+} from './documents';
 
 // Manufacturing module
 export {

@@ -1098,9 +1098,9 @@
     "semantic_hash": ""
   },
   "src/pages/AdminDashboard.tsx": {
-    "mtime": 1788807139.5038877,
-    "seen": 1788807813.0466807,
-    "ast_hash": "c35648f3e1396f4042cc9565d720c660",
+    "mtime": 1788869556.9944444,
+    "seen": 1788880699.8116665,
+    "ast_hash": "cef0f36e3e67600fdd4e51e42e4586d1",
     "semantic_hash": ""
   },
   "src/pages/AdminTestEmail.tsx": {
@@ -1122,9 +1122,9 @@
     "semantic_hash": ""
   },
   "src/pages/PMDashboard.tsx": {
-    "mtime": 1788798762.0398285,
-    "seen": 1788800243.9903314,
-    "ast_hash": "aeb22e77bcd6ecb2618adfc85c3d11c6",
+    "mtime": 1788870136.7777538,
+    "seen": 1788880699.8116746,
+    "ast_hash": "c1903e3884855c3a1a53d7381f7d6c14",
     "semantic_hash": ""
   },
   "src/pages/ProjectDetail.tsx": {
@@ -1242,9 +1242,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/ProjectIMGenerator.tsx": {
-    "mtime": 1788799845.041108,
-    "seen": 1788800243.99038,
-    "ast_hash": "0ec728571484c6621cf67fd25ccd31bf",
+    "mtime": 1788878390.6521943,
+    "seen": 1788880699.8117309,
+    "ast_hash": "44eb7515c7aca94207c1014c07fe3358",
     "semantic_hash": ""
   },
   "src/pages/im/ProjectImImportDialog.tsx": {
@@ -1506,9 +1506,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-import.service.ts": {
-    "mtime": 1785498514.4484646,
-    "seen": 1787843281.2443638,
-    "ast_hash": "a240c84ece66007c7e224b4c12c6980c",
+    "mtime": 1788877782.4466257,
+    "seen": 1788880699.8119965,
+    "ast_hash": "a786100074a24aaca2277678542efa3e",
     "semantic_hash": ""
   },
   "src/services/im/im-print-export.service.ts": {
@@ -1518,15 +1518,15 @@
     "semantic_hash": ""
   },
   "src/services/im/im-print-html.test.ts": {
-    "mtime": 1787672337.377566,
-    "seen": 1787843281.2443736,
-    "ast_hash": "cb83cfd6011107abf07a1ebf6bd55e82",
+    "mtime": 1788878507.5449264,
+    "seen": 1788880699.8120184,
+    "ast_hash": "78d009d4abb52ad84ff5c87ffd594805",
     "semantic_hash": ""
   },
   "src/services/im/im-print-html.ts": {
-    "mtime": 1788637703.428956,
-    "seen": 1788794980.055411,
-    "ast_hash": "8c7006327565d36924938ccf2d7ae167",
+    "mtime": 1788878005.5657015,
+    "seen": 1788880699.8120203,
+    "ast_hash": "1061ab6674d3a6fcba3818313d8b0fb0",
     "semantic_hash": ""
   },
   "src/services/im/im-publish.service.test.ts": {
@@ -1548,9 +1548,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-resolver.ts": {
-    "mtime": 1788637633.8950443,
-    "seen": 1788794980.0554314,
-    "ast_hash": "4df3b99f7d7cdbc3afa969e2618974b9",
+    "mtime": 1788877929.6006787,
+    "seen": 1788880699.812049,
+    "ast_hash": "b57fb35f3b23c450bdb90c838a3ec048",
     "semantic_hash": ""
   },
   "src/services/im/im-section.service.test.ts": {
@@ -1572,9 +1572,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-staleness.service.ts": {
-    "mtime": 1788636472.4747984,
-    "seen": 1788794980.0554404,
-    "ast_hash": "9a8c36a963480f954acb17aa0a957a84",
+    "mtime": 1788877787.4429164,
+    "seen": 1788880699.812061,
+    "ast_hash": "522307f6056eaba7431321ed9fe337c4",
     "semantic_hash": ""
   },
   "src/services/im/im-template.service.ts": {
@@ -1626,15 +1626,15 @@
     "semantic_hash": ""
   },
   "src/services/im/project-im.service.test.ts": {
-    "mtime": 1787734194.7603364,
-    "seen": 1787843281.2444565,
-    "ast_hash": "bc87de125ff4983f4fd0dafdb8f89010",
+    "mtime": 1788877796.6894512,
+    "seen": 1788880699.8121483,
+    "ast_hash": "26123ebf14ad070289b68fa865621941",
     "semantic_hash": ""
   },
   "src/services/im/project-im.service.ts": {
-    "mtime": 1788798723.9311812,
-    "seen": 1788800243.9907863,
-    "ast_hash": "d5a43ea82531a2231e20636ed693571c",
+    "mtime": 1788877734.614313,
+    "seen": 1788880699.8121502,
+    "ast_hash": "be5b41815703b713b15d4e37d43146ed",
     "semantic_hash": ""
   },
   "src/services/index.ts": {
@@ -1800,15 +1800,15 @@
     "semantic_hash": ""
   },
   "src/types/im.types.ts": {
-    "mtime": 1788798642.946426,
-    "seen": 1788800243.990892,
-    "ast_hash": "232053fa5a295dcef79007beb7fc8486",
+    "mtime": 1788877713.099082,
+    "seen": 1788880699.812277,
+    "ast_hash": "50af91ab0e4f21d5a0007f24ce83fe2f",
     "semantic_hash": ""
   },
   "src/types/index.ts": {
-    "mtime": 1788806961.9505744,
-    "seen": 1788807813.0473757,
-    "ast_hash": "7297f224d22caedea386a60ee546438c",
+    "mtime": 1788878094.8271081,
+    "seen": 1788880699.8122811,
+    "ast_hash": "825d4f802a189ee26aada7deaec6abd1",
     "semantic_hash": ""
   },
   "src/types/manufacturing.types.ts": {
@@ -3030,15 +3030,15 @@
     "semantic_hash": ""
   },
   "src/services/im/im-tm-placeholders.test.ts": {
-    "mtime": 1787087930.6965806,
-    "seen": 1787843281.2444222,
-    "ast_hash": "e4dc484c5487fe22b94b48f66d845b68",
+    "mtime": 1788878048.1492674,
+    "seen": 1788880699.8120952,
+    "ast_hash": "22db9c38888bcceb3b942a1946f66964",
     "semantic_hash": ""
   },
   "src/services/im/im-tm-placeholders.ts": {
-    "mtime": 1787087930.6965806,
-    "seen": 1787843281.2444234,
-    "ast_hash": "bab955c5765d5386129de0e6a302abac",
+    "mtime": 1788878030.8361795,
+    "seen": 1788880699.812097,
+    "ast_hash": "7ed9f6c8c00412557b8c4e8b7479f536",
     "semantic_hash": ""
   },
   "src/services/im/im-tm-reassemble.test.ts": {
@@ -4257,6 +4257,12 @@
     "mtime": 1788801065.8638644,
     "seen": 1788807813.047548,
     "ast_hash": "6cc4ef721cf9ae9dee0a888eb99d89c4",
+    "semantic_hash": ""
+  },
+  "db_migrations/153_project_im_attachments.sql": {
+    "mtime": 1788877686.0326803,
+    "seen": 1788880699.8112779,
+    "ast_hash": "b9360592e24c819cf0e3e980e02cb29d",
     "semantic_hash": ""
   }
 }

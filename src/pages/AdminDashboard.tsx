@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import {
-  getProfiles, updateUserRole,
+  getProfiles, updateUserRole, setSuperAdmin,
   getSuppliers, createSupplier, ensureSupplierToken, updateSupplier,
   getCategories, getCategoryTree, saveCategory,
   deleteCategory, assignPMToCategory,
@@ -25,7 +25,7 @@ import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../ut
 import type { ParsedAttributeRow } from '../utils';
 import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryTree, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
@@ -220,6 +220,9 @@ const MarketsAdminSection: React.FC = () => {
 
 const AdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
+  // Only a super admin may move the Super Admin flag (migration 154 reverts it for
+  // anyone else), so only a super admin is shown the control.
+  const viewerIsSuperAdmin = currentUser?.isSuperAdmin === true;
   const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'projectTemplates' | 'prompts' | 'markets' | 'imPrint' | 'translationMemory' | 'feedback'>('users');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -406,6 +409,25 @@ const AdminDashboard: React.FC = () => {
     }
     const newRole = currentRole === UserRole.ADMIN ? UserRole.PM : UserRole.ADMIN;
     await updateUserRole(userId, newRole);
+    loadData();
+  };
+
+  /**
+   * Grant or revoke the Super Admin tier — the gate on modules still under test.
+   *
+   * Only a super admin sees this control, because only a super admin can move the
+   * flag: migration 154's trigger silently reverts the write for anyone else, so
+   * showing it more widely would offer a button that appears to work and does
+   * nothing. Reloading from the server afterwards is the point — the reload is what
+   * confirms the change actually landed rather than being reverted.
+   */
+  const toggleSuperAdmin = async (userId: string, isCurrentlySuper: boolean) => {
+    if (currentUser?.id === userId && isCurrentlySuper) {
+      alert("You cannot remove your own Super Admin access — that would leave the gated modules unreachable.");
+      return;
+    }
+    if (!isCurrentlySuper && !confirm("Grant Super Admin? This user will see every module still under test.")) return;
+    await setSuperAdmin(userId, !isCurrentlySuper);
     loadData();
   };
 
@@ -1837,9 +1859,24 @@ const AdminDashboard: React.FC = () => {
                       <div className="text-xs text-muted">{user.email}</div>
                     </div>
                   </div>
-                  <button onClick={() => toggleRole(user.id, user.role)} className={`text-xs px-3 py-1 rounded-full font-bold transition-colors ${user.role === UserRole.ADMIN ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                    {user.role}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* Super Admin is additive to the role, so it reads as a second badge
+                        rather than replacing the role pill. Visible only to super admins:
+                        the database reverts the write for anyone else. */}
+                    {viewerIsSuperAdmin && (
+                      <button
+                        onClick={() => toggleSuperAdmin(user.id, user.isSuperAdmin === true)}
+                        title={user.isSuperAdmin ? 'Revoke Super Admin' : 'Grant Super Admin — sees modules still under test'}
+                        className={`text-xs px-3 py-1 rounded-full font-bold transition-colors flex items-center gap-1.5 ${user.isSuperAdmin ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                      >
+                        <ShieldAlert size={12} />
+                        {user.isSuperAdmin ? 'SUPER ADMIN' : 'Grant Super'}
+                      </button>
+                    )}
+                    <button onClick={() => toggleRole(user.id, user.role)} className={`text-xs px-3 py-1 rounded-full font-bold transition-colors ${user.role === UserRole.ADMIN ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      {user.role}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

@@ -64,7 +64,7 @@ export const handler = async (event: NetlifyEvent) => {
   // filters im_review_resolve applies. Deliberately NOT via that RPC: resolving bumps
   // use_count, which means "the portal was opened", and attaching an image is not that.
   const { data: share, error } = await supabase
-    .from('im_shares')
+    .from('review_shares')
     .select('id, revoked_at, expires_at, mode')
     .eq('token', req.token)
     .eq('mode', 'review')

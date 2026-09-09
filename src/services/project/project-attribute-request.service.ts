@@ -36,6 +36,7 @@ const map = (r: any): ProjectAttributeRequest => ({
   createdAt: r.created_at,
   submittedAt: r.submitted_at ?? null,
   batchToken: r.batch_token ?? null,
+  notApplicableAttributeIds: r.not_applicable_attribute_ids ?? [],
 });
 
 export const createAttributeRequest = async (
@@ -51,7 +52,9 @@ export const createAttributeRequest = async (
   prefillData?: SubmittedValue[],
   deadline?: string | null,
   copiedFromSku?: string | null,
-  batchToken?: string | null
+  batchToken?: string | null,
+  /** Attributes recorded as not applicable for this SKU — the form will not ask for them. */
+  notApplicableAttributeIds?: readonly string[],
 ): Promise<ProjectAttributeRequest> => {
   if (!isLive) throw new Error('Database not configured.');
 
@@ -72,6 +75,7 @@ export const createAttributeRequest = async (
     deadline: deadline || null,
     copied_from_sku: copiedFromSku || null,
     batch_token: batchToken || null,
+    not_applicable_attribute_ids: notApplicableAttributeIds ?? [],
   });
   return map(created);
 };

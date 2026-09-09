@@ -1,0 +1,79 @@
+// SUPABASE EDGE FUNCTION: send-tcf-notification
+// Deploy this via Supabase CLI:
+// supabase functions deploy send-tcf-notification --no-verify-jwt
+//
+// RECOVERED FROM PRODUCTION 2026-09-08 — see ../README.md before editing.
+// This file was reconstructed from the deployed artifact (slug `send-tcf-notification`,
+// version 6); it had no source in the repo. It is currently UNREACHABLE from the app:
+// `triggerEmailNotification` in src/services/shared/notification.service.ts is a stub that
+// suppresses every send and returns success, so nothing invokes this endpoint.
+//
+// NOTE the deploy comment above says --no-verify-jwt but the deployed function actually
+// has verify_jwt = true. Do not trust the comment when redeploying.
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  // 1. Handle CORS Preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  try {
+    const body = await req.json();
+    const { to, subject, html } = body;
+
+    console.log(`Attempting to send email via Resend to: ${to}`);
+
+    // 2. Validate API Key
+    // You must set this in Supabase: supabase secrets set RESEND_API_KEY=re_your_key
+    const resendKey = Deno.env.get("RESEND_API_KEY");
+    const fromEmail = Deno.env.get("FROM_EMAIL") || "ailaunchflow@gmail.com";
+
+    if (!resendKey) {
+      console.error("Missing RESEND_API_KEY environment variable.");
+      throw new Error("Server configuration error: RESEND_API_KEY not set in Supabase Secrets.");
+    }
+
+    // 3. Send via Resend HTTP API (No broken SMTP libraries needed!)
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${resendKey}`,
+      },
+      body: JSON.stringify({
+        from: `LaunchFlow <${fromEmail}>`,
+        to: [to],
+        subject: subject,
+        html: html,
+      }),
+    });
+
+    const resData = await res.json();
+
+    if (!res.ok) {
+      console.error("Resend API Error:", resData);
+      throw new Error(`Resend Error: ${resData.message || 'Unknown API error'}`);
+    }
+
+    console.log("Email sent successfully through Resend!");
+
+    return new Response(JSON.stringify({ success: true, id: resData.id }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
+    });
+
+  } catch (error) {
+    console.error("Function Error:", error.message);
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 400,
+    });
+  }
+});

@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic, getPortalDocumentUrl } from '../services';
 import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty, ProjectAttributeRequest } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
+import SupplierDocumentsPanel from '../components/documents/SupplierDocumentsPanel';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload, ClipboardList, ExternalLink } from 'lucide-react';
 
 const SupplierPortal: React.FC = () => {
@@ -397,6 +398,19 @@ const SupplierPortal: React.FC = () => {
               </div>
             );
           })}
+        </div>
+
+        {/*
+          Guidelines and specs the internal team has released for this project. Rendered
+          after the upload steps because it is reference material, not a task — but on the
+          same page rather than behind a tab, because a supplier who has to go looking for
+          the packaging spec will use the copy in their email instead.
+
+          The project token is the only credential passed; the server decides what that
+          token may see. Nothing is filtered here.
+        */}
+        <div className="mt-8">
+          <SupplierDocumentsPanel credentials={{ projectToken: token }} projectId={project.id} />
         </div>
       </main>
       

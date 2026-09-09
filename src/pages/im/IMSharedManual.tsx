@@ -1,6 +1,6 @@
 /**
  * Public, unauthenticated page for a shared Instruction Manual link (`/#/share/im/:token`).
- * Resolves the token via the anon-callable `get_im_share_by_token` RPC (im_shares table,
+ * Resolves the token via the anon-callable `get_im_share_by_token` RPC (review_shares table,
  * db_migrations/84_create_im_shares.sql) to a (projectId, templateType) pair, then renders
  * the exact same read-only <IMViewer> the internal Viewer tab uses, pointed at that
  * project's published manifest. No auth, no app chrome — just the manual.

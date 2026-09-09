@@ -11,6 +11,26 @@ import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, Copy, Downloa
 
 type SubmittedRow = { attributeId: string; name: string; value: string; type?: string };
 
+/**
+ * Drops attributes the PM recorded as not-applicable for this SKU (migration 164) from the
+ * supplier-facing field list — the form should not ask for data the PM already confirmed
+ * this product genuinely doesn't have.
+ *
+ * Exception: an excluded attribute that already carries a submitted value (a re-opened
+ * request, or production validation reusing business-case data) stays visible. Hiding a
+ * value the supplier already gave would read as their answer being silently discarded.
+ */
+function excludeNotApplicable(
+  attrs: CategoryAttribute[],
+  request: Pick<ProjectAttributeRequest, 'notApplicableAttributeIds' | 'submittedData'> | null,
+): CategoryAttribute[] {
+  const notApplicableIds = new Set(request?.notApplicableAttributeIds ?? []);
+  if (notApplicableIds.size === 0) return attrs;
+  return attrs.filter(a =>
+    !notApplicableIds.has(a.id) || !!request?.submittedData?.find(d => d.attributeId === a.id && d.value)
+  );
+}
+
 const SupplierAttributePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
 
@@ -63,7 +83,8 @@ const SupplierAttributePortal: React.FC = () => {
 
         if (req.status === 'submitted') { setSubmitted(true); return; }
 
-        const catAttrs = getSupplierVisibleAttributes(attrs, req.categoryId ?? '');
+        const supplierVisible = getSupplierVisibleAttributes(attrs, req.categoryId ?? '');
+        const catAttrs = excludeNotApplicable(supplierVisible, req);
         const initValues: Record<string, string> = {};
         const initTypes: Record<string, 'fixed' | 'range' | 'text'> = {};
         catAttrs.forEach(a => {
@@ -97,7 +118,10 @@ const SupplierAttributePortal: React.FC = () => {
     })();
   }, [token]);
 
-  const catAttrs = request ? getSupplierVisibleAttributes(allAttributes, request.categoryId ?? '') : [];
+  const supplierVisible = request ? getSupplierVisibleAttributes(allAttributes, request.categoryId ?? '') : [];
+  const catAttrs = excludeNotApplicable(supplierVisible, request);
+  // Count only, never surfaced to the supplier as names — see excludeNotApplicable.
+  const excludedCount = supplierVisible.length - catAttrs.length;
   const errorCount = Object.values(errors).filter(Boolean).length;
   // Siblings that can actually receive a copied value — a submitted one is locked.
   const pendingSiblings = siblings.filter(s => s.status === 'pending');
@@ -422,7 +446,16 @@ const SupplierAttributePortal: React.FC = () => {
           </div>
         )}
 
-        {catAttrs.length === 0 ? (
+        {/* Plain, count-only note — the excluded attributes themselves are internal
+            reasoning and are never named to the supplier. */}
+        {excludedCount > 0 && (
+          <div className="mb-6 bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-500">
+            {excludedCount} field{excludedCount === 1 ? '' : 's'} {excludedCount === 1 ? 'was' : 'were'} recorded
+            as not applicable for this product and {excludedCount === 1 ? "isn't" : "aren't"} being asked.
+          </div>
+        )}
+
+        {supplierVisible.length === 0 ? (
           <div className="bg-white rounded-xl shadow p-8 text-center text-gray-400">
             <p>No attributes defined for this category.</p>
           </div>

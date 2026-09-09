@@ -140,10 +140,12 @@ export const getInboxSnapshot = async (userId: string | null): Promise<InboxSnap
           }),
         ),
         source(
-          'im_review_comments',
-          db.select<Row>('im_review_comments', {
-            columns: 'id, project_id, template_type, language, section_title, body, author_name, status, created_at',
-            where: { status: 'open' },
+          'review_comments',
+          db.select<Row>('review_comments', {
+            columns: 'id, project_id, subject_type, language, section_title, body, author_name, status, created_at',
+            // Manuals only. Since migration 162 this table also holds design-spec notes,
+            // and this lane's title and /im-generator/ link are both IM-specific.
+            where: { status: 'open', subject_type: { op: 'in', value: ['im', 'warning_leaflet'] } },
             order: { column: 'created_at', ascending: false },
             limit: SOURCE_LIMIT,
             signal,
@@ -346,7 +348,7 @@ export const buildInboxItems = (sources: InboxSources): InboxItem[] => {
       projectId: c.project_id ?? null,
       projectName: resolveProject(maps, c.project_id),
       supplierName: (c.author_name as string) || resolveSupplierForProject(maps, c.project_id),
-      link: c.project_id ? `/project/${c.project_id}/im-generator/${c.template_type || ''}` : null,
+      link: c.project_id ? `/project/${c.project_id}/im-generator/${c.subject_type || ''}` : null,
       status: c.status,
       statusLabel: 'Open note',
       at: c.created_at,

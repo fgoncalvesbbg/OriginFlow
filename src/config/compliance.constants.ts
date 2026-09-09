@@ -11,6 +11,33 @@ import type { CategoryAttribute } from '../types/compliance.types';
 export const SKU_ATTRIBUTE_ID = '__sku';
 const SKU_ATTRIBUTE_NAME = 'SKU';
 
+/**
+ * The global attribute holding a product's EPREL registration number — the key the registry
+ * cross-check looks a model up by (migration 161).
+ *
+ * Matched by NAME rather than by id, because the id is a uuid generated at insert time and
+ * differs between environments, so a hard-coded one would work on live and silently find
+ * nothing anywhere else.
+ *
+ * The cost of that choice, stated plainly: **renaming the attribute breaks the cross-check**,
+ * and it breaks it quietly — the registry axis simply reports nothing to look up. The sturdier
+ * fix is a dedicated boolean column on `category_attributes` marking the EPREL key, which is
+ * worth doing if this convention ever proves fragile in practice. Until then this is the one
+ * place the name is written down.
+ *
+ * Do not confuse this with `category_attributes.eprel_id`, which names a FIELD inside an EPREL
+ * record so a value can be compared. This names the attribute holding WHICH product to fetch.
+ */
+const EPREL_ID_ATTRIBUTE_NAME = 'EPREL ID';
+
+/** Find the attribute carrying the EPREL registration number, if the category has one. */
+export const findEprelIdAttribute = <T extends { name: string }>(
+  attributes: readonly T[],
+): T | undefined =>
+  attributes.find(
+    a => a.name.trim().toLowerCase() === EPREL_ID_ATTRIBUTE_NAME.toLowerCase(),
+  );
+
 // Synthetic CategoryAttribute used to offer "SKU" in attribute pickers (IM template editor)
 // and to resolve its display name in the IM generator. Not persisted — built on demand.
 export const skuSyntheticAttribute = (): CategoryAttribute => ({

@@ -45,7 +45,7 @@ export interface SignedUrlAuth {
    */
   projectId?: string;
   /**
-   * PORTAL path: an unauthenticated `/share` or `/review` page holding a live `im_shares`
+   * PORTAL path: an unauthenticated `/share` or `/review` page holding a live `review_shares`
    * token. The signing endpoint derives the project FROM THE TOKEN itself — a caller-supplied
    * `projectId` is never consulted on this path, so a token for project A can never mint a
    * URL under project B's prefix.

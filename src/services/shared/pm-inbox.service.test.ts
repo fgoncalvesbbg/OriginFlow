@@ -78,7 +78,9 @@ describe('buildInboxItems lane assignment', () => {
     expect(proposal.lane).toBe('review');
     expect(proposal.supplierName).toBe('Ningbo Kitchen Co');
 
-    const [note] = build({ reviewComments: [{ id: 'c1', project_id: 'p1', template_type: 'user_manual', section_title: 'Safety', body: 'Wrong voltage', author_name: 'Wang', status: 'open', created_at: '2026-09-01T00:00:00Z' }] });
+    // subject_type, not template_type: migration 162 renamed the column when the review
+    // layer stopped being IM-only.
+    const [note] = build({ reviewComments: [{ id: 'c1', project_id: 'p1', subject_type: 'user_manual', section_title: 'Safety', body: 'Wrong voltage', author_name: 'Wang', status: 'open', created_at: '2026-09-01T00:00:00Z' }] });
     expect(note.lane).toBe('review');
     expect(note.link).toBe('/project/p1/im-generator/user_manual');
   });

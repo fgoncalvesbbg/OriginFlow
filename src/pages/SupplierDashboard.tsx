@@ -11,9 +11,10 @@ import {
 } from '../services';
 import { validateUploadFile } from '../utils/upload-validation.utils';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus, ProjectAttributeRequest } from '../types';
+import SupplierDocumentsPanel from '../components/documents/SupplierDocumentsPanel';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
-import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag, ClipboardList } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag, ClipboardList, BookOpen } from 'lucide-react';
 
 /** Relative-due-date pill, matching the colouring already used for compliance deadlines. */
 const DueDate: React.FC<{ date?: string | null; label?: string }> = ({ date, label = 'Due' }) => {
@@ -90,7 +91,7 @@ const SupplierDashboard: React.FC = () => {
   };
 
   // Tab Navigation State
-  const [activeTab, setActiveTab] = useState<'projects' | 'rfq' | 'tcf' | 'attributes' | 'proposals'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'rfq' | 'tcf' | 'attributes' | 'proposals' | 'documents'>('projects');
 
   // Session Management (60 min timeout)
   const SESSION_TIMEOUT = 60 * 60 * 1000;
@@ -1035,11 +1036,25 @@ const SupplierDashboard: React.FC = () => {
               <Package size={16} className="inline mr-2" />
               My Proposals ({proposals.length})
             </button>
+            <button
+              onClick={() => setActiveTab('documents')}
+              className={`flex-1 sm:flex-none px-4 py-3 font-medium text-sm rounded-lg transition ${
+                activeTab === 'documents'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <BookOpen size={16} className="inline mr-2" />
+              Documents
+            </button>
           </div>
         </div>
 
-        {/* Search and Filter Bar - shown for all tabs except proposals */}
-        {activeTab !== 'proposals' && (
+        {/* Search and Filter Bar - shown for all tabs except proposals and documents.
+            Documents is excluded because the shared panel owns its own list and is not
+            wired into debouncedSearchTerm — a search box that silently does nothing is
+            worse than no search box. */}
+        {activeTab !== 'proposals' && activeTab !== 'documents' && (
           <section aria-label="Search and filters">
             <div className="mb-8 bg-white rounded-lg shadow p-4 sm:p-5">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
@@ -1095,6 +1110,19 @@ const SupplierDashboard: React.FC = () => {
         {/* Tab Content */}
 
         {/* PROJECTS TAB */}
+        {/* Guidelines and specs released to this supplier, across every project they are
+            on. No projectId is passed, so the server returns the union — and `projectNames`
+            lets each row say which projects it applies to. Credentials are the supplier
+            token + access code this dashboard was already unlocked with. */}
+        {activeTab === 'documents' && (
+          <div className="mb-8">
+            <SupplierDocumentsPanel
+              credentials={{ supplierToken: token!, accessCode: enteredAccessCode }}
+              projectNames={Object.fromEntries(projects.map(p => [p.id, p.name]))}
+            />
+          </div>
+        )}
+
         {activeTab === 'projects' && (
         <div className="mb-8">
           <h2 className="text-lg sm:text-xl font-bold mb-4 flex items-center gap-2">

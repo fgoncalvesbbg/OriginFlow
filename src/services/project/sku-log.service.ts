@@ -47,7 +47,17 @@ const baseRow = (skuId: string | null, skuNumber: string, actor: ChangeActor) =>
   changed_by_name: actor.name ?? '',
 });
 
-/** Toggle a SKU's final/locked state and record it. */
+/**
+ * Toggle a SKU's final/locked state and record it.
+ *
+ * On UNLOCK the note is also written to `project_skus.reopen_reason` (migration 157), not just
+ * to the log. The log answers "what happened to this SKU" for somebody already looking at its
+ * history; the column answers "why is this one still open?" for somebody scanning a hundred
+ * column headers, which is where the question actually gets asked.
+ *
+ * `finalized_at` / `finalized_by` are NOT set here — a trigger stamps them (migration 158), so
+ * they cannot drift from `is_final` however the flag gets written.
+ */
 export const setSkuFinal = async (
   skuId: string,
   skuNumber: string,
@@ -58,7 +68,13 @@ export const setSkuFinal = async (
   if (!isLive) throw new Error('Database not configured.');
   await db.updateWhere(
     'project_skus',
-    { is_final: isFinal, updated_at: new Date().toISOString() },
+    {
+      is_final: isFinal,
+      updated_at: new Date().toISOString(),
+      // Finalizing clears any previous reason; the trigger does this too, but saying it here
+      // keeps the intent visible at the call site.
+      ...(isFinal ? { reopen_reason: null } : { reopen_reason: note.trim() || null }),
+    },
     { where: { id: skuId } },
   );
   await insertRows([{ ...baseRow(skuId, skuNumber, actor), action: isFinal ? 'finalize' : 'unlock', note }]);

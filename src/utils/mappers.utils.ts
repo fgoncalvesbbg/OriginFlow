@@ -18,7 +18,10 @@ export const mapProfile = (p: any): User => {
     email: p.email,
     name: p.name || 'User',
     role: (p.role || UserRole.PM).toUpperCase() as UserRole,
-    avatarUrl: p.avatar_url
+    avatarUrl: p.avatar_url,
+    // Strict === true: a missing column (older row shape) must read as "not a super
+    // admin" rather than as a truthy value, so the gate fails closed.
+    isSuperAdmin: p.is_super_admin === true
   };
 };
 

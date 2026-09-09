@@ -22,6 +22,16 @@ View your app in AI Studio: https://ai.studio/apps/drive/1buDBiNMWeQPfX3MfF4WIsO
 
 Build with `npm run build`; run tests with `npm test`.
 
+## Architecture notes
+
+- [docs/MULTI_TENANCY.md](docs/MULTI_TENANCY.md) — running multiple companies: one Supabase
+  project per company, one codebase, subdomain routing. Includes the runbook for cloning a
+  Supabase project for a new tenant.
+- [db_migrations/STATUS.md](db_migrations/STATUS.md) — **read before trusting
+  `db_migrations/`.** It is a change log, not a schema definition, and cannot rebuild the
+  database. Introspect the live database for schema questions.
+- [SUPABASE_AUDIT_2026-09-07.md](SUPABASE_AUDIT_2026-09-07.md) — open security findings.
+
 ## Service Layer Conventions
 
 The legacy `apiService.ts` monolith has been **removed** — all service logic now lives in domain

@@ -4,4 +4,4 @@
  */
 
 export { login, signUp, logout } from './auth.service';
-export { getProfiles, getUserProfile, updateUserRole } from './profile.service';
+export { getProfiles, getUserProfile, updateUserRole, setSuperAdmin } from './profile.service';

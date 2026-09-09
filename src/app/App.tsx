@@ -7,6 +7,7 @@ import { ToastProvider, ToastContext } from '../context/ToastContext';
 import { ConnectionProvider } from '../context/ConnectionContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminRoute from '../components/AdminRoute';
+import SuperAdminRoute from '../components/SuperAdminRoute';
 import { ToastContainer } from '../components/common/Toast';
 import { ConnectionBanner } from '../components/common/ConnectionBanner';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
@@ -24,7 +25,7 @@ import AdminTestEmail from '../pages/AdminTestEmail';
 import SupplierDashboard from '../pages/SupplierDashboard';
 import SuppliersList from '../pages/SuppliersList';
 import AttributeViewer from '../pages/products/AttributeViewer';
-import SkuCatalog from '../pages/products/SkuCatalog';
+import DocumentsRegistry from '../pages/documents/DocumentsRegistry';
 
 // Compliance Pages
 import ComplianceDashboard from '../pages/compliance/ComplianceDashboard';
@@ -119,15 +120,32 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           } />
 
+          {/* Super-Admin-only while the merged module is under test. The prefix list in
+              config/moduleAccess.config gates the sidebar too, so the nav entry and this guard
+              can never disagree. */}
           <Route path="/attributes" element={
             <ProtectedRoute>
-              <AttributeViewer />
+              <SuperAdminRoute>
+                <AttributeViewer />
+              </SuperAdminRoute>
             </ProtectedRoute>
           } />
 
-          <Route path="/products" element={
+          {/* SKU Catalog was merged into the Attribute Viewer (Phase 3 of
+              docs/originflow-attribute-viewer-merge-plan.md): one transposed grid over
+              project_skus instead of two that both wrote the same column. Every capability it
+              carried — add, delete, values-sheet upload, roster paste, finalize/unlock, the
+              change log, the row export, the changed-only filter — now lives on /attributes.
+              The redirect stays because /products is a URL people have bookmarked. */}
+          <Route path="/products" element={<Navigate to="/attributes" replace />} />
+
+          {/* SOP & Documents — the registry for internal SOPs and supplier-facing specs.
+              Open to every internal user: a PM needs the packaging guideline as much as an
+              admin does. The one privileged action (the FINAL tick) is gated inside the
+              page and, properly, on the route that performs it. */}
+          <Route path="/documents" element={
             <ProtectedRoute>
-              <SkuCatalog />
+              <DocumentsRegistry />
             </ProtectedRoute>
           } />
 

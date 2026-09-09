@@ -23,7 +23,7 @@ export const IM_TEMPLATE_TYPE_LABELS: Record<IMTemplateType, string> = {
  *   'draft'  Draft Review — the supplier's first pass over a freshly published manual.
  *   'final'  Final Review — the supplier confirming the adjustments made after that pass.
  *
- * Stored on the review LINK (im_shares.review_stage, immutable once minted) and mirrored
+ * Stored on the review LINK (review_shares.review_stage, immutable once minted) and mirrored
  * onto the manual for the round currently in flight (project_ims.review_stage), which is
  * what lets the dashboard place every manual in a column from one query.
  */
@@ -153,8 +153,8 @@ export interface ProjectIM {
   // "In Review" is DERIVED: status='generated' AND reviewRequestedAt set AND
   // reviewVersion = version. A draft save or a republish ends it implicitly.
   //
-  // The round's OUTCOME is not stored here. It lives in im_shares.submitted_at and the open
-  // note count on im_review_comments (see getReviewRoundsByManual) — the Markup.io cache
+  // The round's OUTCOME is not stored here. It lives in review_shares.submitted_at and the
+  // open note count on review_comments (see getReviewRoundsByManual) — the Markup.io cache
   // columns these replaced (review_status / review_done / review_active_threads /
   // review_checked_at, migration 112) are still in the database but are no longer read or
   // written, so they are deliberately absent from this type.
@@ -162,7 +162,7 @@ export interface ProjectIM {
   reviewRequestedBy?: string | null;
   reviewVersion?: number | null;
   // Which of the workflow's TWO review steps the current round is (migration 149):
-  // 'draft' -> Draft Review, 'final' -> Final Review. Mirrors im_shares.review_stage for
+  // 'draft' -> Draft Review, 'final' -> Final Review. Mirrors review_shares.review_stage for
   // the round stamped above. Null = never reviewed, or a round created before 149 — read
   // as 'draft', because placing a legacy round in Final Review would claim a sign-off pass
   // that may never have happened. See src/pages/im/im-manual-status.ts.

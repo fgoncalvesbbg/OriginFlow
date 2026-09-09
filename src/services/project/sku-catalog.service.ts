@@ -6,9 +6,10 @@
  */
 import { db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { CatalogSku, SkuAttributeValue } from '../../types';
+import { CatalogSku, SkuAttributeValue, SkuValueSource } from '../../types';
 import { mapProjectSku } from './project-sku.service';
 import { logSkuChanges, logSkuCreated, type ChangeActor } from './sku-log.service';
+import { syncValueRowsFromJsonb } from './sku-attribute-value.service';
 
 /** Server-side join pulling the owning project's name and category — see data/PORTING.md. */
 const CATALOG_COLUMNS = '*, projects(id, name, category_id)';
@@ -20,28 +21,14 @@ const mapCatalog = (r: any): CatalogSku => ({
   projectName: r.projects?.name ?? null,
 });
 
-/**
- * Every SKU in the system (catalog + project), enriched with project name and effective
- * category. The catalog page filters these client-side by category.
- */
-export const getCatalogSkus = async (): Promise<CatalogSku[]> => {
-  if (!isLive) return [];
-  const rows = await orEmpty(
-    db.select<Row>('project_skus', {
-      columns: CATALOG_COLUMNS,
-      order: { column: 'sku_number', ascending: true },
-    }),
-    'getCatalogSkus',
-  );
-  return rows.map(mapCatalog);
-};
-
 /** Create a project-less catalog SKU under a category (no per-project cap applies). */
 export const createCatalogSku = async (
   categoryId: string,
   skuNumber: string,
   skuTitle: string,
   attributeValues: SkuAttributeValue[] = [],
+  /** Provenance for any values created alongside the SKU. A bulk upload is not 'manual'. */
+  source: SkuValueSource = 'manual',
 ): Promise<CatalogSku> => {
   if (!isLive) throw new Error('Database not configured.');
   const created = await db.insert<Row>(
@@ -56,6 +43,20 @@ export const createCatalogSku = async (
     },
     { columns: CATALOG_COLUMNS },
   );
+
+  // These two functions write attribute_values DIRECTLY rather than through
+  // updateProjectSku, so they are the two paths that would otherwise leave the
+  // authoritative row store (sku_attribute_values, migration 155) behind the mirror.
+  // Logged rather than thrown: the SKU itself is created, and failing the create because a
+  // secondary sync failed would be the worse outcome.
+  if (attributeValues.length > 0) {
+    try {
+      await syncValueRowsFromJsonb({ projectSkuId: created.id, values: attributeValues, source });
+    } catch (e) {
+      console.error('[createCatalogSku] value-row sync failed; the SKU was still created', e);
+    }
+  }
+
   return mapCatalog(created);
 };
 
@@ -116,10 +117,19 @@ export const bulkUpsertCatalogSkus = async (
         },
         { where: { id: existing.id } },
       );
+      try {
+        await syncValueRowsFromJsonb({
+          projectSkuId: existing.id,
+          values: Array.from(merged.values()),
+          source: 'sheet-import',
+        });
+      } catch (e) {
+        console.error('[bulkUpsertCatalogSkus] value-row sync failed for ' + number, e);
+      }
       if (actor) await logSkuChanges(existing.id, number, row.values.map(v => ({ field: v.name, oldValue: null, newValue: v.value })), actor, 'bulk upload');
       result.updated++;
     } else {
-      const created = await createCatalogSku(categoryId, number, row.skuTitle, row.values);
+      const created = await createCatalogSku(categoryId, number, row.skuTitle, row.values, 'sheet-import');
       if (actor) await logSkuCreated(created.id, number, actor, 'bulk upload');
       result.created++;
     }

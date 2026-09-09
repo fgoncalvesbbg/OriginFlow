@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, Package, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, Scale, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, FileText, Scale, type LucideIcon } from 'lucide-react';
 import { UserRole } from '../types';
+import { isSuperAdminOnlyPath } from '../config/moduleAccess.config';
 import { Breadcrumbs } from './Breadcrumbs';
 import { Logo } from './Logo';
 import { FeedbackWidget } from './feedback/FeedbackWidget';
@@ -85,6 +86,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       railCollapsed ? 'px-4 md:px-0 md:justify-center' : 'px-4'
     } ${active ? 'bg-accent text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`;
 
+  // Modules still under test are hidden from everyone but a Super Admin. The list of
+  // gated paths lives in config/moduleAccess.config, which SuperAdminRoute reads too —
+  // so hiding a nav entry always comes with a guard on the route behind it.
+  const isSuperAdmin = user?.isSuperAdmin === true;
+  const visibleToUser = (item: { to: string }) => isSuperAdmin || !isSuperAdminOnlyPath(item.to);
+
   const NAV_MAIN: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
     { to: '/', label: 'Dashboard', Icon: LayoutDashboard, match: p => p === '/' },
     { to: '/timeline', label: 'Timeline', Icon: CalendarClock, match: p => p === '/timeline' },
@@ -95,19 +102,32 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { to: '/compliance', label: 'Compliance', Icon: ShieldCheck, match: p => p.startsWith('/compliance') },
     { to: '/regulations', label: 'Regulations', Icon: Scale, match: p => p.startsWith('/regulations') },
     { to: '/im', label: 'Instruction Manuals', Icon: BookOpen, match: p => p.startsWith('/im') },
+    { to: '/documents', label: 'SOP & Documents', Icon: FileText, match: p => p.startsWith('/documents') },
     { to: '/attributes', label: 'Attribute Viewer', Icon: Table2, match: p => p.startsWith('/attributes') },
-    { to: '/products', label: 'SKU Catalog', Icon: Package, match: p => p.startsWith('/products') },
   ];
   const NAV_TOOLS: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
     { to: '/tools/pdf-to-markdown', label: 'PDF → Markdown', Icon: FileDown, match: p => p.startsWith('/tools/pdf-to-markdown') },
   ];
 
-  const renderNavLink = ({ to, label, Icon, match }: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }) => (
-    <Link key={to} to={to} className={navItemClass(match(location.pathname))} title={railCollapsed ? label : undefined}>
-      <Icon size={18} className="shrink-0" />
-      <span className={railCollapsed ? 'md:hidden' : ''}>{label}</span>
-    </Link>
-  );
+  const renderNavLink = ({ to, label, Icon, match }: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }) => {
+    // Only a Super Admin ever reaches this for a gated item, and they should be able
+    // to tell at a glance which modules their colleagues cannot see yet.
+    const gated = isSuperAdminOnlyPath(to);
+    return (
+      <Link
+        key={to}
+        to={to}
+        className={navItemClass(match(location.pathname))}
+        title={gated ? `${label} — Super Admin only` : (railCollapsed ? label : undefined)}
+      >
+        <Icon size={18} className="shrink-0" />
+        <span className={railCollapsed ? 'md:hidden' : ''}>{label}</span>
+        {gated && (
+          <Lock size={12} className={`shrink-0 ml-auto opacity-60 ${railCollapsed ? 'md:hidden' : ''}`} aria-label="Super Admin only" />
+        )}
+      </Link>
+    );
+  };
 
   // Section eyebrow, hidden on the desktop icon-rail (still shown in the mobile drawer).
   const sectionLabel = (text: string) => (
@@ -136,11 +156,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
 
         <nav className="flex-1 p-4 space-y-2 mt-2 overflow-y-auto">
-          {NAV_MAIN.map(renderNavLink)}
+          {NAV_MAIN.filter(visibleToUser).map(renderNavLink)}
           {sectionLabel('Modules')}
-          {NAV_MODULES.map(renderNavLink)}
+          {NAV_MODULES.filter(visibleToUser).map(renderNavLink)}
           {sectionLabel('Tools')}
-          {NAV_TOOLS.map(renderNavLink)}
+          {NAV_TOOLS.filter(visibleToUser).map(renderNavLink)}
           {user?.role === UserRole.ADMIN && (
             <>
               {sectionLabel('Admin')}
@@ -156,7 +176,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
              </div>
              <div className={`overflow-hidden ${railCollapsed ? 'md:hidden' : ''}`}>
                 <div className="text-xs font-bold truncate">{user?.name}</div>
-                <div className="text-[10px] text-gray-400">{user?.role}</div>
+                <div className="text-[10px] text-gray-400">{isSuperAdmin ? 'SUPER ADMIN' : user?.role}</div>
              </div>
           </div>
           <button onClick={handleLogout} title={railCollapsed ? 'Sign out' : undefined} className={`flex items-center gap-3 py-2 w-full text-xs font-medium text-gray-400 rounded-lg hover:text-rose-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${railCollapsed ? 'px-4 md:px-0 md:justify-center' : 'px-4 text-left'}`}>

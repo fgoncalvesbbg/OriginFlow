@@ -4,7 +4,7 @@
  * `im-published` (published manual JSON/manifests) and `im-print` (rendered print PDFs) are
  * PUBLIC Supabase Storage buckets today. Client code used to build a PERMANENT public URL for
  * either one via the synchronous `storage.publicUrl(bucket, path)` port — a URL that never
- * expires and is never re-checked against project access, so revoking an `im_shares` token did
+ * expires and is never re-checked against project access, so revoking a `review_shares` token did
  * nothing for anyone who had already opened DevTools: they kept a permanent link to unreleased
  * product data, including every future republish. This endpoint is the fix: every read of
  * either bucket now goes through a short-TTL signed URL minted HERE, after re-validating the
@@ -22,9 +22,9 @@
  *       Re-validated via `authorizeProject`: PM-scoped RLS on `projects` decides whether this
  *       session may see this project, exactly as every other authorized function in this repo.
  *
- *   (b) PORTAL — `token` in the body: a live `im_shares` row (a "view" OR "review" link — both
+ *   (b) PORTAL — `token` in the body: a live `review_shares` row (a "view" OR "review" link — both
  *       read the same published manual, they only differ in whether commenting is allowed).
- *       Looked up DIRECTLY against `im_shares` with the service role — see the note below for
+ *       Looked up DIRECTLY against `review_shares` with the service role — see the note below for
  *       why this is not the `get_im_share_by_token` / `im_review_resolve` RPCs — and the
  *       PROJECT ID COMES FROM THAT ROW, never from the request: a token minted for project A
  *       can never mint a URL under project B's prefix, no matter what the caller sends.
@@ -69,7 +69,7 @@ interface FileUrlRequest {
   path?: string;
   /** STAFF path only. */
   projectId?: string;
-  /** PORTAL path only — an `im_shares.token` (view or review link). */
+  /** PORTAL path only — a `review_shares.token` (view or review link). */
   token?: string;
 }
 
@@ -147,7 +147,7 @@ export const handler = async (event: NetlifyEvent) => {
       // both open the same published manual; only commenting is mode-gated, and that's not
       // this endpoint's concern.
       const { data: share, error } = await supabase
-        .from('im_shares')
+        .from('review_shares')
         .select('project_id, template_type, revoked_at, expires_at')
         .eq('token', req.token as string)
         .is('revoked_at', null)

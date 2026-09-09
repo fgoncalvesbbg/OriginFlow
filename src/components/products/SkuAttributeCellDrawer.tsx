@@ -1,25 +1,54 @@
 /**
  * Right-side drawer for one (SKU, attribute) cell in the Attribute Viewer. Lets a reviewer edit the
- * value (written back to the SKU) and flag the cell with a comment / resolve / remove the flag.
+ * value, empty it on purpose, and flag the cell with a comment / resolve / remove the flag.
+ *
+ * Values live in `sku_attribute_values` (migration 155), so this drawer distinguishes the two
+ * things the old JSONB shape could not: a cell nobody has touched, and a cell somebody emptied
+ * because the product genuinely has none of that attribute. "Save" and "Clear" are therefore two
+ * different buttons and saving an empty string is refused — see the note on the Clear button.
  */
 import React, { useState } from 'react';
-import { CategoryAttribute, SkuAttributeFlag } from '../../types';
+import {
+  CategoryAttribute,
+  SkuAttributeFlag,
+  SkuAttributeValueRecord,
+  SkuCellState,
+} from '../../types';
 import { CategorySku } from '../../services';
 import AttributeInput from '../common/AttributeInput';
 import { Button } from '../common/Button';
-import { X, Flag, CheckCircle2, Trash2 } from 'lucide-react';
+import { CELL_STATES, EPREL_PRESENTATION } from './attribute-grid/cell-state';
+import type { EprelComparison } from './attribute-grid/eprel-compare.utils';
+import { X, Flag, CheckCircle2, Trash2, Eraser } from 'lucide-react';
 
 interface Props {
   sku: CategorySku;
   attribute: CategoryAttribute;
   value: string;
+  /** The stored row, when there is one. Absent means nobody has touched this cell. */
+  record?: SkuAttributeValueRecord;
+  state: SkuCellState;
+  /** The registry's verdict for this cell, when the EPREL axis has been read. */
+  eprel?: EprelComparison;
   flag?: SkuAttributeFlag;
   onSaveValue: (newValue: string) => Promise<void>;
+  /** Empty the cell on purpose — stores a null, which is not the same as deleting the row. */
+  onClearValue: () => Promise<void>;
   onSaveFlag: (comment: string) => Promise<void>;
   onResolveFlag: (resolved: boolean) => Promise<void>;
   onDeleteFlag: () => Promise<void>;
   onClose: () => void;
 }
+
+/** Sources worth naming in the provenance line. 'manual' reads as "somebody typed it". */
+const SOURCE_LABELS: Record<string, string> = {
+  manual: 'typed here',
+  'sheet-import': 'from a spreadsheet import',
+  'pt-import': 'from ProductToolkit',
+  supplier: 'from a supplier submission',
+  wizard: 'from the placeholder wizard',
+  eprel: 'from the EPREL registry',
+};
 
 const isNumeric = (attr: CategoryAttribute) =>
   attr.dataType === 'integer' || attr.dataType === 'decimal';
@@ -28,8 +57,12 @@ const SkuAttributeCellDrawer: React.FC<Props> = ({
   sku,
   attribute,
   value,
+  record,
+  state,
+  eprel,
   flag,
   onSaveValue,
+  onClearValue,
   onSaveFlag,
   onResolveFlag,
   onDeleteFlag,
@@ -42,7 +75,9 @@ const SkuAttributeCellDrawer: React.FC<Props> = ({
     isNumeric(attribute) ? (initialRange ? 'range' : 'fixed') : 'text',
   );
   const [comment, setComment] = useState(flag?.comment ?? '');
-  const [busy, setBusy] = useState<null | 'value' | 'flag' | 'resolve' | 'delete'>(null);
+  const [busy, setBusy] = useState<null | 'value' | 'clear' | 'flag' | 'resolve' | 'delete'>(null);
+  /** Set when the current draft came from the registry rather than from the person. */
+  const [fromEprel, setFromEprel] = useState(false);
 
   const run = async (kind: NonNullable<typeof busy>, fn: () => Promise<void>) => {
     setBusy(kind);
@@ -78,31 +113,137 @@ const SkuAttributeCellDrawer: React.FC<Props> = ({
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
           {/* Edit value */}
           <section>
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Value</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Value</h3>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CELL_STATES[state].pill}`}
+                title={CELL_STATES[state].description}
+              >
+                {CELL_STATES[state].label}
+              </span>
+            </div>
+
+            <p className="text-[11px] text-gray-500 mb-2">{CELL_STATES[state].description}</p>
+
+            {/* Where this value came from. A value somebody typed and a value an import put
+                there are different kinds of evidence, and the reviewer deciding whether to
+                trust it should not have to guess which one this is. */}
+            {record && (
+              <p className="text-[11px] text-gray-400 mb-2">
+                {SOURCE_LABELS[record.source] ?? record.source}
+                {record.updatedByName ? ` by ${record.updatedByName}` : ''} ·{' '}
+                {new Date(record.updatedAt).toLocaleString()}
+                {record.unit ? ` · unit: ${record.unit}` : ''}
+              </p>
+            )}
+
+            {/* WHERE THEY DISAGREE, THE EDIT STARTS FROM EPREL — because "make our record say
+                what the registry says" is nearly always the edit being made. It is a starting
+                point, not a decision: nothing is written until Save, the banner says the value
+                came from the registry, and one click puts the old one back.
+
+                Crucially this is OFFERED, never applied on open. Seeding the field
+                automatically would silently replace what somebody typed. */}
+            {eprel && (eprel.verdict === 'differs' || eprel.verdict === 'only-eprel') && (
+              <div
+                className={`mb-2 rounded border p-2 text-[11px] ${
+                  eprel.verdict === 'differs'
+                    ? EPREL_PRESENTATION.differs.pill
+                    : EPREL_PRESENTATION.onlyEprel.pill
+                }`}
+              >
+                <p className="font-semibold">
+                  {eprel.verdict === 'differs'
+                    ? EPREL_PRESENTATION.differs.label
+                    : EPREL_PRESENTATION.onlyEprel.label}
+                  : {eprel.eprelValue ?? '—'}
+                </p>
+                <p className="mt-0.5">
+                  {eprel.verdict === 'differs'
+                    ? EPREL_PRESENTATION.differs.description
+                    : EPREL_PRESENTATION.onlyEprel.description}
+                </p>
+                {eprel.suggestion !== undefined ? (
+                  <button
+                    onClick={() => {
+                      setEditValue(eprel.suggestion as string);
+                      setFromEprel(true);
+                    }}
+                    className="mt-1.5 rounded border border-violet-300 bg-white px-1.5 py-0.5 font-medium hover:bg-violet-50"
+                  >
+                    Start from “{eprel.suggestion}”
+                  </button>
+                ) : (
+                  // No safe equivalent ⇒ offer nothing. A wrong pre-filled value is harder to
+                  // notice than an absent one, so the registry's figure is shown and the
+                  // conversion is left to a person.
+                  <p className="mt-1.5 italic">
+                    The registry's figure has no safe equivalent this field can hold, so nothing
+                    is offered to copy — enter it yourself if it is right.
+                  </p>
+                )}
+              </div>
+            )}
+
             <AttributeInput
               attribute={attribute}
               value={editValue}
-              onChange={setEditValue}
+              onChange={v => {
+                setEditValue(v);
+                setFromEprel(false);
+              }}
               mode={mode}
               onModeChange={isNumeric(attribute) ? setMode : undefined}
             />
-            <div className="mt-3 flex items-center gap-2">
+
+            {fromEprel && (
+              <p className="mt-1 text-[11px] text-violet-700">
+                This value came from the EPREL registry and has not been saved yet.
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button
                 onClick={() => run('value', () => onSaveValue(editValue))}
                 loading={busy === 'value'}
-                disabled={!valueDirty || busy !== null}
+                disabled={!valueDirty || busy !== null || editValue.trim() === ''}
               >
                 Save value
               </Button>
+
+              {/* Emptying a field is its own act, not a save of ''. Saving a blank would be
+                  ambiguous — "I have not filled this in yet" and "this product has none" look
+                  identical — so the blank save is disabled and this button says which one you
+                  mean. It stores a null, which the grid renders as Cleared. */}
+              <Button
+                variant="secondary"
+                onClick={() => run('clear', onClearValue)}
+                loading={busy === 'clear'}
+                leftIcon={<Eraser size={14} />}
+                disabled={busy !== null || state === 'cleared' || state === 'empty'}
+                title="Record that this product genuinely has none of this attribute"
+              >
+                Clear
+              </Button>
+
               {valueDirty && (
                 <button
-                  onClick={() => setEditValue(value)}
+                  onClick={() => {
+                    setEditValue(value);
+                    setFromEprel(false);
+                  }}
                   className="text-xs text-gray-500 hover:text-gray-700"
                 >
                   Reset
                 </button>
               )}
             </div>
+
+            {valueDirty && editValue.trim() === '' && (
+              <p className="text-[11px] text-rose-600 mt-2">
+                To empty this field, use <strong>Clear</strong> — a blank save cannot say whether
+                you mean “not filled in yet” or “this product has none”.
+              </p>
+            )}
           </section>
 
           {/* Flag / comment */}

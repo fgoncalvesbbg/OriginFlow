@@ -13,6 +13,7 @@ interface ProfileRow {
   email: string;
   name: string;
   role: UserRole;
+  is_super_admin?: boolean;
 }
 
 /**
@@ -54,4 +55,19 @@ export const getUserProfile = async (userId: string): Promise<User | null> => {
  */
 export const updateUserRole = async (userId: string, role: UserRole): Promise<void> => {
     await db.updateWhere('profiles', { role }, { where: { id: userId } });
+};
+
+/**
+ * Grant or revoke the Super Admin tier.
+ *
+ * The database is the real gate, not this call: a BEFORE UPDATE trigger on
+ * `profiles` (migration 154) reverts any change to `is_super_admin` made by a
+ * caller who is not already a super admin, and the `Super admins update any
+ * profile` policy is what lets a super admin write someone else's row at all.
+ * So a non-super-admin calling this succeeds at the HTTP level and changes
+ * nothing — callers must re-read the profiles to see what actually landed
+ * rather than assuming the write took.
+ */
+export const setSuperAdmin = async (userId: string, isSuperAdmin: boolean): Promise<void> => {
+    await db.updateWhere('profiles', { is_super_admin: isSuperAdmin }, { where: { id: userId } });
 };

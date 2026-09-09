@@ -64,6 +64,12 @@
 #   JIRA_PROJECT_KEY                           — jira-status.ts (optional; scopes the search)
 #   JIRA_PROJECT_ID_FIELD                      — jira-status.ts (optional; display name of the
 #                                                Jira field holding the launch code, default "ProjectID")
+#   EPREL_API_KEY                              — eprel-lookup.ts (EU product registry cross-check)
+#   EPREL_API_BASE                             — eprel-lookup.ts (optional; default
+#                                                https://eprel.ec.europa.eu/api)
+#   EPREL_PRODUCT_PATH                         — eprel-lookup.ts (optional; default
+#                                                "/product/{registration}")
+#   EPREL_API_KEY_HEADER                       — eprel-lookup.ts (optional; default "x-api-key")
 # The matching public UI flag is VITE_MARKUP_REVIEW_ENABLED=true.
 #
 # The Jira connector needs NO public flag: jira-status.ts answers { configured: false }
@@ -76,6 +82,22 @@
 # status is the launch stage. The ~10-17 gate sub-tickets sharing a ProjectID are
 # excluded. Diagnose with `npm run jira:check <CODE>`; assert against live Jira with
 # `JIRA_LIVE_TEST=1 npx vitest run netlify/functions/lib/jira-match.live.test.ts`.
+#
+# The EPREL connector follows the Jira pattern: eprel-lookup.ts answers { configured: false }
+# with HTTP 200 when EPREL_API_KEY is unset, and the Attribute Viewer hides the registry column
+# on that rather than showing an error on every page load. Nothing it reads is stored.
+#
+# TWO PIECES OF ITS CONTRACT ARE UNVERIFIED, hence the two optional overrides above. The public
+# API's base (https://eprel.ec.europa.eu/api), its JSON responses and its registration-number
+# keying are documented publicly, but the exact product path and the API-key header name live in
+# the EPREL wiki behind EU Login. Both are env templates so a correction is a deploy variable
+# rather than a release. Request a key at https://eprel.ec.europa.eu/screen/requestpublicapikey,
+# then POST { "probe": true } to the function: it echoes the exact URL and header name it would
+# use (never the key) so they can be checked against the wiki.
+#
+# Note that only VERIFIED models are retrievable from the public API — an unverified
+# registration answers as absent, which the function reports as "not-found" rather than as an
+# error.
 #
 # ProductToolkit (category attribute definitions) is deliberately NOT proxied through a
 # function: it is published only as https://producttoolkit.chal-tec.local on the internal
@@ -93,4 +115,47 @@
 [[redirects]]
   from = "/api/skus/*"
   to = "/.netlify/functions/sku-attributes/:splat"
+  status = 200
+
+# ---------------------------------------------------------------------------
+# SOP & Documents (migration 159). Three functions, four friendly paths.
+#
+# Every doc_* table is RLS default-deny with the PostgREST grants revoked, so these
+# functions are the ONLY way to reach the registry — there is no client-side Supabase
+# query against doc_* anywhere in src/. They read SUPABASE_URL and
+# SUPABASE_SERVICE_ROLE_KEY from the server environment (already provisioned for the
+# render/signed-URL functions above); no new secret is needed.
+#
+# Order matters: Netlify matches these top-down, so /api/documents/:id/latest has to come
+# before any broader /api/documents rule would. There is deliberately no broad rule — the
+# registry lives under /api/doc/* precisely so that the two public-ish download paths are
+# the only things matching /api/documents and /api/doc-versions.
+# ---------------------------------------------------------------------------
+
+# The download route. GET only; authenticates, entitlement-checks, then 302s to a 120s
+# signed URL. Never returns a storage path.
+[[redirects]]
+  from = "/api/doc-versions/:versionId/download"
+  to = "/.netlify/functions/doc-download/versions/:versionId/download"
+  status = 200
+
+# The stable "latest template" route: names a DOCUMENT, resolves to whatever is final when
+# it is clicked. Safe to paste into a wiki; 404s rather than serving a withdrawn version.
+[[redirects]]
+  from = "/api/documents/:documentId/latest"
+  to = "/.netlify/functions/doc-download/documents/:documentId/latest"
+  status = 200
+
+# The project-scoped list behind the Documents tab — supplier portal and ProjectDetail
+# alike. The only list route a portal token can reach.
+[[redirects]]
+  from = "/api/doc-portal/*"
+  to = "/.netlify/functions/doc-portal/:splat"
+  status = 200
+
+# The internal registry API (documents, versions, finalise, bindings). Requires an
+# authenticated internal user; no portal-token path into it at all.
+[[redirects]]
+  from = "/api/doc/*"
+  to = "/.netlify/functions/doc-registry/:splat"
   status = 200

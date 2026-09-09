@@ -72,7 +72,23 @@ const SupplierAttributeBatchPortal: React.FC = () => {
   }, [batchToken]);
 
   const first = rows[0];
-  const catAttrs = first ? getSupplierVisibleAttributes(allAttributes, first.categoryId ?? '') : [];
+  const supplierVisible = first ? getSupplierVisibleAttributes(allAttributes, first.categoryId ?? '') : [];
+  // Unlike the single-SKU portal, this table is ONE shared set of attribute rows applied to
+  // every SKU column — there is no per-row-per-column split to hide a field for one SKU only.
+  // So an attribute can only ever be dropped for the whole batch at once, and that's safe to
+  // do only when EVERY request agrees it doesn't apply AND none of them already holds a value
+  // for it (dropping the row would otherwise erase that value for whichever SKU has it, and
+  // that SKU never asked to hide anything). If even one request still needs the field, or
+  // already answered it, the row stays for every column — including the ones that marked it
+  // not-applicable — because a shared row cannot be half-shown.
+  const catAttrs = supplierVisible.filter(a =>
+    !rows.every(r =>
+      (r.notApplicableAttributeIds ?? []).includes(a.id) &&
+      !r.submittedData?.find(d => d.attributeId === a.id && d.value)
+    )
+  );
+  // Count only, never surfaced to the supplier as names — see the comment above.
+  const excludedCount = supplierVisible.length - catAttrs.length;
   const grouped = catAttrs.reduce<Record<string, CategoryAttribute[]>>((acc, a) => {
     const g = a.group || 'Category Specific';
     if (!acc[g]) acc[g] = [];
@@ -278,7 +294,16 @@ const SupplierAttributeBatchPortal: React.FC = () => {
           </div>
         )}
 
-        {catAttrs.length === 0 ? (
+        {/* Plain, count-only note — the excluded attributes themselves are internal
+            reasoning and are never named to the supplier. */}
+        {excludedCount > 0 && (
+          <div className="mb-6 bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-500">
+            {excludedCount} field{excludedCount === 1 ? '' : 's'} {excludedCount === 1 ? 'was' : 'were'} recorded
+            as not applicable for every SKU in this batch and {excludedCount === 1 ? "isn't" : "aren't"} being asked.
+          </div>
+        )}
+
+        {supplierVisible.length === 0 ? (
           <div className="bg-white rounded-xl shadow p-8 text-center text-gray-400">
             <p>No attributes defined for this category.</p>
           </div>
