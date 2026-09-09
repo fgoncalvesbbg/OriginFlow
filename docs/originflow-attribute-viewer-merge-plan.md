@@ -622,7 +622,15 @@ attribute. Added, and the cross-check built on it.
 | [eprel-lookup.ts](../netlify/functions/eprel-lookup.ts) | the server-side registry call |
 | [eprel.service.ts](../src/services/project/eprel.service.ts) | the client, failing soft |
 
-**The attribute is global — one row, not ~200.** `category_id IS NULL` means
+**Scoped to 34 energy-labelled categories, not global** (migration 165). It was created global,
+which — because it is supplier-visible — started asking every supplier for an EPREL registration
+number on pergolas, kitchen knives and dartboards. Nothing in OriginFlow records which categories
+are energy-labelled, so the set is a reading of the EU labelling regulations written out in full in
+the migration so it can be argued with, including the exclusions and their reasons. It is a seed:
+the Admin panel's attribute→category assignment adjusts it without another migration.
+
+*Originally, and kept here because the reasoning still applies to genuinely global attributes:*
+**one row, not ~200.** `category_id IS NULL` means
 `getAttributesForCategory` returns it for every category, so "add it to all categories" is one
 row; a later correction is one edit and cannot drift between categories. Text, not numeric (a
 numeric column drops a leading zero). Supplier-visible, because for a supplier-manufactured model
@@ -688,8 +696,11 @@ a deploy variable and not a release. `POST { "probe": true }` to the function ec
 and header it would use — never the key — so they can be checked against the wiki without reading
 the source.
 
-**Still needed to switch it on:** an API key in `EPREL_API_KEY`, and EPREL IDs captured against
-some SKUs. Until then the axis reads *unavailable* or *not checked* and nothing else changes.
+**PARKED, by decision (2026-09-09).** Built and dormant: with `EPREL_API_KEY` unset the axis reads
+*unavailable* and costs nothing. Switching it on needs three things from outside this repo — an API
+key from the Commission, the two unverified endpoint parameters checked against the EPREL wiki (EU
+Login), and EPREL IDs captured against SKUs. None is urgent; the comparison layer and the fetch are
+tested and waiting.
 
 ### Phase 7 — The ProductToolkit value pull — **BLOCKED, not built** ⛔
 
@@ -949,6 +960,13 @@ out of date. The supplier sees only a count, never the internal reasoning.
 **A field that already has a submitted value is still shown**, even when excluded — hiding a value
 the supplier already gave would read as data loss.
 
+**The batch portal hides a field only when EVERY SKU in the batch marks it not applicable** —
+confirmed as a decision, not a limitation to fix later. Its table renders attributes as rows shared
+across every SKU column, so a field cannot be hidden for one SKU and shown for another without
+restructuring it. The unanimous rule errs toward asking: a supplier occasionally sees a field that
+does not apply to one of several products, which is the lesser harm than not asking for data a SKU
+in the batch genuinely needs.
+
 The other three consumers in the table above are unchanged: the IM wizard's behaviour is usually
 what is wanted anyway, and the ProductToolkit readback correctly collapses both cases to "send
 nothing".
@@ -1006,5 +1024,8 @@ consumers.
    --   3. attempt another value write on it, confirm it raises rather than succeeding
    --   4. unlock it, confirm finalized_at/finalized_by cleared and the write now works
    ```
-3. **Whether Phase 8 has a consumer at all.** If nothing downstream reads an export, Phase 8 is
-   ~2 days of build for a button nobody presses; the existing `buildAkeneoRows` CSV would do.
+3. ~~**Whether Phase 8 has a consumer at all.**~~ **Answered 2026-09-09: nothing downstream.**
+   Somebody downloads the CSV and works from it. So Phase 8 is complete as built — the value was
+   never the file, it was the refusal to produce a wrong one — and no further export work is
+   warranted. If a consumer appears later, the option-conversion matrix in §4 is the thing to
+   revisit first.
