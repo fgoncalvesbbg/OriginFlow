@@ -402,12 +402,31 @@ const AdminDashboard: React.FC = () => {
   };
 
   // --- USER ACTIONS ---
-  const toggleRole = async (userId: string, currentRole: UserRole) => {
+  /**
+   * Roles that can be assigned here, in escalating order.
+   *
+   * SUPPLIER is deliberately absent: OriginFlow has no supplier login (suppliers hold portal
+   * tokens), so handing an account that role would only strip its access. DESIGNER arrived
+   * with migration 163 and owns the Design Specs module.
+   */
+  const ASSIGNABLE_ROLES: readonly UserRole[] = [UserRole.PM, UserRole.DESIGNER, UserRole.ADMIN];
+
+  /**
+   * Set a user's role.
+   *
+   * This replaced a two-state ADMIN/PM toggle, which could not express a third role — and
+   * which would have left DESIGNER assignable only by hand-written SQL.
+   *
+   * Reloading from the server afterwards is the point, not politeness: writing another
+   * user's profile requires the `Super admins update any profile` policy, so for a non-super
+   * admin this call succeeds at the HTTP level and changes nothing. The reload is what shows
+   * whether it actually landed.
+   */
+  const changeRole = async (userId: string, newRole: UserRole) => {
     if (currentUser?.id === userId) {
         alert("You cannot change your own role to prevent accidental lockout.");
         return;
     }
-    const newRole = currentRole === UserRole.ADMIN ? UserRole.PM : UserRole.ADMIN;
     await updateUserRole(userId, newRole);
     loadData();
   };
@@ -1873,9 +1892,30 @@ const AdminDashboard: React.FC = () => {
                         {user.isSuperAdmin ? 'SUPER ADMIN' : 'Grant Super'}
                       </button>
                     )}
-                    <button onClick={() => toggleRole(user.id, user.role)} className={`text-xs px-3 py-1 rounded-full font-bold transition-colors ${user.role === UserRole.ADMIN ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                      {user.role}
-                    </button>
+                    <select
+                      value={ASSIGNABLE_ROLES.includes(user.role) ? user.role : ''}
+                      onChange={e => changeRole(user.id, e.target.value as UserRole)}
+                      disabled={currentUser?.id === user.id}
+                      title={currentUser?.id === user.id
+                        ? 'You cannot change your own role'
+                        : 'Change this user’s role'}
+                      className={`text-xs px-3 py-1 rounded-full font-bold border transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                        user.role === UserRole.ADMIN
+                          ? 'bg-purple-100 text-purple-700 border-purple-200'
+                          : user.role === UserRole.DESIGNER
+                            ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                            : 'bg-gray-100 text-gray-600 border-gray-200'
+                      }`}
+                    >
+                      {/* A role the picker cannot set (e.g. a legacy SUPPLIER row) still has
+                          to be shown, or the control would silently misreport it. */}
+                      {!ASSIGNABLE_ROLES.includes(user.role) && (
+                        <option value="">{user.role}</option>
+                      )}
+                      {ASSIGNABLE_ROLES.map(role => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               ))}

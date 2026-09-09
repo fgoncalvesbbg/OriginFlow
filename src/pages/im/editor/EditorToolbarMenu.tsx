@@ -15,8 +15,16 @@
  *   'toolbar' — the dense editor-bar pill, and `preserveSelection` makes it fire
  *               on mousedown with preventDefault so the contentEditable's live
  *               selection survives opening the menu and picking an item.
+ *
+ * The panel is PORTALLED to <body> and positioned from the trigger's viewport rect
+ * rather than absolutely inside the trigger. It has to be: an inline-HTML block is a
+ * user-resizable box (`resize-y`, which only works with `overflow` != visible), so an
+ * absolute panel was clipped to the block — a short block cut the Insert menu in half.
+ * Positioning also flips the panel above the trigger when there is more room there, and
+ * caps its height to what the viewport has, so it is never taller than the screen.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 
 export type ToolbarItemTone = 'default' | 'warn' | 'success' | 'danger';
@@ -84,11 +92,18 @@ const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  /** Viewport coordinates for the portalled panel. Null until it has been measured. */
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The panel is portalled, so it is NOT inside `ref` — check it separately or
+      // every click on a menu item would read as a click outside.
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDown);
@@ -98,6 +113,52 @@ const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  /**
+   * Place the panel against the trigger in viewport space. Runs once the panel is in
+   * the DOM (so its natural size is known) and again on scroll/resize, since a fixed
+   * panel does not follow its trigger on its own.
+   */
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const GAP = 6;
+    const EDGE = 8;
+    const place = () => {
+      const trigger = ref.current?.getBoundingClientRect();
+      const panel = panelRef.current;
+      if (!trigger || !panel) return;
+      // scrollHeight, not the rect: the rect is already capped by a maxHeight we set on
+      // a previous pass, which would make the flip decision oscillate.
+      const wanted = panel.scrollHeight;
+      const width = panel.getBoundingClientRect().width;
+      const below = window.innerHeight - trigger.bottom - GAP - EDGE;
+      const above = trigger.top - GAP - EDGE;
+      const flip = wanted > below && above > below;
+      const maxHeight = Math.max(120, flip ? above : below);
+      const left = Math.max(EDGE, Math.min(
+        align === 'left' ? trigger.left : trigger.right - width,
+        window.innerWidth - EDGE - width,
+      ));
+      const top = flip
+        ? Math.max(EDGE, trigger.top - GAP - Math.min(wanted, maxHeight))
+        : trigger.bottom + GAP;
+      // Bail when nothing moved: `place` also runs on every scroll event, and a fresh
+      // object each time would re-render the panel continuously.
+      setPos(prev => (prev && prev.top === top && prev.left === left && prev.maxHeight === maxHeight)
+        ? prev
+        : { top, left, maxHeight });
+    };
+    place();
+    window.addEventListener('resize', place);
+    // Capture phase: the editor panes are the scroll containers, not the window.
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+    // `groups` is deliberately not a dependency — callers build it inline, so a new
+    // identity every render would re-place (and re-render) in a loop.
+  }, [open, align]);
 
   // Groups whose every item is hidden by the caller are passed as empty — drop them
   // so no stray caption or divider survives.
@@ -152,10 +213,16 @@ const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
         {label && <ChevronDown size={variant === 'toolbar' ? 12 : 14} className={`${variant === 'toolbar' ? '' : primary ? 'text-indigo-200' : 'text-gray-400'} transition-transform ${open ? 'rotate-180' : ''}`} />}
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
           role="menu"
-          className={`absolute top-full ${align === 'left' ? 'left-0' : 'right-0'} mt-2 ${panelWidth} bg-white rounded-xl shadow-xl border border-gray-200 z-50 py-1`}
+          ref={panelRef}
+          // Hidden for the first paint only: `pos` needs the panel's real size, so it is
+          // rendered, measured, then placed in the same layout pass.
+          style={pos
+            ? { top: pos.top, left: pos.left, maxHeight: pos.maxHeight }
+            : { top: 0, left: 0, visibility: 'hidden' }}
+          className={`fixed ${panelWidth} max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain bg-white rounded-xl shadow-xl border border-gray-200 z-[75] py-1`}
         >
           {visibleGroups.map((group, gi) => (
             <div key={group.label ?? `g${gi}`}>
@@ -185,7 +252,8 @@ const EditorToolbarMenu: React.FC<EditorToolbarMenuProps> = ({
               ))}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

@@ -28,6 +28,7 @@ import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.ut
 import './styles/im-content.css';
 import { getIMThemeVariables } from './styles/im-theme';
 import { InlineHtmlRow, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
+import { removeRowRef } from '../../services/im/im-row-refs';
 import { usePrintColumn } from './editor/usePrintColumn';
 import { imContentPrintScale } from './editor/im-content-style';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
@@ -821,12 +822,13 @@ const IMTemplateEditor: React.FC = () => {
     }));
   };
 
+  // Deleting a row also has to clear the legacy `section.content` mirror once no
+  // inline row is left — otherwise the load-time shim above and the resolver's
+  // hybrid mode both put the deleted box straight back. See im-row-refs.ts.
   const removeRef = (index: number) => {
-    setSections(prev => prev.map(s =>
-      s.id === selectedSectionId
-        ? { ...s, blockRefs: (s.blockRefs ?? []).filter((_, i) => i !== index) }
-        : s
-    ));
+    setSections(prev => prev.map(s => s.id === selectedSectionId
+      ? { ...s, ...removeRowRef(s.blockRefs ?? [], index, s.content ?? {}) }
+      : s));
   };
 
   // Deep-clone the row at `index` and insert the copy directly after it. Block refs

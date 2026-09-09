@@ -1,6 +1,6 @@
 # Design Specs module — implementation plan
 
-Status: **Phase A complete and verified live (2026-09-09).** Phases B-E not started.
+Status: **Phases A-D complete (2026-09-09).** Phase E not started.
 Approved decisions below; the DESIGNER project-visibility open question was resolved in
 favour of the surgical option (one SELECT-only policy on `projects`, `can_see_project`
 left alone).
@@ -167,7 +167,7 @@ the `im_shares` / `im_review_comments` compat views and the six `im_review_*` wr
 functions. Nothing in the repo calls them any more — they exist only for a browser still
 running the pre-162 bundle.
 
-## Phase B — spec schema, storage, role
+## Phase B — spec schema, storage, role — DONE
 
 `db_migrations/163_design_specs.sql`
 
@@ -231,7 +231,54 @@ Role plumbing:
 - `design_specs*` policies: SELECT `can_see_project(project_id) or is_design_editor()`;
   INSERT/UPDATE/DELETE `is_design_editor()`
 
-## Phase C — the PDF review surface
+**Gate — passed 2026-09-09.** Applied as migration `design_specs_module`
+(`db_migrations/163_design_specs.sql`).
+
+One thing the plan had missed, found while building: **the shared review layer would have
+been invisible to a DESIGNER.** `review_shares` / `review_comments` are policed by
+`can_see_project`, so the role that owns design specs could not have read its own spec's
+review links or supplier notes. Fixed with a *subject-scoped* escape —
+`subject_type = 'design_spec' AND is_design_editor()` — rather than a blanket
+`OR is_design_editor()`, which would also have exposed every project's Instruction Manual
+notes to the design team.
+
+Verified against the live database, from a real designer's seat (a PM temporarily promoted
+in `user_roles`, then restored):
+
+- a designer sees the project list, can create/read specs, and reads **0** IM review notes
+- a plain PM is refused on `design_specs` INSERT (`insufficient_privilege`) and
+  `is_design_editor()` is false for them — read-only, as decided
+- `doc_role_from_profile('DESIGNER')` → `'designer'`; the `user_roles` CHECK accepts it
+- the `design-specs` bucket is private and `application/pdf`-only
+
+**10 of 10 cross-row guards refuse what they should**, exercised end to end: spec_code
+auto-assigns (`DS-0001`), versions auto-number 1 then 2, a SKU from another project cannot
+be linked (*including* when the caller lies about `project_id` to match the spec), a draft
+cannot be issued as the final, a final cannot be issued without a timestamp, no version can
+be added once issued, the issued final cannot be deleted while referenced, cancelling
+requires a stamp, and a second spec on one project is impossible. All test rows removed;
+the code sequence was reset so the first real spec is still `DS-0001`.
+
+Three of those are **composite foreign keys rather than triggers** — a spec's final must be
+one of its own versions, and a linked SKU must belong to the spec's own project. That makes
+them true on every path, including a hand-written UPDATE in the SQL editor, with no trigger
+to forget.
+
+Code landed: `src/types/design-spec.types.ts`, `src/services/design/` (registry service +
+round projection + barrel), `src/pages/design/design-spec-status.ts` (the derivation, +27
+tests), `UserRole.DESIGNER`, and `doc-access.ts` where both role branches now go through
+one `INTERNAL_ROLES` list so the next role cannot be added in one place only. The Admin
+panel's two-state ADMIN/PM **toggle became a role select** — without that, DESIGNER would
+have been assignable only by hand-written SQL.
+
+Also fixed in the shared layer, benefiting the IM too: `ReviewRoundSummary` gained
+`liveLinks`. A subject lands in that map for either of two reasons — a live link, or open
+notes — and `submitted` could not tell them apart, so a version whose last link was revoked
+while notes were still open read as "every reviewer came back".
+
+**2057 tests pass** (up 30); both typechecks clean.
+
+## Phase C — the PDF review surface — DONE
 
 - `netlify/functions/design-spec-file.ts` — takes a review token *or* an authenticated session,
   validates it server-side, returns a 5-minute signed URL. Revoking a link genuinely revokes
@@ -245,10 +292,54 @@ Role plumbing:
 - `src/modules/review-portal/PdfReviewCanvas.tsx` — renders pages with `pdfjs-dist` (already a
   dependency, already used in `src/modules/pdf-to-markdown/`), drops numbered pins, stores
   normalised 0–1 coords so a pin survives zoom and page size.
-- Route: `/#/review/:token` resolves the subject and picks the surface. `/#/review/im/:token`
-  is kept as a redirect — links of that shape are already out with suppliers.
+- Route: **one route per subject kind**, `/#/review/im/:token` and
+  `/#/review/design-spec/:token`. This is a deliberate change from the plan's single
+  `/#/review/:token` dispatcher: resolving a token is what stamps `last_used_at` and
+  `use_count` ("the portal was opened"), so a dispatcher would resolve once to choose a
+  portal and the portal would resolve again — double-counting every visit. The link builders
+  already know the subject, so nothing needed a dispatcher.
 
-## Phase D — internal UI
+**Gate — passed 2026-09-09.**
+
+The shell extraction is real, not nominal: `IMReviewPortal.tsx` went from **524 lines to
+about 140**, and what is left is only the viewer and the text anchor. The name gate, the note
+rail, the composer, attachments, submit, the vague "invalid or revoked" screen and the new
+reply threads are all shared, so the IM gained in-thread replies for free.
+
+Landed:
+
+- `netlify/functions/design-spec-file.ts` — signed READ URLs, 5-minute TTL. Two callers:
+  a review token (served the STAMPED copy) or a session (served the original).
+- `netlify/functions/design-spec-upload-url.ts` — signed WRITE URLs for both slots, gated on
+  `is_design_editor()` asked *as the caller*, so it cannot drift from the table policies.
+- `src/services/design/design-spec-stamp.ts` — the `DRAFT vN` banner, diagonal watermark and
+  traceable footer, applied in the BROWSER before upload.
+- `src/modules/review-portal/` — `ReviewPortalShell`, `PdfReviewCanvas`, `anchor-labels`.
+- `src/pages/design/DesignSpecReviewPortal.tsx`, plus the review-link service.
+
+Four things worth knowing:
+
+1. **A reviewer can never receive the original.** A draft with no stamped copy returns 409
+   rather than falling back — the fallback would hand an unmarked draft to a factory the
+   moment stamping had failed. Proved by asserting which object path was signed.
+2. **A review token unlocks only the version it was minted for.** Without that subject
+   equality check, any live review token in the system — including one for another project's
+   spec or for an Instruction Manual — would unlock any spec's PDF. This is the single most
+   important test in the phase.
+3. **Pins are stored as 0..1 fractions**, measured against the page wrapper and not the
+   canvas bitmap: the bitmap is oversampled by the device pixel ratio, so dividing by its
+   width would land every pin at a fraction of where it was clicked on a retina screen.
+4. **The canvas is code-split** — the only lazily-loaded component in the app. pdf.js at
+   module scope had put ~473KB into the MAIN chunk, downloaded by every user on every page
+   (suppliers on portal routes included) for a viewer almost nobody opens. After splitting,
+   the main chunk is **3,543KB, down from 4,032KB** — smaller than before this phase began,
+   despite the phase adding a whole module.
+
+**2110 tests pass** (up 47: the anchor labels, the stamp including the un-encodable-character
+trap that would otherwise fail an upload, and 20 security tests against the real file
+handler). Both typechecks clean; `vite build` succeeds.
+
+## Phase D — internal UI — DONE
 
 - `src/pages/design/DesignSpecsDashboard.tsx` — board/table toggle lifted from
   `IMDashboard.tsx` (which already persists the choice in `localStorage`), columns in the
@@ -260,6 +351,56 @@ Role plumbing:
 - `/design-specs` added to `SUPER_ADMIN_ONLY_PATH_PREFIXES` for the build, removed at launch.
   (You chose a DESIGNER role rather than the super-admin gate as the access model; the gate is
   still worth having while the module is half-built, and it costs one line to remove.)
+
+**Gate — passed 2026-09-09.**
+
+Landed:
+
+- `src/pages/design/DesignSpecsDashboard.tsx` — table + kanban toggle, remembered in
+  `localStorage`, status filter chips with counts, search. **Projects with no spec are
+  synthesised into Backlog**: without them the board answers "how are my specs doing" but not
+  "which projects still need one", and the second question is the one that catches a launch
+  with no design spec at all.
+- `src/pages/design/ProjectDesignSpecPanel.tsx` — versions, upload, per-version review links
+  (create / copy / open / revoke, with who is still outstanding), note triage with
+  done / not-changing / reopen and replies, Issue as final, Unlock, Cancel, Reopen, SKU links.
+- `src/services/design/design-spec-notes.service.ts` — the design team's side of the notes,
+  thin over the shared layer.
+- The **Design Spec tab on `ProjectDetail`**, and `?tab=` support so the board can link
+  straight to it. The spec detail deliberately has no route of its own: one spec per project
+  means the project IS its page.
+- Sidebar entry, and the `/design-specs` prefix gate.
+
+Two decisions worth recording:
+
+1. **The board cannot be dragged.** It is a visualization of derived statuses, not an editor
+   of them — a spec moves by uploading, sending or issuing, never by someone declaring it
+   moved. Same reasoning as the All Manuals board.
+2. **The triage UI is local, not lifted from the IM's `ReviewCommentsPanel`.** That panel
+   exists to be a pointer INTO the manual editor — it jumps to a chapter and highlights a
+   quote — and none of that has a counterpart on a PDF. The *services* underneath are shared,
+   so triage behaviour cannot drift; consolidating the two panels is a follow-up rather than a
+   pretence that they are already one.
+
+Verified: `2113` tests pass (up 3 — the gate, including that it must NOT gate the public
+review portal, where the authorization is the bearer token and a super-admin check is
+meaningless). Both typechecks clean; `vite build` succeeds with the canvas still split out
+(main chunk 3,579KB, canvas 484KB).
+
+Smoke-tested in a real browser against the live database:
+
+- `/#/review/design-spec/<bogus>` renders "This review link is invalid, expired or has been
+  revoked." — exercising the route, the shared shell, and `review_resolve` as `anon`.
+- `/#/design-specs` redirects an unauthenticated visitor to `/#/login`.
+
+**NOT verified in a browser:** the authenticated screens — the board, the panel, upload,
+sending a link, triage. Those need a signed-in Super Admin, which this environment has no
+credentials for. They typecheck and build, but a click-through is owed before launch.
+
+One pre-existing observation, unrelated to this module: on any public portal route an
+app-level compliance-deadline check fires without a session and logs
+`permission denied for table compliance_requests`. It is caught and harmless, and it predates
+this work.
 
 ## Phase E — portal and notifications
 

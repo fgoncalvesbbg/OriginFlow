@@ -4,7 +4,7 @@
  * compliance, SKUs, attribute requests, and production updates for a single project.
  */
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
@@ -77,6 +77,7 @@ import * as XLSX from 'xlsx';
 import AttributeInput from '../components/common/AttributeInput';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import PublishDiffModal from './im/PublishDiffModal';
+import ProjectDesignSpecPanel from './design/ProjectDesignSpecPanel';
 
 // Labels for the two supplier-facing PDF documents (see setSupplierPdfDocument) — never
 // "Instruction Manual", since the Digital IM itself is never shared, only its printed
@@ -195,7 +196,17 @@ const ProjectDetail: React.FC = () => {
   const [attrReqRefreshing, setAttrReqRefreshing] = useState(false);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'checklist' | 'attributes' | 'documents' | 'compliance' | 'timeline' | 'im' | 'manufacturing'>('checklist');
+  type ProjectTab = 'checklist' | 'attributes' | 'documents' | 'compliance' | 'timeline' | 'im' | 'design' | 'manufacturing';
+  const PROJECT_TABS: readonly ProjectTab[] = ['checklist', 'attributes', 'documents', 'compliance', 'timeline', 'im', 'design', 'manufacturing'];
+  // Seeded from ?tab= so another screen can link straight to a tab — the All Design Specs
+  // board opens a spec that way, because one spec per project makes the project its page.
+  // Read once, not synced: the tab is local state afterwards, and rewriting the URL on every
+  // click would put a history entry behind each one.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<ProjectTab>(() => {
+    const requested = searchParams.get('tab') as ProjectTab | null;
+    return requested && PROJECT_TABS.includes(requested) ? requested : 'checklist';
+  });
 
   // Attributes tab: track which historical snapshots are expanded
   const [expandedAttrHistoryId, setExpandedAttrHistoryId] = useState<string | null>(null);
@@ -1573,6 +1584,14 @@ const ProjectDetail: React.FC = () => {
         <button onClick={() => setActiveTab('im')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'im' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <BookOpen size={16} /> Instruction Manual
         </button>
+        {/* Hidden unless the viewer is a Super Admin, matching the /design-specs prefix gate
+            in moduleAccess.config: a tab that shows an unfinished module would be exactly the
+            leak that gating the route prevents. */}
+        {user?.isSuperAdmin && (
+          <button onClick={() => setActiveTab('design')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'design' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+            <ClipboardList size={16} /> Design Spec
+          </button>
+        )}
         <button onClick={() => setActiveTab('timeline')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'timeline' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Calendar size={16} /> Timeline
         </button>
@@ -2480,6 +2499,10 @@ const ProjectDetail: React.FC = () => {
       )}
 
       {/* TIMELINE TAB */}
+      {activeTab === 'design' && project && user?.isSuperAdmin && (
+        <ProjectDesignSpecPanel projectId={project.id} projectName={project.name} />
+      )}
+
       {activeTab === 'timeline' && (
          <div className="max-w-3xl mx-auto">
             <div className="bg-white rounded-xl shadow border border-gray-200 p-8">

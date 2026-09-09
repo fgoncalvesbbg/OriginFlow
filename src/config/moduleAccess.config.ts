@@ -33,6 +33,13 @@ export const SUPER_ADMIN_ONLY_PATH_PREFIXES: readonly string[] = [
   '/attributes',
   // Kept so the old bookmark is gated the same way; '/products' now just redirects.
   '/products',
+  // Design Specs, while the module is still being built out (docs/originflow-design-specs-module.md).
+  //
+  // NOTE this is a VISIBILITY gate on unfinished work, not the module's access model — that
+  // is the DESIGNER role and the is_design_editor() write policies from migration 163, which
+  // stay in force whether or not this prefix is listed. Removing '/design-specs' from this
+  // list is the deliberate act of launching the module to the design team.
+  '/design-specs',
 ];
 
 /**

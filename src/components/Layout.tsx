@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, FileText, Scale, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, FileText, Scale, ClipboardList, type LucideIcon } from 'lucide-react';
 import { UserRole } from '../types';
 import { isSuperAdminOnlyPath } from '../config/moduleAccess.config';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -103,6 +103,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { to: '/regulations', label: 'Regulations', Icon: Scale, match: p => p.startsWith('/regulations') },
     { to: '/im', label: 'Instruction Manuals', Icon: BookOpen, match: p => p.startsWith('/im') },
     { to: '/documents', label: 'SOP & Documents', Icon: FileText, match: p => p.startsWith('/documents') },
+    { to: '/design-specs', label: 'Design Specs', Icon: ClipboardList, match: p => p.startsWith('/design-specs') },
     { to: '/attributes', label: 'Attribute Viewer', Icon: Table2, match: p => p.startsWith('/attributes') },
   ];
   const NAV_TOOLS: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [

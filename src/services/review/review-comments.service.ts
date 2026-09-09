@@ -352,6 +352,19 @@ export interface ReviewRoundSummary {
   openCount: number;
   /** True once EVERY outstanding link on the subject has been submitted. */
   submitted: boolean;
+  /**
+   * How many live (minted, unrevoked) review links the subject has.
+   *
+   * Needed because a subject appears in this map for EITHER reason — it has a live link, or
+   * it has open notes — and `submitted` cannot tell those apart: it starts true and is only
+   * falsified by an outstanding link, so a subject whose last link was revoked while notes
+   * were still open reads as `submitted: true`. Without this counter that is
+   * indistinguishable from "every reviewer came back", which is the difference between a
+   * round that is over and one that is closed and waiting on triage.
+   *
+   * Zero means the round is genuinely over: revoking the last link ends a round.
+   */
+  liveLinks: number;
 }
 
 /**
@@ -404,7 +417,7 @@ export const getReviewRounds = async (
   const entry = (projectId: string, subjectType: string, subjectId: string | null) => {
     const key = reviewRoundKey(projectId, subjectType, subjectId);
     let e = out.get(key);
-    if (!e) { e = { openCount: 0, submitted: true }; out.set(key, e); }
+    if (!e) { e = { openCount: 0, submitted: true, liveLinks: 0 }; out.set(key, e); }
     return e;
   };
 
@@ -412,6 +425,7 @@ export const getReviewRounds = async (
   // does not mean the feedback is all in.
   for (const r of shareRows as any[]) {
     const e = entry(r.project_id, r.subject_type, r.subject_id ?? null);
+    e.liveLinks += 1;
     if (!r.submitted_at) e.submitted = false;
   }
   for (const r of commentRows as any[]) {

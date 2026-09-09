@@ -656,6 +656,47 @@ describe('the internal registry is not reachable by a supplier, and finalising i
     expect(res.statusCode).toBe(403);
   });
 
+  // ---------------------------------------------------------------------------
+  // The DESIGNER role (migration 163). resolveCaller resolves anything it does not
+  // recognise as a SUPPLIER, so a role added to user_roles without being added to
+  // INTERNAL_ROLES would silently hand that account the supplier-audience view of internal
+  // documents instead of refusing it. These pin both halves: designer IS internal here,
+  // and is still NOT an admin.
+  // ---------------------------------------------------------------------------
+
+  it('treats a designer as an internal caller, not as a supplier', async () => {
+    asRole('designer');
+    const res = await registry({
+      httpMethod: 'GET',
+      body: null,
+      path: `/api/doc/documents/${DOC_SUPPLIER}/versions`,
+      headers: asAdmin,
+      queryStringParameters: {},
+    });
+    // A supplier-resolved caller is 403'd by this route outright; 200 is what proves the
+    // designer came out of resolveCaller as internal.
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('403s a designer trying to finalise — internal is not admin', async () => {
+    asRole('designer');
+    const res = await registry(post(`/api/doc/versions/${V_SUPPLIER_DRAFT}/finalize`, {}, asAdmin));
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('403s a role nobody has taught this module about', async () => {
+    // The fail-closed default that makes the two tests above worth having.
+    asRole('marketing');
+    const res = await registry({
+      httpMethod: 'GET',
+      body: null,
+      path: '/api/doc/documents',
+      headers: asAdmin,
+      queryStringParameters: {},
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it('403s an internal (non-admin) user trying to UN-finalise', async () => {
     asRole('internal');
     const res = await registry(post(`/api/doc/versions/${V_SUPPLIER_FINAL}/unfinalize`, {}, asAdmin));

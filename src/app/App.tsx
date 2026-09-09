@@ -45,6 +45,8 @@ import IMTemplateEditor from '../pages/im/IMTemplateEditor';
 import IMPreview from '../pages/im/IMPreview';
 import IMSharedManual from '../pages/im/IMSharedManual';
 import IMReviewPortal from '../pages/im/IMReviewPortal';
+import DesignSpecReviewPortal from '../pages/design/DesignSpecReviewPortal';
+import DesignSpecsDashboard from '../pages/design/DesignSpecsDashboard';
 import IMBlockLibrary from '../pages/im/IMBlockLibrary';
 import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
@@ -86,7 +88,14 @@ const AppContent: React.FC = () => {
           <Route path="/sourcing/supplier/:token" element={<SupplierRFQPortal />} />
           <Route path="/im/preview/:templateId" element={<IMPreview />} />
           <Route path="/share/im/:token" element={<IMSharedManual />} />
+          {/* Supplier review portals. One route per subject kind rather than a single
+              /review/:token that resolves the token to decide — resolving is what stamps
+              last_used_at and use_count ("the portal was opened"), so a dispatcher would
+              have to resolve once to choose a portal and the portal would resolve again,
+              double-counting every visit. The link builders already know the subject:
+              getIMReviewUrl and designSpecReviewUrl. */}
           <Route path="/review/im/:token" element={<IMReviewPortal />} />
+          <Route path="/review/design-spec/:token" element={<DesignSpecReviewPortal />} />
           <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
           <Route path="/attribute-request-batch/:batchToken" element={<SupplierAttributeBatchPortal />} />
 
@@ -127,6 +136,18 @@ const AppContent: React.FC = () => {
             <ProtectedRoute>
               <SuperAdminRoute>
                 <AttributeViewer />
+              </SuperAdminRoute>
+            </ProtectedRoute>
+          } />
+
+          {/* Design Specs. Super-Admin-gated while the module is under construction; the
+              real access model is the DESIGNER role and the is_design_editor() write
+              policies, which apply regardless. The spec DETAIL lives on the project's own
+              Design Spec tab — one spec per project makes the project its page. */}
+          <Route path="/design-specs" element={
+            <ProtectedRoute>
+              <SuperAdminRoute>
+                <DesignSpecsDashboard />
               </SuperAdminRoute>
             </ProtectedRoute>
           } />

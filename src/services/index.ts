@@ -549,3 +549,25 @@ export type {
   RegCheckBlock,
   RegCheckBlockKind
 } from './regulatory';
+
+// Design Specs (migration 163). Names here do not collide with the IM adapters, so unlike
+// src/services/review/ this module is safe to re-export from the flat barrel.
+export {
+  designSpecSubject,
+  canEditDesignSpecs,
+  getDesignSpecs,
+  getDesignSpecByProject,
+  getDesignSpecVersions,
+  getVersionsBySpec,
+  getDesignSpecSkuIds,
+  getDesignSpecDetail,
+  createDesignSpec,
+  updateDesignSpec,
+  addDesignSpecVersion,
+  issueDesignSpecFinal,
+  unlockDesignSpec,
+  cancelDesignSpec,
+  reopenDesignSpec,
+  setDesignSpecSkus,
+  getDesignSpecRounds
+} from './design';

@@ -70,3 +70,21 @@ describe('mapProfile — super admin flag', () => {
     expect(user.isSuperAdmin).toBe(true);
   });
 });
+
+describe('the Design Specs gate (migration 163 / Phase D)', () => {
+  it('gates the module and its whole subtree', () => {
+    expect(isSuperAdminOnlyPath('/design-specs')).toBe(true);
+    expect(isSuperAdminOnlyPath('/design-specs/anything')).toBe(true);
+  });
+
+  it('does NOT gate the public review portal — suppliers are not signed in at all', () => {
+    // The portal's authorization is the bearer token in the URL. Gating it here would be
+    // both wrong and pointless: a super-admin check cannot apply to an anonymous reviewer.
+    expect(isSuperAdminOnlyPath('/review/design-spec/some-token')).toBe(false);
+  });
+
+  it('does not accidentally gate a future sibling route', () => {
+    expect(isSuperAdminOnlyPath('/design-specs-report')).toBe(false);
+    expect(isSuperAdminOnlyPath('/design')).toBe(false);
+  });
+});

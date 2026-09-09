@@ -199,3 +199,14 @@ export type {
   ReviewSession
 } from './review.types';
 export { isPdfAnchor, isReviewShareExpired } from './review.types';
+
+// Design Specs (migration 163). The supplier round these use is the shared review layer
+// above; see src/services/design/ and src/pages/design/design-spec-status.ts.
+export type {
+  DesignSpecState,
+  DesignSpecVersionKind,
+  DesignSpecVersion,
+  DesignSpec,
+  DesignSpecSummary,
+  DesignSpecSkuLink
+} from './design-spec.types';
