@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createFakeSupabase, type FakeDbState, type FakeSupabase } from './lib/doc-fake-supabase';
+import { createFakeSupabase, type FakeDbState, type FakeSupabase } from '../lib/doc-fake-supabase';
 
 // ── ids ────────────────────────────────────────────────────────────────────────────────
 const PROJECT_A = '11111111-1111-4111-8111-111111111111';
@@ -176,8 +176,8 @@ const internalRequest = (path: string, query: Record<string, string> = {}) => ({
 const downloadPath = (versionId: string) => `/api/doc-versions/${versionId}/download`;
 
 // Loaded after the mock is registered.
-const download = async (event: any) => (await import('./doc-download')).handler(event as any);
-const portal = async (event: any) => (await import('./doc-portal')).handler(event as any);
+const download = async (event: any) => (await import('../doc-download')).handler(event as any);
+const portal = async (event: any) => (await import('../doc-portal')).handler(event as any);
 
 // =======================================================================================
 // The three required assertions
@@ -617,7 +617,7 @@ describe('download tickets — how a browser navigation authenticates', () => {
 });
 
 describe('the internal registry is not reachable by a supplier, and finalising is admin-only', () => {
-  const registry = async (event: any) => (await import('./doc-registry')).handler(event as any);
+  const registry = async (event: any) => (await import('../doc-registry')).handler(event as any);
 
   const asRole = (role: string) => {
     db.user_roles = [{ user_id: ADMIN_USER, role }];

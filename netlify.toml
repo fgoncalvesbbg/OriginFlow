@@ -104,6 +104,14 @@
 # network, which these cloud-run functions cannot resolve. The browser calls it directly,
 # so it works only while the operator is on the VPN. Override the host with the public
 # build var VITE_PRODUCTTOOLKIT_URL (e.g. http://localhost:8787/apps/attribute-viewer).
+# Every top-level file in this directory becomes a deployed function named after the file,
+# and Netlify rejects a function name containing anything but alphanumerics, hyphens and
+# underscores. A `foo.test.ts` sitting here therefore FAILS THE DEPLOY ("change the function
+# names to contain only alphanumeric characters, hyphens or underscores"). Tests go in a
+# SUBDIRECTORY instead — `lib/` for helper tests, `__tests__/` for tests of the top-level
+# handlers: a subdirectory is only picked up as a function when it contains a matching
+# `<dir>.ts` or `index.ts`, which neither does. vite.config.ts still collects them all
+# (test.include covers `netlify/**/*.test.ts`).
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"

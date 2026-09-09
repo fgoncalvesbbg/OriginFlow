@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createFakeSupabase, type FakeDbState, type FakeSupabase } from './lib/doc-fake-supabase';
+import { createFakeSupabase, type FakeDbState, type FakeSupabase } from '../lib/doc-fake-supabase';
 
 const PROJECT = '11111111-1111-4111-8111-111111111111';
 const OTHER_PROJECT = '22222222-2222-4222-8222-222222222222';
@@ -108,7 +108,7 @@ const freshDb = (): FakeDbState => ({
 let db: FakeDbState;
 
 const call = async (body: unknown, headers: Record<string, string> = {}) => {
-  const { handler } = await import('./design-spec-file');
+  const { handler } = await import('../design-spec-file');
   return handler({
     httpMethod: 'POST',
     body: JSON.stringify(body),
@@ -231,7 +231,7 @@ describe('the internal path', () => {
 
 describe('input handling', () => {
   it('405s anything but POST', async () => {
-    const { handler } = await import('./design-spec-file');
+    const { handler } = await import('../design-spec-file');
     const res = await handler({
       httpMethod: 'GET', body: null, headers: {}, queryStringParameters: {},
     } as any);
@@ -251,7 +251,7 @@ describe('input handling', () => {
   });
 
   it('400s an unparseable body', async () => {
-    const { handler } = await import('./design-spec-file');
+    const { handler } = await import('../design-spec-file');
     const res = await handler({
       httpMethod: 'POST', body: '{not json', headers: {}, queryStringParameters: {},
     } as any);
