@@ -30,6 +30,7 @@ export {
   mapReplyRow,
   resolveReviewSession,
   listReviewCommentsByToken,
+  listPriorReviewCommentsByToken,
   listReviewRepliesByToken,
   addReviewComment,
   deleteReviewComment,
@@ -41,6 +42,7 @@ export {
   getReviewReplies,
   addReviewReply,
   setReviewCommentStatus,
+  markReviewCommentChecked,
   reviewRoundKey,
   getReviewRounds,
 } from './review-comments.service';

@@ -28,9 +28,9 @@ import { DEFAULT_IM_LOGO_URL, DEFAULT_LEAFLET_LOGO_URL } from '../../config/im.c
 import {
   defaultTypographyFor,
   effectiveTablePt,
-  COMPACT_LEAFLET_COLUMNS,
+  compactColumnsFor,
   type PrintTypography,
-  type PrintLeafletLayout,
+  type PrintLayout,
 } from './im-print-typography';
 import { interFontFaceCss } from './fonts/inter-webfont';
 import { ISO_CALLOUT_ICONS, ISO_M002 } from './iso-icons';
@@ -191,18 +191,22 @@ export interface PrintHtmlOptions {
    */
   compact?: boolean;
   /**
-   * Which leaflet LAYOUT to set the compact path in. Only consulted when `compact` is true.
+   * Which LAYOUT to set this document in. Consulted for BOTH template types.
    *
-   *   'classic'     — one full-measure column, tinted callout panels: what every leaflet has
-   *                   printed so far. The default, so an omitted value changes nothing.
-   *   'compact2col' — the dense two-column booklet measured from
-   *                   docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf.
+   *   'classic'     — one full-measure column, tinted callout panels: what everything printed
+   *                   in before the compact layout. The default, so an omitted value changes
+   *                   nothing.
+   *   'compact2col' — columns, justified and hyphenated. For a leaflet that also means
+   *                   severity-band hazard headers and one continuous flow across locales
+   *                   (docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf); for a manual it means
+   *                   columns ONLY — same cover, same per-language TOC and page numbers, same
+   *                   thumb tabs, same tinted callout panels.
    *
    * A layout is a render choice, not a document type: same template, same content, same
    * translations, same leaflet-coverage issue. That is why it lives here and not in
    * IMTemplateType.
    */
-  leafletLayout?: PrintLeafletLayout;
+  layout?: PrintLayout;
   /**
    * The global print typography (font family, body/heading point sizes, line spacing, page
    * margins) for this template type and page size — one admin-owned setting, NOT per product
@@ -501,24 +505,99 @@ const printAlignOf = (tag: string): PrintImageAlign => {
 };
 
 /**
+ * FULL-MEASURE FIGURES, AND WHY THEY HAVE TO BE RECOGNISED HERE.
+ *
+ * A one-column manual gives a figure the whole 182mm (A4) / 120mm (A5) text block. Put the same
+ * manual in two columns and `max-width: 100%` silently rescales every figure to the column —
+ * 89mm on A4, i.e. half the linear size and a QUARTER of the area. On a wiring diagram or an
+ * exploded parts view that is a legibility regression, and for a manual it is potentially a
+ * compliance one, so the two-column layout spans those figures across both columns instead.
+ *
+ * CSS cannot make that decision: it can match neither "this width is most of the measure" nor
+ * "this table has four columns". Both are decided here and recorded as `data-print-wide="1"`,
+ * which is inert in every other layout (nothing else matches the attribute).
+ *
+ * The thresholds are measured against the live published manuals, not chosen: the declared
+ * image widths fall into clean bands at <95, 100-160, 240, 320-360 and 850-1100px, so 600px
+ * separates the 147 full-measure figures from everything smaller with a wide margin either
+ * side. Table columns average 2.46 with a maximum of 6, and only 22 tables carry 4 or more —
+ * so 4 catches the handful that genuinely cannot set in a 58-89mm column, and leaves the
+ * two- and three-column specification tables in the flow where they read best.
+ */
+export const WIDE_IMAGE_MIN_PX = 600;
+export const WIDE_IMAGE_MIN_MM = 120;
+export const WIDE_IMAGE_MIN_PCT = 80;
+export const WIDE_TABLE_MIN_COLS = 4;
+
+/** The author's declared width as a number plus its unit, or null when there is none. */
+const declaredWidthOf = (tag: string): { value: number; unit: string } | null => {
+  const fromStyle = styleOf(tag).match(/(?:^|;)\s*width\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*(px|mm|cm|in|%)?/i);
+  const fromAttr = tag.match(/\swidth\s*=\s*["']?([0-9]+(?:\.[0-9]+)?)\s*(px|%)?["']?/i);
+  const m = fromStyle ?? fromAttr;
+  if (!m) return null;
+  return { value: Number(m[1]), unit: (m[2] ?? 'px').toLowerCase() };
+};
+
+/** Was this image authored to fill the whole text block? See the block comment above. */
+const isWideImage = (tag: string): boolean => {
+  const w = declaredWidthOf(tag);
+  if (!w) return false;
+  switch (w.unit) {
+    case '%': return w.value >= WIDE_IMAGE_MIN_PCT;
+    case 'mm': return w.value >= WIDE_IMAGE_MIN_MM;
+    case 'cm': return w.value * 10 >= WIDE_IMAGE_MIN_MM;
+    case 'in': return w.value * 25.4 >= WIDE_IMAGE_MIN_MM;
+    default: return w.value >= WIDE_IMAGE_MIN_PX;
+  }
+};
+
+const TABLE_BLOCK_RE = /<table\b[^>]*>[\s\S]*?<\/table>/gi;
+const TABLE_OPEN_RE = /^<table\b[^>]*?(\/?)>/i;
+const ROW_RE = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+const CELL_RE = /<t[dh]\b/gi;
+
+/**
+ * The widest row's cell count. The MAXIMUM rather than the header row's, because a spec table
+ * whose first row is a single spanning caption would otherwise measure as one column. `colspan`
+ * is deliberately not resolved: a spanning cell still needs its share of the measure, so
+ * counting cells under-reads a table's width, which errs towards leaving it in the flow.
+ */
+export const tableColumnCount = (tableHtml: string): number => {
+  let max = 0;
+  for (const row of tableHtml.matchAll(ROW_RE)) max = Math.max(max, (row[1].match(CELL_RE) ?? []).length);
+  return max;
+};
+
+/** Mark tables too wide to set in a column, so the stylesheet can span them. */
+const annotateWideTables = (html: string): string =>
+  html.replace(TABLE_BLOCK_RE, (block) =>
+    tableColumnCount(block) >= WIDE_TABLE_MIN_COLS
+      ? block.replace(TABLE_OPEN_RE, (open, selfClose) =>
+          `${open.slice(0, open.length - (selfClose ? 2 : 1))} data-print-wide="1"${selfClose ? '/' : ''}>`)
+      : block,
+  );
+
+/**
  * Author HTML, repaired and then annotated for the print stylesheet.
  *
  * sanitizeAuthorHtml applies the same repairs the editor now makes on ingress, so an export is
  * correct even for content saved before that existed. The annotation is print-only: it records
- * the placement each image asked for, and whether the author gave it a width, so the stylesheet
- * can float it and cap only the unsized ones.
+ * the placement each image asked for, whether the author gave it a width, and whether it is a
+ * full-measure figure, so the stylesheet can float it, cap only the unsized ones, and span the
+ * wide ones out of a column flow.
  */
 const normalizeAuthorHtmlForPrint = (html: string): string =>
-  sanitizeAuthorHtml(html).replace(IMG_TAG_RE, (tag) => {
+  annotateWideTables(sanitizeAuthorHtml(html)).replace(IMG_TAG_RE, (tag) => {
     const align = printAlignOf(tag);
     const sized = WIDTH_DECL_RE.test(styleOf(tag)) || WIDTH_ATTR_RE.test(tag);
+    const wide = sized && isWideImage(tag) ? ' data-print-wide="1"' : '';
     return tag.replace(
       TAG_END_RE,
-      ` data-print-align="${align}" data-print-width="${sized ? 'set' : 'auto'}"$1`,
+      ` data-print-align="${align}" data-print-width="${sized ? 'set' : 'auto'}"${wide}$1`,
     );
   });
 
-const renderNode = (node: PrintNode, lang: string, layout: PrintLeafletLayout = 'classic'): string => {
+const renderNode = (node: PrintNode, lang: string, layout: PrintLayout = 'classic'): string => {
   switch (node.type) {
     case 'html':
       return `<div class="imv-node imv-content">${normalizeAuthorHtmlForPrint(node.html)}</div>`;
@@ -662,7 +741,7 @@ const buildTocPage = (manual: PrintManual, band = ''): string => {
 // of forcing a new page per section. Only the content block as a whole starts on a fresh page
 // (im-break); individual sections break naturally on overflow.
 /** One manual's `<section>` list, with no page container around it. */
-const buildSectionsInner = (manual: PrintManual, layout: PrintLeafletLayout = 'classic'): string =>
+const buildSectionsInner = (manual: PrintManual, layout: PrintLayout = 'classic'): string =>
   flattenInReadingOrder(manual.sections)
     .map((section) => {
       const body = section.nodes.map((n) => renderNode(n, manual.language, layout)).join('');
@@ -678,7 +757,7 @@ const buildSectionsInner = (manual: PrintManual, layout: PrintLeafletLayout = 'c
 const buildSectionPages = (
   manual: PrintManual,
   startOnNewPage = true,
-  layout: PrintLeafletLayout = 'classic',
+  layout: PrintLayout = 'classic',
 ): string => {
   // Dropping im-break lets the block continue on the TOC page; the sections inside still
   // break naturally on overflow either way.
@@ -723,7 +802,7 @@ const buildCompactLanguageBar = (code: string): string =>
  * exists to remove. Each locale gets its own `lang` on a plain wrapper instead, so
  * `hyphens: auto` still resolves a per-locale dictionary inside the shared flow.
  */
-const buildContinuousLanguageFlow = (manuals: PrintManual[], layout: PrintLeafletLayout): string => {
+const buildContinuousLanguageFlow = (manuals: PrintManual[], layout: PrintLayout): string => {
   const inner = manuals
     .map((manual, i) => {
       // The bar goes BETWEEN languages, so the first locale does not get one: it is announced
@@ -908,13 +987,13 @@ const compactOverrides = (primaryColor: string, textPt: number, headingPt: numbe
  * the greyscale print these leaflets frequently get: a solid ground still reads as a band,
  * where #c1121f and #d97706 text collapse to nearly the same grey.
  */
-const compact2colOverrides = (
+const leaflet2colOverrides = (
   primaryColor: string,
   pageSize: PrintPageSize,
   typography: PrintTypography,
 ): string => {
   const { bodyPt, headingPt, lineHeight, paragraphSpacingEm } = typography;
-  const { columns, gapMm } = COMPACT_LEAFLET_COLUMNS[pageSize];
+  const { columns, gapMm } = compactColumnsFor('warning_leaflet', pageSize);
   const body = `${Number(bodyPt.toFixed(2))}pt`;
   const paraGap = `${Number(paragraphSpacingEm.toFixed(3))}em`;
   // Both the severity band and the hazard descriptor sit in the heading slot, so both take
@@ -1058,6 +1137,132 @@ const compact2colOverrides = (
 };
 
 /**
+ * Instruction-manual two-column CSS, appended AFTER the shared stylesheet (so the classic
+ * manual keeps emitting a byte-identical one).
+ *
+ * WHAT THIS LAYOUT IS, AND WHAT IT DELIBERATELY IS NOT.
+ *
+ * It is the column division from the leaflet's `compact2col` and nothing else. The manual keeps
+ * every piece of its structure: the cover with its jump-to-your-language directory, one render
+ * part per language, the per-language TOC with stamped page numbers, the edge thumb tabs, the
+ * running footer, the attachments page and the back page. That is not a compromise — it is why
+ * this is a cheap change where the leaflet's was not. The leaflet's expensive half was the
+ * CONTINUOUS FLOW (one part carrying all 22 locales), which is what cost it per-language page
+ * counts, thumb tabs and its per-language PDFShift parallelism. A manual has a cover directory
+ * and a TOC that both index pages BY LANGUAGE, so it cannot give those up, and does not have to.
+ *
+ * Callouts also keep their tinted panels rather than taking the leaflet's severity bands. The
+ * live published manuals carry 4,610 callout nodes; changing how a safety callout is DRAWN is a
+ * document change that plausibly forces re-review and re-issue, where changing how the page is
+ * DIVIDED is not. It is only tightened here (see below), never restyled.
+ *
+ * The measure is the point. At the live profiles a single-column manual runs ~129 characters
+ * per line on A4 (182mm at 8pt) and ~113 on A5 (120mm at 6pt) — roughly double the readable
+ * 45-75 band. Two columns give ~63 and ~55. So this is a legibility fix that also happens to
+ * save pages, not a squeeze that costs legibility; see COMPACT_COLUMNS for the arithmetic.
+ */
+const manual2colOverrides = (pageSize: PrintPageSize, typography: PrintTypography): string => {
+  const { lineHeight, paragraphSpacingEm } = typography;
+  const { columns, gapMm } = compactColumnsFor('im', pageSize);
+  // Same furniture scale the shared stylesheet uses, so the tightened block rhythm below
+  // shrinks on A5 exactly as the rhythm it replaces did.
+  const scale = pageSize === 'a5' ? A5_FURNITURE_SCALE : 1;
+  const mm = (base: number) => `${(base * scale).toFixed(2)}mm`;
+  const paraGap = `${Number(paragraphSpacingEm.toFixed(3))}em`;
+  return `
+    /* --- Instruction Manual · two-column layout --- */
+
+    /* The content block still starts on a fresh page (or continues on the TOC page when
+       mergeTocIntoContent is set) — unlike the leaflet, this must NOT reset break-before, or
+       every language's content would run onto its own TOC page. */
+    .im-page-content {
+      columns: ${columns}; column-gap: ${gapMm}mm;
+      /* auto, not balance: fill column 1 to the page height before starting column 2, which is
+         how a paginated multicol reads and the only behaviour verified in this pipeline. The
+         cost is that a language's last page prints one full column beside a short one — the
+         same half-page of slack a single-column manual already leaves at the end of a language,
+         so it is not a regression, just not an improvement. */
+      column-fill: auto;
+    }
+
+    /* The chapter that opens a language takes the full measure above the columns. Safe here in
+       a way a spanner generally is not: a spanner splits the column set into groups above and
+       below itself, and this one sits at the very top of the flow, so there is no group above
+       it to strand. Later titles stay in-column. */
+    .im-page-content > .im-section:first-child > .im-section-title { column-span: all; }
+
+    /* Running text. Justified + hyphenated is the dense-and-legible combination at this
+       measure: ragged-right wastes line ends and justified-without-hyphenation opens rivers.
+       Hyphenation needs a lang attribute on <html> to pick a dictionary — buildPrintPartsHtml
+       sets it per language part. NOTE that Chromium's dictionaries are incomplete: 'de'
+       hyphenates, 'fi' has none at all (verified in Chrome 152), so Finnish sets justified
+       WITHOUT hyphenation and will open rivers at this measure. That is a known gap for both
+       layouts, not something this one introduces. */
+    .imv-content, .imv-content p, .imv-content li {
+      text-align: justify;
+      hyphens: auto; -webkit-hyphens: auto;
+      hyphenate-limit-chars: 6 3 3;
+      orphans: 2; widows: 2;
+    }
+    /* The shared stylesheet indents lists by 1.5em. At this measure that is ~6% of the column
+       given up to bullets. Tightened rather than removed: dropping the markers would silently
+       turn an authored list into prose, and the marker is what makes a list of checks
+       scannable. */
+    .imv-content ul, .imv-content ol { padding-left: 0.9em; }
+
+    /* Block rhythm. Section spacing is the one piece of vertical furniture that is NOT a
+       profile setting (the shared sheet hardcodes 8mm/5mm against the page), and 8mm inside a
+       column is two to three body lines between every chapter. Halved — the ruled, coloured
+       title is what separates chapters, not the white space above it. */
+    .im-section { margin: 0 0 ${mm(4)}; }
+    .im-section-title { margin: 0 0 ${mm(2.5)}; }
+
+    /* Callout panels: the SAME panel — same tint, same accent bar, same ISO icon, same title —
+       fitted to a narrower column. The icon gutter is the expensive part: at the shared 8mm
+       icon plus the block gap and the panel's own padding it started body text ~13mm inside an
+       89mm column, i.e. 15% of every line, and ~20% of A5's 58mm. */
+    .imv-block-wrapper { gap: ${mm(1.5)}; padding: ${mm(1.5)}; border-left-width: 3px; }
+    .imv-block-icon { width: ${mm(5.5)}; height: ${mm(5.5)}; }
+    /* And it must be allowed to BREAK. The shared sheet sets break-inside: avoid, which is
+       right in a 182mm column where a callout is a few lines tall and wrong in an 89mm one
+       where the same callout is half a column: an unbreakable block taller than the space left
+       jumps to the next column and leaves a hole the width of the measure. */
+    .imv-block-wrapper { break-inside: auto; }
+
+    /* FULL-MEASURE FIGURES span both columns instead of being rescaled into one. See
+       normalizeAuthorHtmlForPrint for what earns data-print-wide and why the decision cannot
+       live in CSS. Verify these on a real export: a spanner inside a paginated multicol is the
+       least-trodden corner of Chromium's fragmentation code, and this pipeline's PDFShift
+       Chromium is not the one available locally. */
+    .imv-content img[data-print-wide="1"][data-print-align="block"],
+    .imv-content img[data-print-wide="1"][data-print-align="center"],
+    .imv-content table[data-print-wide="1"] { column-span: all; }
+
+    /* Author column widths are absolute mm, chosen against the ONE-column measure (see
+       setCaretColumnWidth in InlineBlockEditor.tsx). A colgroup summing to ~180mm inside an
+       89mm column cannot be honoured, only overflowed, so a table that stays in the flow drops
+       to the auto algorithm and fits the column; the author's proportions are lost, which is
+       strictly better than a table running off the page. A SPANNED table keeps its widths,
+       because there it still has the measure they were chosen for. \`!important\` because the
+       widths are inline styles on the <col> elements. */
+    .imv-content table[data-col-widths]:not([data-print-wide="1"]) { table-layout: auto; }
+    .imv-content table[data-col-widths]:not([data-print-wide="1"]) col { width: auto !important; }
+
+    /* Anything sized against the wider measure, capped to the column. Live manuals carry no
+       step sequences or annotated image sets today — every node is html or callout — so these
+       are guards against a clipped page rather than descriptions of current output. */
+    .imv-content img { max-width: 100%; }
+    .imv-step-img { max-width: 100%; }
+    .imv-annotated-frame { max-width: 100%; }
+    /* An annotated image's markers are absolutely positioned against the frame, so the frame
+       must not fragment or the markers land on the wrong column. The shared sheet already sets
+       break-inside: avoid on the item; this is the reason it must stay. */
+    .imv-annotated-item { break-inside: avoid; }
+    .imv-legend-table, .imv-steps, .imv-annotated { margin: ${mm(2)} 0; }
+  `;
+};
+
+/**
  * The shared stylesheet.
  *
  * Two distinct scales are at work here, on purpose:
@@ -1078,7 +1283,7 @@ const buildStyles = (
   typography: PrintTypography,
   compact = false,
   fontCss = '',
-  leafletLayout: PrintLeafletLayout = 'classic',
+  layout: PrintLayout = 'classic',
 ): string => {
   const dims = PAGE_DIMS[pageSize];
   const s = pageSize === 'a5' ? A5_FURNITURE_SCALE : 1; // page furniture only (see above)
@@ -1300,10 +1505,12 @@ const buildStyles = (
     .im-end-copyright { margin-top: ${mm(10)}; font-size: ${pt(bodyPt * 0.85)}; color: #64748b; text-align: center; }
     ${
       compact
-        ? leafletLayout === 'compact2col'
-          ? compact2colOverrides(primaryColor, pageSize, typography)
+        ? layout === 'compact2col'
+          ? leaflet2colOverrides(primaryColor, pageSize, typography)
           : compactOverrides(primaryColor, bodyPt, headingPt, lineHeight)
-        : ''
+        : layout === 'compact2col'
+          ? manual2colOverrides(pageSize, typography)
+          : ''
     }
   `;
 };
@@ -1387,7 +1594,7 @@ export const buildPrintHtml = (manuals: PrintManual[], opts: PrintHtmlOptions): 
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <style>${buildStyles(opts.pageSize, primaryColor, resolveTypography(opts), false, buildFontCss(resolveTypography(opts).fontFamily, documentTextOf(manuals)))}</style>
+    <style>${buildStyles(opts.pageSize, primaryColor, resolveTypography(opts), false, buildFontCss(resolveTypography(opts).fontFamily, documentTextOf(manuals)), opts.layout ?? 'classic')}</style>
   </head>
   <body>
     ${cover}
@@ -1442,7 +1649,7 @@ const partStyles = (manuals: PrintManual[], opts: PrintHtmlOptions): string => {
     typography,
     opts.compact,
     buildFontCss(typography.fontFamily, documentTextOf(manuals)),
-    opts.compact ? opts.leafletLayout ?? 'classic' : 'classic',
+    opts.layout ?? 'classic',
   );
 };
 
@@ -1478,6 +1685,18 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
   const versionLabel = opts.version ? `v${opts.version}` : '';
   const multi = manuals.length > 1;
   const styles = partStyles(manuals, opts);
+  const layout = opts.layout ?? 'classic';
+  /**
+   * The `lang` a language part declares — needed because `hyphens: auto` selects its dictionary
+   * from it, and without one the two-column layouts' hyphenation is a silent no-op.
+   *
+   * Scoped to the layout that needs it, NOT set unconditionally: every classic part then stays
+   * byte-for-byte what it has always been, which is the guarantee that keeps this work from
+   * being able to regress an already-shipped booklet. Declaring the language on a classic part
+   * would be correct too, and is a separate change with its own proof print.
+   */
+  const partLang = (language: string): string | undefined =>
+    layout === 'compact2col' ? language : undefined;
 
   // Compact Warning Leaflet: no cover / TOC / dividers / back page.
   if (opts.compact) {
@@ -1485,7 +1704,6 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
     // `||` (not `??`): normalized metadata stores a missing companyLogoUrl as '', which must
     // still fall through to the default so the header logo is always prelinked.
     const logoUrl = opts.cover.logoUrl || base?.companyLogoUrl || DEFAULT_LEAFLET_LOGO_URL;
-    const layout = opts.leafletLayout ?? 'classic';
 
     // compact2col: ONE part carrying every language in a single continuous flow, so a locale
     // starts immediately after the one before it — mid-column if that is where the previous
@@ -1531,8 +1749,12 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
     const band = multi ? buildLanguageBand(manual.language) : '';
     parts.push({
       html: wrapStandalone(
+        // No layout argument on purpose. It would switch callouts to the leaflet's severity
+        // bands; a two-column MANUAL keeps its tinted panels (see manual2colOverrides). The
+        // layout reaches this part through the stylesheet alone.
         buildTocPage(manual, band) + buildSectionPages(manual, !opts.mergeTocIntoContent),
         styles,
+        partLang(manual.language),
       ),
       // Only tag with an edge tab when the booklet actually spans multiple languages.
       tab: multi ? { index: i, total: manuals.length, code: manual.language } : null,

@@ -75,8 +75,13 @@ export const upsertSupplierNotification = async (payload: {
         // One statement, not read-then-write. The old select-then-insert raced two app
         // mounts against each other and left duplicates in the live table (two rows for
         // the same link, 73ms apart, saying "overdue by 112 day(s)" and "153 day(s)").
-        // Migration 148 adds the partial unique index this conflict target needs, and
-        // dedupes what the race already produced.
+        // Migration 148 dedupes what the race already produced and adds the uniqueness
+        // this conflict target needs. It has to be a NON-partial index: PostgREST sends
+        // `on_conflict=supplier_id,link` with no index predicate, and Postgres only
+        // infers a partial index as the arbiter when the statement carries a matching
+        // `ON CONFLICT ... WHERE`. 148 shipped it partial (`where supplier_id is not
+        // null`), so every call failed 42P10 into the catch below until migration 168
+        // dropped the redundant predicate.
         await db.upsert(
             'notifications',
             {

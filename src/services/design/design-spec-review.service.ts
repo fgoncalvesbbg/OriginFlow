@@ -29,20 +29,28 @@ export const designSpecReviewUrl = (token: string): string =>
  * vendor"), and it is the only way the board can say WHO is still outstanding — a round
  * closes only when every live link has been submitted.
  *
+ * `supersedesId` names THIS RECIPIENT's link from the previous round (migration 169). Setting
+ * it is what lets them open the new version and still see what they asked for on the old one,
+ * and it is per-recipient on purpose: pointing every round-two link at the whole document's
+ * history would show each supplier every other supplier's notes.
+ *
  * The TTL default (30 days) comes from the shared layer: omitting `expiresAt` gets it,
  * passing `null` explicitly means never. Both are honoured exactly as passed.
  */
 export const sendDesignSpecForReview = async (
   spec: Pick<DesignSpec, 'projectId'>,
   version: Pick<DesignSpecVersion, 'id' | 'version'>,
-  opts?: { label?: string; expiresAt?: string | null },
+  opts?: { label?: string; expiresAt?: string | null; supersedesId?: string | null },
 ): Promise<ReviewShare> => createReviewShare(
   designSpecSubject(spec, version),
   opts && 'expiresAt' in opts
-    ? { label: opts.label, expiresAt: opts.expiresAt, mode: 'review' }
+    ? {
+      label: opts.label, expiresAt: opts.expiresAt, mode: 'review',
+      supersedesId: opts.supersedesId ?? null,
+    }
     // Deliberately omits the key rather than passing undefined, so the shared module's
     // `'expiresAt' in opts` test still applies the 30-day default.
-    : { label: opts?.label, mode: 'review' },
+    : { label: opts?.label, mode: 'review', supersedesId: opts?.supersedesId ?? null },
 );
 
 /** Live links for one version, most recent first. */

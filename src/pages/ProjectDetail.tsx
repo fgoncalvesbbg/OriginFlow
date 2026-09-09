@@ -1584,14 +1584,12 @@ const ProjectDetail: React.FC = () => {
         <button onClick={() => setActiveTab('im')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'im' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <BookOpen size={16} /> Instruction Manual
         </button>
-        {/* Hidden unless the viewer is a Super Admin, matching the /design-specs prefix gate
-            in moduleAccess.config: a tab that shows an unfinished module would be exactly the
-            leak that gating the route prevents. */}
-        {user?.isSuperAdmin && (
-          <button onClick={() => setActiveTab('design')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'design' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
-            <ClipboardList size={16} /> Design Spec
-          </button>
-        )}
+        {/* Open to every signed-in user, matching the ungated /design-specs route: what a
+            viewer can read or change here is decided by RLS (can_see_project() for reads,
+            is_design_editor() for writes), not by hiding the tab. */}
+        <button onClick={() => setActiveTab('design')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'design' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <ClipboardList size={16} /> Design Spec
+        </button>
         <button onClick={() => setActiveTab('timeline')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'timeline' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Calendar size={16} /> Timeline
         </button>
@@ -2499,7 +2497,7 @@ const ProjectDetail: React.FC = () => {
       )}
 
       {/* TIMELINE TAB */}
-      {activeTab === 'design' && project && user?.isSuperAdmin && (
+      {activeTab === 'design' && project && (
         <ProjectDesignSpecPanel projectId={project.id} projectName={project.name} />
       )}
 

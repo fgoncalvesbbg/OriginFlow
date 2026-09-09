@@ -141,6 +141,10 @@ export {
   getProjectBindings,
   bindDocumentToProject,
   unbindDocumentFromProject,
+  getTemplateDocumentLinks,
+  linkDocumentToTemplate,
+  unlinkDocumentFromTemplate,
+  bindTemplateDocumentsToProject,
   latestVersionUrl,
   getSupplierProjectDocuments,
   getInternalProjectDocuments,
@@ -389,7 +393,7 @@ export type {
   PrintSettingsProfile,
   PrintTypography,
   PrintPageSizeKey,
-  PrintLeafletLayout,
+  PrintLayout,
   IMShare,
   IMShareMode,
   IMReviewComment,
@@ -571,3 +575,25 @@ export {
   setDesignSpecSkus,
   getDesignSpecRounds
 } from './design';
+
+// Roadmap Creator (migration 167). roadmap.service.ts is the single seam the port hangs on —
+// the 15 functions below were ProductToolkit's entire client/server contract, so the board
+// components never learned that the Express backend became the db port.
+export {
+  canEditRoadmap,
+  getRoadmapApprovers,
+  getRoadmapCategories,
+  getRoadmapBoard,
+  getRoadmapImports,
+  getRoadmapAudit,
+  importRoadmapSkus,
+  setRoadmapFlag,
+  clearRoadmapFlag,
+  setRoadmapFlagStatus,
+  addRoadmapPlacer,
+  updateRoadmapPlacer,
+  removeRoadmapPlacer,
+  addRoadmapAxisValue,
+  removeRoadmapAxisValue,
+  clearRoadmapCategory,
+} from './roadmap';

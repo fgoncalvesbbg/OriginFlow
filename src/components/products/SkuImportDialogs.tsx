@@ -2,10 +2,12 @@
  * The three ways SKUs get into a category, absorbed from the SKU Catalog page.
  *
  *  - **Add one** — a single catalog SKU, number and title.
- *  - **Upload a values sheet** — a transposed sheet (SKU numbers across the top, attributes
- *    down the side), parsed in the browser. Three stages: scan → preview → apply, so a wrong
- *    file is caught before anything reaches the shared database, and the person applying it
- *    sees the counts they are about to commit for everyone.
+ *  - **Upload a values sheet** — either orientation (SKUs across the top, or one row per SKU
+ *    with attributes across the top, which is how every category review sheet is laid out),
+ *    parsed in the browser. Three stages: scan → preview → apply, so a wrong file is caught
+ *    before anything reaches the shared database, and the person applying it sees the counts
+ *    they are about to commit for everyone. The orientation is detected and stated, with a
+ *    switch, because a wrong guess is otherwise indistinguishable from a wrong file.
  *  - **Paste a roster** — "these numbers belong to this category", with no values at all. This
  *    is what leaflet coverage is reported against, and it is a different act from filling in
  *    attributes, which is why it is a different dialog.
@@ -14,10 +16,10 @@
  */
 import React, { useState } from 'react';
 import type { CategoryAttribute } from '../../types';
-import type { SkuCsvParseResult } from '../../utils';
+import type { SkuCsvParseResult, SkuSheetOrientation } from '../../utils';
 import { parseSkuCsv, parseSkuRoster } from '../../utils';
 import { Button } from '../common/Button';
-import { X, Upload, ListPlus, Plus, AlertTriangle } from 'lucide-react';
+import { X, Upload, ListPlus, Plus, AlertTriangle, Repeat, Info } from 'lucide-react';
 
 const Shell: React.FC<{
   title: string;
@@ -131,24 +133,36 @@ export const SkuSheetUploadDialog: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  // The bytes are kept so the orientation can be switched without asking for the file again.
+  // Re-reading is cheap and local; making somebody re-pick a file to correct a guess we made
+  // is the kind of friction that gets a feature abandoned halfway through.
+  const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
 
-  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setDone(null);
+  const run = (bytes: ArrayBuffer, orientation?: SkuSheetOrientation) => {
     try {
-      const parsed = parseSkuCsv(await file.arrayBuffer(), attributes as CategoryAttribute[]);
+      const parsed = parseSkuCsv(bytes, attributes as CategoryAttribute[], { orientation });
       setResult(parsed);
       setError(
         parsed.rows.length === 0
-          ? 'No SKU columns found. The header row should list SKU numbers across the top, with attributes down the first column.'
+          ? parsed.orientation === 'wide'
+            ? 'No SKU rows found. A sheet read this way needs an item number in each row of the SKU column.'
+            : 'No SKU columns found. Read this way, the header row should list SKU numbers across the top with attributes down the first column — try the other orientation below.'
           : null,
       );
     } catch (err: any) {
       setResult(null);
       setError(`Could not read the file: ${err.message}`);
     }
+  };
+
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setDone(null);
+    const bytes = await file.arrayBuffer();
+    setBuffer(bytes);
+    run(bytes);
     e.target.value = '';
   };
 
@@ -168,11 +182,14 @@ export const SkuSheetUploadDialog: React.FC<{
 
   const matched = result?.attributes.filter(a => a.matched).length ?? 0;
   const unmatched = (result?.attributes.length ?? 0) - matched;
+  const cells = result?.rows.reduce((n, r) => n + r.values.length, 0) ?? 0;
+  const flagged = result?.rows.filter(r => r.flags.length > 0).length ?? 0;
+  const other: SkuSheetOrientation = result?.orientation === 'wide' ? 'transposed' : 'wide';
 
   return (
     <Shell
       title="Upload a values sheet"
-      subtitle="SKU numbers across the top, attributes down the side. Parsed here in your browser — nothing is written until you apply it."
+      subtitle="Either layout: SKUs across the top with attributes down the side, or one row per SKU with attributes across the top. Parsed here in your browser — nothing is written until you apply it."
       onClose={onClose}
     >
       <div className="space-y-4">
@@ -192,6 +209,32 @@ export const SkuSheetUploadDialog: React.FC<{
         {done && (
           <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
             {done}
+          </div>
+        )}
+
+        {/* How the sheet was read, in plain words, with the way out. A detector that guesses
+            silently turns "wrong guess" and "wrong file" into the same 0 — and the operator has
+            no way to tell which they are looking at. */}
+        {result && buffer && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+            <span className="flex items-start gap-1.5">
+              <Info size={13} className="mt-0.5 shrink-0" />
+              <span>
+                Read as <strong>{result.orientation === 'wide' ? 'one row per SKU' : 'one column per SKU'}</strong>
+                {result.orientationForced ? ' (your choice)' : ' (detected)'}.
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setDone(null);
+                run(buffer, other);
+              }}
+              className="flex items-center gap-1 rounded border border-indigo-300 bg-white px-2 py-1 font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              <Repeat size={12} />
+              Read as {other === 'wide' ? 'one row per SKU' : 'one column per SKU'}
+            </button>
           </div>
         )}
 
@@ -224,13 +267,43 @@ export const SkuSheetUploadDialog: React.FC<{
               </div>
             </div>
 
+            {/* The number that actually says how much work this import does. "65 SKUs" is true
+                of a file that matched nothing at all. */}
+            <p className="text-xs text-gray-600">
+              <strong className="tabular-nums">{cells}</strong> value
+              {cells === 1 ? '' : 's'} to write
+              {flagged > 0 && (
+                <>
+                  {' · '}
+                  <span className="text-amber-700">
+                    {flagged} SKU{flagged === 1 ? '' : 's'} with a cell the definition questions
+                  </span>
+                </>
+              )}
+              .
+            </p>
+
+            {/* Mirror columns are skipped on purpose, and saying so is the difference between a
+                deliberate skip and a parser that lost half the file. */}
+            {result.ignoredColumns.length > 0 && (
+              <div className="rounded border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+                <p>
+                  <strong className="tabular-nums">{result.ignoredColumns.length}</strong>{' '}
+                  comparison column{result.ignoredColumns.length === 1 ? '' : 's'} skipped (
+                  <em>… — in Akeneo</em> / <em>… — in EPREL</em>). Those hold what the other
+                  system has, not what this category should say.
+                </p>
+              </div>
+            )}
+
             {/* Named, not silently dropped: a row the sheet holds that this category has no
                 attribute for is a definition to fix, not data to discard quietly. */}
             {unmatched > 0 && (
               <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 <p className="font-semibold">
-                  {unmatched} row{unmatched === 1 ? '' : 's'} in the sheet match no attribute in
-                  this category and will be ignored:
+                  {unmatched} {result.orientation === 'wide' ? 'column' : 'row'}
+                  {unmatched === 1 ? '' : 's'} in the sheet match no attribute in this category
+                  and will be ignored:
                 </p>
                 <ul className="mt-1 space-y-0.5">
                   {result.attributes
@@ -241,6 +314,15 @@ export const SkuSheetUploadDialog: React.FC<{
                     ))}
                   {unmatched > 12 && <li>• …and {unmatched - 12} more</li>}
                 </ul>
+                {/* The remedy, not just the count. A sheet full of unrecognised columns almost
+                    always means the definitions were never imported for this category, and
+                    that is a different screen — worth saying so here rather than leaving
+                    somebody to conclude their file is wrong. */}
+                <p className="mt-2">
+                  If most of the sheet is here, this category's attributes have not been defined
+                  yet. Import them first in <strong>Admin → Categories</strong> (from a CSV or
+                  from ProductToolkit), then upload this sheet again.
+                </p>
               </div>
             )}
 

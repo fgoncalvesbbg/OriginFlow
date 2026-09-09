@@ -29,6 +29,7 @@ import {
   getDocuments,
   bindDocumentToProject,
   unbindDocumentFromProject,
+  bindTemplateDocumentsToProject,
   downloadDocument,
 } from '../../services/documents';
 import {
@@ -38,7 +39,7 @@ import {
 } from '../../types';
 import {
   FileText, Download, Loader2, Trash2, Plus, Eye, EyeOff,
-  ExternalLink, AlertTriangle, BookOpen,
+  ExternalLink, AlertTriangle, BookOpen, Wand2,
 } from 'lucide-react';
 
 interface Props {
@@ -73,6 +74,7 @@ const ProjectDocumentsTab: React.FC<Props> = ({ projectId, onSuccess, onError })
    *  separately so the picker says why it is empty instead of claiming everything is
    *  already bound — which is what an unexplained empty list looks like. */
   const [registryError, setRegistryError] = useState(false);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,6 +123,31 @@ const ProjectDocumentsTab: React.FC<Props> = ({ projectId, onSuccess, onError })
     }
   };
 
+  /**
+   * Catch this project up with the default template's standard documents.
+   *
+   * Every project created from now on gets these at creation time (see createProject), so
+   * this is for the ones that predate the template's links, or that predate the template
+   * gaining a new one. Idempotent server-side, so it adds what is missing and leaves the
+   * rest — including anything bound here by hand — alone.
+   */
+  const applyTemplate = async () => {
+    setApplyingTemplate(true);
+    try {
+      const count = await bindTemplateDocumentsToProject(projectId);
+      if (count === 0) {
+        onError('The default project template has no standard documents linked yet. An admin sets those under Admin panel → Project Templates.');
+        return;
+      }
+      await load();
+      onSuccess(`Standard documents applied (${count} from the default template).`);
+    } catch (e: any) {
+      onError(e?.message || 'Could not apply the standard documents.');
+    } finally {
+      setApplyingTemplate(false);
+    }
+  };
+
   const unbind = async (documentId: string, title: string) => {
     if (!window.confirm(`Remove "${title}" from this project?\n\nThe document stays in the registry; it just stops applying here, and the supplier stops seeing it.`)) {
       return;
@@ -163,12 +190,26 @@ const ProjectDocumentsTab: React.FC<Props> = ({ projectId, onSuccess, onError })
               )}
             </p>
           </div>
-          <Link
-            to="/documents"
-            className="text-sm text-indigo-600 hover:underline inline-flex items-center gap-1.5 shrink-0"
-          >
-            <ExternalLink size={14} /> Manage registry
-          </Link>
+          <div className="flex items-center gap-4 shrink-0">
+            <button
+              type="button"
+              onClick={applyTemplate}
+              disabled={applyingTemplate}
+              title="Add the standard documents the default project template hands down"
+              className="text-sm text-indigo-600 hover:underline inline-flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {applyingTemplate
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Wand2 size={14} />}
+              Apply standard documents
+            </button>
+            <Link
+              to="/documents"
+              className="text-sm text-indigo-600 hover:underline inline-flex items-center gap-1.5"
+            >
+              <ExternalLink size={14} /> Manage registry
+            </Link>
+          </div>
         </div>
 
         {loading ? (

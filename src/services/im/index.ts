@@ -73,7 +73,7 @@ export {
   PRINT_FONT_FAMILIES,
   PRINT_SETTING_LIMITS,
 } from './im-print-settings.service';
-export type { PrintSettingsProfile, PrintTypography, PrintPageSizeKey, PrintLeafletLayout } from './im-print-settings.service';
+export type { PrintSettingsProfile, PrintTypography, PrintPageSizeKey, PrintLayout } from './im-print-settings.service';
 export type { PublishResult, PublishHistoryEvent } from './im-publish.service';
 export {
   getStaleProjectIMDetails,

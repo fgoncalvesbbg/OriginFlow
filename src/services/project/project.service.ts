@@ -9,6 +9,10 @@ import { Project, ProjectOverallStatus, ProjectMilestones } from '../../types';
 import { mapProject } from '../../utils/mappers.utils';
 import { generateUUID } from '../../utils';
 import { getDefaultTemplateStructure } from './project-template.service';
+// Imported from the service file, not the barrel: the documents module speaks HTTP to
+// /api/doc and pulling it in through services/index.ts would drag the whole barrel into
+// this one's import graph.
+import { bindTemplateDocumentsToProject } from '../documents/document.service';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
@@ -98,12 +102,12 @@ export const createProject = async (name: string, supplierId: string, projectId:
      * template (Admin panel → Project Templates) rather than being hardcoded here, so an
      * admin can change what a new launch starts with without a code deploy.
      */
-    const seedChecklist = async () => {
+    const seedChecklist = async (): Promise<string | undefined> => {
         try {
             const structure = await getDefaultTemplateStructure();
             if (!structure || structure.steps.length === 0) {
                 console.error("No default project template configured. Set one under Admin panel > Project Templates.");
-                return;
+                return undefined;
             }
 
             const stepsPayload = structure.steps.map((step, i) => ({
@@ -127,12 +131,39 @@ export const createProject = async (name: string, supplierId: string, projectId:
             }));
 
             if (docsPayload.length > 0) await db.insertMany('project_documents', docsPayload);
+
+            return structure.templateId;
         } catch(e) {
             console.error("Failed to seed launch checklist. Check row-level-security permissions.", e);
+            return undefined;
         }
     };
 
-    await seedChecklist();
+    /**
+     * The registry documents the same template hands down (Admin panel > Project Templates >
+     * Standard documents), attached as doc_bindings so the project shows the CURRENT final
+     * version of each — a packaging guideline the project reads, not a slot it has to fill.
+     * Contrast the checklist above, which stamps COPIES of titles into project_documents.
+     *
+     * Server-side, because template_doc_bindings and doc_bindings are both server-only
+     * (migration 159). The templateId is passed explicitly rather than letting the server
+     * resolve the default again, so the documents provably come from the same template
+     * whose phases were just stamped even if an admin flips the default mid-creation.
+     *
+     * Non-fatal by design, exactly like seedChecklist: a project that exists with no
+     * standard documents attached is recoverable from the project's Documents tab, whereas
+     * a creation that throws after the row is already committed leaves a project the PM
+     * believes failed. Both are logged.
+     */
+    const templateId = await seedChecklist();
+
+    if (templateId) {
+        try {
+            await bindTemplateDocumentsToProject(project.id, templateId);
+        } catch (e) {
+            console.error("Failed to attach the template's standard documents. Add them from the project's Documents tab.", e);
+        }
+    }
 
     return project;
 };

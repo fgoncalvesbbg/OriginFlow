@@ -2,7 +2,7 @@
 /** Root application component: defines the route table and wraps pages in providers/guards. */
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from '../context/AuthContext';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 import { ToastProvider, ToastContext } from '../context/ToastContext';
 import { ConnectionProvider } from '../context/ConnectionContext';
 import ProtectedRoute from '../components/ProtectedRoute';
@@ -47,6 +47,7 @@ import IMSharedManual from '../pages/im/IMSharedManual';
 import IMReviewPortal from '../pages/im/IMReviewPortal';
 import DesignSpecReviewPortal from '../pages/design/DesignSpecReviewPortal';
 import DesignSpecsDashboard from '../pages/design/DesignSpecsDashboard';
+import RoadmapDashboard from '../pages/roadmap/RoadmapDashboard';
 import IMBlockLibrary from '../pages/im/IMBlockLibrary';
 import ProjectIMGenerator from '../pages/im/ProjectIMGenerator';
 
@@ -62,10 +63,17 @@ import SupplierAttributePortal from '../pages/SupplierAttributePortal';
 import SupplierAttributeBatchPortal from '../pages/SupplierAttributeBatchPortal';
 
 const AppContent: React.FC = () => {
-  // Trigger background checks for deadlines on app mount
+  const { isAuthenticated, isLoading } = useAuth();
+
+  // Trigger background checks for deadlines once a session is actually in hand.
+  // Firing this on bare mount sent the query before the Supabase client had hydrated its
+  // token (and on every public/supplier route, where there is no session at all), so
+  // PostgREST answered 401 "permission denied for table compliance_requests" — anon has no
+  // SELECT grant. The check is internal-only, so gate it on the authenticated session.
   useEffect(() => {
+    if (isLoading || !isAuthenticated) return;
     checkComplianceDeadlines();
-  }, []);
+  }, [isLoading, isAuthenticated]);
 
   const toastContext = React.useContext(ToastContext);
 
@@ -140,14 +148,27 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           } />
 
-          {/* Design Specs. Super-Admin-gated while the module is under construction; the
-              real access model is the DESIGNER role and the is_design_editor() write
-              policies, which apply regardless. The spec DETAIL lives on the project's own
-              Design Spec tab — one spec per project makes the project its page. */}
+          {/* Design Specs — open to every signed-in user. The access model is entirely in
+              RLS: the DESIGNER role and the is_design_editor() write policies decide who can
+              change a spec, and can_see_project() decides whose specs each viewer reads. The
+              spec DETAIL lives on the project's own Design Spec tab — one spec per project
+              makes the project its page. */}
           <Route path="/design-specs" element={
             <ProtectedRoute>
+              <DesignSpecsDashboard />
+            </ProtectedRoute>
+          } />
+
+          {/* Roadmap Creator — Super-Admin-only while the port is under construction (the
+              Step-Up Chart, History and Summary tabs are not built yet). Same prefix list as
+              /attributes gates the sidebar, so the nav entry and this guard cannot disagree.
+              The real write model is RLS: is_roadmap_editor() from migration 167, which is
+              admins and PMs; the reference tables have no write policy at all. Remove the
+              prefix from moduleAccess.config to launch it. */}
+          <Route path="/roadmap" element={
+            <ProtectedRoute>
               <SuperAdminRoute>
-                <DesignSpecsDashboard />
+                <RoadmapDashboard />
               </SuperAdminRoute>
             </ProtectedRoute>
           } />

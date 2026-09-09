@@ -35,9 +35,12 @@ export {
   MAX_SPEC_PDF_BYTES,
   fetchDesignSpecFileByToken,
   fetchDesignSpecFile,
+  fetchDesignSpecObject,
   uploadDesignSpecVersion,
 } from './design-spec-file.service';
-export type { DesignSpecFile, UploadedVersionFiles } from './design-spec-file.service';
+export type {
+  DesignSpecFile, DesignSpecObject, UploadedVersionFiles,
+} from './design-spec-file.service';
 
 export { stampDraftPdf, readPageCount, asciiSafe } from './design-spec-stamp';
 

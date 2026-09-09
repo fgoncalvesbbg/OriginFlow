@@ -423,14 +423,6 @@ LaunchFlow PLM Platform`;
     return date.toLocaleDateString(undefined, { timeZone: 'UTC' });
   };
   
-  if (loading || !req) return <Layout><div>Loading...</div></Layout>;
-
-  const isOverdue = isDateOnlyPast(req.deadline) && req.status === ComplianceRequestStatus.PENDING_SUPPLIER;
-
-  // The supplier's declaration is final once submitted — internal users can review it
-  // here but must not be able to rewrite what was answered.
-  const isLocked = req.status !== ComplianceRequestStatus.PENDING_SUPPLIER;
-
   /**
    * Expired regulations behind THIS request's requirements (migration 140).
    *
@@ -461,6 +453,14 @@ LaunchFlow PLM Platform`;
     () => new Map(regulations.map(r => [r.id, r])),
     [regulations],
   );
+
+  if (loading || !req) return <Layout><div>Loading...</div></Layout>;
+
+  const isOverdue = isDateOnlyPast(req.deadline) && req.status === ComplianceRequestStatus.PENDING_SUPPLIER;
+
+  // The supplier's declaration is final once submitted — internal users can review it
+  // here but must not be able to rewrite what was answered.
+  const isLocked = req.status !== ComplianceRequestStatus.PENDING_SUPPLIER;
 
   const groupedReqs = requirements.reduce((acc, r) => {
       const sec = r.section || 'General Requirements';

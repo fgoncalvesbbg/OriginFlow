@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, FileText, Scale, ClipboardList, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Inbox, ShoppingBag, CalendarClock, Truck, BookOpen, Lock, AlertCircle, Table2, PanelLeftClose, PanelLeftOpen, Menu, X, FileDown, FileText, Scale, ClipboardList, Map, type LucideIcon } from 'lucide-react';
 import { UserRole } from '../types';
 import { isSuperAdminOnlyPath } from '../config/moduleAccess.config';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -105,6 +105,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { to: '/documents', label: 'SOP & Documents', Icon: FileText, match: p => p.startsWith('/documents') },
     { to: '/design-specs', label: 'Design Specs', Icon: ClipboardList, match: p => p.startsWith('/design-specs') },
     { to: '/attributes', label: 'Attribute Viewer', Icon: Table2, match: p => p.startsWith('/attributes') },
+    { to: '/roadmap', label: 'Roadmap Creator', Icon: Map, match: p => p.startsWith('/roadmap') },
   ];
   const NAV_TOOLS: { to: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
     { to: '/tools/pdf-to-markdown', label: 'PDF → Markdown', Icon: FileDown, match: p => p.startsWith('/tools/pdf-to-markdown') },

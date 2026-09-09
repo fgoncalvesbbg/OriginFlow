@@ -51,6 +51,34 @@ export interface PdfReviewCanvasProps {
   onFocusComment: (id: string | null) => void;
   /** Read-only mode: pins are shown, none can be dropped. */
   readOnly?: boolean;
+  /**
+   * Notes from an EARLIER version of this document, drawn as hollow rings at the place they
+   * were made — "this is what the last round flagged here".
+   *
+   * Deliberately UNNUMBERED. A number would come from another version's numbering, where the
+   * same digit already belongs to a different pin, so it would point the reader at the wrong
+   * note in the rail. Their identity comes from the rail entry a click focuses.
+   *
+   * THE CAVEAT THAT MUST STAY VISIBLE: these coordinates are this version's fractions applied
+   * to another version's pages. That is exact as long as the page still shows what it showed
+   * — fractional anchors survive a different page size and any zoom — but a page inserted or
+   * removed between versions shifts every ghost after it. A ghost says "the last round
+   * flagged this spot on ITS copy", never "the problem is here now".
+   */
+  ghostComments?: readonly ReviewComment[];
+  /**
+   * Optional: hands the caller this pane's scroll container as it enters and leaves the DOM
+   * (null on the way out).
+   *
+   * Added for the internal version viewer, which needs to drive the scroll position from
+   * outside — to keep two versions in step in the compare view, and to jump to the page a
+   * note sits on. The reviewer's portal passes nothing and is unaffected.
+   *
+   * The caller does NOT need to memoize this: it is read through a ref, so a new function
+   * identity each render does not detach the container or restart its ResizeObserver.
+   * Page geometry is readable from the `[data-page]` elements inside it.
+   */
+  onScrollElement?: (el: HTMLDivElement | null) => void;
 }
 
 interface PageState {
@@ -76,7 +104,8 @@ const pinNumbers = (comments: readonly ReviewComment[]): Map<string, number> => 
 
 const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
   fileUrl, comments, composing, draftAnchor, onDropPin,
-  focusedCommentId, onFocusComment, readOnly = false,
+  focusedCommentId, onFocusComment, readOnly = false, onScrollElement,
+  ghostComments,
 }) => {
   const [doc, setDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageState[]>([]);
@@ -86,7 +115,16 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
   /** Width of the scroll container, so pages can be fitted to it. */
   const [containerWidth, setContainerWidth] = useState(0);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const resizeObs = useRef<ResizeObserver | null>(null);
+  /**
+   * The latest `onScrollElement`, so `attachScroll` can stay a `[]`-dependency callback ref.
+   *
+   * If the prop were a dependency instead, a caller passing an inline arrow would rebuild the
+   * callback ref every render, which detaches and re-attaches the container — tearing down
+   * the ResizeObserver and re-measuring on every keystroke elsewhere in the page.
+   */
+  const scrollElementCb = useRef(onScrollElement);
   const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
   /** Pages already rastered, so a re-render at the same scale is skipped. */
   const renderedAt = useRef(new Map<number, number>());
@@ -131,16 +169,36 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
     };
   }, [fileUrl]);
 
-  // ---- track the container width, so pages fit it ----
-  useEffect(() => {
-    const el = scrollRef.current;
+  /**
+   * Track the container width, so pages fit it.
+   *
+   * A CALLBACK REF, not an effect. The scroll container only exists in the loaded branch of
+   * the render, so a mount-time effect (deps `[]`) ran while the spinner was on screen, found
+   * a null ref, bailed, and never ran again — leaving containerWidth at 0, which pins `scale`
+   * to its unmeasured fallback and makes the zoom buttons change nothing but their own label.
+   * A callback ref fires when the node actually enters and leaves the DOM, whichever branch
+   * put it there.
+   */
+  const attachScroll = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    scrollElementCb.current?.(el);
+    resizeObs.current?.disconnect();
+    resizeObs.current = null;
     if (!el) return;
     const measure = () => setContainerWidth(el.clientWidth);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    resizeObs.current = ro;
   }, []);
+
+  // The observer outlives the render that created it, so it needs an unmount teardown of its
+  // own — the callback ref only fires while the tree is still there to fire it.
+  useEffect(() => () => resizeObs.current?.disconnect(), []);
+
+  // Keep the callback ref pointing at the current prop. Its initial value is the one from the
+  // first render, which is the one `attachScroll` needs when it fires during mount.
+  useEffect(() => { scrollElementCb.current = onScrollElement; }, [onScrollElement]);
 
   /**
    * Scale that fits the widest page to the container, times the zoom step.
@@ -150,7 +208,9 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
    * ones up to the same width as the portrait ones.
    */
   const scale = useMemo(() => {
-    if (containerWidth === 0 || pages.length === 0) return 1;
+    // Unmeasured (a container of zero width, e.g. mounted hidden): fall back to the PDF's
+    // intrinsic size, but still honour the zoom step rather than freezing at 100%.
+    if (containerWidth === 0 || pages.length === 0) return ZOOM_STEPS[zoomIndex];
     const widest = Math.max(...pages.map(p => p.width));
     // 48px of breathing room for the page shadow and the scrollbar.
     const fit = (containerWidth - 48) / widest;
@@ -292,11 +352,18 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-auto p-6 space-y-6">
+      <div ref={attachScroll} className="flex-1 overflow-auto p-6">
+        {/* Sized to the widest page but never narrower than the viewport: `min-w-full` keeps
+            the pages centred while they still fit, and `w-max` makes a zoomed-in page grow
+            the scrollable box instead of spilling out of the container's right padding. */}
+        <div className="w-max min-w-full mx-auto space-y-6">
         {pages.map(p => {
           const displayWidth = p.width * scale;
           const displayHeight = p.height * scale;
           const pagePins = comments.filter(
+            c => c.anchor?.kind === 'pdf' && c.anchor.page === p.pageNumber,
+          );
+          const pageGhosts = (ghostComments ?? []).filter(
             c => c.anchor?.kind === 'pdf' && c.anchor.page === p.pageNumber,
           );
           const draftOnThisPage = draftAnchor?.page === p.pageNumber ? draftAnchor : null;
@@ -321,6 +388,26 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
                 className="block"
                 style={{ width: displayWidth, height: displayHeight }}
               />
+
+              {/* Under the live pins: where a fix landed exactly on the old mark, this
+                  version's note is the one the reader needs to reach. */}
+              {pageGhosts.map(c => {
+                const a = c.anchor as PdfReviewAnchor;
+                const focused = focusedCommentId === c.id;
+                return (
+                  <button
+                    key={`ghost-${c.id}`}
+                    onClick={ev => { ev.stopPropagation(); onFocusComment(focused ? null : c.id); }}
+                    title={`From v${c.subjectVersion ?? '?'}: ${c.body}`}
+                    style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%` }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-dashed transition-transform ${
+                      focused
+                        ? 'border-indigo-600 bg-indigo-100 scale-125 z-20'
+                        : 'border-gray-500 bg-white/60 hover:scale-110 z-0'
+                    }`}
+                  />
+                );
+              })}
 
               {pagePins.map(c => {
                 const a = c.anchor as PdfReviewAnchor;
@@ -357,6 +444,7 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );

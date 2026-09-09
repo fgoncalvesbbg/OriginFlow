@@ -126,6 +126,16 @@ export interface ProjectDocumentEntry<
 export type SupplierProjectDocument = ProjectDocumentEntry<SupplierDocument, SupplierDocumentVersion>;
 export type InternalProjectDocument = ProjectDocumentEntry<RegisteredDocument, DocumentVersion>;
 
+/**
+ * A registry document a project template hands down (migration 166).
+ *
+ * Structurally the same row the registry list returns, and deliberately so: the admin
+ * linking it needs the same two facts — is it supplier-facing, and has anyone finalised a
+ * version — because a link with no released version binds silently on every new project
+ * and is invisible to every supplier.
+ */
+export type TemplateDocumentLink = RegisteredDocumentRow;
+
 /** A document bound to a project, as the admin binding panel lists it. */
 export interface DocumentBinding {
   id: string;

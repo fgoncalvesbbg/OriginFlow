@@ -40,7 +40,14 @@ vi.mock('../../data', () => ({
 
 vi.mock('../../config/environment.config', () => ({ isLive: true }));
 
-import { addReviewComment, anchorFromRow } from './review-comments.service';
+import { db } from '../../data';
+import {
+  addReviewComment, anchorFromRow, setReviewCommentStatus, markReviewCommentChecked,
+} from './review-comments.service';
+
+/** The column payload the last `updateWhere` was given. */
+const lastUpdate = (): Record<string, unknown> =>
+  (db.updateWhere as unknown as { mock: { calls: any[][] } }).mock.calls.at(-1)![1];
 
 describe('addReviewComment — anchor goes onto the wire as exactly one shape', () => {
   beforeEach(() => { rpcCalls.length = 0; });
@@ -130,5 +137,55 @@ describe('anchorFromRow', () => {
 
   it('returns null for a row with no anchor at all', () => {
     expect(anchorFromRow({ section_id: null, page: null })).toBeNull();
+  });
+});
+
+/**
+ * Carrying a round forward (migration 169).
+ *
+ * The stamp is the only thing that distinguishes "nobody has re-checked this note" from
+ * "someone checked it against v3 and it is still wrong", so the rules about when it is
+ * written — and, more importantly, when it is LEFT ALONE — are the whole feature.
+ */
+describe('triage records which version the verdict was made against', () => {
+  beforeEach(() => {
+    (db.updateWhere as unknown as { mockClear: () => void }).mockClear();
+  });
+
+  it('leaves the stamp untouched when no version is on screen', async () => {
+    await setReviewCommentStatus('c1', 'done');
+    const payload = lastUpdate();
+    // Absent, not null: a triage action taken from a plain list must not erase the knowledge
+    // that somebody checked this note against a version last week.
+    expect(payload).not.toHaveProperty('checked_subject_id');
+    expect(payload).not.toHaveProperty('checked_subject_version');
+    expect(payload.status).toBe('done');
+  });
+
+  it('stamps the version alongside the status when one is given', async () => {
+    await setReviewCommentStatus('c1', 'done', { subjectId: 'ver-3', version: 3 });
+    const payload = lastUpdate();
+    expect(payload.checked_subject_id).toBe('ver-3');
+    expect(payload.checked_subject_version).toBe(3);
+    expect(payload.status).toBe('done');
+    expect(payload.resolved_at).toEqual(expect.any(String));
+  });
+
+  it('clears the resolution but keeps the stamp when a note is reopened', async () => {
+    await setReviewCommentStatus('c1', 'open', { subjectId: 'ver-3', version: 3 });
+    const payload = lastUpdate();
+    expect(payload.status).toBe('open');
+    // Reopening must not leave the audit trail claiming a still-open note was resolved.
+    expect(payload.resolved_at).toBeNull();
+    expect(payload.resolved_by).toBeNull();
+    expect(payload.checked_subject_version).toBe(3);
+  });
+
+  it('"still an issue" records the check and nothing else', async () => {
+    await markReviewCommentChecked('c1', { subjectId: 'ver-3', version: 3 });
+    const payload = lastUpdate();
+    expect(payload).toEqual({ checked_subject_id: 'ver-3', checked_subject_version: 3 });
+    // Emphatically not a status change: the note stays open because it IS open.
+    expect(payload).not.toHaveProperty('status');
   });
 });

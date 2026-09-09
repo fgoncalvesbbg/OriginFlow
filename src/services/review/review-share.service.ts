@@ -43,6 +43,7 @@ export const mapShareRow = (row: any): ReviewShare => ({
   submittedAt: row.submitted_at ?? null,
   submittedBy: row.submitted_by ?? null,
   reviewStage: (row.review_stage ?? null) as ReviewStage | null,
+  supersedesId: row.supersedes_id ?? null,
 });
 
 /**
@@ -75,6 +76,14 @@ export const getReviewShares = async (
 };
 
 export interface CreateReviewShareOptions {
+  /**
+   * The link this one continues — the same recipient's link from the previous round.
+   *
+   * Setting it is what lets that recipient see their own earlier notes when they open the new
+   * link. The database refuses a chain that crosses projects or document types
+   * (`review_shares_check_supersedes`), so a wrong id fails loudly rather than leaking.
+   */
+  supersedesId?: string | null;
   label?: string;
   expiresAt?: string | null;
   mode?: ReviewShareMode;
@@ -110,6 +119,8 @@ export const createReviewShare = async (
     mode: opts?.mode ?? 'view',
     // Only a review link has a stage; a view link is not part of a workflow at all.
     review_stage: opts?.mode === 'review' ? (opts?.reviewStage ?? 'draft') : null,
+    // Likewise a chain: a view link is nobody's second round.
+    supersedes_id: opts?.mode === 'review' ? (opts?.supersedesId ?? null) : null,
   });
   return mapShareRow(created);
 };

@@ -16,6 +16,10 @@
  *   GET    /api/doc/projects/:projectId/bindings       which documents apply to a project
  *   POST   /api/doc/projects/:projectId/bindings       bind one
  *   DELETE /api/doc/projects/:projectId/bindings/:documentId
+ *   POST   /api/doc/projects/:projectId/bindings/from-template   bind a template's standard set
+ *   GET    /api/doc/templates/:templateId/documents    which documents a template hands down
+ *   POST   /api/doc/templates/:templateId/documents    ADMIN — link one
+ *   DELETE /api/doc/templates/:templateId/documents/:documentId  ADMIN — unlink it
  *
  * THE TWO-PHASE UPLOAD, AND WHY THE BYTES DO NOT COME THROUGH HERE
  * ----------------------------------------------------------------
@@ -562,6 +566,183 @@ const deleteBinding = async (supabase: Supabase, projectId: string, documentId: 
 };
 
 // ===========================================================================
+// Template document links
+// ===========================================================================
+//
+// Which registry documents a PROJECT TEMPLATE hands down (migration 166), and the route
+// createProject() calls to turn them into real bindings on a brand-new project.
+//
+// Authorization splits differently from project bindings above. Editing a template is an
+// admin act -- Project Templates is an admin-console screen and project_templates' own RLS
+// gates writes on profiles.role = 'ADMIN', which `requireAdmin` matches because user_roles
+// is trigger-synced from profiles.role. READING the links is only `requireInternal`, the
+// same gate as listing the registry itself.
+
+/** The document ids a template hands down. Unordered -- the reader sorts by title. */
+const templateLinkedDocumentIds = async (supabase: Supabase, templateId: string): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from('template_doc_bindings')
+    .select('document_id')
+    .eq('template_id', templateId);
+
+  if (error) {
+    console.error('[doc-registry] template link list failed:', error);
+    throw new Error('Could not load the template documents.');
+  }
+  return ((data || []) as { document_id: string }[]).map(r => r.document_id);
+};
+
+/**
+ * The documents a template hands down, with each one's current release.
+ *
+ * finalVersion is included for the same reason ProjectDocumentsTab shows it: a linked
+ * document with nothing finalised is a link that will bind on every new project and be
+ * invisible to every supplier, and the admin doing the linking is the only person in a
+ * position to notice.
+ */
+const listTemplateDocuments = async (supabase: Supabase, templateId: string) => {
+  const documentIds = await templateLinkedDocumentIds(supabase, templateId);
+  if (documentIds.length === 0) return docJson(200, { documents: [] });
+
+  const { data, error } = await supabase
+    .from('doc_documents')
+    .select(DOCUMENT_COLUMNS)
+    .in('id', documentIds)
+    .order('title');
+
+  if (error) {
+    console.error('[doc-registry] template document list failed:', error);
+    throw new Error('Could not load the template documents.');
+  }
+
+  const documents = (data || []) as unknown as DocumentRow[];
+
+  const { data: finals, error: finalErr } = await supabase
+    .from('doc_versions')
+    .select('id, document_id, label, finalized_at')
+    .eq('is_final', true)
+    .in('document_id', documentIds);
+
+  if (finalErr) {
+    console.error('[doc-registry] template final version list failed:', finalErr);
+    throw new Error('Could not load the template documents.');
+  }
+
+  const finalByDocument = new Map<string, { id: string; label: string; finalizedAt: string | null }>();
+  for (const f of (finals || []) as { id: string; document_id: string; label: string; finalized_at: string | null }[]) {
+    finalByDocument.set(f.document_id, { id: f.id, label: f.label, finalizedAt: f.finalized_at });
+  }
+
+  return docJson(200, {
+    documents: documents.map(d => ({
+      ...toInternalDocumentDto(d),
+      finalVersion: finalByDocument.get(d.id) ?? null,
+    })),
+  });
+};
+
+const linkTemplateDocument = async (
+  supabase: Supabase,
+  event: NetlifyEvent,
+  templateId: string,
+  caller: InternalCaller,
+) => {
+  const body = parseBody<{ documentId?: unknown }>(event);
+  const documentId = assertDocUuid(body.documentId, 'documentId');
+
+  const { error } = await supabase
+    .from('template_doc_bindings')
+    // upsert for the same reason createBinding upserts: linking twice is a double click.
+    .upsert({ template_id: templateId, document_id: documentId, created_by: caller.userId },
+            { onConflict: 'template_id,document_id' });
+
+  if (error) {
+    // 23503 covers both FKs -- an unknown template and an unknown document are the same
+    // 404 to the caller, and neither needs to be told which one it was.
+    if (error.code === '23503') throw new DocNotFoundError('No such template or document.');
+    console.error('[doc-registry] template link insert failed:', error);
+    throw new Error('Could not add the document to this template.');
+  }
+  return docJson(201, { ok: true });
+};
+
+const unlinkTemplateDocument = async (supabase: Supabase, templateId: string, documentId: string) => {
+  const { error } = await supabase
+    .from('template_doc_bindings')
+    .delete()
+    .eq('template_id', templateId)
+    .eq('document_id', documentId);
+
+  if (error) {
+    console.error('[doc-registry] template link delete failed:', error);
+    throw new Error('Could not remove the document from this template.');
+  }
+  // Existing projects keep the bindings they were created with. Unlinking changes what the
+  // NEXT project starts with and nothing else, the same way editing a template's phases
+  // does not restructure launches already under way.
+  return docJson(200, { ok: true });
+};
+
+/**
+ * Stamp a template's document links onto one project as real bindings.
+ *
+ * Called by createProject() right after it seeds the phase/document checklist, and by the
+ * project Documents tab for projects that predate the template's links.
+ *
+ * `templateId` is optional: omitted means the default template, which is what
+ * createProject() uses. Resolving it HERE rather than in the browser keeps every read of
+ * template_doc_bindings on the server, which is the whole reason that table has no
+ * PostgREST grants.
+ *
+ * Idempotent by upsert, so running it twice -- or on a project that already has some of
+ * these bound by hand -- adds the missing ones and touches nothing else.
+ */
+const bindTemplateDocuments = async (
+  supabase: Supabase,
+  event: NetlifyEvent,
+  projectId: string,
+  caller: InternalCaller,
+) => {
+  const body = parseBody<{ templateId?: unknown }>(event);
+
+  let templateId: string;
+  if (body.templateId !== undefined && body.templateId !== null) {
+    templateId = assertDocUuid(body.templateId, 'templateId');
+  } else {
+    const { data, error } = await supabase
+      .from('project_templates')
+      .select('id')
+      .eq('is_default', true)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[doc-registry] default template lookup failed:', error);
+      throw new Error('Could not read the default project template.');
+    }
+    // No default template is a configuration state, not an error: the project simply
+    // starts with no standard documents, and createProject() must not fail over it.
+    if (!data) return docJson(200, { bound: 0, documentIds: [] });
+    templateId = (data as { id: string }).id;
+  }
+
+  const documentIds = await templateLinkedDocumentIds(supabase, templateId);
+  if (documentIds.length === 0) return docJson(200, { bound: 0, documentIds: [] });
+
+  const { error } = await supabase
+    .from('doc_bindings')
+    .upsert(
+      documentIds.map(document_id => ({ project_id: projectId, document_id, created_by: caller.userId })),
+      { onConflict: 'project_id,document_id' },
+    );
+
+  if (error) {
+    console.error('[doc-registry] template binding stamp failed:', error);
+    throw new Error('Could not add the standard documents to this project.');
+  }
+  return docJson(200, { bound: documentIds.length, documentIds });
+};
+
+// ===========================================================================
 // Handler
 // ===========================================================================
 
@@ -636,7 +817,31 @@ export const handler = async (event: NetlifyEvent) => {
 
       if (method === 'GET' && !subId) return await listBindings(supabase, projectId);
       if (method === 'POST' && !subId) return await createBinding(supabase, event, projectId, caller);
+      // Checked before the DELETE branch's assertDocUuid, so the literal segment is never
+      // mistaken for a document id. Same project gate as binding one by hand, because that
+      // is what it does — several at once, from the template.
+      if (method === 'POST' && subId === 'from-template') {
+        return await bindTemplateDocuments(supabase, event, projectId, caller);
+      }
       if (method === 'DELETE' && subId) return await deleteBinding(supabase, projectId, assertDocUuid(subId, 'documentId'));
+      return docJson(405, { error: 'Method not allowed' });
+    }
+
+    if (resource === 'templates') {
+      const templateId = assertDocUuid(id, 'templateId');
+      if (sub !== 'documents') throw new DocNotFoundError('Unknown route.');
+
+      // No authorizeProject equivalent: a template is global, not project-scoped. Reading
+      // is internal, writing is admin — the same tier that owns the Project Templates
+      // screen these routes back.
+      if (method === 'GET' && !subId) return await listTemplateDocuments(supabase, templateId);
+      if (method === 'POST' && !subId) {
+        return await linkTemplateDocument(supabase, event, templateId, requireAdmin(caller));
+      }
+      if (method === 'DELETE' && subId) {
+        requireAdmin(caller);
+        return await unlinkTemplateDocument(supabase, templateId, assertDocUuid(subId, 'documentId'));
+      }
       return docJson(405, { error: 'Method not allowed' });
     }
 

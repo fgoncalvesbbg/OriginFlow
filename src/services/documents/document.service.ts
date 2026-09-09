@@ -28,6 +28,7 @@ import type {
   DocumentVersionEvent,
   RegisteredDocument,
   RegisteredDocumentRow,
+  TemplateDocumentLink,
 } from '../../types/document.types';
 
 const API = '/api/doc';
@@ -227,6 +228,56 @@ export const bindDocumentToProject = async (projectId: string, documentId: strin
 
 export const unbindDocumentFromProject = async (projectId: string, documentId: string): Promise<void> => {
   await request(`/projects/${projectId}/bindings/${documentId}`, { method: 'DELETE' });
+};
+
+// ===========================================================================
+// Project-template document links
+// ===========================================================================
+//
+// Which registry documents a project template hands down, and the call that stamps them
+// onto a project. Reads are internal; the two writes are admin-only server-side, so a
+// non-admin sees the same 403 the finalise button gives them.
+
+export const getTemplateDocumentLinks = async (templateId: string): Promise<TemplateDocumentLink[]> => {
+  const { documents } = await request<{ documents: TemplateDocumentLink[] }>(
+    `/templates/${templateId}/documents`,
+  );
+  return documents;
+};
+
+/** Admin only. Changes what the NEXT project created from this template starts with. */
+export const linkDocumentToTemplate = async (templateId: string, documentId: string): Promise<void> => {
+  await request(`/templates/${templateId}/documents`, {
+    method: 'POST',
+    body: JSON.stringify({ documentId }),
+  });
+};
+
+/** Admin only. Projects already created keep the bindings they were created with. */
+export const unlinkDocumentFromTemplate = async (templateId: string, documentId: string): Promise<void> => {
+  await request(`/templates/${templateId}/documents/${documentId}`, { method: 'DELETE' });
+};
+
+/**
+ * Bind a template's standard documents to one project.
+ *
+ * Called by createProject() for every new project, and by the project Documents tab for
+ * projects that predate the template's links. `templateId` omitted means the default
+ * template — the server resolves it, because template_doc_bindings is not readable from
+ * the browser at all.
+ *
+ * Idempotent: returns how many documents the template hands down, not how many rows were
+ * new, so calling it twice reports the same number and changes nothing the second time.
+ */
+export const bindTemplateDocumentsToProject = async (
+  projectId: string,
+  templateId?: string,
+): Promise<number> => {
+  const { bound } = await request<{ bound: number }>(`/projects/${projectId}/bindings/from-template`, {
+    method: 'POST',
+    body: JSON.stringify({ templateId: templateId ?? null }),
+  });
+  return bound;
 };
 
 // ===========================================================================

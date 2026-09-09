@@ -30,6 +30,7 @@ import {
   DESIGN_SPEC_STATUS_META, DESIGN_SPEC_STATUS_ORDER,
   type DesignSpecStatus, type DesignSpecRoundInput,
 } from './design-spec-status';
+import Layout from '../../components/Layout';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 
@@ -231,11 +232,16 @@ const DesignSpecsDashboard: React.FC = () => {
       : <span className="text-xs text-gray-400">No spec</span>;
 
   if (loading) {
-    return <div className="p-8 text-sm text-gray-400">Loading design specs…</div>;
+    return (
+      <Layout>
+        <div className="text-sm text-gray-400">Loading design specs…</div>
+      </Layout>
+    );
   }
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto">
+    <Layout>
+      <div className="max-w-[1600px] mx-auto">
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
           <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
@@ -407,7 +413,8 @@ const DesignSpecsDashboard: React.FC = () => {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </Layout>
   );
 };
 

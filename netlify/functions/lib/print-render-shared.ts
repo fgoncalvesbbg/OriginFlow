@@ -31,7 +31,7 @@ import {
   defaultTypographyFor,
   normalizePrintTypography,
   type PrintTypography,
-  type PrintLeafletLayout,
+  type PrintLayout,
 } from '../../../src/services/im/im-print-typography';
 import { isValidDocCode } from '../../../src/services/im/im-doc-code';
 import { assertUuid } from './http';
@@ -60,14 +60,22 @@ export interface RenderRequestBase {
    */
   typography?: PrintTypography;
   /**
-   * Which LAYOUT to set a Warning Leaflet in — 'classic' (the default, and what every leaflet
-   * has printed in so far) or 'compact2col' (the dense two-column A5 booklet).
+   * Which LAYOUT to set this document in — 'classic' (the default, and what everything printed
+   * in until the compact layout existed) or 'compact2col' (columns, justified and hyphenated).
+   * Valid for BOTH template types; what it means per type is documented on `PrintLayout`.
    *
    * Chosen per export in the print dialog. Like `mergeToc` this MUST be identical across the
    * prepare/part/merge calls of one job, which it is: the client sends one shared `base`.
-   * Ignored for full IMs.
    */
-  leafletLayout?: PrintLeafletLayout;
+  layout?: PrintLayout;
+  /**
+   * @deprecated The pre-manual name for `layout`, accepted so that a browser tab loaded before
+   * the deploy that widened this keeps rendering instead of silently falling back to classic.
+   * The pipeline is stateless — every call carries the whole request body — so the only window
+   * that matters is one open tab, but a leaflet quietly printing in the wrong layout is exactly
+   * the kind of failure nobody notices until the pallet arrives. Read only via `printLayoutOf`.
+   */
+  leafletLayout?: PrintLayout;
   /**
    * The document code (e.g. `WL-RAN-ANGLED-8MJ-A5`) — printed in the footer and used in the
    * download filename, so a leaflet on a pallet can be identified from the code plus the
@@ -128,6 +136,7 @@ export const isValidBase = (b: unknown): b is RenderRequestBase => {
     typeof r.back === 'object' &&
     (r.typography === undefined || (typeof r.typography === 'object' && r.typography !== null)) &&
     (r.mergeToc === undefined || typeof r.mergeToc === 'boolean') &&
+    (r.layout === undefined || r.layout === 'classic' || r.layout === 'compact2col') &&
     (r.leafletLayout === undefined || r.leafletLayout === 'classic' || r.leafletLayout === 'compact2col') &&
     (r.docCode === undefined || isValidDocCode(r.docCode)) &&
     (r.draft === undefined || typeof r.draft === 'boolean') &&
@@ -178,17 +187,26 @@ export class PermanentError extends Error {}
  * out-of-range point size or margin would otherwise reach PDFShift verbatim.
  */
 export const resolveTypography = (req: RenderRequestBase): PrintTypography =>
-  // Layout-independent on purpose: both leaflet layouts are set from the operator's single
-  // (warning_leaflet, page size) profile, so the compact layout can never drift to a different
-  // size than the classic one and one admin change moves both.
+  // Layout-independent on purpose: both layouts are set from the operator's single
+  // (template type, page size) profile, so the compact layout can never drift to a different
+  // size than the classic one and one admin change moves both. This is what makes the two
+  // directly comparable — a page-count difference between them is the COLUMNS, not the type.
   normalizePrintTypography(req.typography, defaultTypographyFor(req.templateType, req.pageSize));
 
 /**
- * The leaflet layout this request renders in. `classic` for anything that is not a leaflet,
- * so the layout can never change a full manual.
+ * The layout this request renders in — for either template type.
+ *
+ * This used to return `classic` for anything that was not a leaflet, which was the gate that
+ * kept the compact layout leaflet-only. It is deliberately gone: `compact2col` is now a choice
+ * on a full manual too. What is NOT shared is the meaning — see `PrintLayout`, and the
+ * `continuousFlow` / hazard-band branches, both of which stay keyed on templateType.
+ *
+ * Anything other than the two known values reads as `classic` rather than throwing: an
+ * unrecognised layout must degrade to the layout everything already prints in, never fail a
+ * job that is otherwise valid.
  */
-export const leafletLayoutOf = (req: RenderRequestBase): PrintLeafletLayout =>
-  req.templateType === 'warning_leaflet' && req.leafletLayout === 'compact2col' ? 'compact2col' : 'classic';
+export const printLayoutOf = (req: RenderRequestBase): PrintLayout =>
+  (req.layout ?? req.leafletLayout) === 'compact2col' ? 'compact2col' : 'classic';
 
 /**
  * The leaflet's single last-page line: copyright, then the publish version.
@@ -299,7 +317,7 @@ export const buildParts = (
     back: req.back,
     version: req.version,
     compact,
-    leafletLayout: leafletLayoutOf(req),
+    layout: printLayoutOf(req),
     typography: resolveTypography(req),
     // Per-export choice from the print dialog; the server-side IM_PRINT_MERGE_TOC flag
     // still forces it on fleet-wide. Saves a page per language by letting content continue

@@ -29,7 +29,7 @@ import {
   brandLogoUrl,
 } from '../../../config/im.constants';
 import { requestDraftPrintPdf, type DraftPrintPdfResult } from '../../../services';
-import { getPrintTypography, defaultTypographyFor, type PrintTypography, type PrintLeafletLayout } from '../../../services/im/im-print-settings.service';
+import { getPrintTypography, defaultTypographyFor, type PrintTypography, type PrintLayout } from '../../../services/im/im-print-settings.service';
 import { orderIMLanguages } from '../../../config/im-languages';
 import { TypographySummary } from './TypographySummary';
 import { useDocCode } from './useDocCode';
@@ -82,10 +82,12 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
 }) => {
   const isLeaflet = templateType === 'warning_leaflet';
 
-  // Leaflet layout to proof. This dialog is where the compact layout gets iterated on — a
-  // draft is one PDFShift part and leaves no history row — so it gets the same choice the
-  // production dialog does.
-  const [leafletLayout, setLeafletLayout] = React.useState<PrintLeafletLayout>('classic');
+  // Layout to proof, for either template type. This dialog is where a layout gets iterated on
+  // — a draft leaves no history row and costs one job — so it gets the same choice the
+  // production dialog does. It is also the cheapest way to answer the two questions a
+  // two-column MANUAL raises that a leaflet did not: whether full-measure figures span
+  // correctly, and how many pages the reformat actually saves.
+  const [layout, setLayout] = React.useState<PrintLayout>('classic');
 
 
   // Every language the template carries, in house order; English first by convention.
@@ -180,7 +182,7 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
         pageSize,
         typography,
         mergeToc: isLeaflet ? undefined : mergeToc,
-        leafletLayout: isLeaflet ? leafletLayout : undefined,
+        layout,
         docCode: docCode || undefined,
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         cover: {
@@ -297,29 +299,27 @@ const DraftPrintExportDialog: React.FC<DraftPrintExportDialogProps> = ({
                 ))}
               </div>
             </div>
-            {isLeaflet && (
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase">Layout</label>
-                <div className="flex gap-2 mt-1">
-                  {([
-                    { key: 'classic' as const, label: 'Classic' },
-                    { key: 'compact2col' as const, label: 'Compact 2-col' },
-                  ]).map((opt) => (
-                    <button
-                      key={opt.key}
-                      onClick={() => setLeafletLayout(opt.key)}
-                      className={`px-3 py-1.5 rounded border text-sm font-medium ${
-                        leafletLayout === opt.key
-                          ? 'bg-indigo-600 border-indigo-600 text-white'
-                          : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Layout</label>
+              <div className="flex gap-2 mt-1">
+                {([
+                  { key: 'classic' as const, label: 'Classic' },
+                  { key: 'compact2col' as const, label: 'Compact 2-col' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setLayout(opt.key)}
+                    className={`px-3 py-1.5 rounded border text-sm font-medium ${
+                      layout === opt.key
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
             {!isLeaflet && (
               <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer max-w-xs">
                 <input type="checkbox" className="mt-0.5" checked={mergeToc} onChange={(e) => setMergeToc(e.target.checked)} />

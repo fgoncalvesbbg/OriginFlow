@@ -71,10 +71,13 @@ describe('mapProfile — super admin flag', () => {
   });
 });
 
-describe('the Design Specs gate (migration 163 / Phase D)', () => {
-  it('gates the module and its whole subtree', () => {
-    expect(isSuperAdminOnlyPath('/design-specs')).toBe(true);
-    expect(isSuperAdminOnlyPath('/design-specs/anything')).toBe(true);
+describe('Design Specs — launched to all users', () => {
+  it('is NOT super-admin gated any more', () => {
+    // The module shipped: every signed-in user reaches /design-specs and the project's
+    // Design Spec tab. Who may read or write a spec is decided by RLS — can_see_project()
+    // for reads, is_design_editor() (ADMIN/DESIGNER) for writes — not by this list.
+    expect(isSuperAdminOnlyPath('/design-specs')).toBe(false);
+    expect(isSuperAdminOnlyPath('/design-specs/anything')).toBe(false);
   });
 
   it('does NOT gate the public review portal — suppliers are not signed in at all', () => {
@@ -86,5 +89,20 @@ describe('the Design Specs gate (migration 163 / Phase D)', () => {
   it('does not accidentally gate a future sibling route', () => {
     expect(isSuperAdminOnlyPath('/design-specs-report')).toBe(false);
     expect(isSuperAdminOnlyPath('/design')).toBe(false);
+  });
+});
+
+describe('Roadmap Creator — gated while the port is incomplete', () => {
+  it('is super-admin gated, subtree included', () => {
+    // Gated because the module is UNFINISHED (no Step-Up Chart, History or Summary tab yet),
+    // not because the data is sensitive. Its real write model is RLS: is_roadmap_editor() from
+    // migration 167 for annotations, and no write policy at all on the two reference tables.
+    expect(isSuperAdminOnlyPath('/roadmap')).toBe(true);
+    expect(isSuperAdminOnlyPath('/roadmap/anything')).toBe(true);
+  });
+
+  it('does not accidentally gate a future sibling route', () => {
+    expect(isSuperAdminOnlyPath('/roadmaps-report')).toBe(false);
+    expect(isSuperAdminOnlyPath('/road')).toBe(false);
   });
 });

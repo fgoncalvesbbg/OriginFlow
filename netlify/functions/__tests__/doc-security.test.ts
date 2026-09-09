@@ -25,6 +25,7 @@ const V_INTERNAL_FINAL = '66666666-6666-4666-8666-666666666666';
 const V_SUPPLIER_FINAL = '77777777-7777-4777-8777-777777777777';
 const V_SUPPLIER_DRAFT = '88888888-8888-4888-8888-888888888888';
 const ADMIN_USER = '99999999-9999-4999-8999-999999999999';
+const TEMPLATE_DEFAULT = 'a2f3b1c4-5d6e-4f70-8a91-b2c3d4e5f601';
 
 const PORTAL_TOKEN_A = 'portal-token-for-project-a';
 const PORTAL_TOKEN_B = 'portal-token-for-project-b';
@@ -757,5 +758,166 @@ describe('the internal registry is not reachable by a supplier, and finalising i
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toMatch(/does not belong to this document/i);
+  });
+});
+
+// =======================================================================================
+// Project-template document links (migration 166)
+// =======================================================================================
+//
+// A template link is how a document reaches EVERY future project at once, so the gate on
+// writing one is the interesting part: it is admin-only, a tier above binding a document
+// to a single project, which any PM who can see that project may do.
+//
+// The stamping route is the other half -- createProject() calls it as the PM creating the
+// project, so it must stay on the project gate rather than the admin one, or a PM could
+// not create a project at all.
+
+describe('project-template document links', () => {
+  const registry = async (event: any) => (await import('../doc-registry')).handler(event as any);
+
+  const asRole = (role: string) => {
+    db.user_roles = [{ user_id: ADMIN_USER, role }];
+  };
+
+  const asAdmin = { authorization: 'Bearer admin-jwt' };
+  const asSupplier = { 'x-portal-token': PORTAL_TOKEN_A };
+
+  const templatePath = (documentId?: string) =>
+    '/api/doc/templates/' + TEMPLATE_DEFAULT + '/documents' + (documentId ? '/' + documentId : '');
+
+  const send = (httpMethod: string, path: string, body: unknown, headers: Record<string, string>) => ({
+    httpMethod,
+    body: body === null ? null : JSON.stringify(body),
+    path,
+    headers,
+    queryStringParameters: {},
+  });
+
+  beforeEach(() => {
+    db.project_templates = [{ id: TEMPLATE_DEFAULT, name: 'Standard Launch Process', is_default: true }];
+    db.template_doc_bindings = [
+      { id: 'tb1', template_id: TEMPLATE_DEFAULT, document_id: DOC_SUPPLIER, created_by: ADMIN_USER, created_at: '2026-01-01T00:00:00Z' },
+    ];
+  });
+
+  // -- reading --------------------------------------------------------------------------
+
+  it('403s a portal token reading a template’s documents', async () => {
+    const res = await registry(send('GET', templatePath(), null, asSupplier));
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('lets an internal (non-admin) user read them, with the current release', async () => {
+    asRole('internal');
+    const res = await registry(send('GET', templatePath(), null, asAdmin));
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.documents).toHaveLength(1);
+    expect(body.documents[0].title).toBe('Packaging Guideline');
+    // The whole point of a binding: the version is resolved at read time, not stored.
+    expect(body.documents[0].finalVersion.label).toBe('v4');
+    // A registry DTO, so still never the editable original or the storage key.
+    expect(res.body).not.toContain(SHAREPOINT);
+    expect(res.body).not.toContain('docs/');
+  });
+
+  // -- writing is admin-only ------------------------------------------------------------
+
+  it('403s an internal (non-admin) user linking a document to a template', async () => {
+    asRole('internal');
+    const res = await registry(send('POST', templatePath(), { documentId: DOC_INTERNAL }, asAdmin));
+
+    expect(res.statusCode).toBe(403);
+    expect(db.template_doc_bindings).toHaveLength(1);
+  });
+
+  it('403s a designer linking one, because internal is not admin here either', async () => {
+    asRole('designer');
+    const res = await registry(send('POST', templatePath(), { documentId: DOC_INTERNAL }, asAdmin));
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('403s an internal (non-admin) user unlinking one', async () => {
+    asRole('internal');
+    const res = await registry(send('DELETE', templatePath(DOC_SUPPLIER), null, asAdmin));
+
+    expect(res.statusCode).toBe(403);
+    expect(db.template_doc_bindings).toHaveLength(1);
+  });
+
+  it('403s a portal token linking one', async () => {
+    const res = await registry(send('POST', templatePath(), { documentId: DOC_INTERNAL }, asSupplier));
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('lets an admin link a document to a template', async () => {
+    const res = await registry(send('POST', templatePath(), { documentId: DOC_INTERNAL }, asAdmin));
+
+    expect(res.statusCode).toBe(201);
+    expect(db.template_doc_bindings.some(r => r.document_id === DOC_INTERNAL)).toBe(true);
+  });
+
+  it('rejects a non-uuid documentId before touching the table', async () => {
+    const res = await registry(send('POST', templatePath(), { documentId: 'packaging-guidelines' }, asAdmin));
+
+    expect(res.statusCode).toBe(400);
+    expect(db.template_doc_bindings).toHaveLength(1);
+  });
+
+  // -- stamping a project ---------------------------------------------------------------
+
+  it('binds the default template documents to a project', async () => {
+    db.doc_bindings = [];
+    const res = await registry(send('POST', '/api/doc/projects/' + PROJECT_A + '/bindings/from-template', {}, asAdmin));
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).bound).toBe(1);
+    expect(db.doc_bindings.map(b => b.document_id)).toEqual([DOC_SUPPLIER]);
+  });
+
+  it('resolves the default template when none is named', async () => {
+    // What the "Apply standard documents" path relies on: the browser cannot read
+    // template_doc_bindings at all, so it cannot name a template either.
+    db.doc_bindings = [];
+    const res = await registry(send('POST', '/api/doc/projects/' + PROJECT_A + '/bindings/from-template', { templateId: null }, asAdmin));
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).bound).toBe(1);
+  });
+
+  it('reports zero rather than failing when no template is the default', async () => {
+    // createProject() must not break because an admin has not marked a default yet.
+    db.project_templates = [{ id: TEMPLATE_DEFAULT, name: 'Standard Launch Process', is_default: false }];
+    db.doc_bindings = [];
+
+    const res = await registry(send('POST', '/api/doc/projects/' + PROJECT_A + '/bindings/from-template', {}, asAdmin));
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).bound).toBe(0);
+    expect(db.doc_bindings).toHaveLength(0);
+  });
+
+  it('reports zero when the template hands nothing down', async () => {
+    db.template_doc_bindings = [];
+    db.doc_bindings = [];
+
+    const res = await registry(send('POST', '/api/doc/projects/' + PROJECT_A + '/bindings/from-template', {}, asAdmin));
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).bound).toBe(0);
+  });
+
+  it('403s a portal token trying to stamp a project', async () => {
+    const res = await registry(send('POST', '/api/doc/projects/' + PROJECT_A + '/bindings/from-template', {}, asSupplier));
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('does not read from-template as a document id on the DELETE route', async () => {
+    // The literal segment sits where deleteBinding expects a uuid. Asserting the 400 pins
+    // the router ordering that keeps POST .../from-template from ever reaching it.
+    const res = await registry(send('DELETE', '/api/doc/projects/' + PROJECT_A + '/bindings/from-template', null, asAdmin));
+    expect(res.statusCode).toBe(400);
   });
 });

@@ -78,6 +78,8 @@ export const mapCommentRow = (row: any): ReviewComment => ({
   // hand-edited value could be any JSON shape.
   attachments: Array.isArray(row.attachments) ? (row.attachments as ReviewAttachment[]) : [],
   status: (row.status ?? 'open') as ReviewCommentStatus,
+  checkedSubjectId: row.checked_subject_id ?? null,
+  checkedSubjectVersion: row.checked_subject_version ?? null,
   resolvedAt: row.resolved_at ?? null,
   resolvedBy: row.resolved_by ?? null,
   createdAt: row.created_at,
@@ -152,6 +154,23 @@ export const listReviewCommentsByToken = async (token: string): Promise<ReviewCo
   const rows = await orEmpty(
     portalDb.rpc<Row[]>('review_list_comments', { p_token: token }),
     '[listReviewCommentsByToken]',
+  );
+  return rows.map(mapCommentRow);
+};
+
+/**
+ * What this reviewer said in EARLIER rounds of their own chain of links (migration 169).
+ *
+ * Separate from `listReviewCommentsByToken` on purpose, and not a widening of it: these notes
+ * are anchored to a version that is not the one on screen, and the portal must render them
+ * read-only rather than mixed into the live rail where Delete and Reply sit. Empty for a
+ * first round, and empty for every link minted before rounds were chained.
+ */
+export const listPriorReviewCommentsByToken = async (token: string): Promise<ReviewComment[]> => {
+  if (!isLive) return [];
+  const rows = await orEmpty(
+    portalDb.rpc<Row[]>('review_list_prior_comments', { p_token: token }),
+    '[listPriorReviewCommentsByToken]',
   );
   return rows.map(mapCommentRow);
 };
@@ -332,10 +351,17 @@ export const addReviewReply = async (commentId: string, body: string): Promise<R
 /**
  * Triage one note. Moving it off 'open' stamps who closed it and when; moving it back to
  * 'open' clears both, so the audit trail never claims a still-open note was resolved.
+ *
+ * `checkedAgainst` records WHICH version the person was looking at when they decided
+ * (migration 169). Pass it whenever a version is on screen; omit it where there is no such
+ * context, and the stamp is left exactly as it was rather than being cleared — a triage
+ * action taken from a plain list must not erase the knowledge that someone checked this
+ * note against v3 last week.
  */
 export const setReviewCommentStatus = async (
   id: string,
   status: ReviewCommentStatus,
+  checkedAgainst?: { subjectId: string | null; version: number | null },
 ): Promise<void> => {
   const user = await auth.getUser();
   const closing = status !== 'open';
@@ -343,6 +369,29 @@ export const setReviewCommentStatus = async (
     status,
     resolved_at: closing ? new Date().toISOString() : null,
     resolved_by: closing ? (user?.email ?? user?.id ?? null) : null,
+    ...(checkedAgainst
+      ? {
+        checked_subject_id: checkedAgainst.subjectId,
+        checked_subject_version: checkedAgainst.version,
+      }
+      : {}),
+  }, { where: { id } });
+};
+
+/**
+ * Record that a note was re-checked against a version and is STILL an issue.
+ *
+ * The third verdict of a carried-forward round, and the only one that changes nothing about
+ * the note itself: it stays open, because it is still open. What changes is that the team
+ * now knows someone looked — which is exactly what an open note cannot otherwise tell you.
+ */
+export const markReviewCommentChecked = async (
+  id: string,
+  checkedAgainst: { subjectId: string | null; version: number | null },
+): Promise<void> => {
+  await db.updateWhere('review_comments', {
+    checked_subject_id: checkedAgainst.subjectId,
+    checked_subject_version: checkedAgainst.version,
   }, { where: { id } });
 };
 

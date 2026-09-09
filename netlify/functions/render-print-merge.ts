@@ -38,7 +38,7 @@ import {
   renderPartPdf,
   marginFor,
   resolveTypography,
-  leafletLayoutOf,
+  printLayoutOf,
   buildCopyrightLine,
   resolveDocCode,
   tempPartPath,
@@ -124,12 +124,15 @@ const bandTooThinForStamp = (bottomMarginMm: number, sizePt: number, band: numbe
  */
 const buildDownloadName = (req: MergeRequest): string => {
   const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+  const compact2col = printLayoutOf(req) === 'compact2col';
   const kind =
     req.templateType === 'warning_leaflet'
-      ? leafletLayoutOf(req) === 'compact2col'
+      ? compact2col
         ? 'Warning Leaflet (Compact)'
         : 'Warning Leaflet'
-      : 'Instruction Manual';
+      : compact2col
+        ? 'Instruction Manual (Compact)'
+        : 'Instruction Manual';
   const sku = (req.cover.skus ?? []).map((s) => s.trim()).filter(Boolean).join(', ');
   const name = (req.cover.title ?? '').trim();
   // The document code and version LEAD the filename, so a folder of PDFs sorts by document and
@@ -587,7 +590,7 @@ export const handler = async (event: NetlifyEvent) => {
     // migration 124 ("not measured" must not read as zero pages), and the page-budget report
     // already renders a total with no per-language rows. Without this, 22 languages against one
     // part count would record {first: 44, …21 more: 0}.
-    const continuousFlow = leafletLayoutOf(req) === 'compact2col';
+    const continuousFlow = compact && printLayoutOf(req) === 'compact2col';
     const languagePartOffset = compact ? 0 : 1;
     let pagesByLanguage: Record<string, number> | null = null;
     if (!continuousFlow) {
@@ -609,7 +612,7 @@ export const handler = async (event: NetlifyEvent) => {
     // otherwise treat a compact render as a newer classic one. `layoutOfStoragePath` in
     // im-print-export.service.ts reads it back. Classic keeps today's exact name, so every
     // existing path, URL and history row is untouched.
-    const layoutToken = leafletLayoutOf(req) === 'compact2col' ? 'compact2col-' : '';
+    const layoutToken = printLayoutOf(req) === 'compact2col' ? 'compact2col-' : '';
     const name = `${req.templateType}-${layoutToken}${ordered.join('-')}-${req.pageSize}`;
     const running = [req.cover.footerText, req.cover.title].filter(Boolean).join(' · ');
     const year = new Date().getFullYear();

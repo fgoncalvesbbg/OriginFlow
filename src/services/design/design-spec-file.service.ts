@@ -72,6 +72,46 @@ export const fetchDesignSpecFile = async (versionId: string): Promise<DesignSpec
   return res.json();
 };
 
+/** A version's bytes, held locally, plus the metadata the signing call returned. */
+export interface DesignSpecObject {
+  /** A `blob:` URL. The caller OWNS it and must `URL.revokeObjectURL` it. */
+  objectUrl: string;
+  byteSize: number;
+  file: DesignSpecFile;
+}
+
+/**
+ * Download a version's PDF once and hand back a local `blob:` URL.
+ *
+ * WHY NOT JUST PASS THE SIGNED URL TO pdf.js. The signed URL lives five minutes, and pdf.js
+ * does not read a document in one go — it learns the length, then fetches page ranges lazily
+ * as the reader scrolls. An internal reader keeps a spec open far longer than five minutes
+ * (that is the whole point of a version viewer), so scrolling to page 30 late in a session
+ * would fetch against a dead URL and blank the page with no way back but a reload. Pulling
+ * the bytes down once removes the expiry from the picture entirely.
+ *
+ * The second reason is switching: a viewer that flips between v1 and v2 re-reads the same two
+ * documents repeatedly, and a `blob:` URL makes the second visit free.
+ *
+ * The cost is the whole file in memory — up to `MAX_SPEC_PDF_BYTES` per version held — so a
+ * caller must bound how many it keeps and revoke the rest. `DesignSpecVersionViewer` keeps
+ * two.
+ *
+ * The reviewer path deliberately has no equivalent: a supplier opens one version once, and
+ * streaming it is the lighter thing to do on a phone.
+ */
+export const fetchDesignSpecObject = async (versionId: string): Promise<DesignSpecObject> => {
+  const file = await fetchDesignSpecFile(versionId);
+  const res = await fetch(file.url, { signal: AbortSignal.timeout(5 * 60_000) });
+  if (!res.ok) {
+    // Reached only if the signed URL fails between being minted and being used, so the
+    // actionable advice is to retry rather than anything about the file itself.
+    throw new Error('Could not download that design spec. Please try again.');
+  }
+  const blob = await res.blob();
+  return { objectUrl: URL.createObjectURL(blob), byteSize: blob.size, file };
+};
+
 interface SignedSlot { path: string; signedUrl: string }
 
 interface UploadTargets {

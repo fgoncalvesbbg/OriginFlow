@@ -50,6 +50,7 @@ export type {
   SupplierProjectDocument,
   InternalProjectDocument,
   DocumentBinding,
+  TemplateDocumentLink,
   DocumentRegistryFilters
 } from './document.types';
 
@@ -210,3 +211,28 @@ export type {
   DesignSpecSummary,
   DesignSpecSkuLink
 } from './design-spec.types';
+
+// Roadmap Creator (migration 167). Reference data (RoadmapSku / RoadmapImport) is replaced by an
+// upload and written only by roadmap_import_skus(); everything else is an annotation written only
+// by a person. The terse field names (nov25, sm26, asp25) are the spreadsheet's own vocabulary and
+// are load-bearing — the pure grid/chart/summary logic is written against exactly them.
+export type {
+  RoadmapFlag,
+  RoadmapPlacerType,
+  RoadmapStatus,
+  RoadmapAxisKind,
+  RoadmapAuditEntity,
+  RoadmapAuditAction,
+  RoadmapAttrs,
+  RoadmapSku,
+  RoadmapItemFlag,
+  RoadmapPlacer,
+  RoadmapAxisValue,
+  RoadmapImport,
+  RoadmapAuditEntry,
+  RoadmapApprover,
+  RoadmapBoard,
+  RoadmapCategory,
+  RoadmapImportResult,
+  RoadmapOrphan
+} from './roadmap.types';

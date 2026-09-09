@@ -26,7 +26,7 @@ import {
   isValidBase,
   loadManuals,
   buildParts,
-  leafletLayoutOf,
+  printLayoutOf,
   findPendingRegulatoryAnswers,
   assertRenderProjectId,
   PermanentError,
@@ -136,11 +136,13 @@ export const handler = async (event: NetlifyEvent) => {
       warnings,
       // One label per part, for a progress UI. Language body parts carry their code;
       // the shared cover/back parts (full IM only, absent for compact leaflets) sit
-      // at the very start/end of the array. The compact two-column leaflet is a single
+      // at the very start/end of the array. The compact two-column LEAFLET is a single
       // part holding every language, so it is labelled by what it is rather than being
-      // mislabelled 'cover' by its position.
+      // mislabelled 'cover' by its position. A two-column MANUAL keeps one part per
+      // language, so it labels exactly like a classic one — hence the templateType test
+      // rather than a layout test alone.
       labels:
-        leafletLayoutOf(req) === 'compact2col'
+        req.templateType === 'warning_leaflet' && printLayoutOf(req) === 'compact2col'
           ? parts.map(() => ordered.map((l) => l.toUpperCase()).join('+'))
           : parts.map((p, i) => p.tab?.code ?? (i === 0 ? 'cover' : 'back')),
       ordered,

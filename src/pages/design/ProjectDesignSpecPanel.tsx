@@ -20,7 +20,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, Ban, Check, CheckCircle2, ClipboardList, Copy, Download, ExternalLink,
-  FileUp, Link2, Loader2, Lock, MessageSquare, Plus, RotateCcw, Trash2, Undo2, Unlock,
+  Eye, FileUp, Link2, Loader2, Lock, MessageSquare, Plus, RotateCcw, Trash2, Undo2, Unlock,
 } from 'lucide-react';
 // From the design module's own barrel, not the flat one: `setReviewCommentStatus` and
 // `addReviewReply` are shared with the IM and are already exported there under IM-shaped
@@ -46,6 +46,9 @@ import {
   currentVersionOf, isReviewClosed, DESIGN_SPEC_STATUS_META,
   type DesignSpecRoundInput,
 } from './design-spec-status';
+// Imported eagerly: this file is already only reached from a project page, and the viewer
+// keeps pdf.js behind its own React.lazy boundary — so nothing heavy rides along.
+import DesignSpecVersionViewer from './DesignSpecVersionViewer';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 
@@ -80,9 +83,14 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
 
   const [sendFor, setSendFor] = useState<DesignSpecVersion | null>(null);
   const [sendLabel, setSendLabel] = useState('');
+  /** The previous round's link this one continues, so that reviewer sees their own notes. */
+  const [sendSupersedes, setSendSupersedes] = useState('');
 
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState('');
+
+  /** Which version the viewer overlay opened on, or null when it is closed. */
+  const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const found = await getDesignSpecByProject(projectId);
@@ -270,6 +278,21 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
   );
   const orderedNotes = orderByAnchor(notes);
 
+  /**
+   * Links on OTHER versions, newest version first — the candidates for "this is the next
+   * round for that reviewer".
+   *
+   * Other versions only: chaining a link to another link on the SAME version would say the
+   * reviewer already reviewed the thing they are being sent, and the database's chain guard
+   * has no opinion about that.
+   */
+  const earlierLinks = sendFor
+    ? [...versions]
+      .filter(v => v.id !== sendFor.id)
+      .sort((a, b) => b.version - a.version)
+      .flatMap(v => (linksByVersion.get(v.id) ?? []).map(link => ({ link, version: v.version })))
+    : [];
+
   return (
     <div className="p-6 space-y-5">
       {/* ---- header ---- */}
@@ -397,17 +420,25 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                     </span>
                     <div className="flex-1" />
                     <Button
+                      variant="ghost" size="sm" leftIcon={<Eye size={12} />}
+                      onClick={() => setViewingVersionId(v.id)}
+                      title="Read the pages with this version's notes pinned on them"
+                    >
+                      View
+                    </Button>
+                    <Button
                       variant="ghost" size="sm" loading={busy === `open:${v.id}`}
                       leftIcon={<Download size={12} />} onClick={() => void openFile(v)}
+                      title="Open the unstamped original in a new tab"
                     >
-                      Open
+                      Original
                     </Button>
                     {canEdit && spec.state !== 'cancelled' && (
                       <>
                         {!spec.finalVersionId && (
                           <Button
                             variant="ghost" size="sm" leftIcon={<Link2 size={12} />}
-                            onClick={() => { setSendFor(v); setSendLabel(''); }}
+                            onClick={() => { setSendFor(v); setSendLabel(''); setSendSupersedes(''); }}
                           >
                             Send for review
                           </Button>
@@ -470,9 +501,14 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                     </ul>
                   )}
                   {versionNotes.length > 0 && (
-                    <p className="text-[11px] text-gray-400 mt-1.5">
+                    // The count is the natural way in to the viewer: someone reading "4 notes
+                    // against this version" is asking where they are.
+                    <button
+                      onClick={() => setViewingVersionId(v.id)}
+                      className="text-[11px] text-gray-400 hover:text-indigo-600 mt-1.5 underline decoration-dotted underline-offset-2"
+                    >
                       {versionNotes.length} note{versionNotes.length === 1 ? '' : 's'} against this version
-                    </p>
+                    </button>
                   )}
                 </li>
               );
@@ -480,6 +516,24 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
           </ul>
         )}
       </div>
+
+      {/* ---- version viewer ---- */}
+      {viewingVersionId && versions.some(v => v.id === viewingVersionId) && (
+        <DesignSpecVersionViewer
+          specCode={spec.specCode}
+          specTitle={spec.title}
+          versions={versions}
+          notes={notes}
+          initialVersionId={viewingVersionId}
+          finalVersionId={spec.finalVersionId}
+          canEdit={canEdit}
+          // The viewer writes verdicts straight through the shared review layer, so the panel
+          // has to re-read rather than guess: `load` is the same reload every mutation here
+          // ends with, which keeps the two lists from disagreeing about a note's status.
+          onChanged={load}
+          onClose={() => setViewingVersionId(null)}
+        />
+      )}
 
       {/* ---- send dialog ---- */}
       {sendFor && (
@@ -502,6 +556,31 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
               placeholder="e.g. Factory A, Packaging vendor"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
             />
+            {earlierLinks.length > 0 && (
+              <>
+                <label className="block text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1 mt-3">
+                  Is this the next round for someone?
+                </label>
+                <select
+                  value={sendSupersedes}
+                  onChange={e => setSendSupersedes(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">No — a fresh reviewer</option>
+                  {earlierLinks.map(({ link, version }) => (
+                    <option key={link.id} value={link.id}>
+                      {link.label || 'Unlabelled link'} · v{version}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Pick the link you sent that same reviewer last time. They will see what they
+                  asked for then, on this version's pages. Pick nobody and they see only this
+                  round — which is what you want for a reviewer who has not seen the spec.
+                </p>
+              </>
+            )}
+
             <p className="text-[11px] text-amber-700 bg-amber-50 rounded p-2 mt-3">
               OriginFlow sends no email. Copy the link and send it to the reviewer yourself.
             </p>
@@ -512,9 +591,13 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                 loading={busy === 'send'}
                 onClick={() => {
                   const version = sendFor;
+                  const supersedes = sendSupersedes;
                   setSendFor(null);
                   void run('send', async () => {
-                    const share = await sendDesignSpecForReview(spec, version, { label: sendLabel.trim() });
+                    const share = await sendDesignSpecForReview(spec, version, {
+                      label: sendLabel.trim(),
+                      supersedesId: supersedes || null,
+                    });
                     await copyLink(share.token);
                   });
                 }}

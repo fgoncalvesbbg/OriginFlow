@@ -37,7 +37,7 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { PrintExportReport } from './PrintExportReport';
 import { uploadIMAsset } from '../../../services/im/im-asset.service';
-import { getPrintTypography, defaultTypographyFor, type PrintTypography, type PrintLeafletLayout } from '../../../services/im/im-print-settings.service';
+import { getPrintTypography, defaultTypographyFor, type PrintTypography, type PrintLayout } from '../../../services/im/im-print-settings.service';
 import { TypographySummary } from '../editor/TypographySummary';
 import { useDocCode } from '../editor/useDocCode';
 
@@ -148,13 +148,13 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   );
 
   /**
-   * Which LAYOUT to set a Warning Leaflet in. Defaults to classic, so an operator who does
-   * nothing gets exactly the leaflet they get today.
+   * Which LAYOUT to set this document in — offered for BOTH template types. Defaults to
+   * classic, so an operator who does nothing gets exactly the document they get today.
    *
    * A layout is not a document type — same template, same content, same translations, same
    * coverage issue — so it is a per-export choice here rather than a second template kind.
    */
-  const [leafletLayout, setLeafletLayout] = useState<PrintLeafletLayout>('classic');
+  const [layout, setLayout] = useState<PrintLayout>('classic');
 
   // Save a page per language by letting the first section continue on the TOC page.
   // Default ON: the operator's standing goal is fewer printed pages; unticking restores
@@ -325,10 +325,10 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
     a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
 
   // The most recent render matching the currently selected languages + page size + layout.
-  // Layout is part of the identity: without it, generating the first compact leaflet would
-  // match the existing classic render, report "current" and demand a credit confirmation for
+  // Layout is part of the identity: without it, generating the first compact render would
+  // match the existing classic one, report "current" and demand a credit confirmation for
   // a PDF that has never been produced.
-  const activeLayout: PrintLeafletLayout = isLeaflet ? leafletLayout : 'classic';
+  const activeLayout: PrintLayout = layout;
 
   // The document code identifies the DOCUMENT, so it is keyed on the TEMPLATE's category — a
   // leaflet is a property of the category, not of this one project — falling back to the
@@ -367,7 +367,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const downloadPdf = async (storagePath: string, layout: PrintLeafletLayout, imVersion: number | null) => {
+  const downloadPdf = async (storagePath: string, layout: PrintLayout, imVersion: number | null) => {
     setDownloadError(null);
     setDownloadingPath(storagePath);
     try {
@@ -460,7 +460,7 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
         onProgress: (label, done, total) => setProgress({ label, done, total }),
         typography,
         mergeToc: isLeaflet ? undefined : mergeToc,
-        leafletLayout: isLeaflet ? leafletLayout : undefined,
+        layout,
         docCode: docCode || undefined,
         cover: {
           title,
@@ -721,36 +721,45 @@ const PrintExportDialog: React.FC<PrintExportDialogProps> = ({
             </div>
           )}
 
-          {/* Leaflet layout — leaflets only. */}
-          {isLeaflet && (
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase">Layout</label>
-              <div className="flex gap-2 mt-2">
-                {([
-                  { key: 'classic' as const, label: 'Classic', hint: 'One column, as printed today' },
-                  { key: 'compact2col' as const, label: 'Compact 2-column', hint: '7pt, two columns, no tinted panels' },
-                ]).map((opt) => (
-                  <button
-                    key={opt.key}
-                    onClick={() => setLeafletLayout(opt.key)}
-                    title={opt.hint}
-                    className={`text-sm px-4 py-1.5 border rounded text-left ${
-                      leafletLayout === opt.key
-                        ? 'bg-primary/10 border-primary text-primary'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-gray-400 mt-1.5">
-                {leafletLayout === 'compact2col'
-                  ? 'Two columns, justified and hyphenated. Hazard blocks print as a coloured severity band with the ISO 7010 sign inline — no tinted panels and no icon gutter, so body text keeps the full column. Type sizes, line spacing and margins are the same Admin → IM Print leaflet profile the classic layout uses.'
-                  : 'One full-measure column with tinted hazard panels. Same Admin → IM Print leaflet profile as the compact layout.'}
-              </p>
+          {/* Layout — offered for both template types, with per-type copy: the same choice
+              means a different set of changes for a leaflet and for a manual. */}
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase">Layout</label>
+            <div className="flex gap-2 mt-2">
+              {([
+                { key: 'classic' as const, label: 'Classic', hint: 'One column, as printed today' },
+                {
+                  key: 'compact2col' as const,
+                  label: 'Compact 2-column',
+                  hint: isLeaflet
+                    ? 'Two columns, no tinted panels'
+                    : 'Two columns, everything else unchanged',
+                },
+              ]).map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setLayout(opt.key)}
+                  title={opt.hint}
+                  className={`text-sm px-4 py-1.5 border rounded text-left ${
+                    layout === opt.key
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-          )}
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              {layout === 'compact2col'
+                ? isLeaflet
+                  ? 'Two columns, justified and hyphenated. Hazard blocks print as a coloured severity band with the ISO 7010 sign inline — no tinted panels and no icon gutter, so body text keeps the full column. Type sizes, line spacing and margins are the same Admin → IM Print leaflet profile the classic layout uses.'
+                  : 'Two columns, justified and hyphenated — which also brings the line length back into the readable range (a single column runs about 129 characters per line on A4). Everything else is unchanged: same cover, same contents page and page numbers, same language tabs, same tinted callout panels, same Admin → IM Print profile. Figures and wide tables authored to fill the page still span both columns.'
+                : isLeaflet
+                  ? 'One full-measure column with tinted hazard panels. Same Admin → IM Print leaflet profile as the compact layout.'
+                  : 'One full-measure column, as every manual has printed so far. Same Admin → IM Print profile as the compact layout.'}
+            </p>
+          </div>
 
           {/* Page economy — full manuals only (leaflets have no TOC). */}
           {!isLeaflet && (

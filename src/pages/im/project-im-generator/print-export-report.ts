@@ -6,7 +6,7 @@
  * drift before it stops being translation length and starts being a layout accident.
  */
 
-import type { PrintPdfResult, PrintRender, PrintLeafletLayout } from '../../../services';
+import type { PrintPdfResult, PrintRender, PrintLayout } from '../../../services';
 import type { IMTemplateType } from '../../../types';
 
 /**
@@ -64,16 +64,18 @@ export const findComparableRender = (
   languages: readonly string[],
   pageSize: 'a4' | 'a5',
   excludeId?: string,
-  layout: PrintLeafletLayout = 'classic',
+  layout: PrintLayout = 'classic',
 ): PrintRender | null =>
   renders.find(
     (r) =>
       r.id !== excludeId &&
       r.pageSize === pageSize &&
-      // Layout has to match for the same reason page size does: the two-column compact
-      // leaflet and the classic single-column one are different artefacts from the same
-      // content, so diffing one against the other reports a page delta that says nothing
-      // about the template or the content — which is what this number is read for.
+      // Layout has to match for the same reason page size does: a two-column render and the
+      // classic single-column one are different artefacts from the same content, so diffing
+      // one against the other reports a page delta that says nothing about the template or
+      // the content — which is what this number is read for. True of both template types: the
+      // whole point of a two-column MANUAL is that it prints fewer pages, so its first render
+      // must not be reported as the template having shrunk overnight.
       r.layout === layout &&
       r.pages != null &&
       sameLanguageSet(r.languages, languages),
@@ -138,7 +140,7 @@ export interface PreflightSummary {
 
 export interface PrintDownloadNameInput {
   templateType: IMTemplateType;
-  layout: PrintLeafletLayout;
+  layout: PrintLayout;
   /** The document code (see im-doc-code.ts), or null when none is configured for this category. */
   docCode: string | null;
   /** The IM version this render was built from, or null when unknown (legacy rows). */
@@ -164,7 +166,9 @@ export const buildPrintDownloadFilename = ({
       ? layout === 'compact2col'
         ? 'Warning Leaflet (Compact)'
         : 'Warning Leaflet'
-      : 'Instruction Manual';
+      : layout === 'compact2col'
+        ? 'Instruction Manual (Compact)'
+        : 'Instruction Manual';
   const sku = skus.map((s) => s.trim()).filter(Boolean).join(', ');
   const name = title.trim();
   const stamp = [docCode ?? '', version ? `v${version}` : ''].filter(Boolean).join(' ');

@@ -17,6 +17,7 @@ import {
 import { ProjectTemplate, TemplateStep, TemplateDocument, ResponsibleParty } from '../../types';
 import { Plus, Trash2, Edit2, Star, Loader2, FileText, CheckCircle, X } from 'lucide-react';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import TemplateStandardDocuments from './TemplateStandardDocuments';
 
 const ProjectTemplateAdminSection: React.FC = () => {
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
@@ -213,7 +214,8 @@ const ProjectTemplateAdminSection: React.FC = () => {
         <div>
           <h3 className="font-bold text-gray-800">Project Templates</h3>
           <p className="text-xs text-muted mt-0.5 max-w-2xl">
-            The phases and required documents every new project starts with. The template marked
+            The phases and required documents every new project starts with, plus the registry
+            documents it hands down. The template marked
             <strong> Default</strong> is what "New Project" uses; existing projects are unaffected.
           </p>
         </div>
@@ -297,6 +299,8 @@ const ProjectTemplateAdminSection: React.FC = () => {
                   <button onClick={() => setDeleteTarget(selected)} title="Delete" className="p-1.5 text-gray-400 hover:text-rose-600"><Trash2 size={15} /></button>
                 </div>
               </div>
+
+              <TemplateStandardDocuments templateId={selected.id} isDefault={selected.isDefault} />
 
               {detailLoading ? (
                 <div className="py-8 text-center text-gray-400 text-sm">Loading phases…</div>

@@ -19,15 +19,24 @@
  *
  * The reviewer's display name is self-declared and kept in localStorage. It identifies who
  * wrote which note in a list; it is not, and must not be read as, authentication.
+ *
+ * ROUND TWO SEES ROUND ONE. When a link is minted as the successor of an earlier one
+ * (`review_shares.supersedes_id`, migration 169), this page also loads what that recipient
+ * said in the earlier rounds of their own chain — so a supplier reviewing v3 does not have to
+ * remember what they asked for on v2. Those notes are kept in a SEPARATE list from the live
+ * ones and are strictly read-only: they are anchored to a different version of the document,
+ * so Reply and Remove would act on a round that is over, and the surface must be free to draw
+ * them differently from the notes being written now.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Loader2, ImagePlus, Send, Trash2, X, Reply,
+  AlertTriangle, CheckCircle2, Loader2, ImagePlus, Send, Trash2, X, Reply, History,
 } from 'lucide-react';
 import {
   resolveReviewSession,
   listReviewCommentsByToken,
+  listPriorReviewCommentsByToken,
   listReviewRepliesByToken,
   addReviewComment,
   deleteReviewComment,
@@ -84,6 +93,16 @@ const STATUS_TONE: Record<ReviewComment['status'], 'amber' | 'emerald' | 'gray'>
 export interface ReviewSurfaceRenderProps {
   session: ReviewSession;
   comments: readonly ReviewComment[];
+  /**
+   * What this reviewer said in EARLIER rounds of their chain of links — empty for a first
+   * round, and for every link minted before rounds were chained.
+   *
+   * A surface should render these as clearly secondary: they point at a place on the PREVIOUS
+   * version, and a page added or removed since shifts them. The PDF surface draws them as
+   * hollow rings for exactly that reason. A surface is free to ignore them entirely; they are
+   * listed in the rail either way.
+   */
+  priorComments: readonly ReviewComment[];
   /** True while the composer is open. Surfaces suppress their own "comment here" affordance. */
   composing: boolean;
   /** The anchor being composed, so the surface can draw it provisionally. */
@@ -136,6 +155,9 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
   const [nameDraft, setNameDraft] = useState('');
 
   const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [priorComments, setPriorComments] = useState<ReviewComment[]>([]);
+  /** Collapsed by default: the round being written is what the reviewer came here for. */
+  const [showPrior, setShowPrior] = useState(false);
   const [replies, setReplies] = useState<ReviewReply[]>([]);
   const [draftAnchor, setDraftAnchor] = useState<ReviewAnchor | null>(null);
   const [composing, setComposing] = useState(false);
@@ -182,13 +204,17 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
         setSession(resolved);
         setSubmittedAt(resolved.submittedAt);
 
-        const [existing, existingReplies] = await Promise.all([
+        const [existing, existingReplies, prior] = await Promise.all([
           listReviewCommentsByToken(token),
           listReviewRepliesByToken(token),
+          // Empty unless this link supersedes another. The rpc is the gate, not this call:
+          // it walks the chain from this token and returns nothing for an unchained link.
+          listPriorReviewCommentsByToken(token),
         ]);
         if (!cancelled) {
           setComments(existing);
           setReplies(existingReplies);
+          setPriorComments(prior);
         }
       } catch (e) {
         // Any unexpected failure must still resolve the loading state — otherwise this
@@ -411,6 +437,7 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
         {surface({
           session,
           comments,
+          priorComments,
           composing,
           draftAnchor,
           startComment,
@@ -520,6 +547,58 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
         )}
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {priorComments.length > 0 && (
+            /* Read-only, and visibly so: no Reply, no Remove, muted. These belong to a round
+               that is closed, on a version that is not the one on screen. */
+            <div className="border border-gray-200 rounded-lg bg-white/60">
+              <button
+                onClick={() => setShowPrior(v => !v)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left"
+              >
+                <History size={12} className="text-gray-400 shrink-0" />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
+                  What you asked for last round
+                </span>
+                <span className="ml-auto text-[11px] text-gray-400">
+                  {priorComments.length} · {showPrior ? 'hide' : 'show'}
+                </span>
+              </button>
+              {showPrior && (
+                <ul className="border-t border-gray-100 divide-y divide-gray-100">
+                  {priorComments.map(c => {
+                    const stamp = formatReviewStamp(c.createdAt);
+                    const focused = focusedCommentId === c.id;
+                    return (
+                      <li key={c.id}>
+                        <button
+                          onClick={() => setFocusedCommentId(focused ? null : c.id)}
+                          className={`w-full text-left px-3 py-2 ${focused ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                              {anchorLabel(c.anchor)}
+                            </span>
+                            {c.subjectVersion != null && <Badge tone="gray">v{c.subjectVersion}</Badge>}
+                            <Badge tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Badge>
+                          </div>
+                          <p className="text-xs text-gray-600 whitespace-pre-wrap">{c.body}</p>
+                          {stamp.short && (
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              <time dateTime={c.createdAt} title={reviewStampTitle(stamp)}>{stamp.short}</time>
+                            </p>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="px-3 pb-2 text-[10px] text-gray-400">
+                Marked on the previous version, so the positions are approximate. Add a new note
+                for anything still wrong.
+              </p>
+            </div>
+          )}
           {ordered.length === 0 && (
             <p className="text-xs text-gray-400 text-center py-8">No notes yet.</p>
           )}

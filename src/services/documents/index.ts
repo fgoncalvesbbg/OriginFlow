@@ -16,6 +16,10 @@ export {
   getProjectBindings,
   bindDocumentToProject,
   unbindDocumentFromProject,
+  getTemplateDocumentLinks,
+  linkDocumentToTemplate,
+  unlinkDocumentFromTemplate,
+  bindTemplateDocumentsToProject,
   latestVersionUrl,
 } from './document.service';
 

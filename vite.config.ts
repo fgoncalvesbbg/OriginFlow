@@ -11,6 +11,17 @@ export default defineConfig(({ mode }) => {
     // VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (see src/config/environment.config.ts).
     envPrefix: ['VITE_'],
     plugins: [react()],
+    optimizeDeps: {
+      // pdf.js is reachable only through the React.lazy() import in DesignSpecReviewPortal,
+      // and Vite's startup scan does not pre-bundle it (no `exports` map, bare .mjs main).
+      // The first design-spec open therefore made the dev server optimize it mid-session,
+      // which re-hashes the whole dep bundle: the already-mounted page then loads modules
+      // against the NEW ?v= hash while holding React from the old one. Two React copies mean
+      // two context registries, so every useContext reads undefined and the app dies on the
+      // first one it hits — "useAuth must be used within an AuthProvider". Naming it here
+      // pre-bundles it at server start, so one hash serves the whole session.
+      include: ['pdfjs-dist'],
+    },
     test: {
       environment: 'node',
       include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'netlify/**/*.test.ts'],

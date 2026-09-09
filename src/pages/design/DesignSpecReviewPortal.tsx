@@ -8,6 +8,11 @@
  * could not be shared, is the document and the anchor: a supplier reads a PDF here and marks
  * a place on a page, because a PDF has no chapters and no text this app controls.
  *
+ * ROUND TWO SEES ROUND ONE. When this link was minted as the successor of an earlier one, the
+ * shell also loads what this reviewer said in that round and lists it read-only; here those
+ * notes are additionally drawn on the pages as hollow rings, because a supplier checking
+ * whether their own ask was met wants to look at the place, not read a list.
+ *
  * THE FILE ITSELF IS NEVER PUBLIC. `design-specs` is a private bucket with no storage
  * policies, so the page asks `design-spec-file` for a five-minute signed URL, presenting the
  * review token. That function checks the token is live AND is for this exact version, and
@@ -72,7 +77,7 @@ const DesignSpecReviewPortal: React.FC = () => {
       pickHint="Click anywhere on a page to leave a note there."
       bodyPlaceholder="What needs to change here?"
       prepare={prepare}
-      surface={({ comments, composing, draftAnchor, startComment, focusedCommentId, focusComment }) => (
+      surface={({ comments, priorComments, composing, draftAnchor, startComment, focusedCommentId, focusComment }) => (
         fileUrl ? (
           <Suspense fallback={
             <div className="h-full flex items-center justify-center bg-gray-100 text-gray-400 gap-2">
@@ -88,6 +93,10 @@ const DesignSpecReviewPortal: React.FC = () => {
               onDropPin={(anchor: PdfReviewAnchor) => startComment(anchor)}
               focusedCommentId={focusedCommentId}
               onFocusComment={focusComment}
+              // The previous round's notes, as hollow rings. They are this reviewer's own
+              // words, marked on the PREVIOUS version's pages — so they show where the ask
+              // was, not where the problem is now, and a page added since shifts them.
+              ghostComments={priorComments}
             />
           </Suspense>
         ) : null

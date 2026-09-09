@@ -118,6 +118,14 @@ export interface ReviewShare {
   lastUsedAt: string | null;
   useCount: number;
   mode: ReviewShareMode;
+  /**
+   * The link this one is the next round of — same recipient, later version (migration 169).
+   *
+   * Null for a first round. It is what lets a returning reviewer be shown their OWN earlier
+   * notes and nobody else's: access follows the chain of links a recipient was given, never
+   * "every note on this document", which would hand Factory A everything Factory B wrote.
+   */
+  supersedesId: string | null;
   /** Set once a reviewer pressed "Submit review". Null on view links. */
   submittedAt: string | null;
   /** Display name the reviewer submitted under — self-declared, NOT authentication. */
@@ -143,6 +151,16 @@ export interface ReviewComment {
   authorName: string;
   attachments: ReviewAttachment[];
   status: ReviewCommentStatus;
+  /**
+   * The version this note was last TRIAGED against (migration 169) — for a design spec, a
+   * `design_spec_versions.id`. Null means nobody has looked at it again since it was written.
+   *
+   * This is the difference `status` alone cannot express. An open note that nobody has
+   * re-checked and an open note confirmed still wrong on the newest version look identical
+   * without it, and the whole point of carrying a round forward is telling those apart.
+   */
+  checkedSubjectId: string | null;
+  checkedSubjectVersion: number | null;
   resolvedAt: string | null;
   resolvedBy: string | null;
   createdAt: string;

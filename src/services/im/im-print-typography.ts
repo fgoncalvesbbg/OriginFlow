@@ -14,26 +14,38 @@ import type { IMTemplateType } from '../../types';
 export type PrintPageSizeKey = 'a4' | 'a5';
 
 /**
- * Which printed LAYOUT a Warning Leaflet is set in. A layout is not a document type — the
- * template, its content, its translations and its leaflet-coverage issues are the same
- * artefact either way — so this is a per-export render choice, not a new IMTemplateType.
+ * Which printed LAYOUT a document is set in — a Warning Leaflet or a full Instruction Manual.
+ * A layout is not a document type: the template, its content, its translations and its
+ * leaflet-coverage issues are the same artefact either way, so this is a per-export render
+ * choice, not a new IMTemplateType.
  *
- *  - `classic`     — one full-measure column per page, the layout every leaflet has printed
- *                    in so far.
- *  - `compact2col` — the dense two-column booklet after
- *                    docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf: two columns, justified and
- *                    hyphenated, severity-band hazard headers and no tinted panels.
+ *  - `classic`     — one full-measure column per page, the layout everything printed in until
+ *                    the compact layout existed.
+ *  - `compact2col` — a multi-column layout after docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf:
+ *                    columns, justified and hyphenated running text.
+ *
+ * What `compact2col` means differs by template type, because the two documents have different
+ * binding constraints:
+ *
+ *   warning_leaflet — columns PLUS severity-band hazard headers (no tinted panels) PLUS one
+ *                     continuous flow across every locale. See im-print-html.ts.
+ *   im              — columns only. The cover, per-language TOC, page numbers, thumb tabs and
+ *                     back page are untouched, and callouts keep their tinted panels: 4,610
+ *                     callout nodes exist in live published manuals, and changing how a safety
+ *                     callout is DRAWN is a document change (re-review, re-issue), not a
+ *                     layout change. A manual also keeps one render part per language, so it
+ *                     keeps its TOC page numbers and per-language page counts.
  *
  * BOTH layouts read the SAME typography — the operator's im_print_settings row for
- * (warning_leaflet, page size). Point sizes, line spacing and margins are one admin-owned
- * house style; a layout decides how the page is DIVIDED and how a hazard block is DRAWN, never
- * how big the type is. So changing the leaflet profile in Admin → IM Print moves both layouts
- * together, and the two are directly comparable at the same size.
+ * (template type, page size). Point sizes, line spacing and margins are one admin-owned house
+ * style; a layout decides how the page is DIVIDED, never how big the type is. So changing a
+ * profile in Admin → IM Print moves both layouts together, and the two are directly comparable
+ * at the same size.
  *
  * `classic` is the default everywhere, so every existing call site, stored row and render
  * keeps its current meaning.
  */
-export type PrintLeafletLayout = 'classic' | 'compact2col';
+export type PrintLayout = 'classic' | 'compact2col';
 
 /** Page margins in millimetres, as the PDF engine wants them. */
 export interface PrintMarginsMm {
@@ -127,18 +139,43 @@ export const PRINT_FONT_FAMILIES = [
 export const profileKey = (templateType: string, pageSize: string): string => `${templateType}::${pageSize}`;
 
 /**
- * Columns and gutter for the compact leaflet layout, per page size.
+ * Columns and gutter for the `compact2col` layout, per (template type, page size).
  *
  * A column COUNT rather than a width, so the columns divide whatever measure the profile's
- * margins leave: at the reference's A5 margins that is 132mm split into 2 × 64mm with a 4mm
- * gutter, exactly the column width in docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf. A4 takes
- * three columns of its wider measure rather than two ~95mm ones, which would read as a wall of
- * text.
+ * margins leave: at the leaflet's A5 margins that is 132mm split into 2 × 64mm with a 4mm
+ * gutter, exactly the column width in docs/Gas-Hob-Leaflet-EXAMPLE-v2-ISO7010.pdf.
+ *
+ * WHY THE MANUAL TAKES TWO COLUMNS ON A4 AND THE LEAFLET TAKES THREE.
+ *
+ * The count follows the body size the profile sets, because what has to come out right is the
+ * MEASURE — characters per line, target ~45-75. Both live profiles were measured, not guessed:
+ *
+ *   leaflet A4  4.75pt over 190mm  -> 3 columns of 60.7mm  ~ 51 chars   (2 would give ~77)
+ *   leaflet A5  4.75pt over 132mm  -> 2 columns of 64mm     ~ 54 chars
+ *   im A4       8.00pt over 182mm  -> 2 columns of 89mm     ~ 63 chars  (3 would give ~41)
+ *   im A5       6.00pt over 120mm  -> 2 columns of 58mm     ~ 55 chars
+ *
+ * The single-column manual it replaces runs ~129 chars/line on A4 and ~113 on A5 — roughly
+ * double the readable band — which is why this layout is a legibility fix for a manual and not
+ * only a page-count one.
  */
-export const COMPACT_LEAFLET_COLUMNS: Record<PrintPageSizeKey, { columns: number; gapMm: number }> = {
-  a5: { columns: 2, gapMm: 4 },
-  a4: { columns: 3, gapMm: 4 },
+export const COMPACT_COLUMNS: Record<string, { columns: number; gapMm: number }> = {
+  'warning_leaflet::a5': { columns: 2, gapMm: 4 },
+  'warning_leaflet::a4': { columns: 3, gapMm: 4 },
+  'im::a5': { columns: 2, gapMm: 4 },
+  'im::a4': { columns: 2, gapMm: 4 },
 };
+
+/**
+ * Columns for one (template type, page size), falling back to two — the safe count for an
+ * unknown pair, since a single column would silently defeat the layout and three would set an
+ * unknown profile too narrow.
+ */
+export const compactColumnsFor = (
+  templateType: IMTemplateType | string,
+  pageSize: PrintPageSizeKey | string,
+): { columns: number; gapMm: number } =>
+  COMPACT_COLUMNS[profileKey(templateType, pageSize)] ?? { columns: 2, gapMm: 4 };
 
 /**
  * Built-in fallbacks, one per (template type, page size). These are the values the renderer

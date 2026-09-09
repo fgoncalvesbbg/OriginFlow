@@ -55,7 +55,7 @@ const compact = (m: PrintManual, pageSize: 'a4' | 'a5' = 'a5') =>
     cover: { title: 'T' },
     back: {},
     compact: true,
-    leafletLayout: 'compact2col',
+    layout: 'compact2col',
   })[0].html;
 
 const classic = (m: PrintManual, pageSize: 'a4' | 'a5' = 'a5') =>
@@ -95,7 +95,7 @@ describe('compact2col — typography is the admin profile, shared with classic',
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
       typography: t,
     })[0].html;
     expect(html).toContain('font-size: 6.5pt');
@@ -111,7 +111,7 @@ describe('compact2col — typography is the admin profile, shared with classic',
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
       typography: t,
     })[0].html;
     expect(html).toContain('font-size: 9pt; line-height: 1.45; font-weight: 800;');
@@ -127,7 +127,7 @@ describe('compact2col — typography is the admin profile, shared with classic',
         cover: { title: 'T' },
         back: {},
         compact: true,
-        leafletLayout: layout,
+        layout: layout,
       })[0].html;
     const profile = defaultTypographyFor('warning_leaflet', 'a5');
     for (const html of [each('classic'), each('compact2col')]) {
@@ -150,7 +150,7 @@ describe('compact2col — typography is the admin profile, shared with classic',
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
       typography: tiny,
     })[0].html;
     expect(html).toContain('font-size: 4.75pt');
@@ -173,7 +173,7 @@ describe('compact2col — justification and hyphenation', () => {
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
     })[0].html;
     expect(html).toContain('<div class="imv-lang" lang="en">');
     expect(html).toContain('<div class="imv-lang" lang="de">');
@@ -189,7 +189,7 @@ describe('compact2col — languages flow continuously', () => {
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
     });
 
   it('renders every language as ONE part', () => {
@@ -236,7 +236,7 @@ describe('compact2col — languages flow continuously', () => {
   it('separates locales with a small black bar naming the language in its own language', () => {
     const html = buildPrintPartsHtml(
       [hazardManual('flammable', 'en'), hazardManual('flammable', 'de'), hazardManual('flammable', 'el')],
-      { pageSize: 'a5', cover: { title: 'T' }, back: {}, compact: true, leafletLayout: 'compact2col' },
+      { pageSize: 'a5', cover: { title: 'T' }, back: {}, compact: true, layout: 'compact2col' },
     )[0].html;
     // The endonym, not the English name: a reader looking for their section may not be able to
     // read the language it would otherwise be labelled in.
@@ -257,7 +257,7 @@ describe('compact2col — languages flow continuously', () => {
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
     })[0].html;
     expect(html.match(/class="imv-lang-bar"/g)).toHaveLength(1);
     expect(html).toContain('<span class="imv-lang-bar-name">Deutsch</span>');
@@ -276,7 +276,7 @@ describe('compact2col — languages flow continuously', () => {
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
     })[0].html;
     // Measured on the real leaflet: the bars land 12.2mm / 74.5mm / 100mm into their columns,
     // i.e. the flow runs straight through them.
@@ -405,31 +405,46 @@ describe('compact2col — what it must not disturb', () => {
     expect(html).toContain('<html>');
   });
 
-  it('treats an omitted leafletLayout as classic, byte for byte', () => {
+  it('treats an omitted layout as classic, byte for byte', () => {
     const omitted = classic(hazardManual('flammable'));
     const explicit = buildPrintPartsHtml([hazardManual('flammable')], {
       pageSize: 'a5',
       cover: { title: 'T' },
       back: {},
       compact: true,
-      leafletLayout: 'classic',
+      layout: 'classic',
     })[0].html;
     expect(explicit).toBe(omitted);
   });
 
-  it('can never reach a full manual', () => {
+  /**
+   * This used to assert that the layout could not reach a full manual at all — the gate in
+   * `printLayoutOf`. That gate is deliberately gone: `compact2col` is now a choice on a manual
+   * too (see im-print-manual2col.test.ts for what it does there). What must still hold is that
+   * the LEAFLET-shaped half of it cannot: the severity bands, the continuous locale flow and
+   * the leaflet header are keyed on the template type, not on the layout.
+   */
+  it('takes none of the leaflet-shaped changes into a full manual', () => {
     const opts: PrintHtmlOptions = {
       pageSize: 'a4',
       cover: { title: 'T' },
       back: {},
-      leafletLayout: 'compact2col',
+      layout: 'compact2col',
     };
     const all = buildPrintPartsHtml([fullManual], opts)
       .map((p) => p.html)
       .join('');
-    expect(all).not.toContain('columns: 2; column-gap: 4mm;');
-    expect(all).not.toContain('column-fill: auto;');
+    // Hazard severity bands and the hazard descriptor: leaflet only. A manual's callouts keep
+    // their tinted panels, which is what stops this being a document change.
     expect(all).not.toContain('imv-hz-band');
+    expect(all).not.toContain('imv-hz-desc');
+    // The per-locale language bar and the logo-only leaflet header belong to the continuous
+    // flow, which a manual does not use.
+    expect(all).not.toContain('imv-lang-bar');
+    expect(all).not.toContain('im-leaflet-header');
+    // And the leaflet's break reset must not leak: a manual's content block still starts on a
+    // fresh page rather than running onto its own contents page.
+    expect(all).not.toContain('padding: 0; break-before: auto;');
   });
 
   it('leaves the classic leaflet one part per language, each with its edge tab', () => {

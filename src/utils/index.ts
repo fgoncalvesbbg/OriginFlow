@@ -36,7 +36,7 @@ export { passesFeatureGate } from './attribute-condition.utils';
 export { parseAttributeCsv } from './attribute-csv-import.utils';
 export type { ParsedAttributeRow } from './attribute-csv-import.utils';
 export { parseSkuCsv, parseSkuRoster } from './sku-csv-import.utils';
-export type { SkuCsvSkuColumn, SkuCsvAttributeRow, SkuCsvRow, SkuCsvParseResult, SkuRosterParseResult } from './sku-csv-import.utils';
+export type { SkuCsvSkuColumn, SkuCsvAttributeRow, SkuCsvRow, SkuCsvParseResult, SkuRosterParseResult, SkuSheetOrientation, ParseSkuCsvOptions } from './sku-csv-import.utils';
 export { akeneoColumnCode } from './akeneo-export.utils';
 export { formatBytes, formatDate } from './format.utils';
 export type { FormatBytesOptions, FormatDateOptions } from './format.utils';

@@ -40,7 +40,7 @@ import type { SignedUrlAuth } from '../../data/ports/storage.port';
 import { isLive } from '../../config/environment.config';
 import { generateUUID } from '../../utils';
 import type { IMTemplateType } from '../../types';
-import type { PrintTypography, PrintLeafletLayout } from './im-print-typography';
+import type { PrintTypography, PrintLayout } from './im-print-typography';
 import { flagEnabled } from './feature-flags';
 
 const BUCKET = 'im-print';
@@ -91,13 +91,13 @@ export interface PrintRender {
   /** im_markets.code this booklet was produced for (market preset), or null for ad-hoc. */
   market: string | null;
   /**
-   * Which leaflet layout this PDF was set in — DERIVED from `storagePath`, never stored.
+   * Which layout this PDF was set in — DERIVED from `storagePath`, never stored.
    *
    * im_print_renders has no layout column, and the render rows are immutable history, so
    * there is nothing to backfill: every row written before the compact layout existed reads
    * as 'classic', which is exactly what it is. See `layoutOfStoragePath`.
    */
-  layout: PrintLeafletLayout;
+  layout: PrintLayout;
 }
 
 export interface PrintBackInput {
@@ -135,11 +135,13 @@ export interface RequestPrintPdfParams {
    */
   mergeToc?: boolean;
   /**
-   * Which layout to set a Warning Leaflet in — 'classic' (default) or 'compact2col', the
-   * dense two-column A5 booklet. Ignored for full manuals. A layout is a render choice, not
-   * a document type: same template, same content, same translations, same coverage issue.
+   * Which layout to set this document in — 'classic' (default) or 'compact2col'. Valid for
+   * BOTH template types: a leaflet gets columns plus severity bands plus a continuous flow
+   * across locales, a manual gets columns only (same cover, TOC, page numbers and tabs). A
+   * layout is a render choice, not a document type: same template, same content, same
+   * translations, same coverage issue.
    */
-  leafletLayout?: PrintLeafletLayout;
+  layout?: PrintLayout;
   /**
    * The document code printed in the footer and used in the download filename, e.g.
    * `WL-RAN-ANGLED-8MJ-A5`. Built by `buildDocCode` (./im-doc-code) from the template's
@@ -184,17 +186,20 @@ export interface PrintPdfResult {
 /**
  * The layout a stored render was produced in, read back out of its storage path.
  *
- * The merge step writes `warning_leaflet-compact2col-<langs>-<size>-v<n>-<job>.pdf` for the
+ * The merge step writes `<template_type>-compact2col-<langs>-<size>-v<n>-<job>.pdf` for the
  * compact layout and leaves the classic name exactly as it always was, so this is a total
- * function over every row ever written — old rows have no token and are classic.
+ * function over every row ever written — old rows have no token and are classic. Both template
+ * types are matched: the token is what keeps a compact render from being mistaken for a newer
+ * classic one by the five consumers that match renders on (template_type, page_size,
+ * languages), and a two-column MANUAL needs that distinction exactly as a leaflet does.
  *
  * Path-derived rather than a column on purpose: the alternative is a migration that has to be
  * applied before the feature works at all, against a table whose rows are append-only history
  * that would need no backfill anyway. Promote it to a real column when something needs to
  * QUERY by layout; reading it per row does not.
  */
-export const layoutOfStoragePath = (storagePath: string | null | undefined): PrintLeafletLayout =>
-  /\/warning_leaflet-compact2col-/.test(storagePath ?? '') ? 'compact2col' : 'classic';
+export const layoutOfStoragePath = (storagePath: string | null | undefined): PrintLayout =>
+  /\/(?:warning_leaflet|im)-compact2col-/.test(storagePath ?? '') ? 'compact2col' : 'classic';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const mapRender = (r: any): PrintRender => ({
@@ -457,7 +462,7 @@ export const requestPrintPdf = async (params: RequestPrintPdfParams): Promise<Pr
     market: params.market,
     typography: params.typography,
     mergeToc: params.mergeToc,
-    leafletLayout: params.leafletLayout,
+    layout: params.layout,
     docCode: params.docCode,
   };
 
@@ -506,8 +511,8 @@ export interface RequestDraftPrintPdfParams {
   typography?: PrintTypography;
   /** Continue the first section on the TOC page (full manuals only). */
   mergeToc?: boolean;
-  /** Leaflet layout to preview — 'classic' (default) or 'compact2col'. */
-  leafletLayout?: PrintLeafletLayout;
+  /** Layout to preview — 'classic' (default) or 'compact2col'. Valid for both template types. */
+  layout?: PrintLayout;
   /** Document code for the footer + filename (see RequestPrintPdfParams.docCode). */
   docCode?: string;
   onProgress?: (label: string, done: number, total: number) => void;
@@ -595,7 +600,7 @@ export const requestDraftPrintPdf = async (
     back: params.back,
     typography: params.typography,
     mergeToc: params.mergeToc,
-    leafletLayout: params.leafletLayout,
+    layout: params.layout,
     docCode: params.docCode,
   };
 
@@ -639,9 +644,10 @@ export const requestDraftPrintPdf = async (
     const res = await fetch(merged.url);
     if (!res.ok) throw new Error(`Could not download the draft PDF (${res.status}).`);
     const blob = await res.blob();
+    const compact2col = params.layout === 'compact2col';
     const kind = params.templateType === 'warning_leaflet'
-      ? (params.leafletLayout === 'compact2col' ? 'Warning Leaflet (Compact)' : 'Warning Leaflet')
-      : 'Instruction Manual';
+      ? (compact2col ? 'Warning Leaflet (Compact)' : 'Warning Leaflet')
+      : (compact2col ? 'Instruction Manual (Compact)' : 'Instruction Manual');
     const fallback = `${kind} (draft).pdf`;
     return {
       blobUrl: URL.createObjectURL(blob),
