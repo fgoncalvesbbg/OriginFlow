@@ -74,9 +74,15 @@ export const handler = async (event: NetlifyEvent) => {
 
   // The version, and the spec it belongs to. Read with the service role because the reviewer
   // path has no session for RLS to key off; the entitlement check is the code below.
+  //
+  // The embed names its FK explicitly: migration 163 also put a composite FK the other way
+  // (design_specs.final_version_id -> design_spec_versions), so PostgREST sees two
+  // relationships between these tables and refuses to guess which one `design_specs(...)`
+  // means. Left unqualified, every request here 500s with "more than one relationship was
+  // found" — the in-memory test fake doesn't catch this because it ignores the select string.
   const { data: version, error: vErr } = await supabase
     .from('design_spec_versions')
-    .select('id, spec_id, version, kind, storage_path, stamped_path, design_specs(project_id, spec_code)')
+    .select('id, spec_id, version, kind, storage_path, stamped_path, design_specs!design_spec_versions_spec_id_fkey(project_id, spec_code)')
     .eq('id', versionId)
     .maybeSingle();
 
