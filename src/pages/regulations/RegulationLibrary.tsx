@@ -18,8 +18,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Ban, CalendarClock, CheckSquare, Edit2, FileJson, FileText, Loader2, Plus,
-  RefreshCw, Scale, Search, ShieldCheck, Trash2, X,
+  AlertTriangle, Ban, CalendarClock, CheckSquare, ChevronDown, ChevronRight, Edit2, FileJson,
+  FileText, Loader2, Plus, RefreshCw, Scale, Search, ShieldCheck, Trash2, X,
 } from 'lucide-react';
 
 import {
@@ -31,6 +31,7 @@ import {
   getRegulationTcfCounts,
   getRegulationUsageCounts,
   getRegulations,
+  groupRegulations,
   indexRegulations,
   isReviewOverdue,
   parseRegulationChecklist,
@@ -38,6 +39,7 @@ import {
   runVersionCheck,
   updateRegulation,
 } from '../../services';
+import type { RegulationGroupBy } from '../../services';
 import type { CategoryL3, Regulation, RegulationStatus } from '../../types';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -63,6 +65,9 @@ export const RegulationLibraryContent: React.FC = () => {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | RegulationStatus>('all');
+  const [groupBy, setGroupBy] = useState<RegulationGroupBy>('kind');
+  /** Collapsed sections, by group key. Empty = everything open. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const [draft, setDraft] = useState<RegulationDraft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -122,6 +127,28 @@ export const RegulationLibraryContent: React.FC = () => {
     () => Array.from(lifecycleById.values()).filter(l => l.blocking).length,
     [lifecycleById],
   );
+
+  /**
+   * The sections rendered below. Grouping runs on the FILTERED list, so a search narrows the
+   * sections to those that still have a hit rather than leaving empty headers behind.
+   */
+  const groups = useMemo(() => groupRegulations(visible, groupBy), [visible, groupBy]);
+
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Collapse state is keyed by group key, and the keys change meaning when the dimension does
+  // ('standard' vs 'EU' vs 'active'), so a stale set would collapse an unrelated section.
+  const handleGroupByChange = useCallback((next: RegulationGroupBy) => {
+    setGroupBy(next);
+    setCollapsed(new Set());
+  }, []);
 
   /** How many rows the version check can actually speak to — everything with a CELEX. */
   const checkableCount = useMemo(
@@ -268,6 +295,17 @@ export const RegulationLibraryContent: React.FC = () => {
             <option value="expired">Expired</option>
             <option value="superseded">Superseded</option>
           </select>
+          <select
+            value={groupBy}
+            onChange={e => handleGroupByChange(e.target.value as RegulationGroupBy)}
+            title="How the library is sectioned. Kind reads the citation itself — a directive states the obligation, a standard demonstrates it."
+            className="text-xs border rounded-lg px-2 py-1.5 bg-white"
+          >
+            <option value="kind">Group by kind</option>
+            <option value="jurisdiction">Group by jurisdiction</option>
+            <option value="status">Group by status</option>
+            <option value="none">No grouping</option>
+          </select>
           <button
             onClick={handleCheckVersions}
             disabled={checking || checkableCount === 0}
@@ -330,160 +368,186 @@ export const RegulationLibraryContent: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {visible.map(r => {
-          const templates = usage[r.id] ?? 0;
-          const tcf = tcfUsage[r.id] ?? 0;
-          // Obligations (migration 141) supersede the free-text blob as the source of truth;
-          // counting the blob once a regulation has obligation rows would under/over-report
-          // what it actually contains. Same fallback rule as the checklist builder itself.
-          const hasObligationRows = (r.obligations?.length ?? 0) > 0;
-          const obligationCount = hasObligationRows
-            ? (r.obligations?.length ?? 0)
-            : parseRegulationChecklist(r.checklist).length;
-          const obligationTitles = hasObligationRows
-            ? (r.obligations ?? []).map(o => o.text).join('\n')
-            : parseRegulationChecklist(r.checklist).join('\n');
-          const edition = editionLine(r);
-          return (
-            <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow flex flex-col hover:shadow-md transition-all">
-              <div className="flex items-start justify-between gap-2">
-                <Link
-                  to={`/regulations/${r.id}`}
-                  className="font-mono text-sm font-bold text-primary break-all hover:text-indigo-600"
-                >
-                  {r.referenceCode}
-                </Link>
-                {r.status === 'superseded' && (
-                  <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0">
-                    SUPERSEDED
-                  </span>
-                )}
-                {r.status === 'expired' && (() => {
-                  const life = lifecycleById.get(r.id);
-                  return (
+      {groups.map(group => {
+        const isCollapsed = collapsed.has(group.key);
+        return (
+          <section key={group.key} className="mb-6 last:mb-0">
+            {groupBy !== 'none' && (
+              <button
+                onClick={() => toggleGroup(group.key)}
+                aria-expanded={!isCollapsed}
+                className="w-full flex items-center gap-2 mb-3 pb-1.5 border-b border-gray-200 text-left group"
+              >
+                {isCollapsed
+                  ? <ChevronRight size={14} className="text-gray-400 shrink-0" />
+                  : <ChevronDown size={14} className="text-gray-400 shrink-0" />}
+                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wide group-hover:text-indigo-600 transition-colors">
+                  {group.label}
+                </h3>
+                <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                  {group.regulations.length}
+                </span>
+              </button>
+            )}
+            {!isCollapsed && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {group.regulations.map(r => {
+              const templates = usage[r.id] ?? 0;
+              const tcf = tcfUsage[r.id] ?? 0;
+              // Obligations (migration 141) supersede the free-text blob as the source of truth;
+              // counting the blob once a regulation has obligation rows would under/over-report
+              // what it actually contains. Same fallback rule as the checklist builder itself.
+              const hasObligationRows = (r.obligations?.length ?? 0) > 0;
+              const obligationCount = hasObligationRows
+                ? (r.obligations?.length ?? 0)
+                : parseRegulationChecklist(r.checklist).length;
+              const obligationTitles = hasObligationRows
+                ? (r.obligations ?? []).map(o => o.text).join('\n')
+                : parseRegulationChecklist(r.checklist).join('\n');
+              const edition = editionLine(r);
+              return (
+                <div key={r.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow flex flex-col hover:shadow-md transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link
+                      to={`/regulations/${r.id}`}
+                      className="font-mono text-sm font-bold text-primary break-all hover:text-indigo-600"
+                    >
+                      {r.referenceCode}
+                    </Link>
+                    {r.status === 'superseded' && (
+                      <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0">
+                        SUPERSEDED
+                      </span>
+                    )}
+                    {r.status === 'expired' && (() => {
+                      const life = lifecycleById.get(r.id);
+                      return (
+                        <span
+                          className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0 inline-flex items-center gap-1 ${
+                            life?.blocking ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-800'
+                          }`}
+                          title={life?.blocking
+                            ? 'Expired with no replacement recorded — this is blocking publishes and new TCF requests.'
+                            : `Expired, replaced by ${life?.effective.referenceCode}. Nothing is blocked.`}
+                        >
+                          <Ban size={9} /> {life?.blocking ? 'BLOCKING' : 'EXPIRED'}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <Link to={`/regulations/${r.id}`} className="text-sm text-gray-700 mt-1 hover:text-indigo-600">
+                    {r.title}
+                  </Link>
+
+                  {edition && (
+                    <p className="text-[11px] text-gray-500 mt-1.5 font-medium">{edition}</p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    {r.jurisdiction && (
+                      <span className="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold">
+                        {r.jurisdiction}
+                      </span>
+                    )}
+                    <VersionBadge regulation={r} />
+                    {isReviewOverdue(r) && (
+                      <span
+                        className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
+                        title={`A person was due to re-verify this against the source by ${r.reviewDueAt}.`}
+                      >
+                        <CalendarClock size={9} /> Review due
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Both halves of the obligation, side by side — the whole reason the two
+                      libraries were merged. A zero on either side is worth seeing. */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                     <span
-                      className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0 inline-flex items-center gap-1 ${
-                        life?.blocking ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-800'
-                      }`}
-                      title={life?.blocking
-                        ? 'Expired with no replacement recorded — this is blocking publishes and new TCF requests.'
-                        : `Expired, replaced by ${life?.effective.referenceCode}. Nothing is blocked.`}
+                      className="bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
+                      title="TCF requirements that exist to satisfy this regulation."
                     >
-                      <Ban size={9} /> {life?.blocking ? 'BLOCKING' : 'EXPIRED'}
+                      <ShieldCheck size={9} /> {tcf} TCF
                     </span>
-                  );
-                })()}
-              </div>
-              <Link to={`/regulations/${r.id}`} className="text-sm text-gray-700 mt-1 hover:text-indigo-600">
-                {r.title}
-              </Link>
-
-              {edition && (
-                <p className="text-[11px] text-gray-500 mt-1.5 font-medium">{edition}</p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                {r.jurisdiction && (
-                  <span className="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold">
-                    {r.jurisdiction}
-                  </span>
-                )}
-                <VersionBadge regulation={r} />
-                {isReviewOverdue(r) && (
-                  <span
-                    className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
-                    title={`A person was due to re-verify this against the source by ${r.reviewDueAt}.`}
-                  >
-                    <CalendarClock size={9} /> Review due
-                  </span>
-                )}
-              </div>
-
-              {/* Both halves of the obligation, side by side — the whole reason the two
-                  libraries were merged. A zero on either side is worth seeing. */}
-              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                <span
-                  className="bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
-                  title="TCF requirements that exist to satisfy this regulation."
-                >
-                  <ShieldCheck size={9} /> {tcf} TCF
-                </span>
-                <span
-                  className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
-                  title="IM templates that answer for this regulation, explicitly or via a ticked category."
-                >
-                  {templates} template{templates === 1 ? '' : 's'}
-                </span>
-                {obligationCount > 0 && (
-                  <span
-                    className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
-                    title={obligationTitles}
-                  >
-                    <CheckSquare size={9} /> {obligationCount} obligation{obligationCount === 1 ? '' : 's'}
-                  </span>
-                )}
-              </div>
-
-              {r.summary && (
-                <p className="text-[11px] text-gray-500 mt-2 line-clamp-3">{r.summary}</p>
-              )}
-
-              {r.summaryBytes > 0 ? (
-                <p className="text-[11px] text-gray-500 mt-2 flex items-center gap-1.5 truncate">
-                  <FileText size={11} className="shrink-0" />
-                  <span className="truncate" title={r.summaryFileName ?? undefined}>
-                    {kb(r.summaryBytes)} summary{r.summaryFileName ? ` · ${r.summaryFileName}` : ''}
-                  </span>
-                </p>
-              ) : (
-                <p className="text-[11px] text-amber-600 mt-2 flex items-start gap-1.5">
-                  <AlertTriangle size={11} className="mt-0.5 shrink-0" />
-                  No summary — checks against this regulation will be refused.
-                </p>
-              )}
-
-              <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-100">
-                <Link
-                  to={`/regulations/${r.id}`}
-                  className="text-xs font-medium text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1"
-                >
-                  <Scale size={12} /> Open
-                </Link>
-                {isAdmin && (
-                  <>
-                    <button
-                      onClick={() => handleEdit(r)}
-                      className="text-xs font-medium text-gray-500 hover:text-indigo-700 inline-flex items-center gap-1"
+                    <span
+                      className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                      title="IM templates that answer for this regulation, explicitly or via a ticked category."
                     >
-                      <Edit2 size={12} /> Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(r)}
-                      disabled={deletingId === r.id}
-                      className="text-xs font-medium text-gray-400 hover:text-rose-600 inline-flex items-center gap-1 disabled:opacity-50"
-                    >
-                      {deletingId === r.id
-                        ? <><Loader2 size={12} className="animate-spin" /> Deleting…</>
-                        : <><Trash2 size={12} /> Delete</>}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                      {templates} template{templates === 1 ? '' : 's'}
+                    </span>
+                    {obligationCount > 0 && (
+                      <span
+                        className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-bold inline-flex items-center gap-1"
+                        title={obligationTitles}
+                      >
+                        <CheckSquare size={9} /> {obligationCount} obligation{obligationCount === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
 
-        {visible.length === 0 && (
-          <div className="col-span-full text-center py-12 text-gray-400 bg-light border border-dashed border-gray-200 rounded-xl">
-            {regulations.length === 0
-              ? (isAdmin
-                  ? 'No regulations yet. Add the first one to start building the library.'
-                  : 'No regulations yet. An administrator can add them here.')
-              : 'No regulations match that search.'}
-          </div>
-        )}
-      </div>
+                  {r.summary && (
+                    <p className="text-[11px] text-gray-500 mt-2 line-clamp-3">{r.summary}</p>
+                  )}
+
+                  {r.summaryBytes > 0 ? (
+                    <p className="text-[11px] text-gray-500 mt-2 flex items-center gap-1.5 truncate">
+                      <FileText size={11} className="shrink-0" />
+                      <span className="truncate" title={r.summaryFileName ?? undefined}>
+                        {kb(r.summaryBytes)} summary{r.summaryFileName ? ` · ${r.summaryFileName}` : ''}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-amber-600 mt-2 flex items-start gap-1.5">
+                      <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+                      No summary — checks against this regulation will be refused.
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-100">
+                    <Link
+                      to={`/regulations/${r.id}`}
+                      className="text-xs font-medium text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1"
+                    >
+                      <Scale size={12} /> Open
+                    </Link>
+                    {isAdmin && (
+                      <>
+                        <button
+                          onClick={() => handleEdit(r)}
+                          className="text-xs font-medium text-gray-500 hover:text-indigo-700 inline-flex items-center gap-1"
+                        >
+                          <Edit2 size={12} /> Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(r)}
+                          disabled={deletingId === r.id}
+                          className="text-xs font-medium text-gray-400 hover:text-rose-600 inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {deletingId === r.id
+                            ? <><Loader2 size={12} className="animate-spin" /> Deleting…</>
+                            : <><Trash2 size={12} /> Delete</>}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+                })}
+              </div>
+            )}
+          </section>
+        );
+      })}
+
+      {visible.length === 0 && (
+        <div className="text-center py-12 text-gray-400 bg-light border border-dashed border-gray-200 rounded-xl">
+          {regulations.length === 0
+            ? (isAdmin
+                ? 'No regulations yet. Add the first one to start building the library.'
+                : 'No regulations yet. An administrator can add them here.')
+            : 'No regulations match that search.'}
+        </div>
+      )}
 
       {importing && (
         <RegulationImportDialog

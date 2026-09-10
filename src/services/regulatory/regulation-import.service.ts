@@ -38,6 +38,7 @@ import type {
 } from '../../types';
 import { generateUUID } from '../../utils';
 import { getComplianceRequirementsOrThrow, saveRequirement } from '../compliance/compliance-requirement.service';
+import { getCategories } from '../compliance/compliance-category.service';
 import { CARRIERS } from './obligation-parse';
 import {
   createClause, createObligation, getRegulationStructure, updateClause,
@@ -599,34 +600,46 @@ export const applyRegulationImport = async (
   // Skipping silently would be wrong; the dialog says the count it will create.
   let tcfRequirementsCreated = 0;
   if (tcfCategoryId && doc.tcfRequirements?.length) {
-    // Non-degrading read: a failed one would leave `already` empty and re-create every
-    // TCF requirement this category already has.
-    const existingRequirements = await getComplianceRequirementsOrThrow();
-    const already = new Set(existingRequirements
-      .filter(r => r.categoryId === tcfCategoryId)
-      .map(r => norm(r.title)));
-    for (const req of doc.tcfRequirements) {
-      if (already.has(norm(req.title))) continue;
-      try {
-        await saveRequirement({
-          id: generateUUID(),
-          categoryId: tcfCategoryId,
-          section: req.section,
-          title: req.title,
-          description: req.description,
-          isMandatory: req.isMandatory ?? true,
-          regulationId,
-          clauseId: req.clause ? clauseIdByNumber.get(norm(req.clause)) ?? null : null,
-          appliesByDefault: true,
-          condition: null,
-          timingType: req.timingType ?? 'ETD',
-          timingWeeks: req.timingWeeks ?? 0,
-          testReportOrigin: req.testReportOrigin ?? 'third_party_mandatory',
-          selfDeclarationAccepted: req.selfDeclarationAccepted ?? false,
-        });
-        tcfRequirementsCreated++;
-      } catch (e) {
-        problems.push(`TCF requirement "${req.title}": ${e instanceof Error ? e.message : String(e)}`);
+    // A category marked FINAL (migration 172) refuses every requirement write at the
+    // database. Checked ONCE up front so the operator gets one sentence naming the lock
+    // instead of the same trigger message repeated for every requirement in the document —
+    // and so the count in the result is honestly zero rather than partially applied.
+    const lockedTarget = (await getCategories()).find(c => c.id === tcfCategoryId && c.isFinalized);
+
+    if (lockedTarget) {
+      problems.push(
+        `TCF requirements skipped: "${lockedTarget.name}" is marked FINAL. An administrator must release the category — stating why — before ${doc.tcfRequirements.length} requirement(s) can be imported into it.`,
+      );
+    } else {
+      // Non-degrading read: a failed one would leave `already` empty and re-create every
+      // TCF requirement this category already has.
+      const existingRequirements = await getComplianceRequirementsOrThrow();
+      const already = new Set(existingRequirements
+        .filter(r => r.categoryId === tcfCategoryId)
+        .map(r => norm(r.title)));
+      for (const req of doc.tcfRequirements) {
+        if (already.has(norm(req.title))) continue;
+        try {
+          await saveRequirement({
+            id: generateUUID(),
+            categoryId: tcfCategoryId,
+            section: req.section,
+            title: req.title,
+            description: req.description,
+            isMandatory: req.isMandatory ?? true,
+            regulationId,
+            clauseId: req.clause ? clauseIdByNumber.get(norm(req.clause)) ?? null : null,
+            appliesByDefault: true,
+            condition: null,
+            timingType: req.timingType ?? 'ETD',
+            timingWeeks: req.timingWeeks ?? 0,
+            testReportOrigin: req.testReportOrigin ?? 'third_party_mandatory',
+            selfDeclarationAccepted: req.selfDeclarationAccepted ?? false,
+          });
+          tcfRequirementsCreated++;
+        } catch (e) {
+          problems.push(`TCF requirement "${req.title}": ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
     }
   }

@@ -7,16 +7,17 @@ import Layout from '../../components/Layout';
 import {
   getComplianceRequestById, getComplianceRequirements,
   getCategories, submitComplianceResponse, deleteComplianceRequest,
-  addDocument, uploadFile, getProjectDocs, COMPLIANCE_SECTIONS, getSupplierById,
-  getProjectById, getRegulations, collectBlocks
+  addDocument, uploadFile, getProjectDocs, getSupplierById,
+  getProjectById, getRegulations, collectBlocks, isConditional,
+  getComplianceSections, groupRequirementsBySection
 } from '../../services';
 import { useAuth } from '../../context/AuthContext';
 import { useRefetchOnFocus } from '../../hooks';
-import { passesFeatureGate } from '../../utils';
+import { getRequirementsForCategory } from '../../utils';
 import { isDateOnlyPast } from '../../utils/date.utils';
 import {
   ComplianceRequest, ComplianceRequirement,
-  CategoryL3, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
+  CategoryL3, ComplianceSection, ComplianceResponseStatus, ComplianceRequestStatus, ComplianceResponseItem, UserRole,
   DocStatus, ResponsibleParty, Supplier, Project, Regulation
 } from '../../types';
 import { Copy, CheckCheck, ShieldCheck, Save, Calendar, AlertCircle, AlertTriangle, Trash2, FileDown, Folder, Lock, Eye, EyeOff, User, X, Verified, Mail, Loader2, Check, Clock, Building, FileCheck, RefreshCw, Scale } from 'lucide-react';
@@ -50,6 +51,8 @@ const ComplianceRequestDetail: React.FC = () => {
   const [req, setReq] = useState<ComplianceRequest | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
+  /** Section order, as the operator arranged it (migration 175). */
+  const [sections, setSections] = useState<ComplianceSection[]>([]);
   const [category, setCategory] = useState<CategoryL3 | null>(null);
   const [regulations, setRegulations] = useState<Regulation[]>([]);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
@@ -87,14 +90,16 @@ const ComplianceRequestDetail: React.FC = () => {
     if (!id) return;
     const seq = ++loadSeq.current;
     try {
-      const [r, allReqs, allCats, allRegs] = await Promise.all([
+      const [r, allReqs, allCats, allRegs, allSections] = await Promise.all([
         getComplianceRequestById(id),
         getComplianceRequirements(),
         getCategories(),
-        getRegulations()
+        getRegulations(),
+        getComplianceSections()
       ]);
       if (loadSeq.current !== seq) return; // a newer load has already landed; discard this one
       setRegulations(allRegs);
+      setSections(allSections);
 
       if (r) {
         setReq(r);
@@ -118,16 +123,18 @@ const ComplianceRequestDetail: React.FC = () => {
           });
         }
 
-        const condAttrs = r.conditionAttributes ?? {};
-        const applicableReqs = allReqs.filter(requirement => {
-        // Global requirements (categoryId null) apply to every category.
-        if (requirement.categoryId != null && requirement.categoryId !== r.categoryId) return false;
-        const cond = requirement.condition;
-        const hasCond = !!cond && (!!cond.requires_feature || !!cond.requires_feature_absent);
-        if (!hasCond) return requirement.appliesByDefault;
-        return passesFeatureGate(cond!, condAttrs, {});
-      });
-      setRequirements(applicableReqs);
+        // Owned, global, or shared with this category (migration 173), then narrowed to the
+        // set the wizard FROZE onto the request (migration 174) — the same rule and the same
+        // frozen list the supplier's portal uses, so the two screens cannot disagree about
+        // what was asked for. Nothing is re-evaluated here either: this is a record.
+        const formulated = new Set(r.requirementIds ?? []);
+        const inCategory = getRequirementsForCategory(allReqs, r.categoryId);
+        setRequirements(
+          formulated.size > 0
+            ? inCategory.filter(req => formulated.has(req.id))
+            // Legacy request (pre-wizard): unconditional-only, which is what it resolved to.
+            : inCategory.filter(req => !isConditional(req) && req.appliesByDefault !== false),
+        );
 
       // Never reseed a form the reviewer is mid-edit on — a focus refetch or a manual
       // Refresh must not discard answers/comments typed since the last load.
@@ -317,24 +324,10 @@ LaunchFlow PLM Platform`;
       doc.text("Requirements Checklist", 14, y);
       y += 12;
 
-      const groupedReqs = requirements.reduce((acc, r) => {
-          const sec = r.section || 'General Requirements';
-          if (!acc[sec]) acc[sec] = [];
-          acc[sec].push(r);
-          return acc;
-      }, {} as Record<string, ComplianceRequirement[]>);
-      
-      const sortedSections = Object.keys(groupedReqs).sort((a, b) => {
-        const indexA = COMPLIANCE_SECTIONS.indexOf(a);
-        const indexB = COMPLIANCE_SECTIONS.indexOf(b);
-        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-        if (indexA !== -1) return -1;
-        if (indexB !== -1) return 1;
-        return a.localeCompare(b);
-      });
-
-      sortedSections.forEach((section) => {
-          const reqs = groupedReqs[section];
+      // The one ordering rule (migration 175) — the same call the screen below and the
+      // supplier's portal make, so the PDF cannot come out in a different order than the
+      // page it was exported from. It used to carry its own copy of the comparator.
+      groupRequirementsBySection(requirements, sections).forEach(({ section, requirements: reqs }) => {
           if (y > 270) { doc.addPage(); y = 20; }
           doc.setFontSize(12);
           doc.setFont("helvetica", "bold");
@@ -462,21 +455,10 @@ LaunchFlow PLM Platform`;
   // here but must not be able to rewrite what was answered.
   const isLocked = req.status !== ComplianceRequestStatus.PENDING_SUPPLIER;
 
-  const groupedReqs = requirements.reduce((acc, r) => {
-      const sec = r.section || 'General Requirements';
-      if (!acc[sec]) acc[sec] = [];
-      acc[sec].push(r);
-      return acc;
-  }, {} as Record<string, ComplianceRequirement[]>);
-
-  const sortedSections = Object.keys(groupedReqs).sort((a, b) => {
-    const indexA = COMPLIANCE_SECTIONS.indexOf(a);
-    const indexB = COMPLIANCE_SECTIONS.indexOf(b);
-    if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-    if (indexA !== -1) return -1;
-    if (indexB !== -1) return 1;
-    return a.localeCompare(b);
-  });
+  // Sections and the requirements inside them, both in the operator's defined order
+  // (migration 175). One shared rule, so this screen, its PDF export and the supplier's
+  // portal cannot disagree — which they did, because each carried its own comparator.
+  const sectionGroups = groupRequirementsBySection(requirements, sections);
 
   return (
     <Layout>
@@ -569,7 +551,7 @@ LaunchFlow PLM Platform`;
       )}
 
       <div className="space-y-6 mb-8">
-         {sortedSections.map(section => (
+         {sectionGroups.map(({ section, requirements: sectionReqs }) => (
             <div key={section} className="bg-white border border-gray-200 rounded-xl shadow overflow-hidden">
                 <div className="bg-gray-100 px-6 py-3 border-b border-gray-200">
                     <div className="flex items-center gap-2">
@@ -578,7 +560,7 @@ LaunchFlow PLM Platform`;
                     </div>
                 </div>
                 <div className="divide-y divide-slate-100">
-                    {groupedReqs[section].map((r, idx) => {
+                    {sectionReqs.map((r, idx) => {
                         const currentAnswer = answers[r.id];
                         const isRejected = currentAnswer === ComplianceResponseStatus.CANNOT_COMPLY;
 

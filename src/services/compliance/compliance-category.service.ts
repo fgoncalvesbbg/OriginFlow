@@ -64,6 +64,7 @@ export const getCategories = async (): Promise<CategoryL3[]> => {
             active: c.active,
             isFinalized: c.is_finalized,
             finalizedAt: c.finalized_at,
+            finalizedBy: c.finalized_by ?? null,
             pmId: c.pm_id ?? null,
             pmName: c.pm?.name ?? null,
             l2Id: c.l2_id ?? null,
@@ -89,14 +90,20 @@ export const getCategories = async (): Promise<CategoryL3[]> => {
 
 /**
  * Save/update a compliance category (supports pm_id assignment and re-parenting).
+ *
+ * Deliberately does NOT write `is_finalized` / `finalized_at` / `finalized_by`. The FINAL
+ * lock is a compliance decision with its own two doors — `lockCategoryRequirements` and
+ * `releaseCategoryRequirements` (migration 172) — and the release door demands an admin and
+ * a written reason. Sending the flag from here would have made every ordinary category edit
+ * a chance to flip it back from stale UI state; omitting the columns means an upsert of an
+ * existing row leaves the lock exactly as the database has it. New rows take the column
+ * default (false).
  */
 export const saveCategory = async (cat: CategoryL3): Promise<void> => {
     await db.upsert('categories_l3', {
         id: cat.id,
         name: cat.name,
         active: cat.active,
-        is_finalized: cat.isFinalized,
-        finalized_at: cat.finalizedAt,
         pm_id: cat.pmId ?? null,
         l2_id: cat.l2Id ?? null
     });

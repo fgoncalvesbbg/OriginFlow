@@ -4,15 +4,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import {
   getProjects, getSuppliers, getCategories, createComplianceRequest,
-  getComplianceRequirements, getCategoryAttributes,
-  getProjectSkus, getAttributeRequestsByProject, getEffectiveSkuValue,
+  getComplianceRequirements, isConditional,
   getRegulations, collectBlocks, getComplianceRequests,
 } from '../../services';
-import { Project, Supplier, CategoryL3, ComplianceRequirement, CategoryAttribute, Regulation } from '../../types';
+import { Project, Supplier, CategoryL3, ComplianceRequirement, Regulation } from '../../types';
 import { CategorySelect } from '../../components/common/CategorySelect';
-import { getAttributesForCategory } from '../../utils';
-import AttributeInput from '../../components/common/AttributeInput';
-import { AlertCircle, ArrowLeft, Loader2, Lock, GitBranch, Scale } from 'lucide-react';
+import { getRequirementsForCategory } from '../../utils';
+import TcfQuestionWizard from './TcfQuestionWizard';
+import { AlertCircle, ArrowLeft, Loader2, Lock, ListChecks, Scale } from 'lucide-react';
 
 /**
  * A human-readable TCF request id, e.g. "TCF-2026-483920".
@@ -46,15 +45,27 @@ const CreateComplianceRequest: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
-  const [attributes, setAttributes] = useState<CategoryAttribute[]>([]);
   const [regulations, setRegulations] = useState<Regulation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Attribute values captured to evaluate requirement conditions for this request.
-  const [condValues, setCondValues] = useState<Record<string, string>>({});
-  const [prefilledAttrIds, setPrefilledAttrIds] = useState<Set<string>>(new Set());
-  const [loadingConditions, setLoadingConditions] = useState(false);
+  /**
+   * What the TCF question wizard decided (migration 174): the answers, and the requirement
+   * set they formulated. Both are frozen onto the request on submit.
+   *
+   * Null until the wizard has been run. It is REQUIRED whenever the category has any
+   * conditional requirement — the whole point is that a human answers the questions rather
+   * than the screen guessing — and skipped entirely when nothing is conditional.
+   *
+   * Replaces the old `condValues` map of category-attribute answers. That version read its
+   * required-answer list from the CONDITIONS but rendered its input fields from the surviving
+   * ATTRIBUTES, so once the attributes were deleted there was a required answer with no field
+   * to type it in and the Create button stayed disabled with nothing explaining why.
+   */
+  const [wizardResult, setWizardResult] = useState<
+    { answers: Record<string, string>; requirementIds: string[] } | null
+  >(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Form State
   const [selectedProjectId, setSelectedProjectId] = useState(searchParams.get('projectId') || '');
@@ -71,12 +82,13 @@ const CreateComplianceRequest: React.FC = () => {
         setLoading(true);
         // Load data in parallel. We wrap each in a catch to log errors but ideally allow others to succeed if possible,
         // though for this form most are critical.
-        const [pData, sData, cData, rData, aData, regData, existingRequests] = await Promise.all([
+        // Category attributes are deliberately NOT loaded any more: TCF conditions gate on
+        // compliance_questions (migration 174), and the wizard reads those itself.
+        const [pData, sData, cData, rData, regData, existingRequests] = await Promise.all([
            getProjects(),
            getSuppliers(),
            getCategories(),
            getComplianceRequirements(),
-           getCategoryAttributes(),
            getRegulations(),
            getComplianceRequests(),
         ]);
@@ -85,7 +97,6 @@ const CreateComplianceRequest: React.FC = () => {
         setSuppliers(sData);
         setCategories(cData);
         setRequirements(rData);
-        setAttributes(aData);
         setRegulations(regData);
         setRequestId(generateRequestId(new Set(existingRequests.map(r => r.requestId))));
 
@@ -117,20 +128,21 @@ const CreateComplianceRequest: React.FC = () => {
   }, [projects, searchParams, selectedProjectId]); // Depend on projects loading
 
   // ---------------------------------------------------------------------------
-  // Conditional requirements — which attributes must be known to gate them
+  // Conditional requirements — what the wizard has to decide (migration 174)
   // ---------------------------------------------------------------------------
-  const categoryReqs = requirements.filter(r =>
-    (r.categoryId == null || r.categoryId === categoryId) && r.condition && (r.condition.requires_feature || r.condition.requires_feature_absent));
-  const condAttrIds = Array.from(new Set(
-    categoryReqs.flatMap(r => [r.condition!.requires_feature, r.condition!.requires_feature_absent].filter(Boolean) as string[])
-  ));
-  // Attributes referenced by a "present" condition must have a value supplied; an
-  // "absent"-only attribute is fine left blank (blank IS the meaningful state).
-  const requiredAttrIds = new Set(categoryReqs.map(r => r.condition!.requires_feature).filter(Boolean) as string[]);
-  const condAttrs = condAttrIds
-    .map(id => attributes.find(a => a.id === id))
-    .filter((a): a is CategoryAttribute => !!a);
-  const missingRequired = Array.from(requiredAttrIds).some(id => !(condValues[id]?.trim()));
+  /** Everything that reaches this category: owned, global, and shared with it (migration 173). */
+  const candidates = useMemo(
+    () => (categoryId ? getRequirementsForCategory(requirements, categoryId) : []),
+    [requirements, categoryId],
+  );
+  /** Whether anything here is gated at all. Nothing conditional means no wizard to run. */
+  const hasConditional = useMemo(() => candidates.some(isConditional), [candidates]);
+  /**
+   * The wizard is required exactly when something is conditional. Its answers decide what a
+   * supplier is legally asked for, so the screen never guesses them and never silently
+   * excludes a gated requirement — the two failure modes of the version this replaced.
+   */
+  const needsWizard = hasConditional && !wizardResult;
 
   /**
    * Expired regulations behind the requirements this request would carry (migration 140).
@@ -147,46 +159,27 @@ const CreateComplianceRequest: React.FC = () => {
   const regulationBlocks = useMemo(() => {
     if (!categoryId) return [];
     const byId = new Map(regulations.map(r => [r.id, r]));
-    const cited = requirements
-      .filter(r => r.categoryId == null || r.categoryId === categoryId)
+    const cited = getRequirementsForCategory(requirements, categoryId)
       .map(r => (r.regulationId ? byId.get(r.regulationId) : null));
     return collectBlocks(cited, regulations);
   }, [categoryId, requirements, regulations]);
 
-  // Prefill condition attributes from existing project SKU / attribute-request data.
+  /**
+   * Changing the project or the category invalidates the wizard's answers.
+   *
+   * The formulated set belongs to one category's requirements; keeping it across a category
+   * change would send a supplier a list assembled for a different product family — the
+   * quietest possible way to get a compliance request wrong.
+   *
+   * Note there is no SKU prefill any more. The old version prefilled category-attribute
+   * values from the project when every SKU agreed, which cannot carry over: a TCF question
+   * ("Does it transmit radio?") is deliberately not a PIM field, so there is nothing to read
+   * it from. Convenience was the whole benefit and a wrongly-prefilled compliance answer is
+   * the whole cost.
+   */
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      const reqs = requirements.filter(r =>
-        (r.categoryId == null || r.categoryId === categoryId) && r.condition && (r.condition.requires_feature || r.condition.requires_feature_absent));
-      const ids = Array.from(new Set(
-        reqs.flatMap(r => [r.condition!.requires_feature, r.condition!.requires_feature_absent].filter(Boolean) as string[])
-      ));
-      if (!categoryId || ids.length === 0 || !selectedProjectId) {
-        if (!cancelled) { setCondValues({}); setPrefilledAttrIds(new Set()); }
-        return;
-      }
-      setLoadingConditions(true);
-      try {
-        const [skus, attrReqs] = await Promise.all([
-          getProjectSkus(selectedProjectId),
-          getAttributeRequestsByProject(selectedProjectId),
-        ]);
-        const prefill: Record<string, string> = {};
-        const prefilled = new Set<string>();
-        for (const attrId of ids) {
-          // Only auto-prefill when every SKU agrees on a single value.
-          const vals = Array.from(new Set(skus.map(s => getEffectiveSkuValue(s, attrReqs, attrId)).filter(v => v && v.trim())));
-          if (vals.length === 1) { prefill[attrId] = vals[0]; prefilled.add(attrId); }
-        }
-        if (!cancelled) { setCondValues(prefill); setPrefilledAttrIds(prefilled); }
-      } finally {
-        if (!cancelled) setLoadingConditions(false);
-      }
-    };
-    run();
-    return () => { cancelled = true; };
-  }, [categoryId, selectedProjectId, requirements]);
+    setWizardResult(null);
+  }, [categoryId, selectedProjectId]);
 
   const handleProjectSelect = (pid: string) => {
     setSelectedProjectId(pid);
@@ -208,8 +201,9 @@ const CreateComplianceRequest: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (missingRequired) {
-        alert('Please provide values for the required product attributes before creating the request.');
+    if (needsWizard) {
+        alert('Answer the applicability questions first — they decide which requirements this supplier is asked for.');
+        setWizardOpen(true);
         return;
     }
     // Guarded here as well as on the disabled button: this handler is the one that actually
@@ -229,9 +223,16 @@ const CreateComplianceRequest: React.FC = () => {
     setSubmitting(true);
 
     try {
-        const conditionAttributes: Record<string, string> = {};
-        condAttrIds.forEach(id => { if (condValues[id]?.trim()) conditionAttributes[id] = condValues[id].trim(); });
-        const created = await createComplianceRequest(selectedProjectId, projectName, requestId, supplierId, categoryId, [], deadline || undefined, conditionAttributes);
+        // Both halves of the wizard's output are stored: the answers as the EVIDENCE, and the
+        // requirement ids as the SET. With nothing conditional there is no wizard, and the
+        // set is simply everything that applies by default.
+        const answers = wizardResult?.answers ?? {};
+        const requirementIds = wizardResult?.requirementIds
+            ?? candidates.filter(r => r.appliesByDefault !== false).map(r => r.id);
+        const created = await createComplianceRequest(
+            selectedProjectId, projectName, requestId, supplierId, categoryId, [],
+            deadline || undefined, answers, requirementIds,
+        );
 
         // Land on the request just created, not the project — otherwise the operator has
         // to re-find it (it was buried in the project's own compliance list before).
@@ -266,6 +267,18 @@ const CreateComplianceRequest: React.FC = () => {
 
   return (
     <Layout>
+      {wizardOpen && categoryId && (
+        <TcfQuestionWizard
+          candidates={candidates}
+          categoryName={categories.find(c => c.id === categoryId)?.name ?? 'This category'}
+          /* Re-opening keeps what was already answered, so "Review answers" is a review and
+             not a re-type. */
+          initialAnswers={wizardResult?.answers}
+          onClose={() => setWizardOpen(false)}
+          onComplete={result => { setWizardResult(result); setWizardOpen(false); }}
+        />
+      )}
+
       <div className="max-w-3xl mx-auto">
         <button onClick={() => navigate(-1)} className="flex items-center text-muted hover:text-gray-800 mb-6 text-sm">
           <ArrowLeft size={16} className="mr-1" /> Back
@@ -352,46 +365,42 @@ const CreateComplianceRequest: React.FC = () => {
              </div>
           </div>
 
-          {/* Product attributes needed to decide which conditional requirements apply */}
-          {categoryId && condAttrs.length > 0 && (
-            <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-5 space-y-4">
-              <div className="flex items-start gap-2">
-                <GitBranch size={18} className="text-indigo-600 shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="font-bold text-sm text-gray-800">Product Attributes</h3>
-                  <p className="text-xs text-gray-600">Some requirements in this category only apply under certain attribute values. Confirm or fill these so we include the right requirements. Values found on the project are prefilled.</p>
+          {/* Applicability questions (migration 174). Only shown when something in this
+              category is actually gated — an empty panel on the other ~130 categories would
+              be noise, and a panel that renders nothing while still blocking the button is
+              precisely the bug this replaced. */}
+          {categoryId && hasConditional && (
+            <div className={`rounded-xl p-5 border ${
+              wizardResult ? 'bg-emerald-50/50 border-emerald-200' : 'bg-indigo-50/60 border-indigo-100'
+            }`}>
+              <div className="flex items-start gap-3">
+                <ListChecks size={18} className={`shrink-0 mt-0.5 ${wizardResult ? 'text-emerald-600' : 'text-indigo-600'}`} />
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-sm text-gray-800">Applicability questions</h3>
+                  {wizardResult ? (
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      Answered — <strong>{wizardResult.requirementIds.length} requirement
+                      {wizardResult.requirementIds.length !== 1 ? 's' : ''}</strong> will be
+                      requested. This set is frozen onto the request when you create it.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      Some requirements in this category only apply to certain products. Answer
+                      a few questions and we will formulate the right set.
+                    </p>
+                  )}
                 </div>
-                {loadingConditions && <Loader2 size={16} className="animate-spin text-indigo-500 ml-auto" />}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {condAttrs.map(attr => {
-                  const required = requiredAttrIds.has(attr.id);
-                  const prefilled = prefilledAttrIds.has(attr.id);
-                  const isNumeric = attr.dataType === 'integer' || attr.dataType === 'decimal';
-                  const missing = required && !(condValues[attr.id]?.trim());
-                  return (
-                    <div key={attr.id}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <label className="block text-sm font-medium text-gray-700">{attr.name}</label>
-                        {required
-                          ? <span className="text-[10px] font-bold text-rose-600 uppercase">Required</span>
-                          : <span className="text-[10px] font-bold text-gray-400 uppercase">Optional</span>}
-                        {prefilled && <span className="text-[10px] font-bold text-emerald-600 uppercase">Prefilled</span>}
-                      </div>
-                      <AttributeInput
-                        attribute={attr}
-                        value={condValues[attr.id] ?? ''}
-                        onChange={v => setCondValues(prev => ({ ...prev, [attr.id]: v }))}
-                        mode={isNumeric ? 'fixed' : 'text'}
-                        error={missing ? 'A value is required' : undefined}
-                      />
-                      {!required && (
-                        <p className="text-[11px] text-gray-400 mt-1">Leave blank if the product does not have this.</p>
-                      )}
-                    </div>
-                  );
-                })}
+                <button
+                  type="button"
+                  onClick={() => setWizardOpen(true)}
+                  className={`shrink-0 px-4 py-2 rounded-md text-sm font-medium shadow ${
+                    wizardResult
+                      ? 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  }`}
+                >
+                  {wizardResult ? 'Review answers' : 'Answer questions'}
+                </button>
               </div>
             </div>
           )}
@@ -433,8 +442,12 @@ const CreateComplianceRequest: React.FC = () => {
             <button type="button" onClick={() => navigate(-1)} className="px-6 py-2 text-gray-600 hover:bg-light mr-3 rounded">Cancel</button>
             <button
               type="submit"
-              disabled={submitting || missingRequired || regulationBlocks.length > 0}
-              title={regulationBlocks.length > 0 ? 'An expired regulation must be replaced first' : undefined}
+              disabled={submitting || needsWizard || regulationBlocks.length > 0}
+              title={
+                regulationBlocks.length > 0 ? 'An expired regulation must be replaced first'
+                : needsWizard ? 'Answer the applicability questions first'
+                : undefined
+              }
               className="px-6 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {submitting && <Loader2 size={16} className="animate-spin" />}

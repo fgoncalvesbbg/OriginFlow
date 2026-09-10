@@ -32,7 +32,9 @@ export {
   deleteProject,
   saveProjectMilestones,
   getProjectSteps,
+  getStepsForProjects,
   updateStepStatus,
+  setStepStatuses,
   getProjectDocs,
   addDocument,
   updateDocumentMetadata,
@@ -192,9 +194,43 @@ export {
   saveRequirement,
   deleteRequirement,
   addStandardRequirements,
+  getRequirementHistory,
+  getComplianceQuestions,
+  getComplianceQuestionsOrThrow,
+  saveComplianceQuestion,
+  deleteComplianceQuestion,
+  conditionQuestionId,
+  isConditional,
+  questionsForRequirements,
+  evaluateRequirementApplicability,
+  describeQuestionCondition,
+  questionUsageCounts,
+  applyRequirementSharing,
+  unlinkRequirementFromCategory,
+  promoteRequirementToGlobal,
+  setRequirementApplicability,
+  setRequirementExclusions,
+  planRequirementSharing,
+  summarizeSharingPlan,
+  SHARING_SKIP_LABELS,
+  lockCategoryRequirements,
+  releaseCategoryRequirements,
+  canReleaseComplianceCategory,
+  isValidReleaseReason,
+  RELEASE_REASON_MIN_LENGTH,
   getComplianceSections,
   addComplianceSection,
   deleteComplianceSection,
+  reorderComplianceSections,
+  reorderRequirements,
+  DEFAULT_SECTION_NAME,
+  sectionOf,
+  orderSectionNames,
+  orderRequirements,
+  groupRequirementsBySection,
+  reorderPlan,
+  moveInList,
+  nextSortOrder,
   getCategoryAttributes,
   saveCategoryAttribute,
   importCategoryAttributes,
@@ -215,6 +251,15 @@ export {
 } from './compliance';
 export type { ImportAttributesResult, ReplaceAttributesResult, ApplySyncResult } from './compliance';
 export type { SyncPlan, SyncItem, SyncRisk, AttributeUsage } from './compliance';
+export type {
+  TcfAnswers, ApplicabilityReason, ApplicabilityVerdict, ApplicabilityResult,
+  RequirementSectionGroup,
+} from './compliance';
+export type {
+  SharingMode, SharingPlan, SharingSkipReason,
+  PlannedLink, PlannedCopy, PlannedSkip, PlannedBlock,
+  ApplySharingResult,
+} from './compliance';
 
 export {
   getProductToolkitDefinitions,
@@ -524,6 +569,10 @@ export {
   serializeTemplateForRegCheck,
   chunkRegCheckDocument,
   htmlToStructuredText,
+  classifyRegulation,
+  groupRegulations,
+  KIND_LABELS,
+  KIND_ORDER,
   REG_CHECK_BLOCK_CHAR_CAP,
   REG_CHECK_CHUNK_CHARS
 } from './regulatory';
@@ -551,7 +600,10 @@ export type {
   RegCheckDocument,
   RegCheckSection,
   RegCheckBlock,
-  RegCheckBlockKind
+  RegCheckBlockKind,
+  RegulationGroup,
+  RegulationGroupBy,
+  RegulationKind
 } from './regulatory';
 
 // Design Specs (migration 163). Names here do not collide with the IM adapters, so unlike

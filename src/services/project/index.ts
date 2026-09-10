@@ -16,7 +16,9 @@ export {
 
 export {
   getProjectSteps,
-  updateStepStatus
+  getStepsForProjects,
+  updateStepStatus,
+  setStepStatuses
 } from './project-step.service';
 
 export {

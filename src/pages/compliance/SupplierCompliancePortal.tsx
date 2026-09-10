@@ -4,14 +4,15 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   verifySupplierAccess, submitComplianceResponseSecure,
-  getComplianceRequirements, getCategories,
-  COMPLIANCE_SECTIONS
+  getComplianceRequirements, getCategories, getComplianceSections,
+  groupRequirementsBySection
 } from '../../services';
 import {
   ComplianceRequest, ComplianceRequirement,
-  CategoryL3, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
+  CategoryL3, ComplianceSection, ComplianceResponseItem, ComplianceResponseStatus, ComplianceRequestStatus
 } from '../../types';
-import { passesFeatureGate } from '../../utils';
+import { getRequirementsForCategory } from '../../utils';
+import { isConditional } from '../../services';
 import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle, Printer } from 'lucide-react';
 import { PortalBrandBar, KlarsteinLogo } from '../../components/KlarsteinBrand';
 
@@ -65,6 +66,12 @@ const SupplierCompliancePortal: React.FC = () => {
   const [req, setReq] = useState<ComplianceRequest | null>(null);
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([]);
   const [category, setCategory] = useState<CategoryL3 | null>(null);
+  /**
+   * Section order (migration 175). Readable by anon — `compliance_sections` has carried a
+   * public read policy since migration 64 — unlike `compliance_questions`, which is why the
+   * applicable requirement set is frozen onto the request instead of evaluated here.
+   */
+  const [sections, setSections] = useState<ComplianceSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   // A request the reviewer sent back. Editable — `submit_compliance_response_secure`
@@ -148,28 +155,37 @@ const SupplierCompliancePortal: React.FC = () => {
 
   const loadPortalDependencies = async (requestData: ComplianceRequest) => {
       try {
-          const [allReqs, allCats] = await Promise.all([
+          const [allReqs, allCats, allSections] = await Promise.all([
             getComplianceRequirements(),
-            getCategories()
+            getCategories(),
+            getComplianceSections()
           ]);
 
           const cat = allCats.find(c => c.id === requestData.categoryId);
           setCategory(cat || null);
+          setSections(allSections);
 
-          const condAttrs = requestData.conditionAttributes ?? {};
-          const requirementApplies = (requirement: ComplianceRequirement) => {
-            const cond = requirement.condition;
-            const hasCond = !!cond && (!!cond.requires_feature || !!cond.requires_feature_absent);
-            if (!hasCond) return requirement.appliesByDefault;
-            return passesFeatureGate(cond!, condAttrs, {});
-          };
-
-          // Global requirements first, then this category's own — same grouping order
-          // as the admin Requirements list (ComplianceLibrary), so the supplier sees
-          // items in the order they were set up, not whatever order the DB returned.
-          const globalReqs = allReqs.filter(r => r.categoryId == null && requirementApplies(r));
-          const categoryReqs = allReqs.filter(r => r.categoryId === requestData.categoryId && requirementApplies(r));
-          setRequirements([...globalReqs, ...categoryReqs]);
+          // Globals first, then this category's own AND the ones shared with it
+          // (migration 173) — `getRequirementsForCategory` owns that order, the same order
+          // the admin Requirements list shows, so the supplier sees items as they were set
+          // up rather than however the DB returned them.
+          //
+          // WHAT THE SUPPLIER SEES IS THE SET THAT WAS SENT, not the set today's library
+          // would produce. The wizard froze `requirementIds` onto the request when it was
+          // created (migration 174), so no condition is evaluated here at all: the portal
+          // needs no access to the internal TCF questions, and a library edit tomorrow
+          // cannot change what this supplier was asked for. `getRequirementsForCategory`
+          // still supplies the ORDER; the frozen list decides membership.
+          const formulated = new Set(requestData.requirementIds ?? []);
+          const inCategory = getRequirementsForCategory(allReqs, requestData.categoryId);
+          setRequirements(
+            formulated.size > 0
+              ? inCategory.filter(r => formulated.has(r.id))
+              // Legacy request, created before the wizard existed: it carries no frozen set,
+              // and every condition then pointed at a deleted attribute and so excluded its
+              // requirement. Unconditional-only reproduces exactly what it showed at the time.
+              : inCategory.filter(r => !isConditional(r) && r.appliesByDefault !== false),
+          );
 
           const initialAnswers: Record<string, ComplianceResponseStatus> = {};
           const initialComments: Record<string, string> = {};
@@ -365,30 +381,18 @@ const SupplierCompliancePortal: React.FC = () => {
     }
   });
 
-  // Apply sorting for mandatory-first mode
-  const sortedRequirements = [...filteredRequirements].sort((a, b) => {
-    if (sortMode === 'mandatory') {
-      if (a.isMandatory !== b.isMandatory) {
-        return a.isMandatory ? -1 : 1;
-      }
-    }
-    return 0;
-  });
-
-  const groupedReqs = sortedRequirements.reduce((acc, r) => {
-      const sec = r.section || 'General Requirements';
-      if (!acc[sec]) acc[sec] = [];
-      acc[sec].push(r);
-      return acc;
-  }, {} as Record<string, ComplianceRequirement[]>);
-
-  const sortedSections = Object.keys(groupedReqs).sort((a, b) => {
-    const indexA = COMPLIANCE_SECTIONS.indexOf(a);
-    const indexB = COMPLIANCE_SECTIONS.indexOf(b);
-    if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-    if (indexA !== -1) return -1;
-    if (indexB !== -1) return 1;
-    return a.localeCompare(b);
+  /**
+   * Sections and the requirements inside them, in the order the compliance team defined
+   * (migration 175). One shared rule, so what the supplier reads is the order the PM
+   * arranged in the library — previously this screen carried its own comparator and put
+   * custom sections alphabetically while the library put them in creation order.
+   *
+   * `mandatoryFirst` is the supplier's own view toggle and deliberately outranks the defined
+   * order inside each section: "what must I do to be compliant at all" is a different
+   * question from the reading order the library was arranged for.
+   */
+  const sectionGroups = groupRequirementsBySection(filteredRequirements, sections, {
+    mandatoryFirst: sortMode === 'mandatory',
   });
 
   // Calculate progress stats
@@ -710,8 +714,7 @@ const SupplierCompliancePortal: React.FC = () => {
 
         {/* Requirements Section - Read-only if submitted, editable otherwise */}
         <div className={`space-y-8 print-plain ${submitted ? 'opacity-60 pointer-events-none' : ''}`}>
-                {sortedSections.map(section => {
-                    const sectionReqs = groupedReqs[section];
+                {sectionGroups.map(({ section, requirements: sectionReqs }) => {
                     const completedCount = sectionReqs.filter(r => answers[r.id]).length;
                     return (
                         <div key={section} className={`bg-white border rounded-xl shadow overflow-hidden ${submitted ? 'border-gray-100 bg-gray-50' : 'border-gray-200'}`}>

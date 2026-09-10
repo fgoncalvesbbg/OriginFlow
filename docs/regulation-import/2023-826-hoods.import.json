@@ -1,0 +1,92 @@
+{
+  "importSchemaVersion": 1,
+  "regulation": {
+    "referenceCode": "Regulation (EU) 2023/826",
+    "title": "Commission Regulation (EU) 2023/826 of 17 April 2023 laying down ecodesign requirements for off mode, standby mode, and networked standby energy consumption of electrical and electronic household and office equipment pursuant to Directive 2009/125/EC and repealing Regulations (EC) No 1275/2008 and (EC) No 107/2009",
+    "jurisdiction": "EU",
+    "tcfDescription": "Evidence: declared power consumption (W, one decimal) for each off/standby/networked-standby mode the power-management function enters, and the time to reach it (minutes), per Annex III.3(a). State whether the SKU is HiNA or HiNA-functionality equipment (Annex I.8-9); silence is read as non-HiNA, which caps networked standby at 2.00 W rather than 7.00-8.00 W.",
+    "notes": "Marking, labelling and instruction obligations for hobs / induction hobs, taken from the EE marking guide (Hobs / Induction hobs, R1, 2025-07). Clause references are to Regulation (EU) 2023/826.\nAlso in scope for extractor / range hoods (Annex II, mains-dependent ≤250V household equipment) alongside Reg. 66/2014, which governs energy labelling but not standby/off limits. Off mode ≤0.50 W (≤0.30 W from 9 May 2027); standby ≤0.50 W, or ≤0.80 W with an information/status display; networked standby ≤2.00 W — hoods are never HiNA equipment, so the 7.00-8.00 W HiNA tier does not apply. Corrects the checklist line on Angled Hoods that cited Off <0.3 W and Networked standby <7 W as the figures in force from 9 May 2025.",
+    "status": "active",
+    "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32023R0826",
+    "celexId": "32023R0826",
+    "applicableCategoryNames": [
+      "Built-In Hoods",
+      "Ceiling Hoods",
+      "Downdraft Hoods",
+      "Island Hoods",
+      "Telescopic Hoods",
+      "Under-Cabinet Hoods",
+      "Hobs with Integrated Hoods"
+    ]
+  },
+  "summaryMd": "---\ninstrument: Commission Regulation (EU) 2023/826 of 17 April 2023 laying down ecodesign requirements for off mode, standby mode, and networked standby energy consumption of electrical and electronic household and office equipment pursuant to Directive 2009/125/EC and repealing Regulations (EC) No 1275/2008 and (EC) No 107/2009\ndesignation: Regulation (EU) 2023/826\ncelex: 32023R0826\ntype: Regulation\nin_marking_guide: yes\nconfidence: CONFIRMED\nassessed_on: 2026-08-20\ntags: [im-compliance, induction-hobs, eu]\n---\n\n> **This file contains a restatement of marking-guide row 46 that differs from the row's literal text. It requires sign-off before use.** See `00_Conflicts.md` C-01. The obligation remains mandatory; only its framing is corrected.\n\n## 1. What this instrument is\n\nThe horizontal ecodesign regulation for off mode, standby mode and networked standby power consumption of household and office equipment. It replaced Regulation (EC) No 1275/2008 and applies from 9 May 2025. It sets both design limits and information requirements.\n\n## 2. Applicability to induction hobs\n\nYes. The Commission's product guidance states that hobs are subject to the standby regulation alongside Regulation (EU) No 66/2014. A built-in induction hob with touch controls draws power when not cooking and has both an off mode and a standby mode. Rows 46 and 47 of the marking guide are `ü` for the instruction manual and binding regardless.\n\nThe Annex I product-list basis has not been retrieved. See `00_Unconfirmed.md` U-05 — not blocking.\n\n## 3. IM obligations\n\n### 3.1 Declared power consumption in each low-power mode  `[INFORMATION ITEM]`\n- **Source:** Annex III, point 3(a), first indent (row 46, **restated** — see banner)\n- **Applies when:** always\n- **Requirement:** the instruction manual for end-users and the free-access website must state, for each off mode, standby mode and networked standby into which the equipment is switched by the power management function or a similar function, **the power consumption of that SKU expressed in watts rounded to the first decimal place.**\n- **What row 46 says instead:** the guide's row reproduces the Annex II *limits* — standby or off mode below 0,5 W from 9 May 2025, off mode below 0,3 W from 9 May 2027. Those are design requirements on the product, not text for the manual.\n- **Why the restatement:** a manual printing \"Standby < 0,5 W\" in place of the measured figure does not discharge Annex III point 3(a). Row 47, which is correctly framed, maps to the second indent of the same provision — the two were evidently split from one source and one half lost its framing.\n- **Handling:** one figure per mode, watts, one decimal. The value is per SKU and comes from test data, not from the regulation.\n- **Design limits, for reference only — not IM text:**\n\n| Limit | Value | Applies from |\n|---|---|---|\n| Off mode | ≤ 0,50 W | 9 May 2025 (in force) |\n| Off mode | ≤ 0,30 W | 9 May 2027 (**future — recorded, not current**) |\n| Standby mode | per Annex II | 9 May 2025 |\n\n### 3.2 Delay period before automatic switching  `[INFORMATION ITEM]`\n- **Source:** Annex III, point 3(a), second indent (row 47)\n- **Applies when:** always\n- **Requirement:** the period after which the power management function switches the equipment into standby mode, off mode, or another condition not exceeding the applicable power consumption requirements, expressed in minutes.\n- **Handling:** minutes. If the hob has more than one such transition, each is declared.\n\n### 3.3 Networked standby content  `[CONDITIONAL]` — **dormant**\n- **Source:** Annex III, point 3\n- **Applies when:** the equipment has network ports\n- **Status:** no connectivity in the current range. Where triggered, this adds networked standby consumption and guidance on activating and deactivating wireless network ports.\n\n## 4. Fixed text register\n\nNo `[VERBATIM]` or `[SUBSTANCE]` strings. Wording is free; the data, units and precision are fixed.\n\n## 5. Interaction with other instruments\n\n- **Reg. (EU) No 66/2014** — separate data set, same permitted carriers. Do not merge the tables.\n- **Link alternative:** Annex III permits certain information to be given in the instruction manual as a link to the free-access website. Whether that alternative extends to the point 3(a) figures needs confirming before any manual relies on it; the equivalent allowance does not obviously exist under 66/2014.\n- **EN IEC 60335-1 cl. 7.12.9** — this content sits outside the safety block and must not be placed ahead of it.\n\n## 6. Open points\n\n1. **Sign-off required** on the 3.1 restatement.\n2. Scope basis — Article 1 and Annex I. `00_Unconfirmed.md` U-05.\n3. Exact wording and limits of the link alternative in Annex III point 3.\n4. Whether a built-in induction hob with touch controls has a *networked* standby at all, and whether the 20-minute maximum delay time applies to it.\n\n## 7. Applicability to extractor / range hoods\n\nYes, on the same basis as induction hobs (§2): a mains-dependent (≤250 V) household appliance with a power-management function is in scope of Annex II regardless of connectivity. Regulation (EU) No 66/2014 governs a range hood's energy label, fluid dynamic efficiency and lighting efficacy — not standby/off-mode power, which sits with this instrument.\n\n### 7.1 Full power-limit table (Annex III.1)  `[DESIGN LIMIT — not IM text, unless restated per §3.1]`\n\n| Mode | From 9 May 2025 | From 9 May 2027 |\n|---|---|---|\n| Off mode | ≤ 0.50 W | ≤ 0.30 W |\n| Standby (reactivation function only) | ≤ 0.50 W | ≤ 0.50 W |\n| Standby with information/status display | ≤ 0.80 W | ≤ 0.80 W |\n| Networked standby — HiNA / HiNA functionality | ≤ 8.00 W | ≤ 7.00 W |\n| Networked standby — all other networked equipment | ≤ 2.00 W | ≤ 2.00 W |\n\nExtractor and range hoods are never HiNA equipment (Annex I.8-9 lists only routers, network switches, wireless access points, hubs, modems, VoIP phones and video phones, as the main function). A Wi-Fi- or app-connected hood is \"all other networked equipment\": **≤ 2.00 W networked standby, with no 2027 step-down.**\n\n### 7.2 Checklist correction\n\nThe TCF requirement recorded against Angled Hoods (\"... (for IoT product) (EU) 2023/826 test report for standby and off mode ...\") states Off mode < 0.3 W and Networked standby < 7 W as the limits in force from 9 May 2025. Both are the 2027-tier figures, and the 7 W tier is HiNA-only. From 9 May 2025 the correct figures for a hood are Off mode ≤ 0.50 W and Networked standby ≤ 2.00 W (non-HiNA). Do not fail a hood against the wrong-tier numbers, and do not let a manual state \"< 0.3 W\" as if that were the current requirement — the restatement rule in §3.1 applies identically here: the table above is a design limit, not text for the manual; the manual states the SKU's measured figure.\n",
+  "summaryFileName": "regulation-eu-2023-826.md",
+  "clauses": [
+    {
+      "number": "Annex III.1",
+      "title": "Power limits — off mode, standby mode, networked standby",
+      "kind": "annex",
+      "summary": "Full Annex III.1 table: off mode, standby (with and without display), and networked standby (HiNA vs non-HiNA), each with the 9 May 2025 and 9 May 2027 tiers.",
+      "tcfDescription": "Declared per-mode power consumption (W, 1 dp) and time-to-mode (minutes); HiNA/non-HiNA classification."
+    }
+  ],
+  "obligations": [
+    {
+      "clause": "Annex III.1",
+      "text": "Standby mode with an information or status display shall not exceed 0.80 W (1.00 W for tumble dryers with a display per Regulation (EU) No 932/2012); unchanged across both the 9 May 2025 and 9 May 2027 tiers.",
+      "carriers": [
+        "IM",
+        "Product"
+      ],
+      "note": "Missing from the existing checklist entry, which records only the reactivation-only standby and off-mode figures."
+    },
+    {
+      "clause": "Annex III.1",
+      "text": "Networked standby shall not exceed 2.00 W for networked equipment other than HiNA or HiNA-functionality equipment; the 8.00 W (from 9 May 2025) / 7.00 W (from 9 May 2027) tier applies only to HiNA equipment as defined in Annex I.8-9 (routers, network switches, wireless access points, hubs, modems, VoIP phones and video phones, as the main function).",
+      "carriers": [
+        "IM",
+        "Product"
+      ],
+      "note": "The checklist entry on Angled Hoods states '<7 W' as the figure from 9 May 2025; that is the 2027 HiNA-only tier, and extractor hoods are not HiNA equipment."
+    },
+    {
+      "clause": "Annex III.1",
+      "text": "Technical documentation must state whether the equipment is networked and whether it is HiNA or HiNA-functionality equipment; absence of a statement is treated as non-HiNA.",
+      "note": "Technical file only — no IM/product carrier; see Annex III.3(b)."
+    }
+  ],
+  "tcfRequirements": [
+    {
+      "title": "Off/standby/networked-standby power declaration — Reg. (EU) 2023/826",
+      "description": "State, in watts to one decimal place, the power drawn in each mode the appliance's power-management function switches into (off mode, standby, standby-with-display, and — for any Wi-Fi/app-connected variant — networked standby with all ports active), plus the time in minutes to reach each mode. Limits: off mode ≤0.50 W (≤0.30 W from 9 May 2027); standby (reactivation only) ≤0.50 W; standby with display ≤0.80 W; networked standby ≤2.00 W for this product line, since extractor hoods are not HiNA equipment (the 7.00–8.00 W tier does not apply). Internal design control under Article 4 is a legally sufficient conformity route — third-party lab evidence is a Klarstein policy choice, not a regulatory requirement.",
+      "clause": "Annex III.1",
+      "section": "Electrical Test Reports and Certificates",
+      "isMandatory": true,
+      "timingType": "ETD",
+      "timingWeeks": 0,
+      "testReportOrigin": "supplier_inhouse",
+      "selfDeclarationAccepted": true
+    },
+    {
+      "title": "HiNA classification statement — Reg. (EU) 2023/826",
+      "description": "Confirm in the technical file whether the SKU is HiNA or HiNA-functionality equipment (Annex I.8-9: router, network switch, wireless access point, hub, modem, VoIP phone or video phone, as the main function). Extractor and range hoods are not HiNA; a missing statement is read as non-HiNA, which caps networked standby at 2.00 W rather than 7.00–8.00 W.",
+      "clause": "Annex III.1",
+      "section": "Technical Documentation",
+      "isMandatory": true,
+      "timingType": "ETD",
+      "timingWeeks": 0,
+      "testReportOrigin": "supplier_inhouse",
+      "selfDeclarationAccepted": true
+    }
+  ],
+  "research": {
+    "sources": [
+      {
+        "title": "Commission Regulation (EU) 2023/826, OJ L 103, 18.4.2023",
+        "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32023R0826",
+        "retrievedAt": "2026-09-10"
+      }
+    ],
+    "unverified": []
+  }
+}

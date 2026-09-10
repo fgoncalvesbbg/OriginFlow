@@ -96,6 +96,18 @@ export type {
   ReplacementResolution,
 } from './regulation-lifecycle';
 
+export {
+  classifyRegulation,
+  groupRegulations,
+  KIND_LABELS,
+  KIND_ORDER,
+} from './regulation-grouping';
+export type {
+  RegulationGroup,
+  RegulationGroupBy,
+  RegulationKind,
+} from './regulation-grouping';
+
 export { getRegulationUsage } from './regulation-usage.service';
 export type { RegulationUsage, RegulationTemplateUse } from './regulation-usage.service';
 

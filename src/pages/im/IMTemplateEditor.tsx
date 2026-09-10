@@ -33,7 +33,7 @@ import { usePrintColumn } from './editor/usePrintColumn';
 import { imContentPrintScale } from './editor/im-content-style';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { AttributePicker } from './editor/AttributePicker';
-import { useListDnd } from './editor/useListDnd';
+import { useListDnd } from '../../hooks/useListDnd';
 import { useUndoRedo } from './editor/useUndoRedo';
 import EditorToolbarMenu, { type ToolbarMenuItem } from './editor/EditorToolbarMenu';
 import { insertToActiveEditor, commitPlaceholder as commitPlaceholderToTarget } from './editor/insertTarget';

@@ -2,8 +2,8 @@
 /** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, lookupJiraIssues, jiraFilterValue, JIRA_NOT_FOUND_LABEL } from '../services';
-import { Project, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus, JiraLookup } from '../types';
+import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, getStepsForProjects, setStepStatuses, lookupJiraIssues, jiraFilterValue, JIRA_NOT_FOUND_LABEL } from '../services';
+import { Project, ProjectStep, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus, JiraLookup } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
 import { JiraStatusBadge } from '../components/JiraStatusBadge';
@@ -12,20 +12,14 @@ import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Tr
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
 import { useInbox } from '../components/inbox/InboxContext';
+import {
+  BOARD_BUCKETS, BoardBucketId, activePhase, bucketOf, planBucketDrop,
+} from './project-board-buckets';
 
 // Column keys used for per-column filtering and sorting in the projects table.
 type ProjectColKey = 'name' | 'projectId' | 'pm' | 'supplier' | 'step' | 'status' | 'jira';
 type SortDir = 'asc' | 'desc';
 type ViewMode = 'kanban' | 'table';
-
-// Column order for the kanban board. Archived projects get their own board (mirroring
-// the table's "Show Archived" toggle) rather than a fifth column mixed in with the rest.
-const KANBAN_STATUSES: ProjectOverallStatus[] = [
-  ProjectOverallStatus.IN_PROGRESS,
-  ProjectOverallStatus.ON_HOLD,
-  ProjectOverallStatus.CANCELLED,
-  ProjectOverallStatus.COMPLETED,
-];
 
 /** Clickable table header that toggles sorting for its column. */
 const SortableTh: React.FC<{
@@ -57,6 +51,9 @@ const PMDashboard: React.FC = () => {
   // query, so the tile and the drawer always agree. Null when rendered outside Layout.
   const inboxCtx = useInbox();
   const [projects, setProjects] = useState<Project[]>([]);
+  // Every visible project's chapters, keyed by project id. The board's columns ARE the
+  // chapters, so it groups on these statuses rather than on the overall project status.
+  const [chapters, setChapters] = useState<Record<string, ProjectStep[]>>({});
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [profiles, setProfiles] = useState<User[]>([]);
   const [stats, setStats] = useState<(DashboardStats & { newProposals: number }) | null>(null);
@@ -68,7 +65,7 @@ const PMDashboard: React.FC = () => {
   // filterable/sortable alternative.
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
-  const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
+  const [dragOverBucket, setDragOverBucket] = useState<BoardBucketId | null>(null);
   // Per-column filters + sort state for the projects table.
   const [colFilters, setColFilters] = useState<Record<ProjectColKey, string>>({ name: '', projectId: '', pm: '', supplier: '', step: '', status: 'all', jira: 'all' });
   const [sortKey, setSortKey] = useState<ProjectColKey>('name');
@@ -102,6 +99,10 @@ const PMDashboard: React.FC = () => {
       setSuppliers(sData);
       setProfiles(profileData);
       setStats(statsData);
+      // Awaited, unlike Jira: without the chapters the board cannot place a card, and a
+      // half-placed board is worse than a moment more of the spinner. One indexed query for
+      // every project, and it returns {} rather than throwing if the role cannot read them.
+      setChapters(await getStepsForProjects(pData.map(p => p.id)));
       // Deliberately not awaited: the table renders immediately and the Jira
       // column fills in when Atlassian answers.
       void refreshJira(pData);
@@ -137,6 +138,24 @@ const PMDashboard: React.FC = () => {
     return u?.name || u?.email || (id ? 'Unassigned' : 'Unassigned');
   };
 
+  /**
+   * The chapter a project is working, as a number — the same rule the board groups on, so the
+   * table's "Current Step" column agrees with the column a card sits in. It reads the chapter
+   * statuses, not `projects.current_step`: that column is written once at creation and never
+   * advanced, so before this it showed "Step 1" for every project in the database.
+   */
+  const phaseNumber = (p: Project): number => {
+    const list = chapters[p.id] ?? [];
+    const position = activePhase(list);
+    if (position.kind === 'phase') return position.phase;
+    if (position.kind === 'finished') return Math.max(...list.map(s => s.stepNumber));
+    return p.currentStep || 1;
+  };
+
+  /** The chapter row behind that number, for its name and its own status. */
+  const activeChapter = (p: Project): ProjectStep | undefined =>
+    (chapters[p.id] ?? []).find(s => s.stepNumber === phaseNumber(p));
+
   // Per-column accessors — string values used for both filtering and sorting.
   const colValue = (p: Project, key: ProjectColKey): string => {
     switch (key) {
@@ -144,7 +163,7 @@ const PMDashboard: React.FC = () => {
       case 'projectId': return p.projectId;
       case 'pm': return getPmName(p.pmId);
       case 'supplier': return getSupplierName(p.supplierId);
-      case 'step': return String(p.currentStep);
+      case 'step': return String(phaseNumber(p));
       case 'status': return p.status;
       // Sorts/filters on the same words the cell shows — the Epic's own Jira status.
       case 'jira': return jiraFilterValue(jira[p.projectId]);
@@ -199,34 +218,60 @@ const PMDashboard: React.FC = () => {
     })
     .sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1;
-      if (sortKey === 'step') return (a.currentStep - b.currentStep) * dir;
+      if (sortKey === 'step') return (phaseNumber(a) - phaseNumber(b)) * dir;
       return colValue(a, sortKey).localeCompare(colValue(b, sortKey), undefined, { numeric: true }) * dir;
     });
 
-  // Kanban board: same statuses as the visible column set (archived gets its own
-  // single-column board via the same "Show Archived" toggle used by the table).
-  const kanbanStatuses = showArchived ? [ProjectOverallStatus.ARCHIVED] : KANBAN_STATUSES;
+  // The board's five buckets are fixed and always all rendered, in order, however empty —
+  // see project-board-buckets.ts. Archived projects still get their own single-column board
+  // via the same "Show Archived" toggle the table uses.
   const kanbanProjects = [...searchFiltered].sort((a, b) => a.name.localeCompare(b.name));
-  const projectsByStatus = kanbanStatuses.reduce<Record<string, Project[]>>((acc, status) => {
-    acc[status] = kanbanProjects.filter(p => p.status === status);
+  const projectsByBucket = BOARD_BUCKETS.reduce<Record<string, Project[]>>((acc, bucket) => {
+    acc[bucket.id] = kanbanProjects.filter(p => bucketOf(p, chapters[p.id] ?? []) === bucket.id);
     return acc;
   }, {});
 
-  /** Drop a card onto a column: optimistic status update, reverted if the write fails. */
-  const handleKanbanDrop = async (status: ProjectOverallStatus) => {
+  /**
+   * Drop a card onto a column. The move is applied optimistically to both the project and its
+   * chapters, and rolled back as a pair if either write fails — a card that moved on screen
+   * while the chapter statuses stayed put would make the board disagree with the project page.
+   */
+  const handleKanbanDrop = async (target: BoardBucketId) => {
     const id = dragProjectId;
     setDragProjectId(null);
-    setDragOverStatus(null);
+    setDragOverBucket(null);
     if (!id) return;
     const project = projects.find(p => p.id === id);
-    if (!project || project.status === status) return;
-    const prevStatus = project.status;
-    setProjects(prev => prev.map(p => (p.id === id ? { ...p, status } : p)));
+    if (!project) return;
+
+    const prevChapters = chapters[id] ?? [];
+    const drop = planBucketDrop(project, prevChapters, target);
+    if (drop.kind === 'noop') return;
+    if (drop.kind === 'unsupported') { setErrorMsg(drop.reason); return; }
+
+    setErrorMsg('');
+    const moved = { ...project };
+    if (drop.status !== null) moved.status = drop.status;
+    if (drop.currentStep !== null) moved.currentStep = drop.currentStep;
+    const movedChapters = prevChapters.map(c => {
+      const write = drop.steps.find(s => s.id === c.id);
+      return write ? { ...c, status: write.status } : c;
+    });
+
+    setProjects(prev => prev.map(p => (p.id === id ? moved : p)));
+    setChapters(prev => ({ ...prev, [id]: movedChapters }));
     try {
-      await updateProject(id, { status });
+      if (drop.steps.length > 0) await setStepStatuses(drop.steps);
+      if (drop.status !== null || drop.currentStep !== null) {
+        await updateProject(id, {
+          ...(drop.status !== null ? { status: drop.status } : {}),
+          ...(drop.currentStep !== null ? { currentStep: drop.currentStep } : {}),
+        });
+      }
     } catch (e: any) {
-      setProjects(prev => prev.map(p => (p.id === id ? { ...p, status: prevStatus } : p)));
-      setErrorMsg(e.message || 'Failed to update project status.');
+      setProjects(prev => prev.map(p => (p.id === id ? project : p)));
+      setChapters(prev => ({ ...prev, [id]: prevChapters }));
+      setErrorMsg(e.message || 'Failed to move the project.');
     }
   };
 
@@ -236,6 +281,63 @@ const PMDashboard: React.FC = () => {
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  /**
+   * One card on the board, shared by the pipeline columns and the archived board.
+   *
+   * The badge is the point of the card: in a pipeline column it is the status of the chapter
+   * that column stands for, straight off the project page, so the board answers "how is the
+   * RFQ going" and not just "it is in RFQ". Live and Cancelled / On Hold are not chapters, so
+   * their cards show the overall status instead, with the chapter reached named underneath.
+   */
+  const renderBoardCard = (project: Project, draggable: boolean) => {
+    const chapter = activeChapter(project);
+    const bucket = bucketOf(project, chapters[project.id] ?? []);
+    const inPipeline = bucket === 'rfq' || bucket === 'development' || bucket === 'production';
+    return (
+      <div
+        key={project.id}
+        draggable={draggable}
+        onDragStart={(e) => { setDragProjectId(project.id); e.dataTransfer.setData('text/plain', project.id); e.dataTransfer.effectAllowed = 'move'; }}
+        onDragEnd={() => { setDragProjectId(null); setDragOverBucket(null); }}
+        className={`bg-white border border-gray-200 rounded-lg p-3 hover:border-indigo-300 hover:shadow-sm transition-all ${
+          draggable ? 'cursor-grab active:cursor-grabbing' : ''
+        } ${dragProjectId === project.id ? 'opacity-50' : ''}`}
+      >
+        <div className="font-bold text-primary text-sm mb-1">{project.name}</div>
+        <div className="text-[11px] text-muted font-mono mb-2">{project.projectId}</div>
+        <div className="flex items-center justify-between text-xs text-gray-500 mb-2 gap-2">
+          <span className="truncate">{getPmName(project.pmId)}</span>
+          {inPipeline && chapter ? (
+            <span className="flex-shrink-0" title={`Phase ${chapter.stepNumber}: ${chapter.name}`}>
+              <StatusBadge status={chapter.status} type="step" />
+            </span>
+          ) : (
+            <span className="flex-shrink-0">
+              <StatusBadge status={project.status} type="project" />
+            </span>
+          )}
+        </div>
+        {!inPipeline && chapter && (
+          <div className="text-[11px] text-muted truncate mb-2">Phase {chapter.stepNumber} · {chapter.name}</div>
+        )}
+        <div className="text-xs text-gray-500 truncate mb-2">{getSupplierName(project.supplierId)}</div>
+        {jiraConfigured && (
+          <div className="mb-2">
+            <JiraStatusBadge lookup={jira[project.projectId]} loading={jiraLoading && !jira[project.projectId]} />
+          </div>
+        )}
+        <div className="flex justify-end pt-1 border-t border-gray-100">
+          <Link
+            to={`/project/${project.id}`}
+            className="inline-flex items-center text-indigo-600 hover:text-blue-800 text-xs font-bold gap-0.5"
+          >
+            View <ChevronRight size={14} />
+          </Link>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -403,80 +505,67 @@ const PMDashboard: React.FC = () => {
         </div>
       </Card>
 
-      {/* Kanban board — default view, grouped by status. */}
+      {/* Board — default view. Five fixed pipeline columns, in order, always all present. */}
       {viewMode === 'kanban' && (
         loading ? (
           <Card className="p-12 flex flex-col items-center gap-2 text-muted">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             <span>Loading projects...</span>
           </Card>
-        ) : kanbanProjects.length === 0 ? (
-          <Card className="p-12 flex flex-col items-center gap-2 text-muted opacity-50">
-            <Search size={32} />
-            <span>No projects found.</span>
-          </Card>
-        ) : (
+        ) : showArchived ? (
+          // Archived keeps a board of its own: its cards have left the pipeline, so the five
+          // columns say nothing about them, and there is nowhere on it to drop a card.
           <div className="flex gap-4 overflow-x-auto pb-2">
-            {kanbanStatuses.map(status => {
-              const items = projectsByStatus[status] ?? [];
-              return (
-                <div
-                  key={status}
-                  onDragOver={(e) => { e.preventDefault(); setDragOverStatus(status); }}
-                  onDragLeave={() => setDragOverStatus(prev => (prev === status ? null : prev))}
-                  onDrop={(e) => { e.preventDefault(); void handleKanbanDrop(status); }}
-                  className={`flex-shrink-0 w-80 rounded-xl border transition-colors ${
-                    dragOverStatus === status ? 'border-indigo-400 bg-indigo-50/40' : 'border-gray-200 bg-light'
-                  }`}
-                >
-                  <div className="px-4 py-3 flex items-center justify-between border-b border-gray-200">
-                    <StatusBadge status={status} type="project" />
-                    <span className="text-xs font-semibold text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5">
-                      {items.length}
-                    </span>
-                  </div>
-                  <div className="p-3 space-y-3 min-h-[140px] max-h-[calc(100vh-360px)] overflow-y-auto">
-                    {items.length === 0 ? (
-                      <div className="text-xs text-gray-400 italic text-center py-6">No projects</div>
-                    ) : items.map(project => (
-                      <div
-                        key={project.id}
-                        draggable
-                        onDragStart={(e) => { setDragProjectId(project.id); e.dataTransfer.setData('text/plain', project.id); e.dataTransfer.effectAllowed = 'move'; }}
-                        onDragEnd={() => { setDragProjectId(null); setDragOverStatus(null); }}
-                        className={`bg-white border border-gray-200 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-indigo-300 hover:shadow-sm transition-all ${
-                          dragProjectId === project.id ? 'opacity-50' : ''
-                        }`}
-                      >
-                        <div className="font-bold text-primary text-sm mb-1">{project.name}</div>
-                        <div className="text-[11px] text-muted font-mono mb-2">{project.projectId}</div>
-                        <div className="flex items-center justify-between text-xs text-gray-500 mb-2 gap-2">
-                          <span className="truncate">{getPmName(project.pmId)}</span>
-                          <span className="inline-flex items-center flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                            Step {project.currentStep}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-500 truncate mb-2">{getSupplierName(project.supplierId)}</div>
-                        {jiraConfigured && (
-                          <div className="mb-2">
-                            <JiraStatusBadge lookup={jira[project.projectId]} loading={jiraLoading && !jira[project.projectId]} />
-                          </div>
-                        )}
-                        <div className="flex justify-end pt-1 border-t border-gray-100">
-                          <Link
-                            to={`/project/${project.id}`}
-                            className="inline-flex items-center text-indigo-600 hover:text-blue-800 text-xs font-bold gap-0.5"
-                          >
-                            View <ChevronRight size={14} />
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+            <div className="flex-shrink-0 w-80 rounded-xl border border-gray-200 bg-light">
+              <div className="px-4 py-3 flex items-center justify-between border-b border-gray-200">
+                <span className="text-sm font-bold text-primary">Archived</span>
+                <span className="text-xs font-semibold text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5">
+                  {kanbanProjects.length}
+                </span>
+              </div>
+              <div className="p-3 space-y-3 min-h-[140px] max-h-[calc(100vh-360px)] overflow-y-auto">
+                {kanbanProjects.length === 0 ? (
+                  <div className="text-xs text-gray-400 italic text-center py-6">No archived projects</div>
+                ) : kanbanProjects.map(project => renderBoardCard(project, false))}
+              </div>
+            </div>
           </div>
+        ) : (
+          <>
+            {kanbanProjects.length === 0 && (
+              <p className="mb-3 text-sm text-muted flex items-center gap-2">
+                <Search size={14} /> No projects match this search — the pipeline is shown empty.
+              </p>
+            )}
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {BOARD_BUCKETS.map(bucket => {
+                const items = projectsByBucket[bucket.id] ?? [];
+                return (
+                  <div
+                    key={bucket.id}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverBucket(bucket.id); }}
+                    onDragLeave={() => setDragOverBucket(prev => (prev === bucket.id ? null : prev))}
+                    onDrop={(e) => { e.preventDefault(); void handleKanbanDrop(bucket.id); }}
+                    className={`flex-shrink-0 w-80 rounded-xl border transition-colors ${
+                      dragOverBucket === bucket.id ? 'border-indigo-400 bg-indigo-50/40' : 'border-gray-200 bg-light'
+                    }`}
+                  >
+                    <div className="px-4 py-3 flex items-center justify-between gap-2 border-b border-gray-200" title={bucket.hint}>
+                      <span className="text-sm font-bold text-primary leading-tight">{bucket.label}</span>
+                      <span className="text-xs font-semibold text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5 flex-shrink-0">
+                        {items.length}
+                      </span>
+                    </div>
+                    <div className="p-3 space-y-3 min-h-[140px] max-h-[calc(100vh-360px)] overflow-y-auto">
+                      {items.length === 0 ? (
+                        <div className="text-xs text-gray-400 italic text-center py-6">No projects</div>
+                      ) : items.map(project => renderBoardCard(project, true))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )
       )}
 
@@ -598,8 +687,12 @@ const PMDashboard: React.FC = () => {
                       {getSupplierName(project.supplierId)}
                     </td>
                     <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        Step {project.currentStep}
+                      {/* The chapter the project is actually working, same rule as the board. */}
+                      <span
+                        title={activeChapter(project)?.name}
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100"
+                      >
+                        Step {phaseNumber(project)}
                       </span>
                     </td>
                     <td className="px-6 py-4">

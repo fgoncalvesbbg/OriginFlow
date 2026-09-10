@@ -127,6 +127,8 @@ export const mapComplianceRequest = (r: any): ComplianceRequest => {
     categoryId: r.category_id,
     features: Array.isArray(r.features) ? r.features : [],
     conditionAttributes: (r.condition_attributes && typeof r.condition_attributes === 'object') ? r.condition_attributes : {},
+    conditionAnswers: (r.condition_answers && typeof r.condition_answers === 'object') ? r.condition_answers : {},
+    requirementIds: Array.isArray(r.requirement_ids) ? r.requirement_ids : [],
     status: r.status,
     responses: Array.isArray(r.responses) ? r.responses : [],
     token: r.token,

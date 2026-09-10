@@ -5,7 +5,7 @@
 
 import { db, portalDb, orEmpty, mustRead, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { ComplianceRequirement, CategoryAttribute, AttributeDataType } from '../../types';
+import { ComplianceRequirement, ComplianceSection, CategoryAttribute, AttributeDataType } from '../../types';
 import { generateUUID } from '../../utils';
 import { PREDEFINED_ATTRIBUTE_GROUPS, compareAttributes } from '../../config/compliance.constants';
 import type { ParsedAttributeRow } from '../../utils/attribute-csv-import.utils';
@@ -19,6 +19,8 @@ const mapComplianceRequirementRows = (rows: any[]): ComplianceRequirement[] =>
     rows.map((r: any) => ({
         ...r,
         categoryId: r.category_id,
+        assignedCategoryIds: r.assigned_category_ids ?? [],
+        excludedCategoryIds: r.excluded_category_ids ?? [],
         condition: r.condition ?? null,
         conditionFeatureIds: r.condition_feature_ids,
         referenceCode: r.reference_code,
@@ -26,6 +28,7 @@ const mapComplianceRequirementRows = (rows: any[]): ComplianceRequirement[] =>
         clauseId: r.clause_id ?? null,
         isMandatory: r.is_mandatory,
         appliesByDefault: r.applies_by_default,
+        sortOrder: r.sort_order ?? 0,
         timingType: r.timing_type,
         timingWeeks: r.timing_weeks,
         selfDeclarationAccepted: r.self_declaration_accepted,
@@ -34,7 +37,18 @@ const mapComplianceRequirementRows = (rows: any[]): ComplianceRequirement[] =>
 
 export const getComplianceRequirements = async (): Promise<ComplianceRequirement[]> => {
     if (!isLive) return [];
-    const rows = await orEmpty(portalDb.select<Row>('compliance_requirements'), 'getComplianceRequirements');
+    // A deterministic base order (migration 175). `groupRequirementsBySection` re-sorts with
+    // the sections list, which it needs and this read does not have — but anything that reads
+    // requirements WITHOUT that helper now gets a defined list instead of Postgres's whim.
+    const rows = await orEmpty(
+        portalDb.select<Row>('compliance_requirements', {
+            order: [
+                { column: 'sort_order', ascending: true },
+                { column: 'title', ascending: true },
+            ],
+        }),
+        'getComplianceRequirements',
+    );
     return mapComplianceRequirementRows(rows);
 };
 
@@ -59,6 +73,15 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
     const payload: Row = {
         id: req.id,
         category_id: req.categoryId,
+        // The LINK list (migration 173). Sent on every save, not only when it changed: an
+        // upsert that omitted it would preserve whatever the row already had, which is right
+        // for a partial edit and wrong here — the modal round-trips the whole requirement, so
+        // an omission would silently resurrect a share the operator had just removed.
+        assigned_category_ids: req.assignedCategoryIds ?? [],
+        // Sent on every save for the same reason as the share list: the modal round-trips the
+        // whole requirement, so omitting it would let PostgREST preserve an exclusion the
+        // operator had just lifted.
+        excluded_category_ids: req.excludedCategoryIds ?? [],
         section: req.section,
         title: req.title,
         description: req.description,
@@ -71,6 +94,7 @@ export const saveRequirement = async (req: ComplianceRequirement): Promise<void>
         // belonging to a different document — there is no composite FK to catch that.
         clause_id: req.regulationId ? (req.clauseId ?? null) : null,
         applies_by_default: req.appliesByDefault,
+        sort_order: req.sortOrder ?? 0,
         condition: req.condition ?? null,
         timing_type: req.timingType,
         timing_weeks: req.timingWeeks,
@@ -88,10 +112,13 @@ export const deleteRequirement = async (id: string): Promise<void> => {
 };
 
 /**
- * Custom section groups (built-in sections live in COMPLIANCE_SECTIONS). Returns
- * the user-defined section names so they can be offered for every category.
+ * Every section group, in the operator's order (migration 175).
+ *
+ * Returns the built-in six as well: they became rows in that migration precisely so they could
+ * be reordered, and a caller that had to merge a constant with a table would be back to two
+ * sources of truth for one list. `isBuiltIn` is how the library still tells them apart.
  */
-export const getComplianceSections = async (): Promise<string[]> => {
+export const getComplianceSections = async (): Promise<ComplianceSection[]> => {
     if (!isLive) return [];
     const rows = await orEmpty(
         portalDb.select<Row>('compliance_sections', {
@@ -102,17 +129,72 @@ export const getComplianceSections = async (): Promise<string[]> => {
         }),
         'getComplianceSections',
     );
-    return rows.map((s: any) => s.name as string);
+    return rows.map((s: any): ComplianceSection => ({
+        name: s.name,
+        sortOrder: s.sort_order ?? 0,
+        isBuiltIn: s.is_builtin === true,
+    }));
 };
 
 /**
  * Define a new section group (no-op if it already exists). Once added it is
  * offered for requirements in every category.
+ *
+ * Appended to the END of the list rather than left at the column default of 0, where every
+ * custom section used to pile up and tie — which is how the library (creation order) and the
+ * three other surfaces (alphabetical) came to disagree about where a custom section goes.
  */
 export const addComplianceSection = async (name: string): Promise<void> => {
     const clean = name.trim();
     if (!clean) return;
-    await db.upsert('compliance_sections', { name: clean }, { onConflict: 'name' });
+    const existing = await getComplianceSections();
+    if (existing.some(s => s.name.toLowerCase() === clean.toLowerCase())) return;
+    const nextOrder = existing.reduce((max, s) => Math.max(max, s.sortOrder), -1) + 1;
+    await db.upsert(
+        'compliance_sections',
+        { name: clean, sort_order: nextOrder },
+        { onConflict: 'name' },
+    );
+};
+
+/**
+ * Write a new section order. `orderedNames` is the whole list, top to bottom.
+ *
+ * Only the rows whose position actually changed are written — dragging one section otherwise
+ * rewrites all eight. Sequential from 0, so the stored numbers stay contiguous and a later
+ * insert-at-end is just `max + 1`.
+ */
+export const reorderComplianceSections = async (orderedNames: readonly string[]): Promise<void> => {
+    if (!isLive) throw new Error('Database not configured.');
+    const current = await getComplianceSections();
+    const currentByName = new Map(current.map(s => [s.name, s.sortOrder]));
+    for (const [index, name] of orderedNames.entries()) {
+        if (currentByName.get(name) === index) continue;
+        await db.updateWhere('compliance_sections', { sort_order: index }, { where: { name } });
+    }
+};
+
+/**
+ * Write a new requirement order within a section. `orderedIds` is the whole visible list.
+ *
+ * Writes one column and nothing else, which is what lets the history trigger recognise a pure
+ * reorder and stay quiet about it (migration 175) — an `update` that also touched, say, the
+ * title would be logged in full.
+ *
+ * Does not degrade: a half-applied reorder leaves a list in an order nobody chose, and the
+ * caller reloads from the database afterwards so a failure is visible rather than cosmetic.
+ */
+export const reorderRequirements = async (
+    plan: readonly { id: string; sortOrder: number }[],
+): Promise<void> => {
+    if (!isLive) throw new Error('Database not configured.');
+    for (const item of plan) {
+        await db.updateWhere(
+            'compliance_requirements',
+            { sort_order: item.sortOrder },
+            { where: { id: item.id } },
+        );
+    }
 };
 
 /**
@@ -123,14 +205,62 @@ export const deleteComplianceSection = async (name: string): Promise<void> => {
 };
 
 /**
- * Add standard compliance requirements to a category
+ * Add the two standard electrical-safety requirements to a category.
+ *
+ * DERIVED FROM THE REGULATION LIBRARY, not hardcoded alongside it. The pair used to be
+ * created with no `regulationId` at all, which is the state the library now refuses for a
+ * hand-written requirement — a preload that quietly seeded two unlinked rows would have been
+ * a hole in that rule rather than an exception to it.
+ *
+ * So the regulations are looked up by reference code, and if the library does not have them
+ * this REFUSES rather than falling back to unlinked rows. The message names what to add,
+ * because "nothing happened" is the one outcome that teaches nobody anything.
+ *
+ * The reference codes are the EU directives' own identifiers, which is why matching on them
+ * is safe: they are the stable part. The `title` a regulation carries is the full official
+ * name and varies with how it was imported.
  */
 export const addStandardRequirements = async (categoryId: string): Promise<void> => {
-    const defaults: ComplianceRequirement[] = [
-        { id: generateUUID(), categoryId, title: "LVD Report", description: "Low Voltage Directive Compliance", isMandatory: true, appliesByDefault: true, conditionFeatureIds: [] },
-        { id: generateUUID(), categoryId, title: "EMC Report", description: "Electromagnetic Compatibility", isMandatory: true, appliesByDefault: true, conditionFeatureIds: [] }
+    const wanted = [
+        { code: 'Directive 2014/35/EU', title: 'LVD Report', description: 'Low Voltage Directive compliance' },
+        { code: 'Directive 2014/30/EU', title: 'EMC Report', description: 'Electromagnetic compatibility' },
     ];
-    for (const d of defaults) await saveRequirement(d);
+
+    const regulations = await orEmpty(
+        portalDb.select<Row>('regulations', { columns: 'id, reference_code' }),
+        'addStandardRequirements.regulations',
+    );
+    const idByCode = new Map<string, string>(
+        regulations.map((r: any) => [String(r.reference_code).trim().toLowerCase(), r.id as string]),
+    );
+
+    const missing = wanted.filter(w => !idByCode.has(w.code.toLowerCase()));
+    if (missing.length > 0) {
+        throw new Error(
+            `The Regulation library is missing ${missing.map(m => m.code).join(' and ')}. `
+            + 'Add them there first — every requirement has to cite the regulation it derives from.',
+        );
+    }
+
+    // Appended in order, so the two land at the end of the section rather than tying on 0.
+    const existing = await getComplianceRequirementsOrThrow();
+    let order = existing
+        .filter(r => r.categoryId === categoryId && !r.section)
+        .reduce((max, r) => Math.max(max, r.sortOrder ?? 0), -1) + 1;
+
+    for (const w of wanted) {
+        await saveRequirement({
+            id: generateUUID(),
+            categoryId,
+            title: w.title,
+            description: w.description,
+            isMandatory: true,
+            appliesByDefault: true,
+            regulationId: idByCode.get(w.code.toLowerCase()) ?? null,
+            sortOrder: order++,
+            conditionFeatureIds: [],
+        });
+    }
 };
 
 const mapCategoryAttributeRow = (a: any): CategoryAttribute => ({

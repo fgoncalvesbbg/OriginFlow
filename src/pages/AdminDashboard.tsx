@@ -6,6 +6,7 @@ import {
   getSuppliers, createSupplier, ensureSupplierToken, updateSupplier,
   getCategories, getCategoryTree, saveCategory,
   deleteCategory, assignPMToCategory,
+  lockCategoryRequirements, canReleaseComplianceCategory,
   getCategoryAttributes, saveCategoryAttribute, deleteCategoryAttribute,
   importCategoryAttributes, replaceCategoryAttributes,
   getProductToolkitDefinitions, getProductToolkitDefinition, mapProductToolkitAttributes,
@@ -25,7 +26,7 @@ import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../ut
 import type { ParsedAttributeRow } from '../utils';
 import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryTree, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks, ShieldAlert } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks, ShieldAlert, Lock, Unlock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
@@ -34,6 +35,7 @@ import PrintSettingsAdminSection from '../components/admin/PrintSettingsAdminSec
 import TranslationMemoryAdmin from '../components/admin/translation-memory/TranslationMemoryAdmin';
 import FeedbackAdminSection from '../components/admin/FeedbackAdminSection';
 import ProjectTemplateAdminSection from '../components/admin/ProjectTemplateAdminSection';
+import ReleaseCategoryModal from './compliance/ReleaseCategoryModal';
 
 /**
  * Markets admin — the market → language mapping the print-export dialog offers as
@@ -562,11 +564,21 @@ const AdminDashboard: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  /** The category whose FINAL lock is being released, or null. Admin-gated; see lockCategory. */
+  const [releaseCategory, setReleaseCategory] = useState<CategoryL3 | null>(null);
+  const [canReleaseFinal, setCanReleaseFinal] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    canReleaseComplianceCategory().then(v => { if (!cancelled) setCanReleaseFinal(v); });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleDeleteCategory = (id: string) => {
     setDeleteModal({
       isOpen: true,
       title: 'Delete Category',
-      message: 'Are you sure you want to delete this category? This will permanently delete all associated requirements, features, attributes, and templates.',
+      message: 'Are you sure you want to delete this category? This will permanently delete all associated requirements, features, attributes, and templates. A category marked FINAL must be released first.',
       onConfirm: async () => {
         try {
           await deleteCategory(id);
@@ -1108,14 +1120,21 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const toggleCategoryFinalized = async (category: CategoryL3) => {
-    const newStatus = !category.isFinalized;
-    await saveCategory({ 
-      ...category, 
-      isFinalized: newStatus,
-      finalizedAt: newStatus ? new Date().toISOString() : null
-    });
-    loadData();
+  /**
+   * Lock a category's TCF requirements as FINAL (migration 172).
+   *
+   * This used to be a plain two-way toggle through `saveCategory`, which is exactly what the
+   * lock could not be: FINAL now freezes the category's requirements in the database, and
+   * undoing it needs an ADMIN and a written reason. So the toggle only locks — unlocking
+   * opens the release dialog instead, and `saveCategory` no longer carries the flag at all.
+   */
+  const lockCategory = async (category: CategoryL3) => {
+    try {
+      await lockCategoryRequirements(category.id);
+      loadData();
+    } catch (e: any) {
+      alert(`Could not mark FINAL: ${e.message}`);
+    }
   };
 
   // --- AI PROMPT ACTIONS ---
@@ -1697,8 +1716,8 @@ const AdminDashboard: React.FC = () => {
                                         <span className="font-medium text-primary flex items-center gap-1.5">
                                             {c.name}
                                             {c.isFinalized && (
-                                                <span title="Finalized (Requirements Locked)" className="text-indigo-600">
-                                                    <CheckCircle size={14} />
+                                                <span title="FINAL — TCF requirements frozen" className="text-gray-900">
+                                                    <Lock size={13} />
                                                 </span>
                                             )}
                                         </span>
@@ -1734,17 +1753,34 @@ const AdminDashboard: React.FC = () => {
                                             >
                                                 <SlidersHorizontal size={13} /> Configure
                                             </button>
-                                            <button
-                                                onClick={() => toggleCategoryFinalized(c)}
-                                                className={`text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap ${
-                                                    c.isFinalized
-                                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                                                    : 'bg-white text-muted border-gray-200 hover:bg-light hover:text-gray-700'
-                                                }`}
-                                                title="Finalizing signals that requirements are complete"
-                                            >
-                                                {c.isFinalized ? 'Finalized' : 'Mark Final'}
-                                            </button>
+                                            {/* FINAL is no longer a two-way toggle (migration 172).
+                                                Locking is open to anyone; releasing needs an admin
+                                                and a written reason, so it gets its own dialog and
+                                                a non-admin sees a state, not a dead button. */}
+                                            {!c.isFinalized ? (
+                                                <button
+                                                    onClick={() => lockCategory(c)}
+                                                    className="text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap bg-white text-muted border-gray-200 hover:bg-light hover:text-gray-700 inline-flex items-center gap-1"
+                                                    title="Freeze this category's TCF requirements. Only an administrator can undo it, and only with a reason."
+                                                >
+                                                    <Lock size={11} /> Mark FINAL
+                                                </button>
+                                            ) : canReleaseFinal ? (
+                                                <button
+                                                    onClick={() => setReleaseCategory(c)}
+                                                    className="text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap bg-gray-900 text-white border-gray-900 hover:bg-amber-600 hover:border-amber-600 inline-flex items-center gap-1"
+                                                    title="Release this category for editing — you will be asked why"
+                                                >
+                                                    <Unlock size={11} /> Release
+                                                </button>
+                                            ) : (
+                                                <span
+                                                    className="text-xs px-2 py-1 rounded border whitespace-nowrap bg-gray-900 text-white border-gray-900 inline-flex items-center gap-1"
+                                                    title="Requirements frozen. An administrator must release the category, and record why, before they can change."
+                                                >
+                                                    <Lock size={11} /> FINAL
+                                                </span>
+                                            )}
                                             <button
                                                 onClick={() => handleEditItem(c, 'category')}
                                                 className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
@@ -1790,6 +1826,15 @@ const AdminDashboard: React.FC = () => {
         onConfirm={deleteModal.onConfirm}
         onCancel={() => setDeleteModal(prev => ({ ...prev, isOpen: false }))}
       />
+
+      {releaseCategory && (
+        <ReleaseCategoryModal
+          categoryId={releaseCategory.id}
+          categoryName={releaseCategory.name}
+          onClose={() => setReleaseCategory(null)}
+          onReleased={() => { setReleaseCategory(null); loadData(); }}
+        />
+      )}
 
       <div className="mb-8 flex items-start justify-between">
         <div>

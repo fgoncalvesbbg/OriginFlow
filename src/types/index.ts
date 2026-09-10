@@ -69,7 +69,12 @@ export type {
   CategoryAttribute,
   AttributeDataType,
   AttributeValidationRules,
-  WizardTier
+  WizardTier,
+  ComplianceRequirementHistoryEntry,
+  ComplianceHistoryAction,
+  ComplianceQuestion,
+  TcfQuestionDataType,
+  ComplianceSection
 } from './compliance.types';
 
 // IM types

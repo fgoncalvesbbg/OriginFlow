@@ -84,7 +84,17 @@ export const getComplianceRequestsBySupplierToken = async (supplierToken: string
 export const createComplianceRequest = async (
   projectId: string, projectName: string, requestIdCode: string, supplierId: string,
   categoryId: string, features: { featureId: string; value: boolean }[], deadline?: string,
-  conditionAttributes: Record<string, string> = {}
+  /**
+   * Answers to the TCF questions the wizard asked, keyed by `compliance_questions.id`
+   * (migration 174). Stored as-is and never recomputed: the request is the record of what the
+   * supplier was asked for and why.
+   */
+  conditionAnswers: Record<string, string> = {},
+  /**
+   * The requirement ids the wizard formulated from those answers. Frozen onto the row so the
+   * supplier portal renders the set that was SENT — see the migration-174 header.
+   */
+  requirementIds: readonly string[] = []
 ): Promise<ComplianceRequest> => {
   const token = generateUUID();
   const accessCode = generateNumericCode(6);
@@ -96,7 +106,8 @@ export const createComplianceRequest = async (
     supplier_id: supplierId,
     category_id: categoryId,
     features,
-    condition_attributes: conditionAttributes,
+    condition_answers: conditionAnswers,
+    requirement_ids: requirementIds,
     status: ComplianceRequestStatus.PENDING_SUPPLIER,
     token,
     access_code: accessCode,

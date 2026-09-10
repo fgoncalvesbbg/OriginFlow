@@ -22,13 +22,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, Building, CalendarClock, CheckSquare, Clock, Edit2, ExternalLink,
-  Ban, FileCheck, FileText, Globe, ListTree, Loader2, Lock, RefreshCw, Scale, ShieldCheck,
+  Ban, FileCheck, FileText, Globe, Link2, ListTree, Loader2, Lock, RefreshCw, Scale, ShieldCheck,
 } from 'lucide-react';
 
 import Layout from '../../components/Layout';
 import {
   collectBlocks,
   getCategories,
+  getComplianceQuestions,
   getRegulationById,
   getRegulations,
   getRegulationUsage,
@@ -41,6 +42,7 @@ import {
   versionCheckAgeDays,
 } from '../../services';
 import type { CategoryL3, ComplianceRequirement, Regulation, RegulationClause } from '../../types';
+import { requirementShareCount } from '../../utils';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import type { RegulationTemplateUse } from '../../services/regulatory/regulation-usage.service';
@@ -74,7 +76,10 @@ const Fact: React.FC<{ label: string; children: React.ReactNode }> = ({ label, c
 );
 
 /** The supplier-facing rules of one TCF requirement, in the same words the portal uses. */
-const RequirementRules: React.FC<{ r: ComplianceRequirement }> = ({ r }) => (
+const RequirementRules: React.FC<{
+  r: ComplianceRequirement;
+  questionById: Map<string, string>;
+}> = ({ r, questionById }) => (
   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[10px] text-gray-500">
     <span className="inline-flex items-center gap-1">
       <Clock size={10} />
@@ -88,11 +93,30 @@ const RequirementRules: React.FC<{ r: ComplianceRequirement }> = ({ r }) => (
       <FileCheck size={10} />
       {r.selfDeclarationAccepted ? 'Self-declaration OK' : 'Lab report required'}
     </span>
-    {r.condition && (
-      <span className="inline-flex items-center gap-1 text-indigo-500">
-        <Lock size={10} /> Conditional
-      </span>
-    )}
+    {r.condition && (() => {
+      // "Conditional" alone cannot be acted on — it is the difference between a requirement
+      // that is broadly assigned and one that is broadly ASKED. RED 2014/53/EU reaches 27
+      // categories but only reaches a supplier when the radio question is answered yes, and
+      // a reader who cannot see that reads the assignment as a mistake.
+      const absent = r.condition.requires_feature_absent;
+      const questionId = r.condition.requires_feature ?? absent;
+      const label = questionId ? questionById.get(questionId) : undefined;
+      const answer = r.condition.requires_feature_label;
+      return (
+        <span
+          className="inline-flex items-center gap-1 text-indigo-500"
+          title={label
+            ? `Only asked when "${label}" is ${absent ? 'NOT ' : ''}answered${answer ? ` "${answer}"` : ' yes'}. `
+              + 'An unanswered question does not suppress the requirement — the gate fails open.'
+            : 'Gated on a compliance question that is no longer in the question set.'}
+        >
+          <Lock size={10} />
+          {label
+            ? `Only if${absent ? ' not' : ''}: ${label}`
+            : 'Conditional — question missing'}
+        </span>
+      );
+    })()}
   </div>
 );
 
@@ -109,6 +133,8 @@ const RegulationDetail: React.FC = () => {
   // The whole library: the replacement picker needs it, and so does resolving this row's
   // own expiry chain (migration 140).
   const [library, setLibrary] = useState<Regulation[]>([]);
+  /** Only needed to name a requirement's gating question; a failed read degrades to []. */
+  const [questions, setQuestions] = useState<Array<{ id: string; label: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -128,11 +154,12 @@ const RegulationDetail: React.FC = () => {
   const load = useCallback(async () => {
     if (!regulationId) return;
     const seq = ++loadSeq.current;
-    const [reg, cats, usage, lib] = await Promise.all([
+    const [reg, cats, usage, lib, qs] = await Promise.all([
       getRegulationById(regulationId),
       getCategories(),
       getRegulationUsage(regulationId),
       getRegulations(),
+      getComplianceQuestions(),
     ]);
     if (loadSeq.current !== seq) return; // a newer load has already landed; discard this one
     if (!reg) { setNotFound(true); setLoading(false); return; }
@@ -141,17 +168,32 @@ const RegulationDetail: React.FC = () => {
     setRequirements(usage.tcfRequirements);
     setTemplates(usage.templates);
     setLibrary(lib);
+    setQuestions(qs);
     setLoading(false);
   }, [regulationId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const questionById = useMemo(
+    () => new Map(questions.map(q => [q.id, q.label])),
+    [questions],
+  );
 
   const categoryName = useCallback(
     (id: string | null | undefined) => (id ? categories.find(c => c.id === id)?.name ?? 'Unknown category' : 'All categories'),
     [categories],
   );
 
-  /** TCF requirements grouped by the category that asks for them. */
+  /**
+   * TCF requirements grouped by the category that OWNS them — which is not the same as the
+   * set of categories they reach, and the heading must not be read as the latter.
+   *
+   * A linked requirement (migration 173) lives on one category and is shared with others:
+   * RED 2014/53/EU is owned by Angled Hoods and shared with 26 more. Grouping by owner keeps
+   * one row per requirement — banding it under all 27 headings would render it 27 times — so
+   * the REACH is stated per row by `scopeLabel` below instead. Grouping on `categoryId` alone
+   * and saying nothing else is what made RED look like an Angled Hoods requirement.
+   */
   const requirementsByCategory = useMemo(() => {
     const groups = new Map<string, ComplianceRequirement[]>();
     for (const r of requirements) {
@@ -161,6 +203,25 @@ const RegulationDetail: React.FC = () => {
     return Array.from(groups.entries()).sort(([a], [b]) =>
       a === '__global__' ? -1 : b === '__global__' ? 1 : categoryName(a).localeCompare(categoryName(b)));
   }, [requirements, categoryName]);
+
+  /**
+   * How far one requirement actually reaches, via the shared scope rule rather than a local
+   * re-reading of the columns. `requirementShareCount` returns 0 for a global requirement —
+   * "shared with N" is the wrong sentence when it applies to all of them — so that case is
+   * handled by the Global heading and gets no chip.
+   */
+  const scopeLabel = useCallback((r: ComplianceRequirement): { text: string; title: string } | null => {
+    const reach = requirementShareCount(r);
+    if (reach <= 1) return null;
+    const shared = (r.assignedCategoryIds ?? [])
+      .map(id => categoryName(id))
+      .sort((a, b) => a.localeCompare(b));
+    return {
+      text: `${reach} categories`,
+      title: `One shared requirement (migration 173), edited once and changing everywhere. `
+        + `Owned by ${categoryName(r.categoryId)} and also asked for by: ${shared.join(', ')}.`,
+    };
+  }, [categoryName]);
 
   const checklistItems = useMemo(
     () => parseRegulationChecklist(regulation?.checklist),
@@ -535,9 +596,18 @@ const RegulationDetail: React.FC = () => {
               <div className="space-y-3">
                 {requirementsByCategory.map(([key, reqs]) => (
                   <div key={key}>
-                    <div className="text-[11px] font-bold text-gray-600 flex items-center gap-1.5">
+                    <div
+                      className="text-[11px] font-bold text-gray-600 flex items-center gap-1.5"
+                      title={key === '__global__'
+                        ? 'Applies to every category.'
+                        : 'The category this requirement is OWNED by. A requirement can be shared with '
+                          + 'others — see the count on the row for how many it actually reaches.'}
+                    >
                       {key === '__global__' && <Globe size={11} className="text-amber-500" />}
                       {key === '__global__' ? 'Global — all categories' : categoryName(key)}
+                      {key !== '__global__' && (
+                        <span className="font-normal text-gray-400 normal-case">owns</span>
+                      )}
                     </div>
                     <ul className="mt-1 divide-y divide-gray-100 border border-gray-100 rounded-lg">
                       {reqs.map(r => (
@@ -549,6 +619,17 @@ const RegulationDetail: React.FC = () => {
                                 REQUIRED
                               </span>
                             )}
+                            {(() => {
+                              const scope = scopeLabel(r);
+                              return scope && (
+                                <span
+                                  className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0 mt-0.5 inline-flex items-center gap-1"
+                                  title={scope.title}
+                                >
+                                  <Link2 size={9} /> {scope.text}
+                                </span>
+                              );
+                            })()}
                             {r.section && (
                               <span className="text-[10px] text-gray-400 ml-auto shrink-0">{r.section}</span>
                             )}
@@ -556,7 +637,7 @@ const RegulationDetail: React.FC = () => {
                           {r.description && (
                             <p className="text-[11px] text-gray-500 mt-0.5">{r.description}</p>
                           )}
-                          <RequirementRules r={r} />
+                          <RequirementRules r={r} questionById={questionById} />
                         </li>
                       ))}
                     </ul>

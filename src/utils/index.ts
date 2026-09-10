@@ -10,6 +10,15 @@ export { PortalLockedError, asPortalLockedError } from './portal-lockout.utils';
 export { generateNumericCode } from './code.utils';
 export { validateAttributeValue, getAttributesForCategory, getSupplierVisibleAttributes } from './attribute-validation.utils';
 export {
+  requirementAppliesToCategory,
+  getRequirementsForCategory,
+  getRequirementsFrozenByCategory,
+  requirementShareCount,
+  getExcludedRequirementsForCategory,
+  requirementExclusionCount,
+  finalCategoriesForRequirement,
+} from './requirement-scope.utils';
+export {
   NO_VALUES,
   cellKey,
   indexByCell,
