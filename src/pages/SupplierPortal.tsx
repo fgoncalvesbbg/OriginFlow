@@ -2,11 +2,15 @@
 /** Token/code-based supplier portal entry for accessing a project's supplier workspace. */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic, getPortalDocumentUrl } from '../services';
+import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadAdHocFile, getAttributeRequestsByProjectPublic, getPortalDocumentUrl, getSupplierDesignSpecRounds, getSupplierDesignSpecFinals } from '../services';
 import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty, ProjectAttributeRequest } from '../types';
+import type { SupplierDesignSpecFinal, SupplierDesignSpecRound } from '../types/design-spec.types';
+import { DesignSpecRoundsCard, DesignSpecFinalCard } from '../components/design/SupplierDesignSpecCards';
+import { DESIGN_REVIEW_PHASE, DESIGN_FINAL_PHASE, phaseStep } from './supplier-portal-phases';
 import { StatusBadge } from '../components/StatusBadge';
 import SupplierDocumentsPanel from '../components/documents/SupplierDocumentsPanel';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload, ClipboardList, ExternalLink } from 'lucide-react';
+import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
 
 const SupplierPortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -14,6 +18,8 @@ const SupplierPortal: React.FC = () => {
   const [steps, setSteps] = useState<ProjectStep[]>([]);
   const [docs, setDocs] = useState<ProjectDocument[]>([]);
   const [attrRequests, setAttrRequests] = useState<ProjectAttributeRequest[]>([]);
+  const [specRounds, setSpecRounds] = useState<SupplierDesignSpecRound[]>([]);
+  const [specFinals, setSpecFinals] = useState<SupplierDesignSpecFinal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
@@ -50,10 +56,14 @@ const SupplierPortal: React.FC = () => {
           return;
         }
 
-        const [stepsData, docsData, attrReqsData] = await Promise.all([
+        // Both design spec reads are token-scoped routines of their own (migration 170), so
+        // they join the same single round-trip as everything else this page needs.
+        const [stepsData, docsData, attrReqsData, roundsData, finalsData] = await Promise.all([
           getProjectSteps(p.id),
           getProjectDocs(p.id),
-          getAttributeRequestsByProjectPublic(token)
+          getAttributeRequestsByProjectPublic(token),
+          getSupplierDesignSpecRounds({ projectToken: token }),
+          getSupplierDesignSpecFinals({ projectToken: token })
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -65,6 +75,8 @@ const SupplierPortal: React.FC = () => {
         setSteps(stepsData);
         setDocs(visibleDocs);
         setAttrRequests(attrReqsData);
+        setSpecRounds(roundsData);
+        setSpecFinals(finalsData);
         setLoading(false);
       } catch (err: any) {
         if (!mounted || controller.signal.aborted) return;
@@ -149,6 +161,9 @@ const SupplierPortal: React.FC = () => {
   if (error) return <div className="min-h-screen flex items-center justify-center bg-light text-red-500 font-medium">{error}</div>;
   if (!project) return null;
 
+  const reviewPhase = phaseStep(steps, DESIGN_REVIEW_PHASE);
+  const finalPhase = phaseStep(steps, DESIGN_FINAL_PHASE);
+
   return (
     <div className="min-h-screen bg-light font-sans">
       {/* Hidden Input */}
@@ -160,6 +175,7 @@ const SupplierPortal: React.FC = () => {
       />
 
       {/* Header */}
+      <PortalBrandBar label="Supplier Document Portal" maxWidth="max-w-5xl" />
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
           <div>
@@ -168,7 +184,7 @@ const SupplierPortal: React.FC = () => {
           </div>
           <div className="text-right hidden sm:block">
             <div className="text-xs font-medium text-muted uppercase tracking-wide">Requested by</div>
-            <div className="font-semibold text-gray-800">OriginFlow Partner</div>
+            <div className="font-semibold text-gray-800">Klarstein</div>
           </div>
         </div>
       </header>
@@ -189,7 +205,12 @@ const SupplierPortal: React.FC = () => {
         <div className="space-y-8">
           {steps.map(step => {
             const rawStepDocs = docs.filter(d => d.stepNumber === step.stepNumber);
-            if (rawStepDocs.length === 0) return null;
+            // The design spec blocks make a phase worth showing on their own: a project whose
+            // development phase has no document rows still has drafts out for review, and
+            // returning null here would have hidden them.
+            const showRounds = specRounds.length > 0 && step.stepNumber === reviewPhase;
+            const showFinals = specFinals.length > 0 && step.stepNumber === finalPhase;
+            if (rawStepDocs.length === 0 && !showRounds && !showFinals) return null;
 
             const othersPlaceholder = rawStepDocs.find(d => d.title === 'Others' && d.description !== 'ad-hoc');
             const adHocDocs = rawStepDocs.filter(d => d.description === 'ad-hoc');
@@ -394,6 +415,47 @@ const SupplierPortal: React.FC = () => {
                         </button>
                      </div>
                   )}
+
+                  {/* DESIGN SPECS OUT FOR REVIEW (development phase).
+                      Sub-headed inside the phase rather than given a card of their own,
+                      because a design round IS work in this phase — the same standing as the
+                      documents above it — and a separate card at the bottom of the page would
+                      read as reference material. */}
+                  {showRounds && (
+                    <div className="border-t border-gray-100">
+                      <div className="px-6 pt-4 pb-1 flex items-center gap-2">
+                        <ClipboardList size={15} className="text-indigo-600" />
+                        <h4 className="text-sm font-bold text-gray-800">Design specifications for review</h4>
+                      </div>
+                      <p className="px-6 pb-2 text-xs text-muted">
+                        Open a draft to leave your notes directly on the drawing. Klarstein sees
+                        them as soon as you write them.
+                      </p>
+                      <div className="px-2">
+                        <DesignSpecRoundsCard rounds={specRounds} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* THE ISSUED FINAL (production phase). */}
+                  {showFinals && (
+                    <div className="border-t border-gray-100">
+                      <div className="px-6 pt-4 pb-1 flex items-center gap-2">
+                        <FileText size={15} className="text-emerald-600" />
+                        <h4 className="text-sm font-bold text-gray-800">Final design specification</h4>
+                      </div>
+                      <p className="px-6 pb-2 text-xs text-muted">
+                        The approved specification to build to. Drafts you reviewed earlier are
+                        not production documents.
+                      </p>
+                      <div className="px-2">
+                        <DesignSpecFinalCard
+                          finals={specFinals}
+                          credentials={{ projectToken: token! }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -415,8 +477,9 @@ const SupplierPortal: React.FC = () => {
       </main>
       
       <footer className="bg-white border-t border-gray-200 mt-12 py-8">
-         <div className="max-w-5xl mx-auto px-6 text-center text-sm text-gray-400">
-           &copy; 2025 OriginFlow PLM. Secure Document Portal.
+         <div className="max-w-5xl mx-auto px-6 flex flex-col items-center gap-3 text-sm text-gray-400">
+           <KlarsteinLogo height={18} />
+           <div>Secure document portal · Powered by OriginFlow</div>
          </div>
       </footer>
     </div>

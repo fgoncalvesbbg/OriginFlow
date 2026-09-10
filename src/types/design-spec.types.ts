@@ -79,3 +79,68 @@ export interface DesignSpecSkuLink {
   skuId: string;
   projectId: string;
 }
+
+/**
+ * A design spec review round as the SUPPLIER's own portal sees it.
+ *
+ * The portal is anonymous — it holds a project token or a supplier token plus an access
+ * code, never a session — so this is not `ReviewShare` with fields hidden. It is what
+ * `get_design_spec_rounds_by_project_token` chose to return (migration 170): enough to say
+ * which spec, which version, when it was sent and whether it is still open, and nothing
+ * about who else was asked to review the same version.
+ */
+export interface SupplierDesignSpecRound {
+  shareId: string;
+  /** The review token. Present on dead rounds too — every resolver re-checks the state below. */
+  token: string;
+  /** The sender's own note on the round ("Factory A", "packaging"), shown as context. */
+  label: string | null;
+  sentAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  submittedAt: string | null;
+  submittedBy: string | null;
+  specId: string;
+  specCode: string;
+  specTitle: string;
+  versionId: string;
+  version: number;
+  versionKind: DesignSpecVersionKind;
+  versionNote: string | null;
+  pageCount: number | null;
+  projectId: string;
+  projectName: string;
+}
+
+/**
+ * The issued final, as the supplier's portal sees it.
+ *
+ * `finalVersionId` is null for a spec that exists but has not been issued — the portal shows
+ * that as a placeholder rather than nothing, so the Production phase says where the spec will
+ * appear before it appears. A cancelled spec is not returned at all.
+ */
+export interface SupplierDesignSpecFinal {
+  specId: string;
+  specCode: string;
+  specTitle: string;
+  state: DesignSpecState;
+  finalVersionId: string | null;
+  version: number | null;
+  pageCount: number | null;
+  byteSize: number | null;
+  issuedAt: string | null;
+  projectId: string;
+  projectName: string;
+}
+
+/**
+ * True once a round's link no longer resolves: revoked, or past its expiry.
+ *
+ * SUBMITTING IS NOT CLOSING. The review portal says as much to the reviewer's face —
+ * "Review submitted. You can still add notes." — so a submitted round stays openable here
+ * too. Treating it as closed would take the document away from the one person who has just
+ * been reading it, and would contradict the portal they would land on.
+ */
+export const isRoundClosed = (r: SupplierDesignSpecRound, now: Date = new Date()): boolean =>
+  r.revokedAt != null
+  || (r.expiresAt != null && new Date(r.expiresAt) <= now);

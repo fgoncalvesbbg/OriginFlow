@@ -801,8 +801,30 @@ const buildCompactLanguageBar = (code: string): string =>
  * column set below the tallest column of the first, which is the page-break-shaped gap this
  * exists to remove. Each locale gets its own `lang` on a plain wrapper instead, so
  * `hyphens: auto` still resolves a per-locale dictionary inside the shared flow.
+ *
+ * WHY THE HEADER IS PASSED IN HERE RATHER THAN PRINTED ABOVE THE FLOW.
+ *
+ * The multi-column box has to begin at the very top of the page. The print engine (PDFShift's
+ * Chromium) will not fragment a multicol that starts part-way down a sheet: it sizes the
+ * column row to a whole page, finds that it does not fit in what is left, and moves the ENTIRE
+ * row to the next page rather than filling the space and continuing. A logo bar above the
+ * columns is therefore not 12mm of cost — it is a whole blank sheet as soon as the booklet
+ * runs to about a full page, which is exactly what the Induction Hobs leaflet did.
+ *
+ * So the header sets INSIDE the flow, as the first block of column 1. It is the one placement
+ * that renders: verified against the live engine on that leaflet's published snapshot, where
+ * it moved the content back onto page 1, and on a three-times-longer booklet, where the flow
+ * fragmented across pages normally. `column-span: all` is not an alternative — a spanner fails
+ * in the same way as a bar above the flow (see leaflet2colOverrides).
+ *
+ * The visible cost is that the logo/QR bar and its rule now run the width of column 1 instead
+ * of the full measure. That is the price of the sheet it buys back.
  */
-const buildContinuousLanguageFlow = (manuals: PrintManual[], layout: PrintLayout): string => {
+const buildContinuousLanguageFlow = (
+  manuals: PrintManual[],
+  layout: PrintLayout,
+  headerHtml = '',
+): string => {
   const inner = manuals
     .map((manual, i) => {
       // The bar goes BETWEEN languages, so the first locale does not get one: it is announced
@@ -812,7 +834,7 @@ const buildContinuousLanguageFlow = (manuals: PrintManual[], layout: PrintLayout
       return `<div class="imv-lang" lang="${escapeHtml(manual.language)}">${bar}${buildSectionsInner(manual, layout)}</div>`;
     })
     .join('');
-  return `<div class="im-page im-page-content">${inner}</div>`;
+  return `<div class="im-page im-page-content">${headerHtml}${inner}</div>`;
 };
 
 /**
@@ -1002,19 +1024,35 @@ const leaflet2colOverrides = (
   const heading = `${Number(headingPt.toFixed(2))}pt`;
   return `
     /* --- Warning Leaflet · compact two-column layout --- */
-    .im-leaflet-header { display: flex; align-items: center; margin: 0 0 2.5mm; padding-bottom: 1.2mm; border-bottom: 0.4mm solid ${primaryColor}; }
-    .im-leaflet-logo { height: 7mm; width: auto; object-fit: contain; }
+    /* The header is the FIRST BLOCK INSIDE the column flow, not a band above it, and that
+       placement is load-bearing rather than cosmetic. See buildContinuousLanguageFlow: the
+       print engine will not fragment a multi-column box that does not begin at the top of a
+       page, so anything above the columns costs the whole first sheet. It therefore sets in
+       column 1 like any other block — no column-span, which fails the same way. */
+    .im-leaflet-header {
+      display: flex; align-items: center; margin: 0 0 2.5mm; padding-bottom: 1.2mm;
+      border-bottom: 0.4mm solid ${primaryColor};
+      break-inside: avoid; break-after: avoid;
+    }
+    /* Capped as a fraction of the measure, not just by height: a wide wordmark set to 7mm tall
+       is free to be 40mm wide, which overflows a 64mm column and paints over the gutter. */
+    .im-leaflet-logo { height: 7mm; width: auto; max-width: 70%; object-fit: contain; }
     .im-leaflet-qr { margin-left: auto; line-height: 0; }
 
-    /* Each language is its own render part, so the content block must NOT force a page break —
-       otherwise the header would sit alone on page 1 and content would start on page 2. */
+    /* The whole booklet is ONE render part, so the content block must NOT force a page break —
+       otherwise the columns would start on page 2 and page 1 would print empty. */
     .im-page-content {
       padding: 0; break-before: auto; page-break-before: auto;
       columns: ${columns}; column-gap: ${gapMm}mm;
-      /* auto, not the default balance: text must fill column 1 before starting column 2, the
-         way the reference reads. Balancing would leave both columns half-height on the last
-         page of every locale. */
-      column-fill: auto;
+      /* balance, which is what a fragmented multicol already does: every page BUT THE LAST
+         fills column 1 to the page depth before starting column 2 — the reading order this
+         layout wants — and only the final page shares its remainder evenly between them.
+         Explicit column-fill:auto was worse on both counts. It buys nothing on the earlier
+         pages, which fill either way, and on the last page it drives the final column flush
+         into the bottom margin, which makes the engine emit a trailing EMPTY sheet. Measured
+         on the Induction Hobs leaflet against the live engine: auto printed 1 full page plus
+         1 blank, balance printed 1 page. */
+      column-fill: balance;
     }
 
     /* Running text. Justified + hyphenated is the dense-and-legible combination at a 64mm
@@ -1070,11 +1108,14 @@ const leaflet2colOverrides = (
     }
     .imv-lang-bar-code { font-weight: 600; }
 
-    /* The booklet's opening title runs the full measure above the columns, as it does in the
-       reference. ONLY the very first one spans: a spanner mid-flow splits the columns into
-       separate groups, which is the page-break-shaped gap this layout exists to remove — so
-       every later locale's title stays in-column. */
-    .im-page-content > .imv-lang:first-child > .im-section:first-child > .im-section-title { column-span: all; }
+    /* NO SPANNER, not even for the booklet's opening title, which the reference does set
+       across the full measure. A column-span:all spanner is unusable in this pipeline: the print
+       engine sizes the column row that follows a spanner to a WHOLE page and then refuses to
+       fragment it, so as soon as a locale runs to about a full page the entire flow is pushed
+       to the next sheet and the spanner prints alone. That is the blank first page this
+       layout shipped with. Verified against the live engine on the Induction Hobs leaflet:
+       with the spanner, page 1 held the title and nothing else; without it, the same content
+       sets on one page. Every title therefore stays in-column. */
 
     /* Hazard blocks — severity band, ISO sign, descriptor, body. No tinted panel, no accent
        bar, no icon gutter: the body keeps the full 64mm column. */
@@ -1713,11 +1754,14 @@ export const buildPrintPartsHtml = (manuals: PrintManual[], opts: PrintHtmlOptio
       return [
         {
           html: wrapStandalone(
-            // The header prints ONCE, at the top of the booklet. Repeating it per locale would
-            // mean a full-measure band inside the column flow — a spanner that breaks the
-            // columns into separate groups, i.e. exactly the gap this layout removes.
-            buildLeafletHeader(logoUrl, manuals[0].primarySkuQrSvg) +
-              buildContinuousLanguageFlow(manuals, layout),
+            // The header prints ONCE, at the top of the booklet, and INSIDE the column flow —
+            // see buildContinuousLanguageFlow for why anything above the columns costs the
+            // whole first sheet. Repeating it per locale would put a second header mid-column.
+            buildContinuousLanguageFlow(
+              manuals,
+              layout,
+              buildLeafletHeader(logoUrl, manuals[0].primarySkuQrSvg),
+            ),
             styles,
             // No document-level language: the part spans all of them, and each locale carries
             // its own `lang` on its wrapper so `hyphens: auto` still resolves per locale.

@@ -32,8 +32,17 @@
               '2xl': '0.75rem',   // 12px
             },
             colors: {
+              // ── Brand colors are indirected through CSS variables ──────────────
+              // Every value below is `rgb(var(--of-*, <today's channels>) / <alpha-value>)`.
+              // With no variable set the fallback applies, so the internal app renders
+              // byte-identically to before. Setting the variables on an ancestor re-tints
+              // EVERY utility and variant derived from that color at once — `bg-indigo-600`,
+              // `hover:bg-indigo-700`, `ring-indigo-500`, `bg-indigo-50/20`, `shadow-indigo-200`.
+              // That is how the supplier-facing portals get Klarstein's palette without
+              // touching a single utility class: see src/styles/klarstein-brand.css.
+              //
               // Brand neutrals
-              primary: '#1a1f35',        // Control-Room Ink — sidebar bg + body text
+              primary: 'rgb(var(--of-primary, 26 31 53) / <alpha-value>)',   // Control-Room Ink — sidebar bg + body text
               secondary: '#6b7280',      // Refined gray — secondary text
               muted: '#9ca3af',          // Soft gray — muted text / icons
               light: '#f9fafb',          // Canvas — app background
@@ -41,8 +50,8 @@
               border: '#e5e7eb',         // Hairline borders / dividers
               // Action accent — Steel Slate: a muted, corporate blue-gray (replaces the
               // saturated indigo for a calmer, more professional feel).
-              accent: '#3f5b73',         // Steel Slate — primary action / active / selection
-              'accent-hover': '#324a5e', // Steel Slate, deepened for hover
+              accent: 'rgb(var(--of-accent, 63 91 115) / <alpha-value>)',            // Steel Slate — primary action / active / selection
+              'accent-hover': 'rgb(var(--of-accent-hover, 50 74 94) / <alpha-value>)', // Steel Slate, deepened for hover
               // Semantic status (see DESIGN.md status vocabulary)
               success: '#047857',        // Progress Emerald
               warning: '#b45309',        // Pending Amber
@@ -51,28 +60,42 @@
               // Steel Slate ramp so every existing `indigo-*` / `blue-*` class reads as
               // the professional accent rather than the old "AI" violet-blue.
               indigo: {
-                50:  '#f3f6f8',
-                100: '#e3eaef',
-                200: '#c7d4dd',
-                300: '#a0b4c2',
-                400: '#7390a3',
-                500: '#527088',
-                600: '#3f5b73',
-                700: '#34495d',
-                800: '#2d3e4e',
-                900: '#283543',
+                50:  'rgb(var(--of-indigo-50,  243 246 248) / <alpha-value>)',
+                100: 'rgb(var(--of-indigo-100, 227 234 239) / <alpha-value>)',
+                200: 'rgb(var(--of-indigo-200, 199 212 221) / <alpha-value>)',
+                300: 'rgb(var(--of-indigo-300, 160 180 194) / <alpha-value>)',
+                400: 'rgb(var(--of-indigo-400, 115 144 163) / <alpha-value>)',
+                500: 'rgb(var(--of-indigo-500,  82 112 136) / <alpha-value>)',
+                600: 'rgb(var(--of-indigo-600,  63  91 115) / <alpha-value>)',
+                700: 'rgb(var(--of-indigo-700,  52  73  93) / <alpha-value>)',
+                800: 'rgb(var(--of-indigo-800,  45  62  78) / <alpha-value>)',
+                900: 'rgb(var(--of-indigo-900,  40  53  67) / <alpha-value>)',
               },
               blue: {
-                50:  '#f3f6f8',
-                100: '#e3eaef',
-                200: '#c7d4dd',
-                300: '#a0b4c2',
-                400: '#7390a3',
-                500: '#527088',
-                600: '#3f5b73',
-                700: '#34495d',
-                800: '#2d3e4e',
-                900: '#283543',
+                50:  'rgb(var(--of-blue-50,  243 246 248) / <alpha-value>)',
+                100: 'rgb(var(--of-blue-100, 227 234 239) / <alpha-value>)',
+                200: 'rgb(var(--of-blue-200, 199 212 221) / <alpha-value>)',
+                300: 'rgb(var(--of-blue-300, 160 180 194) / <alpha-value>)',
+                400: 'rgb(var(--of-blue-400, 115 144 163) / <alpha-value>)',
+                500: 'rgb(var(--of-blue-500,  82 112 136) / <alpha-value>)',
+                600: 'rgb(var(--of-blue-600,  63  91 115) / <alpha-value>)',
+                700: 'rgb(var(--of-blue-700,  52  73  93) / <alpha-value>)',
+                800: 'rgb(var(--of-blue-800,  45  62  78) / <alpha-value>)',
+                900: 'rgb(var(--of-blue-900,  40  53  67) / <alpha-value>)',
+              },
+              // Violet keeps Tailwind's own values as its fallbacks — it is declared here
+              // ONLY so the portal scope can re-point it. Nothing changes outside that scope.
+              violet: {
+                50:  'rgb(var(--of-violet-50,  245 243 255) / <alpha-value>)',
+                100: 'rgb(var(--of-violet-100, 237 233 254) / <alpha-value>)',
+                200: 'rgb(var(--of-violet-200, 221 214 254) / <alpha-value>)',
+                300: 'rgb(var(--of-violet-300, 196 181 253) / <alpha-value>)',
+                400: 'rgb(var(--of-violet-400, 167 139 250) / <alpha-value>)',
+                500: 'rgb(var(--of-violet-500, 139  92 246) / <alpha-value>)',
+                600: 'rgb(var(--of-violet-600, 124  58 237) / <alpha-value>)',
+                700: 'rgb(var(--of-violet-700, 109  40 217) / <alpha-value>)',
+                800: 'rgb(var(--of-violet-800,  91  33 182) / <alpha-value>)',
+                900: 'rgb(var(--of-violet-900,  76  29 149) / <alpha-value>)',
               },
             }
           }

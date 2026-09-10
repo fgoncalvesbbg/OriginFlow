@@ -8,7 +8,16 @@ genuinely good and is the only place that reasoning exists.
 
 Reconciled in full against project `ecueltibpmpnhnaxlskx` on 2026-09-09.
 
-## Result: nothing here is unshipped
+## One file added since that reconciliation IS pending
+
+`170_supplier_portal_design_specs.sql` — written 2026-09-10, **not applied**. It adds
+`review_shares.supplier_id` and four `get_design_spec_*_by_(project_token|supplier)` reader
+functions, and the supplier-portal design spec feature does not work without it. Worse, the
+send-for-review dialog writes `supplier_id` on insert, so **sending a design spec for review
+fails outright until this is applied**. Apply it, then delete this section and fold the file
+into the table below.
+
+## Result for everything reconciled on 2026-09-09: nothing there is unshipped
 
 All 129 files (123 numbered `.sql`, plus 4 `.txt`, `69b`, and a seed) resolve as follows.
 **Genuinely pending: zero.**

@@ -7,14 +7,18 @@ import {
   getSupplierNotifications, markNotificationRead, getMissingDocumentsForSupplier,
   getRFQsForSupplier, getProductionUpdates, saveProductionUpdate,
   logAccessCodeAttempt, getSupplierProposals, addDocumentComment,
-  getAttributeRequestsForSupplier, verifySupplierPortalAccess, uploadFile
+  getAttributeRequestsForSupplier, verifySupplierPortalAccess, uploadFile,
+  getSupplierDesignSpecRounds, getSupplierDesignSpecFinals
 } from '../services';
 import { validateUploadFile } from '../utils/upload-validation.utils';
 import { Supplier, Project, ComplianceRequest, Notification, ProjectDocument, RFQEntry, ProductionDelayReason, SupplierProposal, ComplianceRequestStatus, ProjectAttributeRequest } from '../types';
 import SupplierDocumentsPanel from '../components/documents/SupplierDocumentsPanel';
+import { DesignSpecRoundsCard, DesignSpecFinalCard } from '../components/design/SupplierDesignSpecCards';
+import type { SupplierDesignSpecFinal, SupplierDesignSpecRound } from '../types/design-spec.types';
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
 import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag, ClipboardList, BookOpen } from 'lucide-react';
+import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
 
 /** Relative-due-date pill, matching the colouring already used for compliance deadlines. */
 const DueDate: React.FC<{ date?: string | null; label?: string }> = ({ date, label = 'Due' }) => {
@@ -40,6 +44,10 @@ const SupplierDashboard: React.FC = () => {
   const [openRfqs, setOpenRfqs] = useState<RFQEntry[]>([]);
   const [proposals, setProposals] = useState<SupplierProposal[]>([]);
   const [attributeRequests, setAttributeRequests] = useState<ProjectAttributeRequest[]>([]);
+  // Design spec rounds and issued finals across every project this supplier is on; each
+  // project card filters the two lists to its own rows.
+  const [specRounds, setSpecRounds] = useState<SupplierDesignSpecRound[]>([]);
+  const [specFinals, setSpecFinals] = useState<SupplierDesignSpecFinal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
@@ -255,7 +263,9 @@ const SupplierDashboard: React.FC = () => {
           retryApiCall(() => getMissingDocumentsForSupplier(supplier.id)),
           retryApiCall(() => getRFQsForSupplier(token!, enteredAccessCode)),
           retryApiCall(() => getSupplierProposals(token!, enteredAccessCode)),
-          retryApiCall(() => getAttributeRequestsForSupplier(token!, enteredAccessCode))
+          retryApiCall(() => getAttributeRequestsForSupplier(token!, enteredAccessCode)),
+          retryApiCall(() => getSupplierDesignSpecRounds({ supplierToken: token!, accessCode: enteredAccessCode })),
+          retryApiCall(() => getSupplierDesignSpecFinals({ supplierToken: token!, accessCode: enteredAccessCode }))
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -267,6 +277,8 @@ const SupplierDashboard: React.FC = () => {
         const rfqList = results[4].status === 'fulfilled' ? results[4].value : [];
         const propList = results[5].status === 'fulfilled' ? results[5].value : [];
         const attrList = results[6].status === 'fulfilled' ? results[6].value : [];
+        const roundList = results[7].status === 'fulfilled' ? results[7].value : [];
+        const finalList = results[8].status === 'fulfilled' ? results[8].value : [];
 
         const failedCalls = results.filter(r => r.status === 'rejected');
 
@@ -277,6 +289,12 @@ const SupplierDashboard: React.FC = () => {
         setOpenRfqs(rfqList);
         setProposals(propList);
         setAttributeRequests(attrList);
+        setSpecRounds(roundList);
+        setSpecFinals(finalList);
+
+        // Deliberately absent from `looksEmpty` below: a supplier with no design spec is
+        // perfectly normal, so counting these would suppress the retry that exists for the
+        // auth-lock race.
 
         // If the first attempt(s) came back failed or entirely empty — typically because
         // the supabase auth lock hadn't settled yet — retry automatically rather than
@@ -425,7 +443,9 @@ const SupplierDashboard: React.FC = () => {
         getMissingDocumentsForSupplier(supplier.id),
         getRFQsForSupplier(token!, enteredAccessCode),
         getSupplierProposals(token!, enteredAccessCode),
-        getAttributeRequestsForSupplier(token!, enteredAccessCode)
+        getAttributeRequestsForSupplier(token!, enteredAccessCode),
+        getSupplierDesignSpecRounds({ supplierToken: token!, accessCode: enteredAccessCode }),
+        getSupplierDesignSpecFinals({ supplierToken: token!, accessCode: enteredAccessCode })
       ]);
 
       const pList = results[0].status === 'fulfilled' ? results[0].value : [];
@@ -435,6 +455,8 @@ const SupplierDashboard: React.FC = () => {
       const rfqList = results[4].status === 'fulfilled' ? results[4].value : [];
       const propList = results[5].status === 'fulfilled' ? results[5].value : [];
       const attrList = results[6].status === 'fulfilled' ? results[6].value : [];
+      const roundList = results[7].status === 'fulfilled' ? results[7].value : [];
+      const finalList = results[8].status === 'fulfilled' ? results[8].value : [];
 
       const failedCalls = results.filter(r => r.status === 'rejected');
       if (failedCalls.length > 0) {
@@ -451,6 +473,8 @@ const SupplierDashboard: React.FC = () => {
       setOpenRfqs(rfqList);
       setProposals(propList);
       setAttributeRequests(attrList);
+      setSpecRounds(roundList);
+      setSpecFinals(finalList);
     } catch (err: any) {
       console.error('Error refreshing dashboard:', err);
       setDashboardError('Failed to refresh dashboard. Please try again.');
@@ -812,10 +836,11 @@ const SupplierDashboard: React.FC = () => {
   // Access Code Entry Screen
   if (!isAccessVerified) {
     return (
-      <div className="min-h-screen bg-light flex items-center justify-center px-4 py-6 sm:py-8">
+      <div className="min-h-screen bg-light flex flex-col items-center justify-center px-4 py-6 sm:py-8 gap-6">
+        <KlarsteinLogo height={26} />
         <div className="bg-white rounded-lg shadow-lg p-6 sm:p-8 max-w-md w-full">
-          <div className="flex items-center justify-center w-12 h-12 bg-primary-light rounded-lg mb-6 mx-auto">
-            <Key size={24} className="text-primary" />
+          <div className="flex items-center justify-center w-12 h-12 bg-indigo-100 rounded-lg mb-6 mx-auto">
+            <Key size={24} className="text-indigo-600" />
           </div>
           <h1 className="text-xl sm:text-2xl font-bold mb-2 text-center break-words">{supplier.name} Portal</h1>
           <p className="text-xs sm:text-sm text-muted text-center mb-6">Enter your access code to continue</p>
@@ -840,7 +865,7 @@ const SupplierDashboard: React.FC = () => {
 
             <button
               type="submit"
-              className="w-full bg-primary text-white py-2.5 sm:py-3 rounded-lg hover:bg-primary-dark transition font-medium text-sm sm:text-base"
+              className="kl-cta w-full py-2.5 sm:py-3 rounded-lg font-medium text-sm sm:text-base"
             >
               Verify Access Code
             </button>
@@ -857,6 +882,7 @@ const SupplierDashboard: React.FC = () => {
   // Dashboard Content (after access verification)
   return (
     <div className="min-h-screen bg-light">
+      <PortalBrandBar label="Supplier Portal" maxWidth="max-w-7xl" />
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 sm:gap-0">
@@ -866,7 +892,7 @@ const SupplierDashboard: React.FC = () => {
             </div>
             <div>
               <h1 className="font-bold text-lg sm:text-lg">{supplier.name}</h1>
-              <p className="text-xs sm:text-sm text-muted">Supplier Portal</p>
+              <p className="text-xs sm:text-sm text-muted">Projects, quotes and compliance requests</p>
             </div>
           </div>
           <div className="flex items-center gap-3 sm:gap-4 justify-end">
@@ -1140,6 +1166,8 @@ const SupplierDashboard: React.FC = () => {
                 const allComplianceForProject = filteredCompliance.filter(c => c.projectId === p.id);
                 const pendingCompliance = allComplianceForProject.filter(c => c.status === ComplianceRequestStatus.PENDING_SUPPLIER);
                 const allAttrForProject = filteredAttributeRequests.filter(r => r.projectId === p.id);
+                const projectRounds = specRounds.filter(r => r.projectId === p.id);
+                const projectFinals = specFinals.filter(f => f.projectId === p.id);
                 const pendingAttrForProject = allAttrForProject.filter(r => r.status !== 'submitted');
                 const projectNeedsUpdate = projectsNeedingUpdate.find(pnu => pnu.project.id === p.id);
 
@@ -1204,6 +1232,21 @@ const SupplierDashboard: React.FC = () => {
                                 Full document list, review comments & extra files
                               </span>
                             </a>
+                          )}
+
+                          {/* Design specs for THIS project. The dashboard has no phase
+                              structure to hang them on — that lives in the document
+                              workspace linked above — so rounds and the issued final are
+                              shown together, each labelled for what it is. */}
+                          {(projectRounds.length > 0 || projectFinals.length > 0) && (
+                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                              <h4 className="font-bold text-sm px-3 pt-3">Design specifications</h4>
+                              <DesignSpecRoundsCard rounds={projectRounds} />
+                              <DesignSpecFinalCard
+                                finals={projectFinals}
+                                credentials={{ supplierToken: token!, accessCode: enteredAccessCode }}
+                              />
+                            </div>
                           )}
 
                           {/* Project Details */}

@@ -28,6 +28,8 @@ const V_DRAFT = '55555555-5555-4555-8555-555555555555';
 const V_FINAL = '66666666-6666-4666-8666-666666666666';
 const V_UNSTAMPED = '77777777-7777-4777-8777-777777777777';
 const V_OTHER_SPEC = '88888888-8888-4888-8888-888888888888';
+/** A `kind: 'final'` version of SPEC that has NOT been issued — final_version_id ignores it. */
+const V_UNISSUED_FINAL = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER = '99999999-9999-4999-8999-999999999999';
 
 const TOK_DRAFT = 'live-token-for-the-draft';
@@ -39,6 +41,13 @@ const TOK_EXPIRED = 'expired-token';
 const TOK_VIEW = 'view-mode-token';
 const TOK_IM = 'token-for-an-instruction-manual';
 
+/** The two standing portal credentials, which are not review tokens and never expire. */
+const PROJECT_TOKEN = 'project-portal-token';
+const OTHER_PROJECT_TOKEN = 'other-project-portal-token';
+const SUPPLIER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const SUPPLIER_TOKEN = 'supplier-portal-token';
+const ACCESS_CODE = 'CODE-1234';
+
 const ORIGINAL = `${SPEC}/aaaa-original.pdf`;
 const STAMPED = `${SPEC}/aaaa-review.pdf`;
 
@@ -48,8 +57,8 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: () => fake.client,
 }));
 
-const spec = (id: string, projectId: string, code: string) =>
-  ({ id, project_id: projectId, spec_code: code });
+const spec = (id: string, projectId: string, code: string, finalVersionId: string | null = null) =>
+  ({ id, project_id: projectId, spec_code: code, final_version_id: finalVersionId });
 
 /**
  * The fake ignores the select string and returns whole rows, so the embedded
@@ -68,7 +77,8 @@ const version = (
   storage_path: ORIGINAL,
   stamped_path: STAMPED,
   design_specs: specId === SPEC
-    ? spec(SPEC, PROJECT, 'DS-0001')
+    // SPEC has issued V_FINAL; OTHER_SPEC has issued nothing.
+    ? spec(SPEC, PROJECT, 'DS-0001', V_FINAL)
     : spec(OTHER_SPEC, OTHER_PROJECT, 'DS-0002'),
   ...over,
 });
@@ -85,11 +95,16 @@ const share = (token: string, subjectId: string | null, over: Record<string, any
 });
 
 const freshDb = (): FakeDbState => ({
-  projects: [{ id: PROJECT }, { id: OTHER_PROJECT }],
+  projects: [
+    { id: PROJECT, supplier_link_token: PROJECT_TOKEN, supplier_id: SUPPLIER },
+    { id: OTHER_PROJECT, supplier_link_token: OTHER_PROJECT_TOKEN, supplier_id: null },
+  ],
+  suppliers: [{ id: SUPPLIER, portal_token: SUPPLIER_TOKEN, access_code: ACCESS_CODE }],
   design_spec_versions: [
     version(V_DRAFT, SPEC),
     version(V_FINAL, SPEC, { kind: 'final', version: 2, stamped_path: null }),
     version(V_UNSTAMPED, SPEC, { version: 3, stamped_path: null }),
+    version(V_UNISSUED_FINAL, SPEC, { kind: 'final', version: 4, stamped_path: null }),
     version(V_OTHER_SPEC, OTHER_SPEC),
   ],
   review_shares: [
@@ -225,6 +240,77 @@ describe('the internal path', () => {
     const res = await call({ versionId: V_DRAFT }, { authorization: 'Bearer user-jwt' });
     expect(res.statusCode).toBe(200);
     expect(fake.signedUrlCalls[0].path).toBe(ORIGINAL);
+    expect(JSON.parse(res.body).stamped).toBe(false);
+  });
+});
+
+/**
+ * The portal path (migration 170). A supplier's standing portal link is not a review round:
+ * it does not expire when a round closes and nobody revokes it, so what it may reach is
+ * narrower than what a review token may reach — the issued final, and nothing else.
+ */
+describe('the supplier portal path', () => {
+  it('serves the ISSUED FINAL to a project portal token', async () => {
+    const res = await call({ projectToken: PROJECT_TOKEN, versionId: V_FINAL });
+    expect(res.statusCode).toBe(200);
+    expect(fake.signedUrlCalls[0]).toMatchObject({ bucket: 'design-specs', path: ORIGINAL });
+  });
+
+  it('serves it to a supplier token + access code as well', async () => {
+    const res = await call({
+      supplierToken: SUPPLIER_TOKEN, accessCode: ACCESS_CODE, versionId: V_FINAL,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('403s a DRAFT — the standing link must never reach one', async () => {
+    // The whole reason the portal path exists is the issued spec. A draft reaches a supplier
+    // only through the review token for a round they were actually sent.
+    const res = await call({ projectToken: PROJECT_TOKEN, versionId: V_DRAFT });
+    expect(res.statusCode).toBe(403);
+    expect(fake.signedUrlCalls).toHaveLength(0);
+  });
+
+  it('403s a final-KIND version that was uploaded but never issued', async () => {
+    // The test is the spec's own final_version_id, not the version's `kind`: a final sitting
+    // in the bucket unissued is not something the supplier has been told to build to.
+    const res = await call({ projectToken: PROJECT_TOKEN, versionId: V_UNISSUED_FINAL });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('403s another project s portal token — the check that matters most here', async () => {
+    const res = await call({ projectToken: OTHER_PROJECT_TOKEN, versionId: V_FINAL });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('403s a wrong access code', async () => {
+    const res = await call({
+      supplierToken: SUPPLIER_TOKEN, accessCode: 'WRONG', versionId: V_FINAL,
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('403s a supplier token with no code at all, rather than falling through', async () => {
+    // Half a credential is not a credential: without the code this must not land on the
+    // internal branch and 401, nor authorize on the token alone.
+    const res = await call({ supplierToken: SUPPLIER_TOKEN, versionId: V_FINAL });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('gives every portal refusal the same message', async () => {
+    const bodies = await Promise.all([
+      call({ projectToken: PROJECT_TOKEN, versionId: V_DRAFT }),
+      call({ projectToken: PROJECT_TOKEN, versionId: V_UNISSUED_FINAL }),
+      call({ projectToken: OTHER_PROJECT_TOKEN, versionId: V_FINAL }),
+      call({ projectToken: 'no-such-token', versionId: V_FINAL }),
+      call({ supplierToken: SUPPLIER_TOKEN, accessCode: 'WRONG', versionId: V_FINAL }),
+    ]);
+    const messages = new Set(bodies.map(r => JSON.parse(r.body).error));
+    expect(messages.size).toBe(1);
+  });
+
+  it('reports the final as unstamped, because it is the original', async () => {
+    const res = await call({ projectToken: PROJECT_TOKEN, versionId: V_FINAL });
     expect(JSON.parse(res.body).stamped).toBe(false);
   });
 });

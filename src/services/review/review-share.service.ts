@@ -40,6 +40,7 @@ export const mapShareRow = (row: any): ReviewShare => ({
   lastUsedAt: row.last_used_at ?? null,
   useCount: row.use_count ?? 0,
   mode: (row.mode ?? 'view') as ReviewShareMode,
+  supplierId: row.supplier_id ?? null,
   submittedAt: row.submitted_at ?? null,
   submittedBy: row.submitted_by ?? null,
   reviewStage: (row.review_stage ?? null) as ReviewStage | null,
@@ -85,6 +86,14 @@ export interface CreateReviewShareOptions {
    */
   supersedesId?: string | null;
   label?: string;
+  /**
+   * The supplier this link is for, when it should also appear in that supplier's own portal.
+   *
+   * Omit it for a link the sender will deliver by hand — an internal reviewer, a vendor with
+   * no portal of their own. See the column comment in migration 170 for why this is a
+   * separate decision from `label` and not inferred from it.
+   */
+  supplierId?: string | null;
   expiresAt?: string | null;
   mode?: ReviewShareMode;
   reviewStage?: ReviewStage | null;
@@ -121,6 +130,9 @@ export const createReviewShare = async (
     review_stage: opts?.mode === 'review' ? (opts?.reviewStage ?? 'draft') : null,
     // Likewise a chain: a view link is nobody's second round.
     supersedes_id: opts?.mode === 'review' ? (opts?.supersedesId ?? null) : null,
+    // Publishing a link in a portal only makes sense for a round someone is asked to review;
+    // a view link is not a round and has no portal entry to appear in.
+    supplier_id: opts?.mode === 'review' ? (opts?.supplierId ?? null) : null,
   });
   return mapShareRow(created);
 };

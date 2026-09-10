@@ -8,13 +8,24 @@
  * copied the object URL. Here, access is re-derived on every request from a credential that
  * can be taken away.
  *
- * TWO CALLERS, TWO CREDENTIALS, AND A DIFFERENT FILE FOR EACH:
+ * THREE CALLERS, THREE CREDENTIALS, AND A DIFFERENT FILE FOR EACH:
  *
  *   (a) REVIEWER — `token` in the body: a live `review_shares` row for this spec version.
  *       Served the STAMPED copy (`DRAFT vN · FOR REVIEW ONLY`). Never the original, so a
  *       factory cannot tool up from an unmarked draft that leaked out of a review.
  *   (b) INTERNAL — a bearer session: authorized against the spec's project the same way
  *       every other function does it, by asking Postgres as the caller. Served the original.
+ *   (c) SUPPLIER PORTAL — `projectToken`, or `supplierToken` + `accessCode`: the same two
+ *       credentials supplier-file-url.ts accepts, validated the same way. Served the
+ *       ISSUED FINAL ONLY, and only for the spec of a project that credential speaks for.
+ *
+ * WHY (c) CANNOT REACH A DRAFT. A portal credential is a long-lived URL sitting in a
+ * supplier's inbox — it does not expire with a round and nobody revokes it when one closes.
+ * A draft is exactly the thing every other path here goes out of its way to serve only in
+ * stamped form and only to the recipient of a live round; letting the standing portal link
+ * reach one would quietly undo that. `final_version_id` is the test, not `kind`: it is the
+ * spec's own record of what was ISSUED, so a `kind = 'final'` version uploaded but not yet
+ * issued is refused too.
  *
  * A reviewer's token is checked against the version they are asking for, not just for
  * existence: without that, any live review token in the system would unlock any other
@@ -43,10 +54,26 @@ interface FileRequest {
   versionId?: unknown;
   /** REVIEWER path: a review_shares.token. Omitted on the internal path. */
   token?: unknown;
+  /** PORTAL path: projects.supplier_link_token. */
+  projectToken?: unknown;
+  /** PORTAL path: suppliers.portal_token + suppliers.access_code, which travel together. */
+  supplierToken?: unknown;
+  accessCode?: unknown;
 }
+
+/** Read a body field as a non-empty string, or null. */
+const str = (v: unknown): string | null =>
+  typeof v === 'string' && v.length > 0 ? v : null;
 
 /** One message for every reviewer-side refusal, so a probe cannot tell the cases apart. */
 const DEAD_LINK = 'This review link is invalid, expired or has been revoked.';
+
+/**
+ * Likewise for the portal: a wrong token, a spec on someone else's project and a spec that
+ * has not been issued all read the same, so the endpoint cannot be used to discover which of
+ * those is true.
+ */
+const NO_PORTAL_ACCESS = 'This design spec is not available from your portal.';
 
 export const handler = async (event: NetlifyEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
@@ -82,7 +109,7 @@ export const handler = async (event: NetlifyEvent) => {
   // found" — the in-memory test fake doesn't catch this because it ignores the select string.
   const { data: version, error: vErr } = await supabase
     .from('design_spec_versions')
-    .select('id, spec_id, version, kind, storage_path, stamped_path, design_specs!design_spec_versions_spec_id_fkey(project_id, spec_code)')
+    .select('id, spec_id, version, kind, storage_path, stamped_path, design_specs!design_spec_versions_spec_id_fkey(project_id, spec_code, final_version_id)')
     .eq('id', versionId)
     .maybeSingle();
 
@@ -97,17 +124,21 @@ export const handler = async (event: NetlifyEvent) => {
   // both is cheaper than pinning a cast that a dependency bump can quietly invalidate.
   const relation = version.design_specs as unknown;
   const spec = (Array.isArray(relation) ? relation[0] : relation) as
-    { project_id: string; spec_code: string } | null | undefined;
+    { project_id: string; spec_code: string; final_version_id: string | null } | null | undefined;
 
   if (!spec) {
     console.error('[design-spec-file] version has no spec:', versionId);
     return json(500, { error: 'Could not load that design spec.' });
   }
 
-  const hasToken = typeof req.token === 'string' && req.token.length > 0;
+  const reviewToken = str(req.token);
+  const projectToken = str(req.projectToken);
+  const supplierToken = str(req.supplierToken);
+  const accessCode = str(req.accessCode);
+  const hasPortal = projectToken !== null || (supplierToken !== null && accessCode !== null);
   let objectPath: string;
 
-  if (hasToken) {
+  if (reviewToken) {
     // ---- (a) REVIEWER ----
     // The same filters review_resolve applies, enforced here in TypeScript because the
     // service role bypasses RLS. Deliberately NOT via that RPC: resolving bumps use_count,
@@ -115,7 +146,7 @@ export const handler = async (event: NetlifyEvent) => {
     const { data: share, error: sErr } = await supabase
       .from('review_shares')
       .select('id, subject_id, subject_type, revoked_at, expires_at')
-      .eq('token', req.token as string)
+      .eq('token', reviewToken)
       .eq('mode', 'review')
       .is('revoked_at', null)
       .maybeSingle();
@@ -148,6 +179,47 @@ export const handler = async (event: NetlifyEvent) => {
         error: 'This draft is still being prepared for review. Please try again shortly.',
       });
     }
+  } else if (hasPortal) {
+    // ---- (c) SUPPLIER PORTAL ----
+    // The issued final and nothing else. Tested against the SPEC's final_version_id rather
+    // than the version's own `kind`, because a final that has been uploaded but not yet
+    // issued is not something the supplier has been told to build to — see the file header.
+    if (!spec.final_version_id || spec.final_version_id !== versionId) {
+      return json(403, { error: NO_PORTAL_ACCESS });
+    }
+
+    // Same two credentials, same checks, as supplier-file-url.ts. The service role bypasses
+    // RLS, so this comparison IS the authorization.
+    const { data: project, error: pErr } = await supabase
+      .from('projects')
+      .select('supplier_link_token, supplier_id')
+      .eq('id', spec.project_id)
+      .maybeSingle();
+
+    if (pErr) {
+      console.error('[design-spec-file] project lookup failed:', pErr);
+      return json(500, { error: 'Could not verify your access.' });
+    }
+    if (!project) return json(403, { error: NO_PORTAL_ACCESS });
+
+    let authorized = false;
+    if (projectToken) {
+      authorized = (project as { supplier_link_token: string | null }).supplier_link_token
+        === projectToken;
+    } else if (supplierToken && accessCode && (project as { supplier_id: string | null }).supplier_id) {
+      const { data: supplier } = await supabase
+        .from('suppliers')
+        .select('portal_token, access_code')
+        .eq('id', (project as { supplier_id: string }).supplier_id)
+        .maybeSingle();
+      const s = supplier as { portal_token: string | null; access_code: string | null } | null;
+      authorized = !!s && s.portal_token === supplierToken && s.access_code === accessCode;
+    }
+    if (!authorized) return json(403, { error: NO_PORTAL_ACCESS });
+
+    // The original, exactly as the design team issued it. A final carries no stamp by
+    // decision (see the reviewer branch above), so there is no other copy to serve.
+    objectPath = version.storage_path as string;
   } else {
     // ---- (b) INTERNAL ----
     // Asking Postgres as the caller IS the authorization: a designer reaches the project
@@ -190,6 +262,6 @@ export const handler = async (event: NetlifyEvent) => {
     specCode: spec.spec_code,
     // Says which object was served, so a reviewer's client can never be confused about
     // whether it is looking at a stamped draft or an original.
-    stamped: hasToken && version.kind !== 'final',
+    stamped: reviewToken !== null && version.kind !== 'final',
   });
 };

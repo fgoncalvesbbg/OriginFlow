@@ -8,6 +8,7 @@ import { RFQ, RFQEntry, RFQEntryStatus, RFQAttributeResponse, RFQAttachment } fr
 import { normalizeExternalLink } from '../../utils/url.utils';
 import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, Upload, Paperclip, Sliders, X, Tag, Lock, Clock, Printer } from 'lucide-react';
 import RFQAttributeComparison from '../../components/sourcing/RFQAttributeComparison';
+import { PortalBrandBar, KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
 
 const SupplierRFQPortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -202,7 +203,8 @@ const SupplierRFQPortal: React.FC = () => {
   // submission the server will refuse — and never let a late quote look accepted.
   if (!success && rfq.status !== 'open') {
       return (
-          <div className="min-h-screen bg-light flex items-center justify-center p-4">
+          <div className="min-h-screen bg-light flex flex-col items-center justify-center p-4 gap-6">
+              <KlarsteinLogo height={26} />
               <div className="bg-white p-8 rounded-xl shadow max-w-md w-full text-center">
                   <Lock className="w-14 h-14 text-gray-400 mx-auto mb-4" />
                   <h1 className="text-2xl font-bold text-primary mb-2">This RFQ is closed</h1>
@@ -227,7 +229,8 @@ const SupplierRFQPortal: React.FC = () => {
           ['Tooling cost', money(entry.toolingCost)],
       ];
       return (
-          <div className="min-h-screen bg-light flex items-center justify-center p-4">
+          <div className="min-h-screen bg-light flex flex-col items-center justify-center p-4 gap-6">
+              <KlarsteinLogo height={26} />
               <div className="bg-white p-8 rounded-xl shadow max-w-lg w-full print-plain">
                   <div className="text-center">
                       <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
@@ -311,8 +314,9 @@ const SupplierRFQPortal: React.FC = () => {
   const inputClass = 'w-full border border-gray-300 rounded p-3 focus:ring-2 focus:ring-indigo-500 outline-none';
 
   return (
-    <div className="min-h-screen bg-light py-10 px-4">
-        <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-light">
+        <PortalBrandBar label="Request For Quotation" maxWidth="max-w-4xl" />
+        <div className="max-w-4xl mx-auto space-y-6 py-10 px-4">
 
             {/* 1. Header — RFQ identity */}
             <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
@@ -543,7 +547,7 @@ const SupplierRFQPortal: React.FC = () => {
                         <button
                             type="submit"
                             disabled={submitting || uploadingFile}
-                            className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-70"
+                            className="kl-cta w-full font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2"
                         >
                             {submitting ? <Loader2 className="animate-spin" /> : 'Submit Quote'}
                         </button>

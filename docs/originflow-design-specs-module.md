@@ -411,6 +411,39 @@ this work.
   Message copy: `"<supplier> submitted their review of DS-0142 v2"` /
   `"<n> new notes on DS-0142 v2"`.
 
+### Phase E as built (2026-09-10, migration 170)
+
+The portal half shipped; the notification half did not. What is live:
+
+- **`review_shares.supplier_id`** — the recipient a link was minted for. The send dialog
+  carries a tick, defaulted ON, that sets it to the project's supplier. This is what a portal
+  lists by, and it is deliberately NOT inferred from `label`: holding a round's token makes
+  the holder that reviewer (they see that recipient's earlier notes through `supersedes_id`
+  and write new ones in their name), so publishing a link is a decision a person makes, never
+  a guess off free text. Existing links stay null — hand-delivered, still working.
+- **Four SECURITY DEFINER readers**, keyed by the two portal credentials that already exist:
+  `get_design_spec_rounds_by_project_token` / `_by_supplier`, and
+  `get_design_spec_finals_by_project_token` / `_by_supplier`. Rounds and finals are separate
+  reads because they answer to different rules — a round is visible because it was marked for
+  this supplier; an issued final is visible because the project's supplier is the party that
+  builds to it, marking or no marking.
+- **`design-spec-file.ts` gained a third caller**: a portal credential, which reaches the
+  ISSUED FINAL ONLY. The test is the spec's own `final_version_id`, not the version's `kind`,
+  so a final uploaded but not yet issued is refused too. A portal link is long-lived and
+  nobody revokes it when a round closes, which is exactly why it must not reach a draft.
+- **Where they render**: `SupplierPortal.tsx` puts rounds under the development phase and the
+  final under production (`supplier-portal-phases.ts`, which falls back to the last phase of a
+  shortened template rather than hiding the block). `SupplierDashboard.tsx` shows both inside
+  each expanded project card. Both use `SupplierDesignSpecCards.tsx`, so the two surfaces
+  cannot drift.
+- **Not-yet-issued shows a placeholder**, rather than nothing, so the factory knows where the
+  final will appear before it appears.
+- **A submitted round stays open.** The portal itself says "you can still add notes", so
+  greying it out in the list would contradict the page it links to. Only revoked and expired
+  rounds go grey.
+
+Still not built from Phase E: the `notifications` rows for `design_specs.owner_id`.
+
 ## Deliberately not built
 
 - In-app PDF editing or redlining. The design team authors elsewhere.

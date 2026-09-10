@@ -34,7 +34,7 @@ import {
   designSpecReviewUrl,
   getDesignSpecNotes, getDesignSpecNoteReplies, setReviewCommentStatus, addReviewReply,
 } from '../../services/design';
-import { getProjectSkus } from '../../services';
+import { getProjectSkus, getProjectById, getSupplierById } from '../../services';
 import type { DesignSpec, DesignSpecVersion } from '../../types/design-spec.types';
 import type { ProjectSku } from '../../types';
 import type { ReviewComment, ReviewCommentStatus, ReviewReply, ReviewShare } from '../../types/review.types';
@@ -81,10 +81,27 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
   const [uploadNote, setUploadNote] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * The project's supplier, when it has one — the only party whose portal a link can be
+   * published to. Null for a project with no supplier assigned yet, which hides the tick
+   * rather than offering a destination that does not exist.
+   */
+  const [supplier, setSupplier] = useState<{ id: string; name: string } | null>(null);
+
   const [sendFor, setSendFor] = useState<DesignSpecVersion | null>(null);
   const [sendLabel, setSendLabel] = useState('');
   /** The previous round's link this one continues, so that reviewer sees their own notes. */
   const [sendSupersedes, setSendSupersedes] = useState('');
+  /**
+   * Publish this link in the supplier's own portal (migration 170).
+   *
+   * Defaults ON, because the supplier is who a design spec round is for nine times in ten and
+   * a default of OFF would mean the portal stayed empty and nobody noticed. It must be turned
+   * OFF for a link meant for anyone else — an internal reviewer, a vendor with no portal —
+   * because whoever holds a round's token IS that reviewer: they see that reviewer's earlier
+   * notes and write new ones in their name.
+   */
+  const [sendToPortal, setSendToPortal] = useState(true);
 
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState('');
@@ -96,6 +113,12 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
     const found = await getDesignSpecByProject(projectId);
     setSpec(found);
     setCanEdit(await canEditDesignSpecs());
+
+    // Read through the project rather than taking a supplier id as a prop: this panel is
+    // mounted from the project page and from the board, and only one of those knows it.
+    const project = await getProjectById(projectId);
+    const supplierRow = project?.supplierId ? await getSupplierById(project.supplierId) : undefined;
+    setSupplier(supplierRow ? { id: supplierRow.id, name: supplierRow.name } : null);
 
     if (!found) {
       setVersions([]);
@@ -438,7 +461,13 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                         {!spec.finalVersionId && (
                           <Button
                             variant="ghost" size="sm" leftIcon={<Link2 size={12} />}
-                            onClick={() => { setSendFor(v); setSendLabel(''); setSendSupersedes(''); }}
+                            onClick={() => {
+                              setSendFor(v); setSendLabel(''); setSendSupersedes('');
+                              // Back to the default every time: a round unticked for an
+                              // internal reviewer must not silently stay unticked for the
+                              // supplier's round that follows it.
+                              setSendToPortal(true);
+                            }}
                           >
                             Send for review
                           </Button>
@@ -471,6 +500,16 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                             ? <Check size={12} className="text-emerald-600" />
                             : <Loader2 size={12} className="text-sky-500" />}
                           <span className="text-gray-700 font-medium">{l.label || 'Unlabelled link'}</span>
+                          {/* Says where this link is reachable from, so "did they get it?"
+                              does not depend on remembering whether the tick was on. */}
+                          {l.supplierId && (
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100"
+                              title="Published in the supplier's portal — they can open it without an email."
+                            >
+                              in portal
+                            </span>
+                          )}
                           <span className="text-gray-400">
                             {l.submittedAt
                               ? `submitted${l.submittedBy ? ` by ${l.submittedBy}` : ''} · ${formatReviewStamp(l.submittedAt).short}`
@@ -581,8 +620,27 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
               </>
             )}
 
+            {supplier && (
+              <label className="flex items-start gap-2 mt-3 p-2 rounded bg-indigo-50 border border-indigo-100 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sendToPortal}
+                  onChange={e => setSendToPortal(e.target.checked)}
+                  className="mt-0.5 accent-indigo-600"
+                />
+                <span className="text-[11px] text-indigo-900">
+                  <strong>Show this round in {supplier.name}'s portal.</strong> They will find it
+                  under the project's development phase without waiting for an email. Untick it
+                  if this link is for anyone else — whoever opens it reviews AS the recipient
+                  and sees that recipient's earlier notes.
+                </span>
+              </label>
+            )}
+
             <p className="text-[11px] text-amber-700 bg-amber-50 rounded p-2 mt-3">
-              OriginFlow sends no email. Copy the link and send it to the reviewer yourself.
+              {supplier && sendToPortal
+                ? `OriginFlow sends no email, but ${supplier.name} will see this round in their portal. Copy the link too if you want to chase them.`
+                : 'OriginFlow sends no email. Copy the link and send it to the reviewer yourself.'}
             </p>
             <div className="flex justify-end gap-2 mt-4">
               <Button variant="ghost" size="sm" onClick={() => setSendFor(null)}>Cancel</Button>
@@ -592,11 +650,13 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                 onClick={() => {
                   const version = sendFor;
                   const supersedes = sendSupersedes;
+                  const publish = sendToPortal;
                   setSendFor(null);
                   void run('send', async () => {
                     const share = await sendDesignSpecForReview(spec, version, {
                       label: sendLabel.trim(),
                       supersedesId: supersedes || null,
+                      supplierId: publish && supplier ? supplier.id : null,
                     });
                     await copyLink(share.token);
                   });

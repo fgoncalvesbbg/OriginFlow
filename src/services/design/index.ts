@@ -42,6 +42,12 @@ export type {
   DesignSpecFile, DesignSpecObject, UploadedVersionFiles,
 } from './design-spec-file.service';
 
+export {
+  getSupplierDesignSpecRounds,
+  getSupplierDesignSpecFinals,
+  fetchSupplierDesignSpecFinalUrl,
+} from './design-spec-portal.service';
+
 export { stampDraftPdf, readPageCount, asciiSafe } from './design-spec-stamp';
 
 export {

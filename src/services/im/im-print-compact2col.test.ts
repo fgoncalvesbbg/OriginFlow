@@ -68,9 +68,15 @@ describe('compact2col — page geometry', () => {
     expect(compact(hazardManual('flammable'))).toContain('columns: 2; column-gap: 4mm;');
   });
 
-  it('fills column 1 before starting column 2 instead of balancing them', () => {
-    // Balancing would leave both columns half-height on the last page of every locale.
-    expect(compact(hazardManual('flammable'))).toContain('column-fill: auto;');
+  it('balances rather than declaring column-fill: auto, which cost a trailing blank sheet', () => {
+    // A fragmented multicol fills every page but the last either way, so `auto` bought nothing
+    // on the pages that matter — and on the last page it ran the final column flush into the
+    // bottom margin, which made the print engine emit an extra EMPTY sheet. Measured against
+    // the live engine on the Induction Hobs leaflet: auto = 1 full page + 1 blank, balance = 1
+    // page. This asserts the pair, since `column-fill` appearing at all is the regression risk.
+    const html = compact(hazardManual('flammable'));
+    expect(html).toContain('column-fill: balance;');
+    expect(html).not.toContain('column-fill: auto;');
   });
 
   it('keeps ~64mm columns on A4 by taking three, not two 95mm ones', () => {
@@ -220,17 +226,33 @@ describe('compact2col — languages flow continuously', () => {
   });
 
   it('prints the header once for the booklet, not once per language', () => {
-    // Repeated per locale it would be a full-measure band inside the column flow — a spanner,
-    // which splits the columns into separate groups and reintroduces the gap.
+    // Repeated per locale it would be a second logo bar partway down a column.
     const html = twoLangs()[0].html;
     expect(html.match(/class="im-leaflet-header"/g)).toHaveLength(1);
   });
 
-  it('spans only the FIRST title across the columns', () => {
+  it('sets the header INSIDE the column flow, so the columns own the whole first page', () => {
+    // The load-bearing half of the blank-first-page fix. The print engine will not fragment a
+    // multicol that starts partway down a sheet: it sizes the column row to a whole page,
+    // finds it does not fit in what is left, and moves the WHOLE row to the next page. A logo
+    // bar above the columns therefore costs an entire blank sheet, not its own 12mm. Inside
+    // the flow it is an ordinary first block of column 1 and the columns start at the page
+    // top. Asserted on the markup because no CSS assertion can express "not above the flow".
     const html = twoLangs()[0].html;
-    expect(html).toContain(
-      '.im-page-content > .imv-lang:first-child > .im-section:first-child > .im-section-title { column-span: all; }',
-    );
+    expect(html).toContain('<div class="im-page im-page-content"><header class="im-leaflet-header">');
+    expect(html).not.toMatch(/<\/header>\s*<div class="im-page im-page-content"/);
+  });
+
+  it('spans NOTHING across the columns — a spanner blanks the first page', () => {
+    // This layout used to run the booklet's opening title across the full measure. The print
+    // engine sizes the column row FOLLOWING a spanner to a whole page and then refuses to
+    // fragment it, so once a locale reached about a page the entire flow was pushed to the
+    // next sheet and the spanner printed alone — the blank first page this layout shipped
+    // with. Reproduced against the live engine on the Induction Hobs leaflet's published
+    // snapshot: with the spanner page 1 held the title and nothing else; without it the same
+    // content set on one page. Nothing in the leaflet flow may span.
+    const html = twoLangs()[0].html;
+    expect(html).not.toContain('column-span: all');
   });
 
   it('separates locales with a small black bar naming the language in its own language', () => {

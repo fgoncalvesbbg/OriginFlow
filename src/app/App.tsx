@@ -8,6 +8,7 @@ import { ConnectionProvider } from '../context/ConnectionContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminRoute from '../components/AdminRoute';
 import SuperAdminRoute from '../components/SuperAdminRoute';
+import { PortalTheme } from '../components/portal/KlarsteinBrand';
 import { ToastContainer } from '../components/common/Toast';
 import { ConnectionBanner } from '../components/common/ConnectionBanner';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
@@ -89,23 +90,31 @@ const AppContent: React.FC = () => {
           <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
-          <Route path="/supplier/:token" element={<SupplierPortal />} />
-          <Route path="/supplier-dashboard/:token" element={<SupplierDashboard />} />
-          <Route path="/compliance/supplier/:token" element={<SupplierCompliancePortal />} />
-          <Route path="/compliance/supplier-portal" element={<SupplierCompliancePortalList />} />
-          <Route path="/sourcing/supplier/:token" element={<SupplierRFQPortal />} />
+          {/* Every supplier-facing route is wrapped in <PortalTheme>, which puts the
+              Klarstein palette and fonts on the page for as long as it is mounted (see
+              src/components/portal/KlarsteinBrand.tsx). Suppliers only ever reach these
+              routes, so this is the whole of what they see, and it should read as
+              Klarstein rather than as an internal tool.
+
+              /login and /im/preview are excluded: both are internal — the PM's own login
+              and the PM's own template preview — despite being unauthenticated. */}
+          <Route path="/supplier/:token" element={<PortalTheme><SupplierPortal /></PortalTheme>} />
+          <Route path="/supplier-dashboard/:token" element={<PortalTheme><SupplierDashboard /></PortalTheme>} />
+          <Route path="/compliance/supplier/:token" element={<PortalTheme><SupplierCompliancePortal /></PortalTheme>} />
+          <Route path="/compliance/supplier-portal" element={<PortalTheme><SupplierCompliancePortalList /></PortalTheme>} />
+          <Route path="/sourcing/supplier/:token" element={<PortalTheme><SupplierRFQPortal /></PortalTheme>} />
           <Route path="/im/preview/:templateId" element={<IMPreview />} />
-          <Route path="/share/im/:token" element={<IMSharedManual />} />
+          <Route path="/share/im/:token" element={<PortalTheme><IMSharedManual /></PortalTheme>} />
           {/* Supplier review portals. One route per subject kind rather than a single
               /review/:token that resolves the token to decide — resolving is what stamps
               last_used_at and use_count ("the portal was opened"), so a dispatcher would
               have to resolve once to choose a portal and the portal would resolve again,
               double-counting every visit. The link builders already know the subject:
               getIMReviewUrl and designSpecReviewUrl. */}
-          <Route path="/review/im/:token" element={<IMReviewPortal />} />
-          <Route path="/review/design-spec/:token" element={<DesignSpecReviewPortal />} />
-          <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
-          <Route path="/attribute-request-batch/:batchToken" element={<SupplierAttributeBatchPortal />} />
+          <Route path="/review/im/:token" element={<PortalTheme><IMReviewPortal /></PortalTheme>} />
+          <Route path="/review/design-spec/:token" element={<PortalTheme><DesignSpecReviewPortal /></PortalTheme>} />
+          <Route path="/attribute-request/:token" element={<PortalTheme><SupplierAttributePortal /></PortalTheme>} />
+          <Route path="/attribute-request-batch/:batchToken" element={<PortalTheme><SupplierAttributeBatchPortal /></PortalTheme>} />
 
           {/* Protected PM Routes */}
           <Route path="/" element={

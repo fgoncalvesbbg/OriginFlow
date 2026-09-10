@@ -13,6 +13,7 @@ import {
 } from '../../types';
 import { passesFeatureGate } from '../../utils';
 import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle, Printer } from 'lucide-react';
+import { PortalBrandBar, KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
 
 /**
  * What the comment box on a requirement is for, given the supplier's answer.
@@ -288,7 +289,11 @@ const SupplierCompliancePortal: React.FC = () => {
 
   if (!isAuthenticated) {
       return (
-          <div className="min-h-screen bg-light flex items-center justify-center p-4 font-sans text-primary">
+          <div className="min-h-screen bg-light flex flex-col items-center justify-center p-4 font-sans text-primary gap-6">
+              {/* The gate is the first thing a supplier sees after clicking a mail link, and
+                  it asks for a security code — so it has to be recognisably Klarstein's
+                  before they will type anything into it. */}
+              <KlarsteinLogo height={26} />
               <div className="bg-white max-w-md w-full rounded-2xl shadow-xl overflow-hidden border border-gray-200 animate-in fade-in zoom-in duration-300">
                   <div className="bg-indigo-600 p-6 text-center">
                       <ShieldCheck className="w-12 h-12 text-white mx-auto mb-3 opacity-90" />
@@ -319,7 +324,7 @@ const SupplierCompliancePortal: React.FC = () => {
                                   <span>{loginError}</span>
                               </div>
                           )}
-                          <button type="submit" disabled={loading || accessCodeInput.length < 4} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                          <button type="submit" disabled={loading || accessCodeInput.length < 4} className="kl-cta w-full font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
                               {loading ? <Loader2 className="animate-spin" size={18} /> : <span>Access Portal <ArrowRight size={16} /></span>}
                           </button>
                       </form>
@@ -431,6 +436,7 @@ const SupplierCompliancePortal: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-light font-sans pb-20 text-primary">
+      <PortalBrandBar label="Technical Compliance File" maxWidth="max-w-4xl" />
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow no-print">
         <div className="max-w-4xl mx-auto px-6 py-4 flex justify-between items-center gap-4">
           <div className="flex items-center gap-3">
@@ -460,8 +466,13 @@ const SupplierCompliancePortal: React.FC = () => {
         </div>
       </header>
 
-      {/* Paper-only masthead — the on-screen header is chrome and is suppressed. */}
+      {/* Paper-only masthead — the on-screen header is chrome and is suppressed. The
+          wordmark is repeated here because this printout is the supplier's own copy of a
+          declaration carrying a liability clause, and on paper it should be unambiguous
+          whose document it is. The on-screen brand bar is `no-print`, so without this the
+          printed copy would carry no mark at all. */}
       <div className="print-only" style={{ marginBottom: '1rem' }}>
+        <KlarsteinLogo height={20} className="mb-3" />
         <h1 style={{ fontSize: '18px', fontWeight: 700 }}>Technical Compliance File — Declaration</h1>
         <p style={{ fontSize: '11px' }}>
           {req.requestId} · {req.projectName}
@@ -972,7 +983,7 @@ const SupplierCompliancePortal: React.FC = () => {
                             >
                                 {savingDraft ? <Loader2 className="animate-spin" size={18} /> : 'Save draft'}
                             </button>
-                            <button onClick={handleSubmit} disabled={loading || savingDraft || (requirements.length > 0 && requirements.filter(r => answers[r.id]).length < requirements.length)} className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-bold hover:bg-indigo-700 shadow-lg transition-all disabled:opacity-50 disabled:bg-gray-200 flex items-center gap-2">
+                            <button onClick={handleSubmit} disabled={loading || savingDraft || (requirements.length > 0 && requirements.filter(r => answers[r.id]).length < requirements.length)} className="kl-cta px-10 py-3 rounded-xl font-bold shadow-lg transition-all flex items-center gap-2">
                                 {loading ? <Loader2 className="animate-spin" size={18} /> : <><CheckCircle size={18}/> {returned ? 'Resubmit Response' : 'Submit Response'}</>}
                             </button>
                         </div>

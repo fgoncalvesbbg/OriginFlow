@@ -1,0 +1,211 @@
+/**
+ * Klarstein brand layer for the SUPPLIER-FACING surfaces only.
+ *
+ * WHERE IT APPLIES. Nothing here is global. Every rule is scoped under
+ * `html.klarstein-brand`, a class that only `<PortalTheme>` sets
+ * (src/components/portal/KlarsteinBrand.tsx) and only while a public portal route is
+ * mounted — the token portals, the TCF/compliance gateway, the RFQ portal, the IM and
+ * design-spec review portals, and the attribute-request portals. The internal PM app
+ * never carries the class and is untouched.
+ *
+ * HOW THE RECOLOR WORKS. index.html defines `primary`, `accent`, `indigo`, `blue` and
+ * `violet` as `rgb(var(--of-*, <steel-slate channels>) / <alpha-value>)`. Re-pointing
+ * those variables here re-tints every utility AND every variant derived from them —
+ * `bg-indigo-600`, `hover:bg-indigo-700`, `ring-indigo-500`, `focus:bg-indigo-600`,
+ * `bg-indigo-50/20`, `from-indigo-500`, `shadow-indigo-200` — without editing a single
+ * className. That is why the portal pages are almost unchanged: they still say
+ * `indigo`, and the variable decides what indigo means.
+ *
+ * WHAT IS DELIBERATELY NOT CHANGED.
+ *  - Semantic status colors (emerald / amber / rose / red / sky). Klarstein's own warning
+ *    yellow (#f5d400) is unreadable on white, and "approved / pending / rejected" is a
+ *    compliance signal, not brand expression. They stay as they are.
+ *  - Radii, spacing and shadows. Klarstein runs sharper corners than this app; swapping
+ *    them would relayout every portal for no branding gain.
+ *  - IM viewer and IM content typography (see the reset at the bottom) — the manual has
+ *    to keep rendering exactly as it does in the PDF.
+ *
+ * TOKEN SOURCE. bbg-theme/src/sass/abstracts/colors/_klarstein.scss and _fonts.scss.
+ */
+
+/* ── Webfonts ───────────────────────────────────────────────────────────────────────
+ * Open Sans (body) comes from Google Fonts, already allowed by the CSP in netlify.toml.
+ * BwKlarstein is Klarstein's proprietary display face, served from the same Cloudinary
+ * account the production shop uses; netlify.toml's `font-src` was widened to
+ * res.cloudinary.com for it.
+ *
+ * This file is imported globally (src/app/main.tsx), but internal users pay almost nothing
+ * for it: an unused @font-face declaration does not fetch its font file, and no rule outside
+ * the portal scope asks for either family, so only the small Google stylesheet is requested.
+ *
+ * Only 400 and 700 are loaded. Each .otf is ~100KB and, per Klarstein's own type rules,
+ * the display face is reserved for the wordmark and headline copy — body, nav, tables
+ * and form copy stay in Open Sans, so the Light and Medium cuts would be dead weight.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap");
+
+@font-face {
+  font-family: "BwKlarstein";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("https://res.cloudinary.com/dle0apf7l/raw/upload/v1709902876/brands/gds/fonts/klarstein/BwKlarstein-Regular_mufwjf.otf") format("opentype");
+}
+@font-face {
+  font-family: "BwKlarstein";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("https://res.cloudinary.com/dle0apf7l/raw/upload/v1709902874/brands/gds/fonts/klarstein/BwKlarstein-Bold_c8go0t.otf") format("opentype");
+}
+
+/* ── Palette ────────────────────────────────────────────────────────────────────────*/
+html.klarstein-brand {
+  /* Raw brand tokens, for the hand-written rules further down. */
+  --kl-coral: #fc7c5a;         /* primary surface — the shop CTA */
+  --kl-coral-hover: #fc9175;
+  --kl-coral-disabled: #feccbf;
+  --kl-on-coral: #0d0d0d;      /* Klarstein pairs coral with near-black, never white */
+  --kl-ink: #0d0d0d;           /* text primary */
+  --kl-ink-soft: #4a4a4a;      /* text secondary */
+  --kl-hairline: #ebebeb;      /* general-light */
+
+  /* Dark ink. Klarstein is a black/white brand; #1a1f35 reads faintly navy beside it. */
+  --of-primary: 13 13 13;
+
+  /* Accent = Klarstein tertiary indigo. This drives `Button variant="primary"`, active
+     states and selection. Coral is NOT used here: the Button primitive hardcodes
+     `text-white`, and white on coral is ~2.3:1. Coral gets its own `.kl-cta` below,
+     where the text color is under our control. */
+  --of-accent: 87 89 224;         /* #5759e0 tertiary-surface */
+  --of-accent-hover: 68 70 175;   /* #4446af link-hover */
+
+  /* The indigo ramp, anchored on real Klarstein tokens:
+       300 = tertiary-disable #b6b7fb   500 = tertiary-hover / link #6062f6
+       600 = tertiary-surface  #5759e0  700 = link-hover           #4446af
+     The remaining steps are interpolated to keep a smooth 50→900 scale. White on 600 is
+     5.6:1 and 600 on white is 5.6:1, so the existing `bg-indigo-600 text-white` and
+     `text-indigo-600` pairings stay accessible. */
+  --of-indigo-50:  242 242 254;
+  --of-indigo-100: 230 230 253;
+  --of-indigo-200: 207 208 251;
+  --of-indigo-300: 182 183 251;
+  --of-indigo-400: 138 139 244;
+  --of-indigo-500:  96  98 246;
+  --of-indigo-600:  87  89 224;
+  --of-indigo-700:  68  70 175;
+  --of-indigo-800:  56  58 140;
+  --of-indigo-900:  44  45 107;
+
+  /* `blue` and `violet` already stand in for the accent across these pages, so they
+     follow the same ramp rather than introducing a third and fourth hue. */
+  --of-blue-50:  242 242 254;
+  --of-blue-100: 230 230 253;
+  --of-blue-200: 207 208 251;
+  --of-blue-300: 182 183 251;
+  --of-blue-400: 138 139 244;
+  --of-blue-500:  96  98 246;
+  --of-blue-600:  87  89 224;
+  --of-blue-700:  68  70 175;
+  --of-blue-800:  56  58 140;
+  --of-blue-900:  44  45 107;
+
+  --of-violet-50:  242 242 254;
+  --of-violet-100: 230 230 253;
+  --of-violet-200: 207 208 251;
+  --of-violet-300: 182 183 251;
+  --of-violet-400: 138 139 244;
+  --of-violet-500:  96  98 246;
+  --of-violet-600:  87  89 224;
+  --of-violet-700:  68  70 175;
+  --of-violet-800:  56  58 140;
+  --of-violet-900:  44  45 107;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────────────────────
+ * Open Sans for everything. `html.klarstein-brand` (0,1,1) outranks Tailwind
+ * preflight's `html` rule (0,0,1), so this wins without !important.
+ */
+html.klarstein-brand,
+html.klarstein-brand body {
+  font-family: "Open Sans", Helvetica, Arial, sans-serif;
+  font-feature-settings: "kern";
+}
+
+/* BwKlarstein is the display face, and Klarstein's type rules reserve it for the
+ * wordmark and headline copy. Applying it to every h1–h3 in a dense supplier table would
+ * look wrong and shift column widths, so it is limited to page-level titles (`h1`) and
+ * anything opting in with `.kl-display`. Everything else keeps Open Sans. */
+html.klarstein-brand h1,
+html.klarstein-brand .kl-display {
+  font-family: "BwKlarstein", "Trebuchet MS", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* ── Primary CTA ────────────────────────────────────────────────────────────────────
+ * Klarstein's primary button: coral surface, near-black label. Used on the one main
+ * submit per portal (send quote, submit declaration, submit attributes). Everything
+ * secondary stays on the indigo accent so a screen never shows two competing CTAs.
+ *
+ * Written as a class rather than a variable override because it has to set the text
+ * color too, which the utility classes on those buttons already claim.
+ */
+html.klarstein-brand .kl-cta {
+  background-color: var(--kl-coral);
+  color: var(--kl-on-coral);
+  transition: background-color 100ms linear;
+}
+html.klarstein-brand .kl-cta:hover:not(:disabled) {
+  background-color: var(--kl-coral-hover);
+}
+html.klarstein-brand .kl-cta:active:not(:disabled) {
+  opacity: 0.65; /* --alpha-press, the shop press feedback */
+}
+html.klarstein-brand .kl-cta:disabled {
+  background-color: var(--kl-coral-disabled);
+  color: #757575; /* --color-primary-text-disable */
+  opacity: 1;     /* the token pair already reads as disabled; do not double-fade it */
+}
+html.klarstein-brand .kl-cta:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px #fff, 0 0 0 3px var(--kl-coral); /* --shadow-button-focus */
+}
+/* Icons inside the CTA follow the label, not their own utility color. */
+html.klarstein-brand .kl-cta svg {
+  color: currentColor;
+}
+
+/* ── Brand bar ──────────────────────────────────────────────────────────────────────
+ * The coral keyline under the Klarstein wordmark. This is the one purely decorative
+ * brand cue on these pages, and the fastest signal to a supplier that the portal is
+ * Klarstein's. Rendered as an inset shadow rather than a border so it does not add to
+ * the element height and shift the sticky headers it sits in.
+ */
+.kl-brandbar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--kl-hairline, #ebebeb);
+  box-shadow: inset 0 -3px 0 0 var(--kl-coral, #fc7c5a);
+}
+.kl-wordmark {
+  height: 20px;
+  width: auto;
+  display: block;
+}
+
+/* ── Reset: the IM keeps its own typography ─────────────────────────────────────────
+ * The IM viewer (`.imv-root`) and the editor's rendered content (`.im-content`) are what
+ * a supplier reviews, and the same markup is what PDFShift prints. Their type has to
+ * stay identical to the PDF, so the brand fonts stop at their boundary. The two-class
+ * selectors here (0,2,x) outrank the `html.klarstein-brand h1` rule above.
+ */
+html.klarstein-brand .imv-root,
+html.klarstein-brand .imv-root h1,
+html.klarstein-brand .imv-root .kl-display {
+  font-family: var(--imv-font, "Inter", system-ui, Arial, sans-serif);
+  letter-spacing: normal;
+}
+html.klarstein-brand .im-content,
+html.klarstein-brand .im-content h1 {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  letter-spacing: normal;
+}

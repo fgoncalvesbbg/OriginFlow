@@ -55,6 +55,7 @@ import { formatReviewStamp, reviewStampTitle } from '../../pages/im/project-im-g
 import { anchorLabel, anchorExcerpt, orderByAnchor } from './anchor-labels';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
+import { KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
 
 /** Where the self-declared reviewer name is remembered between visits. */
 const NAME_KEY = 'im-review-name';
@@ -396,7 +397,8 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
       setName(trimmed);
     };
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 px-4 gap-6">
+        <KlarsteinLogo height={26} />
         <div className="w-full max-w-sm bg-white border border-gray-200 rounded-xl p-6">
           <h1 className="text-lg font-bold text-primary mb-1">{gateTitle}</h1>
           <p className="text-sm text-muted mb-5">
@@ -447,6 +449,9 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
       </div>
 
       <aside className="w-96 shrink-0 border-l border-gray-200 bg-gray-50 flex flex-col">
+        <div className="kl-brandbar px-4 h-12 flex items-center shrink-0">
+          <KlarsteinLogo height={18} />
+        </div>
         <div className="px-4 py-3 border-b border-gray-200 bg-white">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-primary">Your review</h2>
@@ -730,7 +735,7 @@ export const ReviewPortalShell: React.FC<ReviewPortalShellProps> = ({
               <span>Review submitted. You can still add notes.</span>
             </div>
           ) : (
-            <Button className="w-full" loading={saving} leftIcon={<Send size={13} />} onClick={finishReview}>
+            <Button className="kl-cta w-full" loading={saving} leftIcon={<Send size={13} />} onClick={finishReview}>
               Submit review
             </Button>
           )}

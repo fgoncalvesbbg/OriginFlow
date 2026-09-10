@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { getComplianceRequestsBySupplierCode, getCategories } from '../../services';
 import { ComplianceRequest, CategoryL3, ComplianceRequestStatus } from '../../types';
 import { Search, Clock, AlertCircle, CheckCircle, Loader2, Eye, Copy, Check, Lock } from 'lucide-react';
+import { KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
 
 const SupplierCompliancePortalList: React.FC = () => {
   const navigate = useNavigate();
@@ -123,6 +124,7 @@ const SupplierCompliancePortalList: React.FC = () => {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
+          <KlarsteinLogo height={28} className="mx-auto mb-6" />
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Technical Compliance Framework</h1>
           <p className="text-lg text-gray-600">Supplier Portal - View and Complete Compliance Requests</p>
         </div>
@@ -177,7 +179,7 @@ const SupplierCompliancePortalList: React.FC = () => {
             <button
               type="submit"
               disabled={loading || !supplierId.trim() || !accessCode.trim()}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="kl-cta w-full font-semibold py-2 rounded-lg flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>

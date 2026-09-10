@@ -34,23 +34,39 @@ export const designSpecReviewUrl = (token: string): string =>
  * and it is per-recipient on purpose: pointing every round-two link at the whole document's
  * history would show each supplier every other supplier's notes.
  *
+ * `supplierId` publishes the link in that supplier's own project portal (migration 170), so
+ * the round shows up under the project's development phase instead of only in whatever email
+ * the PM sends. Pass it ONLY for the party the link is genuinely for: holding the token is
+ * what makes its holder that reviewer, so publishing it to the wrong supplier hands them
+ * someone else's markup and lets them answer in their name.
+ *
  * The TTL default (30 days) comes from the shared layer: omitting `expiresAt` gets it,
  * passing `null` explicitly means never. Both are honoured exactly as passed.
  */
 export const sendDesignSpecForReview = async (
   spec: Pick<DesignSpec, 'projectId'>,
   version: Pick<DesignSpecVersion, 'id' | 'version'>,
-  opts?: { label?: string; expiresAt?: string | null; supersedesId?: string | null },
+  opts?: {
+    label?: string;
+    expiresAt?: string | null;
+    supersedesId?: string | null;
+    supplierId?: string | null;
+  },
 ): Promise<ReviewShare> => createReviewShare(
   designSpecSubject(spec, version),
   opts && 'expiresAt' in opts
     ? {
       label: opts.label, expiresAt: opts.expiresAt, mode: 'review',
       supersedesId: opts.supersedesId ?? null,
+      supplierId: opts.supplierId ?? null,
     }
     // Deliberately omits the key rather than passing undefined, so the shared module's
     // `'expiresAt' in opts` test still applies the 30-day default.
-    : { label: opts?.label, mode: 'review', supersedesId: opts?.supersedesId ?? null },
+    : {
+      label: opts?.label, mode: 'review',
+      supersedesId: opts?.supersedesId ?? null,
+      supplierId: opts?.supplierId ?? null,
+    },
 );
 
 /** Live links for one version, most recent first. */

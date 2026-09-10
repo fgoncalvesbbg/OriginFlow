@@ -573,7 +573,11 @@ export {
   cancelDesignSpec,
   reopenDesignSpec,
   setDesignSpecSkus,
-  getDesignSpecRounds
+  getDesignSpecRounds,
+  // The supplier portals' own reads (migration 170) — anon-callable, credential-scoped.
+  getSupplierDesignSpecRounds,
+  getSupplierDesignSpecFinals,
+  fetchSupplierDesignSpecFinalUrl
 } from './design';
 
 // Roadmap Creator (migration 167). roadmap.service.ts is the single seam the port hangs on —

@@ -35,18 +35,22 @@
     # supabase/functions and are not subject to the page's CSP, so they are deliberately not
     # listed here):
     #   - https://cdn.tailwindcss.com        index.html:15, the Tailwind play CDN <script>
-    #   - https://fonts.googleapis.com       index.html:12,14, Inter stylesheet
+    #   - https://fonts.googleapis.com       index.html:12,14, Inter stylesheet; also the
+    #     Open Sans stylesheet imported by src/styles/klarstein-brand.css
     #   - https://fonts.gstatic.com          index.html:13, the font files that stylesheet pulls
     #   - https://ecueltibpmpnhnaxlskx.supabase.co / wss://...   src/config/im.constants.ts:20
     #     (public storage asset) and the live REST/Realtime/Edge-Function connection built from
     #     VITE_SUPABASE_URL (src/config/environment.config.ts, src/data/supabase/client.ts) —
     #     update this if the project's Supabase URL ever changes
-    #   - https://res.cloudinary.com         SKU thumbnails (src/pages/products/SkuCatalog.tsx)
-    #     and IM brand logos (src/config/im.constants.ts)
+    #   - https://res.cloudinary.com         SKU thumbnails (src/pages/products/SkuCatalog.tsx),
+    #     IM brand logos (src/config/im.constants.ts) and the Klarstein wordmark on the
+    #     supplier portals (src/components/portal/KlarsteinBrand.tsx). It is also in font-src:
+    #     BwKlarstein, Klarstein's proprietary display face, is served from the same account
+    #     (@font-face in src/styles/klarstein-brand.css) — there is no Google-hosted copy.
     #   - https://producttoolkit.chal-tec.local   ProductToolkit is called directly by the
     #     browser, not proxied (see the [functions] comment below) — VITE_PRODUCTTOOLKIT_URL
     #     overrides it for local dev, which this CSP does not need to cover
-    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https://res.cloudinary.com https://ecueltibpmpnhnaxlskx.supabase.co; connect-src 'self' https://ecueltibpmpnhnaxlskx.supabase.co wss://ecueltibpmpnhnaxlskx.supabase.co https://producttoolkit.chal-tec.local; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://res.cloudinary.com data:; img-src 'self' data: https://res.cloudinary.com https://ecueltibpmpnhnaxlskx.supabase.co; connect-src 'self' https://ecueltibpmpnhnaxlskx.supabase.co wss://ecueltibpmpnhnaxlskx.supabase.co https://producttoolkit.chal-tec.local; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 # Server-side functions (PDF render, supplier file signed-URL issuer, IM
 # translation proxy, Markup.io review upload, Jira project lookup).

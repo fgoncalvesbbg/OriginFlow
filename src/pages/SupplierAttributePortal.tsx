@@ -8,6 +8,7 @@ import { getSupplierVisibleAttributes, validateAttributeValue } from '../utils';
 import AttributeInput from '../components/common/AttributeInput';
 import * as XLSX from 'xlsx';
 import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, Copy, Download, Printer, Layers, Check } from 'lucide-react';
+import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
 
 type SubmittedRow = { attributeId: string; name: string; value: string; type?: string };
 
@@ -210,7 +211,8 @@ const SupplierAttributePortal: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 gap-6">
+        <KlarsteinLogo height={26} />
         <div className="bg-white rounded-xl shadow p-8 max-w-md w-full text-center">
           <AlertTriangle className="mx-auto text-rose-500 mb-4" size={40} />
           <h2 className="text-xl font-bold text-gray-800 mb-2">Link Error</h2>
@@ -248,6 +250,7 @@ const SupplierAttributePortal: React.FC = () => {
       <div className="min-h-screen bg-gray-50 py-8 px-4">
         <div className="max-w-2xl mx-auto">
           <div className="bg-white rounded-xl shadow p-8 text-center mb-6 print-avoid-break">
+            <KlarsteinLogo height={22} className="mx-auto mb-6" />
             <CheckCircle className="mx-auto text-emerald-500 mb-4" size={48} />
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Data Submitted</h2>
             <p className="text-gray-500 text-sm">
@@ -315,6 +318,7 @@ const SupplierAttributePortal: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <PortalBrandBar label="Product Attribute Data Request" maxWidth="max-w-2xl" />
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-5">
         <div className="max-w-2xl mx-auto">
@@ -324,7 +328,7 @@ const SupplierAttributePortal: React.FC = () => {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900">Product Attribute Data Request</h1>
-              <p className="text-xs text-gray-400">OriginFlow · Product Lifecycle Management</p>
+              <p className="text-xs text-gray-400">Klarstein · Product Data</p>
             </div>
           </div>
           {request && (
@@ -529,7 +533,7 @@ const SupplierAttributePortal: React.FC = () => {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+                className="kl-cta w-full py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 text-base"
               >
                 {submitting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                 {submitting ? 'Submitting...' : 'Submit Attribute Data'}

@@ -126,6 +126,18 @@ export interface ReviewShare {
    * "every note on this document", which would hand Factory A everything Factory B wrote.
    */
   supersedesId: string | null;
+  /**
+   * The supplier this link was minted FOR, when the sender said so (migration 170).
+   *
+   * It is what lets that supplier's own portal LIST a link nobody emailed them. Deliberately
+   * not derived from `label`: a label is free text, and publishing a link on the strength of
+   * it would be a guess — a wrong one hands one factory another factory's markup, since
+   * holding a token is what makes the holder that reviewer.
+   *
+   * Null means hand-delivered. The link works exactly the same; it is simply not published.
+   * This grants no access on its own — the token is still the only thing that resolves.
+   */
+  supplierId: string | null;
   /** Set once a reviewer pressed "Submit review". Null on view links. */
   submittedAt: string | null;
   /** Display name the reviewer submitted under — self-declared, NOT authentication. */

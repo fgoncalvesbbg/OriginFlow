@@ -19,7 +19,7 @@
  * instant.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 // Vite resolves this to a hashed, bundled asset URL at build time — pdf.js spawns its own
 // worker from it to do the binary parsing off the main thread. Same import the
@@ -30,9 +30,25 @@ import type { PdfReviewAnchor, ReviewComment } from '../../types/review.types';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
-/** Zoom steps, as a multiplier on the width-fitted base scale. */
+/** Zoom steps the +/- buttons snap to, as a multiplier on the width-fitted base scale. */
 const ZOOM_STEPS = [0.75, 1, 1.25, 1.5, 2] as const;
-const DEFAULT_ZOOM_INDEX = 1;
+const DEFAULT_ZOOM = 1;
+
+/**
+ * Ctrl/⌘ + wheel zooms CONTINUOUSLY, so its range is wider than the button steps: a reviewer
+ * checking a tolerance callout wants further in than the largest step, and someone scanning a
+ * 40-page spec wants further out than the smallest.
+ */
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 5;
+const clampZoom = (z: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+
+/**
+ * How hard a wheel notch bites. A notch is ~100px of deltaY, so this is ~1.2x per notch —
+ * fast enough to cross the range in a few flicks, slow enough that a trackpad pinch (which
+ * arrives as many small ctrlKey wheel events) still feels continuous rather than jumpy.
+ */
+const WHEEL_ZOOM_RATE = 0.0018;
 
 /** How far outside the viewport a page starts rendering. One screen of lead time. */
 const RENDER_MARGIN_PX = 800;
@@ -111,11 +127,22 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
   const [pages, setPages] = useState<PageState[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   /** Width of the scroll container, so pages can be fitted to it. */
   const [containerWidth, setContainerWidth] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** The pages' wrapper, so a pointer-anchored zoom can measure the content box. */
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  /** Current zoom for the native wheel handler, which is registered once and never re-bound. */
+  const zoomRef = useRef(zoom);
+  /**
+   * Set by a wheel zoom, consumed by the layout effect below: the point of the document that
+   * was under the pointer, and how much the zoom moved it.
+   */
+  const zoomAnchor = useRef<
+    { px: number; py: number; clientX: number; clientY: number; ratio: number } | null
+  >(null);
   const resizeObs = useRef<ResizeObserver | null>(null);
   /**
    * The latest `onScrollElement`, so `attachScroll` can stay a `[]`-dependency callback ref.
@@ -179,18 +206,96 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
    * A callback ref fires when the node actually enters and leaves the DOM, whichever branch
    * put it there.
    */
+  /**
+   * Ctrl/⌘ + wheel — and a trackpad pinch, which the browser reports as exactly that —
+   * zooms the document instead of the whole app.
+   *
+   * A NATIVE, NON-PASSIVE LISTENER, not React's `onWheel`. React registers wheel listeners
+   * passively at the root, where `preventDefault()` is ignored, so the browser would go on
+   * zooming the entire page: the reviewer would get the toolbar and the note rail scaled up
+   * along with the drawing, and the app's own zoom control would be left showing 100%.
+   *
+   * Zoom is CONTINUOUS here rather than snapping to the button steps, because a wheel is a
+   * continuous input; snapping made every notch jump a step and overshoot.
+   */
+  const handleWheelZoom = useCallback((e: WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    e.preventDefault();
+
+    // deltaY is in pixels by default, but Firefox reports lines and some mice report pages.
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+    const current = zoomRef.current;
+    // Exponential, so a notch is the same proportional step at 40% as it is at 400%.
+    const next = clampZoom(current * Math.exp(-e.deltaY * unit * WHEEL_ZOOM_RATE));
+    if (next === current) return;
+
+    // Remember what sat under the pointer, so the layout effect can put it back there.
+    const content = contentRef.current;
+    if (content) {
+      const rect = content.getBoundingClientRect();
+      zoomAnchor.current = {
+        px: e.clientX - rect.left,
+        py: e.clientY - rect.top,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        ratio: next / current,
+      };
+    }
+    zoomRef.current = next;
+    setZoom(next);
+  }, []);
+
+  /**
+   * The buttons snap to the next step in `direction`, from wherever a wheel zoom left the
+   * document — so a reviewer at 137% clicks + and lands on 150%, not on 171%.
+   */
+  const stepZoom = useCallback((direction: 1 | -1) => {
+    const current = zoomRef.current;
+    const target = direction > 0
+      ? ZOOM_STEPS.find(s => s > current + 0.001)
+      : [...ZOOM_STEPS].reverse().find(s => s < current - 0.001);
+    const next = clampZoom(target ?? (direction > 0 ? MAX_ZOOM : MIN_ZOOM));
+    if (next === current) return;
+    zoomRef.current = next;
+    setZoom(next);
+  }, []);
+
   const attachScroll = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current?.removeEventListener('wheel', handleWheelZoom);
     scrollRef.current = el;
     scrollElementCb.current?.(el);
     resizeObs.current?.disconnect();
     resizeObs.current = null;
     if (!el) return;
+    el.addEventListener('wheel', handleWheelZoom, { passive: false });
     const measure = () => setContainerWidth(el.clientWidth);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     resizeObs.current = ro;
-  }, []);
+    // `handleWheelZoom` is itself a []-dependency callback, so this stays a stable ref — see
+    // the note above about why re-attaching would be expensive.
+  }, [handleWheelZoom]);
+
+  /**
+   * Keep the point that was under the pointer under the pointer.
+   *
+   * Runs BEFORE paint, and measures the content box as it now actually is, so the correction
+   * is exact whatever the layout did — including the switch from centred pages to a
+   * horizontally scrolling box the moment the document grows wider than the pane.
+   */
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current;
+    zoomAnchor.current = null;
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!anchor || !el || !content) return;
+    const rect = content.getBoundingClientRect();
+    el.scrollLeft += rect.left + anchor.px * anchor.ratio - anchor.clientX;
+    el.scrollTop += rect.top + anchor.py * anchor.ratio - anchor.clientY;
+  }, [zoom]);
 
   // The observer outlives the render that created it, so it needs an unmount teardown of its
   // own — the callback ref only fires while the tree is still there to fire it.
@@ -210,12 +315,12 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
   const scale = useMemo(() => {
     // Unmeasured (a container of zero width, e.g. mounted hidden): fall back to the PDF's
     // intrinsic size, but still honour the zoom step rather than freezing at 100%.
-    if (containerWidth === 0 || pages.length === 0) return ZOOM_STEPS[zoomIndex];
+    if (containerWidth === 0 || pages.length === 0) return zoom;
     const widest = Math.max(...pages.map(p => p.width));
     // 48px of breathing room for the page shadow and the scrollbar.
     const fit = (containerWidth - 48) / widest;
-    return Math.max(0.2, fit) * ZOOM_STEPS[zoomIndex];
-  }, [containerWidth, pages, zoomIndex]);
+    return Math.max(0.2, fit) * zoom;
+  }, [containerWidth, pages, zoom]);
 
   const renderPage = useCallback(async (pageNumber: number) => {
     if (!doc) return;
@@ -332,19 +437,22 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
         </span>
         <div className="flex-1" />
         <button
-          onClick={() => setZoomIndex(i => Math.max(0, i - 1))}
-          disabled={zoomIndex === 0}
+          onClick={() => stepZoom(-1)}
+          disabled={zoom <= MIN_ZOOM}
           title="Zoom out"
           className="p-1 text-gray-500 hover:text-gray-800 disabled:opacity-30"
         >
           <ZoomOut size={14} />
         </button>
-        <span className="text-[11px] text-gray-500 w-10 text-center">
-          {Math.round(ZOOM_STEPS[zoomIndex] * 100)}%
+        <span
+          className="text-[11px] text-gray-500 w-10 text-center"
+          title="Ctrl + scroll (⌘ + scroll on a Mac, or pinch) to zoom on the pointer"
+        >
+          {Math.round(zoom * 100)}%
         </span>
         <button
-          onClick={() => setZoomIndex(i => Math.min(ZOOM_STEPS.length - 1, i + 1))}
-          disabled={zoomIndex === ZOOM_STEPS.length - 1}
+          onClick={() => stepZoom(1)}
+          disabled={zoom >= MAX_ZOOM}
           title="Zoom in"
           className="p-1 text-gray-500 hover:text-gray-800 disabled:opacity-30"
         >
@@ -356,7 +464,7 @@ const PdfReviewCanvas: React.FC<PdfReviewCanvasProps> = ({
         {/* Sized to the widest page but never narrower than the viewport: `min-w-full` keeps
             the pages centred while they still fit, and `w-max` makes a zoomed-in page grow
             the scrollable box instead of spilling out of the container's right padding. */}
-        <div className="w-max min-w-full mx-auto space-y-6">
+        <div ref={contentRef} className="w-max min-w-full mx-auto space-y-6">
         {pages.map(p => {
           const displayWidth = p.width * scale;
           const displayHeight = p.height * scale;

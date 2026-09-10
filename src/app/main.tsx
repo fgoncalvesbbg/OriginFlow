@@ -4,6 +4,10 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import '../styles/animations.css';
 import '../styles/print.css';
+// Klarstein brand layer for the supplier-facing portals. Everything in it is scoped under
+// `html.klarstein-brand`, which only <PortalTheme> sets, so importing it here is inert for
+// the internal app.
+import '../styles/klarstein-brand.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

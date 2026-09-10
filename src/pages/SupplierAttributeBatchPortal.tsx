@@ -22,6 +22,7 @@ import { getSupplierVisibleAttributes, validateAttributeValue } from '../utils';
 import AttributeInput from '../components/common/AttributeInput';
 import * as XLSX from 'xlsx';
 import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, ArrowRightToLine, Download, Lock } from 'lucide-react';
+import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
 
 type CellValues = Record<string, Record<string, string>>; // [skuToken][attributeId] -> value
 type CellErrors = Record<string, Record<string, string>>; // [skuToken][attributeId] -> error message
@@ -204,7 +205,8 @@ const SupplierAttributeBatchPortal: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 gap-6">
+        <KlarsteinLogo height={26} />
         <div className="bg-white rounded-xl shadow p-8 max-w-md w-full text-center">
           <AlertTriangle className="mx-auto text-rose-500 mb-4" size={40} />
           <h2 className="text-xl font-bold text-gray-800 mb-2">Link Error</h2>
@@ -218,6 +220,7 @@ const SupplierAttributeBatchPortal: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <PortalBrandBar label="Product Attribute Data Request" maxWidth="max-w-6xl" />
       <div className="bg-white border-b border-gray-200 px-4 py-5">
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center gap-3 mb-3">
@@ -226,7 +229,7 @@ const SupplierAttributeBatchPortal: React.FC = () => {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900">Product Attribute Data Request</h1>
-              <p className="text-xs text-gray-400">OriginFlow · Product Lifecycle Management</p>
+              <p className="text-xs text-gray-400">Klarstein · Product Data</p>
             </div>
           </div>
           {first && (
@@ -401,7 +404,7 @@ const SupplierAttributeBatchPortal: React.FC = () => {
                   type="button"
                   onClick={handleSubmit}
                   disabled={submitting || pending.length === 0}
-                  className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+                  className="kl-cta w-full py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 text-base"
                 >
                   {submitting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                   {submitting ? 'Submitting…' : `Submit ${pending.length} SKU${pending.length === 1 ? '' : 's'}`}
