@@ -73,6 +73,33 @@ Do not run a forced code-only rebuild (`graphify extract . --code-only --force`)
 staleness: it drops the node count below the existing graph and discards the semantic
 layer. `graphify update .` is the safe, additive path.
 
+## Branding — never hardcode a colour
+
+The app ships in the **Klarstein** brand, and no component states a brand colour as a hex.
+[index.html](index.html) defines `primary`, `accent`, `indigo`, `blue` and `violet` as
+`rgb(var(--of-*, <fallback>) / <alpha-value>)`; [src/styles/klarstein-brand.css](src/styles/klarstein-brand.css)
+sets those variables on `html.klarstein` (the class is static in `index.html`, so there is no
+unstyled first paint). Re-pointing one variable there re-tints every utility *and* every
+variant — `bg-indigo-600`, `hover:bg-indigo-700`, `ring-indigo-500`, `bg-indigo-50/20`,
+`shadow-indigo-200` — which is why the rebrand touched a dozen files instead of several hundred.
+
+- `indigo-*`, `blue-*` and `violet-*` all resolve to the one brand-indigo ramp (#5759e0). Use
+  any of them; do not add a fourth hue.
+- Coral (#fc7c5a on #0d0d0d text) is the Klarstein CTA. Apply it with `.kl-cta`, one per screen.
+  It is deliberately not the `accent` token — call sites pair `accent` with a hardcoded
+  `text-white`, and white on coral is ~2.3:1.
+- **Status colours (emerald / amber / rose / red / sky) are not brand colours** and were left
+  alone on purpose. Klarstein's warning yellow (#f5d400) is unreadable on white, and
+  approved/pending/rejected is a compliance signal.
+- Body type is Open Sans; **BwKlarstein is for `h1` and `.kl-display` only**. The IM viewer
+  (`.imv-root`) and IM editor content (`.im-content`) are pinned back to **Inter** — the print
+  pipeline embeds Inter as woff2 subsets and every point size in
+  [src/services/im/im-print-typography.ts](src/services/im/im-print-typography.ts) was measured
+  against it, so a brand font leaking in there breaks editor/PDF parity.
+
+The Steel Slate hexes still in `index.html` are load-failure fallbacks, not a live theme.
+[DESIGN.md](DESIGN.md) is the full design system. Adding a colour means adding a token.
+
 ## The database schema — introspect, do not read migrations
 
 **`db_migrations/` is a change log, not a schema definition.** Do not answer "does column X

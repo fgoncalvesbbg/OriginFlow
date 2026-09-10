@@ -55,7 +55,7 @@ import { formatReviewStamp, reviewStampTitle } from '../../pages/im/project-im-g
 import { anchorLabel, anchorExcerpt, orderByAnchor } from './anchor-labels';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
-import { KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
+import { KlarsteinLogo } from '../../components/KlarsteinBrand';
 
 /** Where the self-declared reviewer name is remembered between visits. */
 const NAME_KEY = 'im-review-name';

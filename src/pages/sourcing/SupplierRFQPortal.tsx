@@ -8,7 +8,7 @@ import { RFQ, RFQEntry, RFQEntryStatus, RFQAttributeResponse, RFQAttachment } fr
 import { normalizeExternalLink } from '../../utils/url.utils';
 import { ShoppingBag, CheckCircle, Loader2, AlertTriangle, Calendar, DollarSign, Package, Truck, Wrench, FileText, Upload, Paperclip, Sliders, X, Tag, Lock, Clock, Printer } from 'lucide-react';
 import RFQAttributeComparison from '../../components/sourcing/RFQAttributeComparison';
-import { PortalBrandBar, KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
+import { PortalBrandBar, KlarsteinLogo } from '../../components/KlarsteinBrand';
 
 const SupplierRFQPortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();

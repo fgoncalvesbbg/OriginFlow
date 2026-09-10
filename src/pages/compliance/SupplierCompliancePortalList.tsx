@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { getComplianceRequestsBySupplierCode, getCategories } from '../../services';
 import { ComplianceRequest, CategoryL3, ComplianceRequestStatus } from '../../types';
 import { Search, Clock, AlertCircle, CheckCircle, Loader2, Eye, Copy, Check, Lock } from 'lucide-react';
-import { KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
+import { KlarsteinLogo } from '../../components/KlarsteinBrand';
 
 const SupplierCompliancePortalList: React.FC = () => {
   const navigate = useNavigate();

@@ -8,7 +8,7 @@ import { getSupplierVisibleAttributes, validateAttributeValue } from '../utils';
 import AttributeInput from '../components/common/AttributeInput';
 import * as XLSX from 'xlsx';
 import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, Copy, Download, Printer, Layers, Check } from 'lucide-react';
-import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
+import { PortalBrandBar, KlarsteinLogo } from '../components/KlarsteinBrand';
 
 type SubmittedRow = { attributeId: string; name: string; value: string; type?: string };
 

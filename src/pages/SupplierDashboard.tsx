@@ -18,7 +18,7 @@ import type { SupplierDesignSpecFinal, SupplierDesignSpecRound } from '../types/
 import { StatusBadge } from '../components/StatusBadge';
 import SubmitProposalModal from '../components/sourcing/SubmitProposalModal';
 import { ShieldCheck, LayoutDashboard, Bell, X, AlertCircle, FileText, Package, Factory, Key, Plus, Download, RefreshCw, Copy, Check, CheckCircle, ChevronRight, ShoppingBag, ClipboardList, BookOpen } from 'lucide-react';
-import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
+import { PortalBrandBar, KlarsteinLogo } from '../components/KlarsteinBrand';
 
 /** Relative-due-date pill, matching the colouring already used for compliance deadlines. */
 const DueDate: React.FC<{ date?: string | null; label?: string }> = ({ date, label = 'Due' }) => {

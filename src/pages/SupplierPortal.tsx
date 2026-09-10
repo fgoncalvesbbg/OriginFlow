@@ -10,7 +10,7 @@ import { DESIGN_REVIEW_PHASE, DESIGN_FINAL_PHASE, phaseStep } from './supplier-p
 import { StatusBadge } from '../components/StatusBadge';
 import SupplierDocumentsPanel from '../components/documents/SupplierDocumentsPanel';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Clock, Lock, Paperclip, Upload, ClipboardList, ExternalLink } from 'lucide-react';
-import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
+import { PortalBrandBar, KlarsteinLogo } from '../components/KlarsteinBrand';
 
 const SupplierPortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();

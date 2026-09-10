@@ -2,9 +2,11 @@
 name: OriginFlow PLM
 description: Internal product-launch (PLM) platform — calm, precise, status-legible operational UI.
 colors:
-  primary: "#1a1f35"
-  accent: "#3f5b73"
-  accent-hover: "#324a5e"
+  primary: "#0d0d0d"
+  accent: "#5759e0"
+  accent-hover: "#4446af"
+  brand-cta: "#fc7c5a"
+  brand-cta-text: "#0d0d0d"
   secondary: "#6b7280"
   muted: "#9ca3af"
   light: "#f9fafb"
@@ -16,7 +18,7 @@ colors:
   danger-solid: "#e11d48"
 typography:
   headline:
-    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontFamily: "BwKlarstein, \"Trebuchet MS\", Helvetica, Arial, sans-serif"
     fontSize: "1.5rem"
     fontWeight: 700
     lineHeight: 1.2
@@ -98,15 +100,25 @@ OriginFlow is the room a product manager runs many launches from: a calm, fixed 
 rail framing a bright, uncluttered work canvas, where the status of every project, document, and
 compliance request is legible at a glance. Nothing on the canvas competes for attention except the
 thing that needs a decision. Color is spent almost entirely on *state* (what's done, what's blocked,
-what's waiting) and on the single Steel Slate accent that marks the current selection or the primary
+what's waiting) and on the single brand-indigo accent that marks the current selection or the primary
 action. The personality is calm, precise, and trustworthy: the interface earns confidence by being
 predictable and honest about state, not by impressing.
 
-> **Accent note:** the shipped accent is **Steel Slate `#3f5b73`** (hover `#324a5e`), a muted
-> corporate blue-gray chosen over a saturated indigo for a calmer, more professional feel. The
-> Tailwind `indigo-*` and `blue-*` scales are deliberately remapped onto this steel ramp
-> (`index.html`), so existing `indigo-*` / `blue-*` utility classes render as the steel accent.
-> Where this doc says "indigo" as a *status* tone (in-progress / active), it now renders steel.
+> **Brand note (read before changing any colour):** OriginFlow ships in the **Klarstein** brand.
+> The accent is **Klarstein tertiary indigo `#5759e0`** (hover `#4446af`); the primary CTA colour is
+> **coral `#fc7c5a` with near-black `#0d0d0d` text**, applied via `.kl-cta` and reserved for the one
+> most consequential action on a screen.
+>
+> Colours are **not** written as hex in components. `index.html` defines `primary`, `accent`,
+> `indigo`, `blue` and `violet` as `rgb(var(--of-*, <fallback>) / <alpha-value>)`, and
+> `src/styles/klarstein-brand.css` sets those variables on `html.klarstein`. Re-pointing a variable
+> there re-tints every utility and variant at once. The `indigo-*`, `blue-*` and `violet-*` scales
+> all resolve to the one brand-indigo ramp, so existing utility classes need no edits — which is why
+> the rebrand touched a handful of files rather than several hundred. **Add a colour by adding a
+> token, never by hardcoding a hex.** The Steel Slate values that remain in `index.html` are
+> load-failure fallbacks, not a live theme.
+>
+> Where this doc says "indigo" as a *status* tone (in-progress / active), it renders brand indigo.
 
 This system is built for internal power users who live here all day, so it favors **density with
 hierarchy**: it will show a lot, but always ranked, so the eye lands on what matters first. Familiar
@@ -121,25 +133,37 @@ sake, no playful illustration. This is operational software, not a campaign.
 
 **Key Characteristics:**
 - Dark fixed rail + bright canvas; a two-layer neutral system, not a flat single surface.
-- Steel Slate accent reserved for action, selection, and active state, never decoration.
-- A consistent four-hue status vocabulary (steel / emerald / rose / gray) used everywhere.
+- Brand-indigo accent reserved for action, selection, and active state, never decoration; coral
+  (`.kl-cta`) for the single hero action, and as the keyline under a Klarstein wordmark.
+- A consistent four-hue status vocabulary (indigo / emerald / rose / gray) used everywhere.
+  **Status hues are not brand colours** and were left untouched by the rebrand: Klarstein's warning
+  yellow (#f5d400) is unreadable on white, and approved/pending/rejected is a compliance signal.
 - Dense but ranked: small type, tight spacing, clear hierarchy.
-- Inter only. No display face, no second family.
+- Open Sans for body and UI; **BwKlarstein for page titles (`h1`) and `.kl-display` only** — per
+  Klarstein's own type rules the display face is reserved for the wordmark and headline copy.
+  Exception: the IM viewer (`.imv-root`) and IM editor content (`.im-content`) stay on **Inter**,
+  because the print pipeline embeds Inter and its point sizes were measured against it
+  (`src/services/im/im-print-typography.ts`). Do not let the brand font leak into those.
 
 ## 2. Colors
 
 A restrained, near-neutral palette where saturated color almost always means *state* or *action*.
 
 ### Primary
-- **Control-Room Ink** (#1a1f35): the deep charcoal-navy that anchors the system. It is the
-  fixed sidebar background *and* the default body text color on the light canvas. Its weight is what
-  makes the bright canvas read as calm rather than empty.
+- **Klarstein Ink** (#0d0d0d): the near-black that anchors the system. It is the fixed sidebar
+  background *and* the default body text color on the light canvas. Klarstein is a black/white
+  brand, so this is a true near-black rather than the charcoal-navy (#1a1f35) it replaced.
 
 ### Secondary
-- **Action Steel** (#3f5b73, "Steel Slate"): the one accent. Primary buttons, the active nav item,
-  current selection, focus rings, unread/active indicators. **Hover** deepens to Steel-Deep (#324a5e).
-  Spend it sparingly; its rarity is what makes it read as "this is the action." (Exposed as the
-  `accent` token and via the remapped `indigo-*` / `blue-*` scales.)
+- **Brand Indigo** (#5759e0, Klarstein tertiary-surface): the one accent. Primary buttons, the
+  active nav item, current selection, focus rings, unread/active indicators. **Hover** deepens to
+  #4446af. Spend it sparingly; its rarity is what makes it read as "this is the action." (Exposed as
+  the `accent` token and via the `indigo-*` / `blue-*` / `violet-*` scales, which all resolve here.)
+- **Brand Coral** (#fc7c5a with #0d0d0d text): Klarstein's primary CTA, applied with `.kl-cta` and
+  limited to the single most consequential action on a screen — send the quote, submit the
+  declaration. It is deliberately *not* the `accent` token: many call sites pair the accent with a
+  hardcoded `text-white`, and white on coral is ~2.3:1. Coral also draws the keyline beneath a
+  Klarstein wordmark (`.kl-brandbar`, `.kl-keyline-dark`), its only decorative use.
 
 ### Tertiary
 The semantic state hues. Each appears as a tinted pill (`-50` background, `-700` text, `-200`
@@ -212,10 +236,11 @@ rail → overlay). Resting content stays low; don't shadow things that aren't fl
 
 ### Buttons
 - **Shape:** gently rounded (4px); compact padding (8px 16px), `text-sm`/`text-xs` weight 500–600.
-- **Primary:** Action Steel (#3f5b73) on white text; hover deepens to #324a5e.
+- **Primary:** Brand Indigo (#5759e0) with white text; hover deepens to #4446af.
+- **Hero CTA:** add `.kl-cta` for Klarstein coral (#fc7c5a) with near-black text. One per screen.
 - **Danger:** Blocked Rose solid (#e11d48) on white; hover #be123c. For destructive confirmations.
 - **Ghost / Cancel:** no fill, Refined Gray (#6b7280) text, hover `background #f3f4f6`.
-- **Focus:** visible focus ring in Action Steel; never remove the outline without replacing it.
+- **Focus:** visible focus ring in Brand Indigo; never remove the outline without replacing it.
 
 ### Status Badges (signature)
 - **Style:** pill (12px radius), `text-xs` weight 500, tinted `-50` background + `-700` text + `-200`
@@ -231,20 +256,21 @@ rail → overlay). Resting content stays low; don't shadow things that aren't fl
 ### Inputs / Fields
 - **Style:** white background, 4px radius, 1px border. Default border `#d1d5db`; an unfilled/required
   field may use an amber border to signal "needs value".
-- **Focus:** `ring-2` in Action Steel, border shifts to indigo. Always visible.
+- **Focus:** `ring-2` in Brand Indigo, border shifts to indigo. Always visible.
 - **Error / Warning:** rose border + helper text for errors; amber for "needs value".
 
 ### Navigation (signature: the rail)
-- **Style:** fixed 16rem dark rail (Control-Room Ink, #1a1f35), white wordmark, item rows at 12px
+- **Style:** fixed 16rem dark rail (Klarstein Ink, #0d0d0d) headed by the white Klarstein wordmark
+  over a coral keyline, with "OriginFlow" demoted to the strapline; item rows at 12px
   radius, `text-sm` weight 500.
-- **States:** active = Action Steel fill + white text + subtle shadow; inactive = Soft Gray text;
+- **States:** active = Brand Indigo fill + white text + subtle shadow; inactive = Soft Gray text;
   hover = `background gray-800` + white text.
 - **Mobile:** the rail is hidden below `md`; navigation collapses to a top-bar affordance.
 
 ## 6. Do's and Don'ts
 
 ### Do:
-- **Do** reserve Action Steel (#3f5b73) for primary action, current selection, and active state.
+- **Do** reserve Brand Indigo (#5759e0) for primary action, current selection, and active state.
   Everything non-active is gray.
 - **Do** convey every status with hue **and** a text label (and icon where space allows), never color
   alone.
@@ -269,5 +295,5 @@ rail → overlay). Resting content stays low; don't shadow things that aren't fl
   alerts; use a full border, a tint, or a leading icon instead.
 - **Don't** introduce a second typeface or a display font for UI labels, buttons, or data.
 - **Don't** let muted gray text fall below 4.5:1 on its background (the most likely contrast failure
-  here); bump toward Control-Room Ink before reaching for lighter gray.
+  here); bump toward Klarstein Ink before reaching for lighter gray.
 - **Don't** reach for a modal as the first thought; exhaust inline and progressive disclosure first.

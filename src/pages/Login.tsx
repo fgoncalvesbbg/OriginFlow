@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { signUp } from '../services';
 import { Box, Lock, Mail, ArrowRight, User } from 'lucide-react';
+import { KlarsteinLogo } from '../components/KlarsteinBrand';
 
 const Login: React.FC = () => {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
@@ -47,7 +48,8 @@ const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-light flex flex-col items-center justify-center p-4">
-      <div className="mb-8 text-center">
+      <div className="mb-8 flex flex-col items-center text-center">
+        <KlarsteinLogo height={24} className="mb-7" />
         <div className="flex items-center justify-center gap-2 text-3xl font-bold text-primary mb-2">
           <Box className="text-indigo-600" size={32} />
           OriginFlow

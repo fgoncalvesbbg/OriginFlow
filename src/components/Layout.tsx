@@ -8,6 +8,7 @@ import { UserRole } from '../types';
 import { isSuperAdminOnlyPath } from '../config/moduleAccess.config';
 import { Breadcrumbs } from './Breadcrumbs';
 import { Logo } from './Logo';
+import { KlarsteinLogo } from './KlarsteinBrand';
 import { FeedbackWidget } from './feedback/FeedbackWidget';
 import { ProjectInboxPanel } from './inbox/ProjectInboxPanel';
 import { InboxProvider } from './inbox/InboxContext';
@@ -145,11 +146,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Sidebar — off-canvas drawer on mobile, fixed rail on md+ (icon-rail when collapsed). */}
       <aside className={`bg-primary text-white flex-col fixed h-full z-40 shadow-lg transition-[width] ${mobileNavOpen ? 'flex w-64' : 'hidden'} md:flex ${railCollapsed ? 'md:w-16' : 'md:w-64'}`}>
-        <div className={`p-4 border-b border-gray-700 flex items-center gap-3 ${railCollapsed ? 'md:justify-center' : ''}`}>
+        <div className={`kl-keyline-dark p-4 flex items-center gap-3 ${railCollapsed ? 'md:justify-center' : ''}`}>
           <Logo size={30} className="shrink-0" />
           <div className={`min-w-0 ${railCollapsed ? 'md:hidden' : ''}`}>
-            <h1 className="text-lg font-bold tracking-tight leading-none">OriginFlow</h1>
-            <p className="text-[10px] text-gray-400 mt-1">Beta V1.5</p>
+            {/* The wordmark is the heading here — an <img> with alt text, so the rail still
+                contributes one. `variant="light"` inverts it for the dark ground. */}
+            <h1 className="leading-none">
+              <KlarsteinLogo height={15} variant="light" />
+            </h1>
+            <p className="text-[10px] text-gray-400 mt-1.5">OriginFlow · Beta V1.5</p>
           </div>
           {/* Close affordance inside the mobile drawer */}
           <button onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" className="md:hidden ml-auto p-1.5 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white">

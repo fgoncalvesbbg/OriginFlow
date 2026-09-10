@@ -2,6 +2,9 @@
  * OriginFlow wordmark mark. A single "origin" node flowing out to launches — the product's core
  * motion (one launch branching into steps, documents, suppliers). Steel-Slate tile so it reads on
  * both the dark rail and a light browser tab; the matching favicon lives in index.html.
+ *
+ * The tile carries the Klarstein accent (#5759e0, tertiary-surface). Beside it in the rail
+ * sits the Klarstein wordmark — this mark is the product's, the wordmark is the brand's.
  */
 import React from 'react';
 
@@ -19,7 +22,7 @@ export const Logo: React.FC<{ size?: number; className?: string; title?: string 
     aria-label={title}
     className={className}
   >
-    <rect width="32" height="32" rx="7" fill="#3f5b73" />
+    <rect width="32" height="32" rx="7" fill="#5759e0" />
     <path
       d="M11 16 L22.5 10.5 M11 16 L22.5 21.5"
       stroke="#ffffff"

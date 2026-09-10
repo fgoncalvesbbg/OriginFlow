@@ -22,7 +22,7 @@ import { getSupplierVisibleAttributes, validateAttributeValue } from '../utils';
 import AttributeInput from '../components/common/AttributeInput';
 import * as XLSX from 'xlsx';
 import { CheckCircle, Loader2, AlertTriangle, ClipboardList, Send, ArrowRightToLine, Download, Lock } from 'lucide-react';
-import { PortalBrandBar, KlarsteinLogo } from '../components/portal/KlarsteinBrand';
+import { PortalBrandBar, KlarsteinLogo } from '../components/KlarsteinBrand';
 
 type CellValues = Record<string, Record<string, string>>; // [skuToken][attributeId] -> value
 type CellErrors = Record<string, Record<string, string>>; // [skuToken][attributeId] -> error message

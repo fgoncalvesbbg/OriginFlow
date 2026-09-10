@@ -1,23 +1,32 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<!-- `klarstein` switches on the brand layer (src/styles/klarstein-brand.css) for the whole
+     app. Static rather than set from JS so there is no unstyled first paint. -->
+<html lang="en" class="klarstein">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OriginFlow PLM</title>
-    <meta name="theme-color" content="#1a1f35" />
+    <meta name="theme-color" content="#0d0d0d" />
     <!-- Favicon: the OriginFlow mark (see src/components/Logo.tsx) as an inline SVG. -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%233f5b73'/><path d='M11 16L22.5 10.5M11 16L22.5 21.5' stroke='white' stroke-width='2.2' stroke-linecap='round'/><circle cx='11' cy='16' r='3.3' fill='white'/><circle cx='22.5' cy='10.5' r='2.4' fill='white'/><circle cx='22.5' cy='21.5' r='2.4' fill='white'/></svg>" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%235759e0'/><path d='M11 16L22.5 10.5M11 16L22.5 21.5' stroke='white' stroke-width='2.2' stroke-linecap='round'/><circle cx='11' cy='16' r='3.3' fill='white'/><circle cx='22.5' cy='10.5' r='2.4' fill='white'/><circle cx='22.5' cy='21.5' r='2.4' fill='white'/></svg>" />
     <!-- Modern Font Import -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           fontFamily: {
-            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            // Klarstein's body face. This is the single switch for the app's default type;
+            // Tailwind preflight puts it on <html>. The IM viewer (.imv-root) and the IM
+            // editor content (.im-content) are pinned back to Inter in
+            // src/styles/klarstein-brand.css, because the print pipeline embeds Inter and
+            // its point sizes were measured against it.
+            sans: ['"Open Sans"', 'Helvetica', 'Arial', 'sans-serif'],
+            // Still addressable as `font-inter` for those IM surfaces.
+            inter: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
           },
           extend: {
             // Tightened radius scale — crisper, more enterprise corners than the
@@ -33,13 +42,15 @@
             },
             colors: {
               // ── Brand colors are indirected through CSS variables ──────────────
-              // Every value below is `rgb(var(--of-*, <today's channels>) / <alpha-value>)`.
-              // With no variable set the fallback applies, so the internal app renders
-              // byte-identically to before. Setting the variables on an ancestor re-tints
-              // EVERY utility and variant derived from that color at once — `bg-indigo-600`,
-              // `hover:bg-indigo-700`, `ring-indigo-500`, `bg-indigo-50/20`, `shadow-indigo-200`.
-              // That is how the supplier-facing portals get Klarstein's palette without
-              // touching a single utility class: see src/styles/klarstein-brand.css.
+              // Every value below is `rgb(var(--of-*, <fallback channels>) / <alpha-value>)`.
+              // src/styles/klarstein-brand.css sets those variables on `html.klarstein`,
+              // which re-tints EVERY utility and variant derived from them at once —
+              // `bg-indigo-600`, `hover:bg-indigo-700`, `ring-indigo-500`, `bg-indigo-50/20`,
+              // `shadow-indigo-200` — without touching a single utility class. That is why
+              // the app was rebranded without a sweep through every className.
+              //
+              // The fallbacks are the previous Steel Slate palette, kept as the answer to
+              // "what if the brand stylesheet fails to load" rather than as a live theme.
               //
               // Brand neutrals
               primary: 'rgb(var(--of-primary, 26 31 53) / <alpha-value>)',   // Control-Room Ink — sidebar bg + body text

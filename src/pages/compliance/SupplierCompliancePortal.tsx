@@ -13,7 +13,7 @@ import {
 } from '../../types';
 import { passesFeatureGate } from '../../utils';
 import { AlertTriangle, CheckCircle, ShieldCheck, Calendar, Lock, ArrowRight, Loader2, Folder, Building, FileCheck, Clock, PenTool, Check, ChevronRight, X, HelpCircle, Printer } from 'lucide-react';
-import { PortalBrandBar, KlarsteinLogo } from '../../components/portal/KlarsteinBrand';
+import { PortalBrandBar, KlarsteinLogo } from '../../components/KlarsteinBrand';
 
 /**
  * What the comment box on a requirement is for, given the supplier's answer.
