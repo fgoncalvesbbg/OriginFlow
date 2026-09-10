@@ -8,14 +8,34 @@ genuinely good and is the only place that reasoning exists.
 
 Reconciled in full against project `ecueltibpmpnhnaxlskx` on 2026-09-09.
 
-## One file added since that reconciliation IS pending
+## Two files added since that reconciliation ARE pending, and their ORDER matters
 
-`170_supplier_portal_design_specs.sql` — written 2026-09-10, **not applied**. It adds
-`review_shares.supplier_id` and four `get_design_spec_*_by_(project_token|supplier)` reader
-functions, and the supplier-portal design spec feature does not work without it. Worse, the
-send-for-review dialog writes `supplier_id` on insert, so **sending a design spec for review
-fails outright until this is applied**. Apply it, then delete this section and fold the file
-into the table below.
+Apply **170 first, then 171**. 171 refuses to run otherwise, with a message saying so.
+
+`170_supplier_portal_design_specs.sql` — written 2026-09-10, **not applied** (re-verified
+against the live project 2026-09-10: none of its four functions exist, and
+`review_shares.supplier_id` is absent). It adds `review_shares.supplier_id` and four
+`get_design_spec_*_by_(project_token|supplier)` reader functions, and the supplier-portal
+design spec feature does not work without it. Worse, the send-for-review dialog writes
+`supplier_id` on insert, so **sending a design spec for review fails outright until this is
+applied**.
+
+`171_design_spec_release_stages.sql` — written 2026-09-10, **not applied**. Replaces
+`design_spec_versions.kind` (`draft`/`final`) with `stage`
+(`internal`/`initial`/`final`) plus a per-stage `revision`, so a version is named
+"Final Release v.02" rather than "v7 final". Also adds the forward-only stage rule, makes
+issuing require a Final Release, refuses to publish an Internal Review to a supplier portal,
+and **rewrites 170's two round RPCs** to return `version_stage` + `version_revision` — which
+is why 170 cannot be applied after it (a `CREATE OR REPLACE` cannot change a return type, so
+it would fail).
+
+Its behaviour was exercised against the live project on 2026-09-10 inside transactions that
+were rolled back — backfill, forward-only refusal, per-stage revision numbering, the issue
+gate, the lock, and the portal guard all behaved as written; row counts after were unchanged
+(1 spec, 3 versions, 9 shares) and no column leaked. The TypeScript half is in the same
+commit, so the app is broken against a database where 171 has not run.
+
+Apply both, then delete this section and fold the files into the table below.
 
 ## Result for everything reconciled on 2026-09-09: nothing there is unshipped
 

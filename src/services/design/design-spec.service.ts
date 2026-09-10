@@ -19,7 +19,7 @@
 import { auth, db, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import type {
-  DesignSpec, DesignSpecState, DesignSpecSummary, DesignSpecVersion, DesignSpecVersionKind,
+  DesignSpec, DesignSpecStage, DesignSpecState, DesignSpecSummary, DesignSpecVersion,
 } from '../../types/design-spec.types';
 import type { ReviewSubject } from '../../types/review.types';
 import { revokeAllReviewShares } from '../review/review-share.service';
@@ -46,7 +46,8 @@ const mapVersionRow = (row: any): DesignSpecVersion => ({
   id: row.id,
   specId: row.spec_id,
   version: Number(row.version),
-  kind: (row.kind ?? 'draft') as DesignSpecVersionKind,
+  stage: (row.stage ?? 'initial') as DesignSpecStage,
+  revision: row.revision != null ? Number(row.revision) : 1,
   storagePath: row.storage_path,
   stampedPath: row.stamped_path ?? null,
   pageCount: row.page_count != null ? Number(row.page_count) : null,
@@ -220,10 +221,16 @@ export const updateDesignSpec = async (
 /**
  * Record an uploaded PDF as the next version.
  *
- * `version` is NOT passed: a trigger assigns it as max+1 inside the insert, so two uploads
- * cannot both decide they are v3 (and `unique (spec_id, version)` is the backstop if they
- * race). The same trigger refuses the insert outright when the spec is issued or cancelled,
- * which is what makes the lock mean something.
+ * NEITHER NUMBER IS PASSED. A trigger assigns `version` as max+1 across the spec and
+ * `revision` as max+1 within the chosen stage, both inside the insert — so two uploads
+ * cannot both decide they are v3, nor both claim Final Release v.02 (the two unique
+ * constraints are the backstop if they race). The client's own guess at the revision exists
+ * only to print the stamp, which happens before this row exists.
+ *
+ * The same trigger refuses the insert outright when the spec is issued or cancelled — which
+ * is what makes the lock mean something — and when `stage` would walk BACKWARDS through
+ * Internal Review -> Initial Release -> Final Release. Both raise sentences the panel shows
+ * verbatim.
  *
  * Uploading the first version moves the spec out of Backlog — the only place `state` is
  * written by an upload, and the reason Backlog can be a stored value without going stale.
@@ -231,7 +238,7 @@ export const updateDesignSpec = async (
 export const addDesignSpecVersion = async (
   specId: string,
   input: {
-    kind: DesignSpecVersionKind;
+    stage: DesignSpecStage;
     storagePath: string;
     stampedPath?: string | null;
     pageCount?: number | null;
@@ -241,7 +248,7 @@ export const addDesignSpecVersion = async (
 ): Promise<DesignSpecVersion> => {
   const created = await db.insert<Row>('design_spec_versions', {
     spec_id: specId,
-    kind: input.kind,
+    stage: input.stage,
     storage_path: input.storagePath,
     stamped_path: input.stampedPath ?? null,
     page_count: input.pageCount ?? null,
@@ -263,9 +270,9 @@ export const addDesignSpecVersion = async (
  * Issue a version as the final. This is the lock.
  *
  * Two guards live in the database and are worth knowing about rather than duplicating here:
- * the version must be one of THIS spec's own (a composite FK), and it must have been
- * uploaded as `kind: 'final'` (a trigger). So passing a draft's id fails loudly instead of
- * marking a draft as the released spec.
+ * the version must be one of THIS spec's own (a composite FK), and it must be a FINAL
+ * RELEASE (a trigger). So passing an Internal Review's or an Initial Release's id fails
+ * loudly instead of issuing a version the supplier's comments have not been applied to.
  */
 export const issueDesignSpecFinal = async (
   specId: string,
@@ -284,7 +291,9 @@ export const issueDesignSpecFinal = async (
 };
 
 /**
- * Unlock an issued spec so a corrected version can be added.
+ * Unlock an issued spec so a corrected version can be added — which is how a Final Release
+ * v.02 comes about. Deliberately a separate, deliberate act rather than a side effect of
+ * uploading: correcting a spec a factory may already be building to is a decision.
  *
  * `issued_at` is cleared in the SAME statement as `final_version_id` because
  * `design_specs_issued_stamp` forbids a spec that claims to be final with nothing to point

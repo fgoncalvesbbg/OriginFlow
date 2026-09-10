@@ -14,8 +14,8 @@
  */
 
 import { auth } from '../../data';
-import { stampDraftPdf, readPageCount } from './design-spec-stamp';
-import type { DesignSpecVersionKind } from '../../types/design-spec.types';
+import { stampReviewPdf, readPageCount } from './design-spec-stamp';
+import type { DesignSpecStage } from '../../types/design-spec.types';
 
 /** Mirrors the bucket's file_size_limit, so an oversize file is refused before uploading. */
 export const MAX_SPEC_PDF_BYTES = 52428800; // 50 MB
@@ -24,9 +24,10 @@ export interface DesignSpecFile {
   url: string;
   expiresIn: number;
   version: number;
-  kind: DesignSpecVersionKind;
+  stage: DesignSpecStage;
+  revision: number;
   specCode: string;
-  /** True when the served object is the DRAFT-stamped copy rather than the original. */
+  /** True when the served object is the stamped review copy rather than the original. */
   stamped: boolean;
 }
 
@@ -56,7 +57,7 @@ export const fetchDesignSpecFileByToken = async (
   return res.json();
 };
 
-/** An internal user's copy — the design team's original, not the stamped draft. */
+/** An internal user's copy — the design team's original, not the stamped review copy. */
 export const fetchDesignSpecFile = async (versionId: string): Promise<DesignSpecFile> => {
   const session = await auth.getSession();
   const res = await fetch('/.netlify/functions/design-spec-file', {
@@ -117,13 +118,13 @@ interface SignedSlot { path: string; signedUrl: string }
 interface UploadTargets {
   contentType: string;
   original: SignedSlot;
-  /** Null for a final version, which is served exactly as uploaded. */
+  /** Null for a Final Release, which is served exactly as uploaded. */
   stamped: SignedSlot | null;
 }
 
 const requestUploadTargets = async (
   specId: string,
-  kind: DesignSpecVersionKind,
+  stage: DesignSpecStage,
   byteSize: number,
 ): Promise<UploadTargets> => {
   const session = await auth.getSession();
@@ -133,7 +134,7 @@ const requestUploadTargets = async (
       'Content-Type': 'application/json',
       ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     },
-    body: JSON.stringify({ specId, kind, byteSize }),
+    body: JSON.stringify({ specId, stage, byteSize }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) await errorFrom(res, 'Could not prepare the upload.');
@@ -165,14 +166,19 @@ export interface UploadedVersionFiles {
 }
 
 /**
- * Upload one version's files: the original, and for a draft the DRAFT-stamped copy.
+ * Upload one version's files: the original, and — unless this is a Final Release — the
+ * stamped copy a reviewer is served.
  *
  * THE STAMP IS APPLIED HERE, IN THE BROWSER, before either object is uploaded — the bytes
  * are already in hand, so stamping server-side would mean moving 50MB up, down, and up
  * again. If stamping fails the whole upload fails: uploading an original with no stamped
- * copy would leave a draft whose review link either serves nothing or, worse, would have to
- * fall back to the unmarked original. `design-spec-file` refuses that fallback for the same
- * reason.
+ * copy would leave an unreleased version whose review link either serves nothing or, worse,
+ * would have to fall back to the unmarked original. `design-spec-file` refuses that fallback
+ * for the same reason.
+ *
+ * `revision` is only ever used for the words printed on the page. The database assigns the
+ * real one in the insert that follows, so a losing upload in a race prints a stamp one
+ * number out — cosmetic — rather than two rows claiming to be Final Release v.02.
  *
  * The original is uploaded LAST. Both objects live under paths the server chose, and the
  * version row is only written by the caller once this resolves, so a failure part-way leaves
@@ -181,8 +187,8 @@ export interface UploadedVersionFiles {
 export const uploadDesignSpecVersion = async (
   specId: string,
   file: File,
-  kind: DesignSpecVersionKind,
-  meta: { specCode: string; version: number; projectLabel: string },
+  stage: DesignSpecStage,
+  meta: { specCode: string; revision: number; projectLabel: string },
 ): Promise<UploadedVersionFiles> => {
   if (file.size > MAX_SPEC_PDF_BYTES) {
     throw new Error('That PDF is larger than the 50MB limit.');
@@ -192,25 +198,26 @@ export const uploadDesignSpecVersion = async (
   }
 
   const bytes = await file.arrayBuffer();
-  const targets = await requestUploadTargets(specId, kind, file.size);
+  const targets = await requestUploadTargets(specId, stage, file.size);
 
   // Read before stamping: a file pdf-lib cannot parse should fail here, at pick time, with a
-  // message the designer can act on — not silently store an unstampable draft.
+  // message the designer can act on — not silently store an unstampable version.
   const pageCount = await readPageCount(bytes);
 
-  if (kind === 'draft') {
+  if (stage !== 'final') {
     if (!targets.stamped) throw new Error('The server did not offer a slot for the review copy.');
     let stamped: Uint8Array;
     try {
-      stamped = await stampDraftPdf({
+      stamped = await stampReviewPdf({
         pdf: bytes,
         specCode: meta.specCode,
-        version: meta.version,
+        stage,
+        revision: meta.revision,
         projectLabel: meta.projectLabel,
       });
     } catch (e) {
       console.error('[uploadDesignSpecVersion] stamping failed:', e);
-      throw new Error('This PDF could not be marked as a draft, so it was not uploaded. Re-export it and try again.');
+      throw new Error('This PDF could not be stamped for review, so it was not uploaded. Re-export it and try again.');
     }
     // pdf-lib returns a Uint8Array. A Blob accepts one at runtime, but TypeScript 5.7 made
     // Uint8Array generic over ArrayBufferLike, so the view no longer satisfies BlobPart.

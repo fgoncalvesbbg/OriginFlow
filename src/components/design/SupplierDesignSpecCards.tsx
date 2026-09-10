@@ -23,6 +23,9 @@ import {
   isRoundClosed,
   type SupplierDesignSpecFinal, type SupplierDesignSpecRound,
 } from '../../types/design-spec.types';
+// The one vocabulary for naming a version, shared with every internal surface — a supplier
+// reading "Initial Release v.02" and a designer reading the same words is the point.
+import { releaseLabel } from '../../pages/design/design-spec-release';
 
 const shortDate = (iso: string | null): string =>
   iso ? new Date(iso).toLocaleDateString() : '—';
@@ -66,11 +69,15 @@ export const DesignSpecRoundsCard: React.FC<RoundsProps> = ({ rounds, showProjec
               <div className="flex flex-wrap items-center gap-2">
                 <FileText size={15} className="text-indigo-500 shrink-0" />
                 <span className="font-semibold text-primary break-words">
-                  {r.specCode} · v{r.version}
+                  {r.specCode} · {releaseLabel({ stage: r.versionStage, revision: r.versionRevision })}
                 </span>
-                {r.versionKind === 'draft' && (
+                {/* Says in the supplier's own words that this is not the released spec. An
+                    Internal Review can never appear here — a trigger refuses to publish one
+                    to a portal — so the only unreleased thing they ever see is an Initial
+                    Release. */}
+                {r.versionStage !== 'final' && (
                   <span className="text-[10px] uppercase tracking-wide font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
-                    Draft
+                    Not yet final
                   </span>
                 )}
                 {r.submittedAt && (
@@ -186,7 +193,7 @@ export const DesignSpecFinalCard: React.FC<FinalsProps> = ({
                     : <Clock size={15} className="text-gray-400 shrink-0" />}
                   <span className={`font-semibold break-words ${issued ? 'text-emerald-900' : 'text-gray-600'}`}>
                     {f.specCode}
-                    {issued && f.version != null ? ` · v${f.version} FINAL` : ''}
+                    {issued && f.version != null ? ' · FINAL RELEASE' : ''}
                   </span>
                 </div>
                 <p className="text-sm text-muted mt-1 break-words">

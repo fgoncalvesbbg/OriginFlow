@@ -11,7 +11,7 @@
  *
  * TWO READS, TWO RULES, ON PURPOSE:
  *
- *   rounds — the draft review links someone explicitly marked for this supplier. A round is
+ *   rounds — the review links someone explicitly marked for this supplier. A round is
  *            an identity: whoever holds the token is that reviewer, sees that reviewer's own
  *            earlier notes and writes new ones in their name. So publishing one is a decision
  *            a human makes at send time, never something inferred from a free-text label.
@@ -26,7 +26,7 @@
 import { portalDb, orEmpty, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
 import type {
-  DesignSpecState, DesignSpecVersionKind,
+  DesignSpecStage, DesignSpecState,
   SupplierDesignSpecFinal, SupplierDesignSpecRound,
 } from '../../types/design-spec.types';
 import type { PortalCredentials } from '../documents';
@@ -45,7 +45,8 @@ const mapRound = (row: Row): SupplierDesignSpecRound => ({
   specTitle: row.spec_title,
   versionId: row.version_id,
   version: row.version_number,
-  versionKind: (row.version_kind ?? 'draft') as DesignSpecVersionKind,
+  versionStage: (row.version_stage ?? 'initial') as DesignSpecStage,
+  versionRevision: row.version_revision != null ? Number(row.version_revision) : 1,
   versionNote: row.version_note ?? null,
   pageCount: row.page_count ?? null,
   projectId: row.project_id,
@@ -125,9 +126,10 @@ export const getSupplierDesignSpecFinals = async (
  *
  * Deliberately final-only, and the function enforces that server-side rather than trusting
  * this call: a portal credential is a long-lived URL a supplier keeps in their inbox, so
- * letting it reach an unstamped draft would undo the point of stamping every draft copy
- * `DRAFT vN · FOR REVIEW ONLY`. A draft still reaches a supplier one way — the review token
- * for a round they were actually sent.
+ * letting it reach an unstamped, unissued version would undo the point of stamping every
+ * review copy `INITIAL RELEASE v.02 · FOR REVIEW ONLY`. An unissued version still reaches a
+ * supplier one way — the review token for a round they were actually sent. An Internal
+ * Review reaches them by no path at all: a trigger refuses to mark one for a portal.
  */
 export const fetchSupplierDesignSpecFinalUrl = async (
   versionId: string,

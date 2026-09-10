@@ -1,6 +1,15 @@
 /**
  * The Design Spec workflow — one vocabulary for every surface that shows "where is this spec".
  *
+ * NOT THE SAME AXIS AS THE RELEASE STAGE. This file answers "how far along is this spec"
+ * (Backlog → In Progress → In Review → Final). `design-spec-release.ts` next door answers
+ * "which release is this file" (Internal Review → Initial Release → Final Release). The two
+ * badges sit side by side and are read together: a spec can be In Progress on an Internal
+ * Review, In Progress on a Final Release, or In Review on an Initial Release, and those are
+ * three different situations that the status alone cannot tell apart. The status derivation
+ * below does not read the stage; only the next-action line does, because the stage is what
+ * decides which job comes next.
+ *
  *   Backlog → In Progress → In Review → Final          (and Cancelled, from anywhere)
  *
  * These are the ONLY step names the UI may use: the board columns, the table's group
@@ -33,6 +42,7 @@
  */
 
 import type { DesignSpec, DesignSpecVersion } from '../../types/design-spec.types';
+import { releaseShort } from './design-spec-release';
 
 export type DesignSpecStatus =
   | 'backlog'
@@ -62,7 +72,7 @@ export interface DesignSpecStatusInput {
   state: DesignSpec['state'];
   finalVersionId: string | null;
   /** Newest first or oldest first does not matter; only emptiness and the max version do. */
-  versions: readonly Pick<DesignSpecVersion, 'version' | 'kind'>[];
+  versions: readonly Pick<DesignSpecVersion, 'version' | 'stage' | 'revision'>[];
 }
 
 /** The current version number, or null when nothing has been uploaded. */
@@ -70,6 +80,20 @@ export const currentVersionOf = (
   versions: readonly Pick<DesignSpecVersion, 'version'>[],
 ): number | null =>
   versions.length === 0 ? null : Math.max(...versions.map(v => v.version));
+
+/**
+ * The newest uploaded version, or null when nothing has been uploaded.
+ *
+ * Newest by `version`, the spec-wide upload counter, because it is the only number that
+ * orders versions across stages — `revision` restarts at 1 in each. The stage cannot walk
+ * backwards, so this also always names the furthest-along release.
+ */
+export const currentReleaseOf = <T extends Pick<DesignSpecVersion, 'version'>>(
+  versions: readonly T[],
+): T | null => versions.reduce<T | null>(
+  (best, v) => best == null || v.version > best.version ? v : best,
+  null,
+);
 
 /**
  * True while the current version is out with a reviewer.
@@ -125,12 +149,12 @@ export const DESIGN_SPEC_STATUS_META: Record<DesignSpecStatus, DesignSpecStatusM
   backlog: {
     label: 'Backlog',
     classes: 'bg-gray-100 text-gray-600 border-gray-200',
-    hint: 'Not started. Upload a draft to begin.',
+    hint: 'Not started. Upload an Internal Review to begin.',
   },
   in_progress: {
     label: 'In Progress',
     classes: 'bg-amber-100 text-amber-700 border-amber-200',
-    hint: 'Being drafted, or the supplier’s notes are being worked. Send a review when ready.',
+    hint: 'Being drawn, or the supplier’s notes are being worked. Send a review when ready.',
   },
   in_review: {
     label: 'In Review',
@@ -141,7 +165,7 @@ export const DESIGN_SPEC_STATUS_META: Record<DesignSpecStatus, DesignSpecStatusM
   final: {
     label: 'Final',
     classes: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    hint: 'Issued and locked. Unlock the spec before adding another version.',
+    hint: 'The Final Release is issued and the spec is locked. Unlock it to add a further revision.',
   },
   cancelled: {
     label: 'Cancelled',
@@ -228,14 +252,29 @@ export const designSpecNextAction = (
     case 'in_progress': {
       const notes = notesFragment(round?.openCount);
       if (notes) return `${notes} to handle, then upload the next version`;
-      return version == null
-        ? 'upload the first draft'
-        : `v${version} uploaded — send it for review`;
+      const release = currentReleaseOf(spec.versions);
+      if (release == null) return 'upload the first Internal Review';
+      // What to do next depends on which release this is, and the three answers are
+      // genuinely different jobs — not one "send it for review" with different nouns.
+      switch (release.stage) {
+        case 'internal':
+          return `${releaseShort(release)} uploaded — check it internally, then upload the Initial Release`;
+        case 'initial':
+          return `${releaseShort(release)} uploaded — send it to the supplier`;
+        case 'final':
+          return `${releaseShort(release)} uploaded — issue it to lock the spec`;
+      }
+      // Unreachable while `stage` is one of the three; keeps the function total.
+      return `${releaseShort(release)} uploaded`;
     }
     case 'in_review': {
       if (isReviewClosed(round)) {
         const notes = notesFragment(round?.openCount);
-        return `review closed${notes ? ` · ${notes}` : ''} — work the notes, then issue the final`;
+        const release = currentReleaseOf(spec.versions);
+        const next = release?.stage === 'final'
+          ? 'issue the Final Release'
+          : 'upload the Final Release';
+        return `review closed${notes ? ` · ${notes}` : ''} — work the notes, then ${next}`;
       }
       const parts: string[] = [];
       if (sentAt) {

@@ -18,20 +18,41 @@
  */
 export type DesignSpecState = 'backlog' | 'active' | 'cancelled';
 
-/** A draft goes out for review; the final is the one that gets issued and locks the spec. */
-export type DesignSpecVersionKind = 'draft' | 'final';
+/**
+ * The RELEASE STAGE of one uploaded version (migration 171).
+ *
+ *   internal  ours only — the pass before the supplier has ever seen the spec. A trigger
+ *             refuses to publish one in a supplier's portal.
+ *   initial   the first version the supplier sees; their comments land against it.
+ *   final     applies those comments. Only a Final Release may be issued.
+ *
+ * Forward-only, and each stage has its own revision counter — see
+ * src/pages/design/design-spec-release.ts for the labels and the derivation.
+ */
+export type DesignSpecStage = 'internal' | 'initial' | 'final';
 
 export interface DesignSpecVersion {
   id: string;
   specId: string;
-  /** 1-based, assigned server-side by a trigger so two uploads cannot both claim v3. */
+  /**
+   * The spec-wide upload counter: 1-based, never reused, assigned server-side by a trigger
+   * so two uploads cannot both claim v3. This is the version's IDENTITY — `review_comments`
+   * pins every note and every triage verdict to it — and NOT the number the business reads,
+   * which is `stage` + `revision`.
+   */
   version: number;
-  kind: DesignSpecVersionKind;
+  stage: DesignSpecStage;
+  /**
+   * Which revision within the stage this is: `Final Release v.02` is revision 2. 1-based and
+   * assigned server-side alongside `version`, in the same insert.
+   */
+  revision: number;
   /** The design team's original bytes. Never mutated. */
   storagePath: string;
   /**
-   * The `DRAFT vN · FOR REVIEW ONLY` copy served to reviewers. Null on a final, which is
-   * served exactly as uploaded.
+   * The stamped copy served to reviewers — `INITIAL RELEASE v.02 · FOR REVIEW ONLY`, or
+   * `INTERNAL REVIEW v.01 · NOT FOR DISTRIBUTION`. Null on a Final Release, which is served
+   * exactly as uploaded.
    */
   stampedPath: string | null;
   pageCount: number | null;
@@ -105,7 +126,8 @@ export interface SupplierDesignSpecRound {
   specTitle: string;
   versionId: string;
   version: number;
-  versionKind: DesignSpecVersionKind;
+  versionStage: DesignSpecStage;
+  versionRevision: number;
   versionNote: string | null;
   pageCount: number | null;
   projectId: string;

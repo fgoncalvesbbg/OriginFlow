@@ -48,7 +48,7 @@ export {
   fetchSupplierDesignSpecFinalUrl,
 } from './design-spec-portal.service';
 
-export { stampDraftPdf, readPageCount, asciiSafe } from './design-spec-stamp';
+export { stampReviewPdf, readPageCount, asciiSafe } from './design-spec-stamp';
 
 export {
   getDesignSpecNotes,

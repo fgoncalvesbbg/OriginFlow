@@ -48,6 +48,9 @@ import type { PdfReviewAnchor, ReviewComment, ReviewCommentStatus } from '../../
 import { anchorLabel, orderByAnchor } from '../../modules/review-portal';
 import { reviewImageUrl } from '../../services/review';
 import { formatReviewStamp, reviewStampTitle } from '../im/project-im-generator/review-comments.utils';
+import {
+  DESIGN_SPEC_STAGE_META, releaseLabel, releaseShort, releaseShortByNumber,
+} from './design-spec-release';
 import { Badge } from '../../components/common/Badge';
 import {
   readScrollPosition, scrollTopFor, mapPage, type PageBox,
@@ -582,7 +585,7 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                   // The note count belongs ON the switcher: choosing which version to read is
                   // the moment the reader wants to know where the comments are.
                   title={[
-                    `v${v.version} ${v.kind}`,
+                    `${releaseLabel(v)} (upload v${v.version})`,
                     v.pageCount != null ? `${v.pageCount} page${v.pageCount === 1 ? '' : 's'}` : null,
                     list.length > 0 ? `${list.length} note${list.length === 1 ? '' : 's'}, ${openCount} open` : 'no notes',
                     v.note || null,
@@ -595,9 +598,9 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                         : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                   }`}
                 >
-                  v{v.version}
+                  {releaseShort(v)}
                   {v.id === finalVersionId && (
-                    <span className={isPrimary ? 'text-indigo-100' : 'text-emerald-600'}> final</span>
+                    <span className={isPrimary ? 'text-indigo-100' : 'text-emerald-600'}> issued</span>
                   )}
                   {list.length > 0 && (
                     <span className={`ml-1 ${
@@ -644,7 +647,7 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                 {versions
                   .filter(v => v.id !== activeId)
                   .sort((a, b) => b.version - a.version)
-                  .map(v => <option key={v.id} value={v.id}>with v{v.version}</option>)}
+                  .map(v => <option key={v.id} value={v.id}>with {releaseShort(v)}</option>)}
               </select>
             </label>
           )}
@@ -703,9 +706,12 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
               >
                 {comparing && (
                   <div className="px-3 py-1.5 border-b border-gray-200 flex items-center gap-2 shrink-0 bg-gray-50">
-                    <Badge tone={version.kind === 'final' ? 'emerald' : 'gray'}>
-                      v{version.version} {version.kind}
-                    </Badge>
+                    <span
+                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${DESIGN_SPEC_STAGE_META[version.stage].classes}`}
+                      title={`${DESIGN_SPEC_STAGE_META[version.stage].hint} (upload v${version.version})`}
+                    >
+                      {releaseLabel(version)}
+                    </span>
                     {version.id === finalVersionId && (
                       <Lock size={11} className="text-emerald-600" aria-label="Issued as the final" />
                     )}
@@ -773,8 +779,8 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                 {showAllVersions
                   ? ' across every version'
                   : comparing
-                    ? ` on v${slotA?.version} and v${slotB?.version}`
-                    : ` on v${active?.version ?? '?'}`}
+                    ? ` on ${slotA ? releaseShort(slotA) : '?'} and ${slotB ? releaseShort(slotB) : '?'}`
+                    : ` on ${active ? releaseShort(active) : '?'}`}
               </p>
               <div className="flex gap-1 mt-1.5">
                 {([false, true] as const).map(all => (
@@ -827,8 +833,8 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                           title={onScreen
                             ? 'Jump to this note'
                             : carried
-                              ? `Carried over from v${n.subjectVersion ?? '?'} — jump to its ring on this version`
-                              : `Written against v${n.subjectVersion ?? '?'} — opens that version`}
+                              ? `Carried over from ${releaseShortByNumber(versions, n.subjectVersion)} — jump to its ring on this version`
+                              : `Written against ${releaseShortByNumber(versions, n.subjectVersion)} — opens that version`}
                         >
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {/* A number only where a pin bearing it is on screen; a ring
@@ -879,10 +885,10 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                               n.checkedSubjectVersion === checkTarget?.version ? 'text-amber-700' : 'text-gray-400'
                             }`}>
                               {n.checkedSubjectVersion == null
-                                ? `Not re-checked since v${n.subjectVersion}`
+                                ? `Not re-checked since ${releaseShortByNumber(versions, n.subjectVersion)}`
                                 : n.checkedSubjectVersion === checkTarget?.version
-                                  ? `Confirmed still an issue on v${n.checkedSubjectVersion}`
-                                  : `Last checked against v${n.checkedSubjectVersion}`}
+                                  ? `Confirmed still an issue on ${releaseShortByNumber(versions, n.checkedSubjectVersion)}`
+                                  : `Last checked against ${releaseShortByNumber(versions, n.checkedSubjectVersion)}`}
                             </p>
                           )}
                         </button>
@@ -896,7 +902,7 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
                               <>
                                 <VerdictButton
                                   icon={<Check size={11} />}
-                                  label={`Fixed in v${checkTarget.version}`}
+                                  label={`Fixed in ${releaseShort(checkTarget)}`}
                                   busy={busyNote === n.id}
                                   onClick={() => void triage(n, 'done')}
                                 />
@@ -937,7 +943,7 @@ const DesignSpecVersionViewer: React.FC<DesignSpecVersionViewerProps> = ({
             )}
             <p className="px-3 py-2 border-t border-gray-200 text-[10px] text-gray-400 shrink-0">
               {checkTarget
-                ? `Verdicts are recorded against v${checkTarget.version}. Reply to a reviewer on the Design Spec tab.`
+                ? `Verdicts are recorded against ${releaseShort(checkTarget)}. Reply to a reviewer on the Design Spec tab.`
                 : 'Reply to a reviewer on the Design Spec tab.'}
             </p>
           </aside>

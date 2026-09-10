@@ -11,21 +11,22 @@
  * THREE CALLERS, THREE CREDENTIALS, AND A DIFFERENT FILE FOR EACH:
  *
  *   (a) REVIEWER — `token` in the body: a live `review_shares` row for this spec version.
- *       Served the STAMPED copy (`DRAFT vN · FOR REVIEW ONLY`). Never the original, so a
- *       factory cannot tool up from an unmarked draft that leaked out of a review.
+ *       Served the STAMPED copy (`INITIAL RELEASE v.02 · FOR REVIEW ONLY`, or
+ *       `INTERNAL REVIEW v.01 · NOT FOR DISTRIBUTION`). Never the original, so a factory
+ *       cannot tool up from an unmarked spec that leaked out of a review.
  *   (b) INTERNAL — a bearer session: authorized against the spec's project the same way
  *       every other function does it, by asking Postgres as the caller. Served the original.
  *   (c) SUPPLIER PORTAL — `projectToken`, or `supplierToken` + `accessCode`: the same two
  *       credentials supplier-file-url.ts accepts, validated the same way. Served the
  *       ISSUED FINAL ONLY, and only for the spec of a project that credential speaks for.
  *
- * WHY (c) CANNOT REACH A DRAFT. A portal credential is a long-lived URL sitting in a
- * supplier's inbox — it does not expire with a round and nobody revokes it when one closes.
- * A draft is exactly the thing every other path here goes out of its way to serve only in
- * stamped form and only to the recipient of a live round; letting the standing portal link
- * reach one would quietly undo that. `final_version_id` is the test, not `kind`: it is the
- * spec's own record of what was ISSUED, so a `kind = 'final'` version uploaded but not yet
- * issued is refused too.
+ * WHY (c) CANNOT REACH AN UNISSUED VERSION. A portal credential is a long-lived URL sitting
+ * in a supplier's inbox — it does not expire with a round and nobody revokes it when one
+ * closes. An unreleased version is exactly the thing every other path here goes out of its
+ * way to serve only in stamped form and only to the recipient of a live round; letting the
+ * standing portal link reach one would quietly undo that. `final_version_id` is the test,
+ * not `stage`: it is the spec's own record of what was ISSUED, so a Final Release uploaded
+ * but not yet issued is refused too.
  *
  * A reviewer's token is checked against the version they are asking for, not just for
  * existence: without that, any live review token in the system would unlock any other
@@ -109,7 +110,7 @@ export const handler = async (event: NetlifyEvent) => {
   // found" — the in-memory test fake doesn't catch this because it ignores the select string.
   const { data: version, error: vErr } = await supabase
     .from('design_spec_versions')
-    .select('id, spec_id, version, kind, storage_path, stamped_path, design_specs!design_spec_versions_spec_id_fkey(project_id, spec_code, final_version_id)')
+    .select('id, spec_id, version, stage, revision, storage_path, stamped_path, design_specs!design_spec_versions_spec_id_fkey(project_id, spec_code, final_version_id)')
     .eq('id', versionId)
     .maybeSingle();
 
@@ -167,23 +168,23 @@ export const handler = async (event: NetlifyEvent) => {
     if (!share || expired || wrongSubject) return json(403, { error: DEAD_LINK });
 
     // A reviewer gets the stamped copy. Falling back to the original would silently hand out
-    // an unmarked draft the moment stamping had failed, so this refuses instead — except for
-    // a final, which is served as the design team made it, by decision.
-    if (version.kind === 'final') {
+    // an unmarked spec the moment stamping had failed, so this refuses instead — except for
+    // a Final Release, which is served as the design team made it, by decision.
+    if (version.stage === 'final') {
       objectPath = version.storage_path as string;
     } else if (version.stamped_path) {
       objectPath = version.stamped_path as string;
     } else {
-      console.error('[design-spec-file] draft has no stamped copy:', versionId);
+      console.error('[design-spec-file] version has no stamped copy:', versionId);
       return json(409, {
-        error: 'This draft is still being prepared for review. Please try again shortly.',
+        error: 'This version is still being prepared for review. Please try again shortly.',
       });
     }
   } else if (hasPortal) {
     // ---- (c) SUPPLIER PORTAL ----
     // The issued final and nothing else. Tested against the SPEC's final_version_id rather
-    // than the version's own `kind`, because a final that has been uploaded but not yet
-    // issued is not something the supplier has been told to build to — see the file header.
+    // than the version's own `stage`, because a Final Release that has been uploaded but not
+    // yet issued is not something the supplier has been told to build to — see the header.
     if (!spec.final_version_id || spec.final_version_id !== versionId) {
       return json(403, { error: NO_PORTAL_ACCESS });
     }
@@ -258,10 +259,11 @@ export const handler = async (event: NetlifyEvent) => {
     url: signed.signedUrl,
     expiresIn: SIGNED_URL_TTL_SECONDS,
     version: version.version,
-    kind: version.kind,
+    stage: version.stage,
+    revision: version.revision,
     specCode: spec.spec_code,
     // Says which object was served, so a reviewer's client can never be confused about
-    // whether it is looking at a stamped draft or an original.
-    stamped: reviewToken !== null && version.kind !== 'final',
+    // whether it is looking at a stamped review copy or an original.
+    stamped: reviewToken !== null && version.stage !== 'final',
   });
 };

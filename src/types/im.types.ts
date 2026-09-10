@@ -20,8 +20,8 @@ export const IM_TEMPLATE_TYPE_LABELS: Record<IMTemplateType, string> = {
  * Which of the IM workflow's two supplier review steps a review round belongs to
  * (migration 149).
  *
- *   'draft'  Draft Review — the supplier's first pass over a freshly published manual.
- *   'final'  Final Review — the supplier confirming the adjustments made after that pass.
+ *   'draft'  In Review (draft) — the supplier's first pass over a freshly published manual.
+ *   'final'  In Review (final) — the supplier confirming the adjustments made after that pass.
  *
  * Stored on the review LINK (review_shares.review_stage, immutable once minted) and mirrored
  * onto the manual for the round currently in flight (project_ims.review_stage), which is
@@ -29,9 +29,11 @@ export const IM_TEMPLATE_TYPE_LABELS: Record<IMTemplateType, string> = {
  */
 export type IMReviewStage = 'draft' | 'final';
 
+/** The board's own words for the two review steps — see MANUAL_STATUS_META, which these
+ *  must keep matching: the send dialog promises the column a manual is about to land in. */
 export const IM_REVIEW_STAGE_LABELS: Record<IMReviewStage, string> = {
-  draft: 'Draft Review',
-  final: 'Final Review',
+  draft: 'In Review (draft)',
+  final: 'In Review (final)',
 };
 
 export interface IMMasterPageOverride {
@@ -162,9 +164,9 @@ export interface ProjectIM {
   reviewRequestedBy?: string | null;
   reviewVersion?: number | null;
   // Which of the workflow's TWO review steps the current round is (migration 149):
-  // 'draft' -> Draft Review, 'final' -> Final Review. Mirrors review_shares.review_stage for
+  // 'draft' -> In Review (draft), 'final' -> In Review (final). Mirrors review_shares.review_stage for
   // the round stamped above. Null = never reviewed, or a round created before 149 — read
-  // as 'draft', because placing a legacy round in Final Review would claim a sign-off pass
+  // as 'draft', because placing a legacy round in the final review would claim a sign-off pass
   // that may never have happened. See src/pages/im/im-manual-status.ts.
   reviewStage?: IMReviewStage | null;
   // project_skus.id values this IM is bound to (the SKUs it covers). Empty/absent =

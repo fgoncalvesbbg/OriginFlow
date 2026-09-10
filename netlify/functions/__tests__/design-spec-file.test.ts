@@ -28,7 +28,7 @@ const V_DRAFT = '55555555-5555-4555-8555-555555555555';
 const V_FINAL = '66666666-6666-4666-8666-666666666666';
 const V_UNSTAMPED = '77777777-7777-4777-8777-777777777777';
 const V_OTHER_SPEC = '88888888-8888-4888-8888-888888888888';
-/** A `kind: 'final'` version of SPEC that has NOT been issued — final_version_id ignores it. */
+/** A Final Release of SPEC that has NOT been issued — final_version_id ignores it. */
 const V_UNISSUED_FINAL = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER = '99999999-9999-4999-8999-999999999999';
 
@@ -73,7 +73,8 @@ const version = (
   id,
   spec_id: specId,
   version: 1,
-  kind: 'draft',
+  stage: 'initial',
+  revision: 1,
   storage_path: ORIGINAL,
   stamped_path: STAMPED,
   design_specs: specId === SPEC
@@ -102,9 +103,9 @@ const freshDb = (): FakeDbState => ({
   suppliers: [{ id: SUPPLIER, portal_token: SUPPLIER_TOKEN, access_code: ACCESS_CODE }],
   design_spec_versions: [
     version(V_DRAFT, SPEC),
-    version(V_FINAL, SPEC, { kind: 'final', version: 2, stamped_path: null }),
+    version(V_FINAL, SPEC, { stage: 'final', revision: 1, version: 2, stamped_path: null }),
     version(V_UNSTAMPED, SPEC, { version: 3, stamped_path: null }),
-    version(V_UNISSUED_FINAL, SPEC, { kind: 'final', version: 4, stamped_path: null }),
+    version(V_UNISSUED_FINAL, SPEC, { stage: 'final', revision: 2, version: 4, stamped_path: null }),
     version(V_OTHER_SPEC, OTHER_SPEC),
   ],
   review_shares: [
@@ -271,9 +272,9 @@ describe('the supplier portal path', () => {
     expect(fake.signedUrlCalls).toHaveLength(0);
   });
 
-  it('403s a final-KIND version that was uploaded but never issued', async () => {
-    // The test is the spec's own final_version_id, not the version's `kind`: a final sitting
-    // in the bucket unissued is not something the supplier has been told to build to.
+  it('403s a Final Release that was uploaded but never issued', async () => {
+    // The test is the spec's own final_version_id, not the version's `stage`: a Final Release
+    // sitting in the bucket unissued is not what the supplier has been told to build to.
     const res = await call({ projectToken: PROJECT_TOKEN, versionId: V_UNISSUED_FINAL });
     expect(res.statusCode).toBe(403);
   });

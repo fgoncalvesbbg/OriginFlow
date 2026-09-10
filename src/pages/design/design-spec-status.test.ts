@@ -17,7 +17,7 @@ import {
 const spec = (over: Partial<Parameters<typeof designSpecStatusOf>[0]> = {}) => ({
   state: 'active' as const,
   finalVersionId: null as string | null,
-  versions: [{ version: 1, kind: 'draft' as const }],
+  versions: [{ version: 1, stage: 'initial' as const, revision: 1 }],
   ...over,
 });
 
@@ -144,9 +144,17 @@ describe('designSpecNextAction', () => {
       .toBe('no draft uploaded yet');
   });
 
-  it('names the version to send once a draft exists', () => {
+  it('names the release, and the job that release implies', () => {
+    // Three different jobs, not one job with three nouns: an Internal Review is checked
+    // internally, an Initial Release goes to the supplier, a Final Release gets issued.
     expect(designSpecNextAction(spec(), undefined, null, now))
-      .toBe('v1 uploaded — send it for review');
+      .toBe('Initial v.01 uploaded — send it to the supplier');
+    expect(designSpecNextAction(
+      spec({ versions: [{ version: 1, stage: 'internal', revision: 1 }] }), undefined, null, now,
+    )).toBe('Internal v.01 uploaded — check it internally, then upload the Initial Release');
+    expect(designSpecNextAction(
+      spec({ versions: [{ version: 3, stage: 'final', revision: 2 }] }), undefined, null, now,
+    )).toBe('Final v.02 uploaded — issue it to lock the spec');
   });
 
   it('leads with the outstanding notes when there are any', () => {
@@ -168,7 +176,7 @@ describe('designSpecNextAction', () => {
 
   it('says what unblocks next once the round closes', () => {
     expect(designSpecNextAction(spec(), round({ allSubmitted: true, openCount: 4 }), null, now))
-      .toBe('review closed · 4 open notes — work the notes, then issue the final');
+      .toBe('review closed · 4 open notes — work the notes, then upload the Final Release');
   });
 
   it('is quiet about settled specs', () => {

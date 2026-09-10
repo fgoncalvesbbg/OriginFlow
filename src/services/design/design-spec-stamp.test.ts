@@ -1,16 +1,20 @@
 /**
- * The DRAFT stamp.
+ * The review stamp.
  *
- * Two things are worth pinning down here. First `asciiSafe`, because pdf-lib THROWS on a
+ * Three things are worth pinning down here. First `asciiSafe`, because pdf-lib THROWS on a
  * character a standard font cannot encode rather than substituting one — so a spec title or
  * a project name with a smart quote in it would fail the whole upload, and the reviewer
- * would see "this draft is still being prepared" with no explanation. Second that stamping
+ * would see "this version is still being prepared" with no explanation. Second that stamping
  * neither loses pages nor touches the caller's buffer, since the original bytes are the copy
- * the design team gets back.
+ * the design team gets back. Third that an Internal Review and an Initial Release are marked
+ * DIFFERENTLY — one says NOT FOR DISTRIBUTION and the other invites review — because that
+ * difference is the only thing on the page telling a reader which of the two they hold.
  */
 import { describe, it, expect } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { asciiSafe, stampDraftPdf, readPageCount } from './design-spec-stamp';
+import {
+  asciiSafe, reviewStampText, stampReviewPdf, readPageCount,
+} from './design-spec-stamp';
 
 /** A small multi-page PDF to stamp. */
 const makePdf = async (pages = 3): Promise<ArrayBuffer> => {
@@ -26,7 +30,8 @@ const makePdf = async (pages = 3): Promise<ArrayBuffer> => {
 
 describe('asciiSafe', () => {
   it('leaves plain ASCII alone', () => {
-    expect(asciiSafe('DS-0142 - Nevora Induction - v2 draft')).toBe('DS-0142 - Nevora Induction - v2 draft');
+    expect(asciiSafe('DS-0142 - Nevora Induction - Initial Release v.02'))
+      .toBe('DS-0142 - Nevora Induction - Initial Release v.02');
   });
 
   it('folds typographic quotes and dashes to their ASCII equivalents', () => {
@@ -54,13 +59,58 @@ describe('asciiSafe', () => {
   });
 });
 
-describe('stampDraftPdf', () => {
+describe('reviewStampText', () => {
+  it('marks an Initial Release as reviewable, with its padded revision', () => {
+    const { banner, footer, watermark } = reviewStampText({
+      specCode: 'DS-0142',
+      stage: 'initial',
+      revision: 2,
+      projectLabel: 'Nevora',
+      date: new Date('2026-09-09T00:00:00Z'),
+    });
+    expect(banner).toBe('INITIAL RELEASE v.02 - FOR REVIEW ONLY');
+    expect(footer).toBe('DS-0142 - Nevora - Initial Release v.02 - 2026-09-09');
+    expect(watermark).toBe('DRAFT');
+  });
+
+  it('marks an Internal Review as NOT FOR DISTRIBUTION instead', () => {
+    // The whole reason the two stages are separate: an Internal Review that leaks must not
+    // read as an invitation to review, because nobody outside was invited.
+    const { banner, watermark } = reviewStampText({
+      specCode: 'DS-0142',
+      stage: 'internal',
+      revision: 1,
+      projectLabel: 'Nevora',
+      date: new Date('2026-09-09T00:00:00Z'),
+    });
+    expect(banner).toBe('INTERNAL REVIEW v.01 - NOT FOR DISTRIBUTION');
+    expect(banner).not.toContain('FOR REVIEW ONLY');
+    // …and the diagonal watermark says INTERNAL, not DRAFT, so a photographed page says
+    // which it is without the header being legible.
+    expect(watermark).toBe('INTERNAL');
+  });
+
+  it('folds a project name Helvetica cannot draw, rather than carrying it through', () => {
+    // The stamp is drawn with a standard font, and pdf-lib throws on an un-encodable
+    // character — so this is the exact call that used to fail a whole 50MB upload.
+    expect(reviewStampText({
+      specCode: 'DS-0002',
+      stage: 'initial',
+      revision: 1,
+      projectLabel: 'Kühlschrank — “Premium”',
+      date: new Date('2026-09-09T00:00:00Z'),
+    }).footer).toBe('DS-0002 - K?hlschrank - "Premium" - Initial Release v.01 - 2026-09-09');
+  });
+});
+
+describe('stampReviewPdf', () => {
   it('keeps every page and returns a parseable PDF', async () => {
     const original = await makePdf(3);
-    const stamped = await stampDraftPdf({
+    const stamped = await stampReviewPdf({
       pdf: original,
       specCode: 'DS-0142',
-      version: 2,
+      stage: 'initial',
+      revision: 2,
       projectLabel: 'Nevora Induction White LED',
       date: new Date('2026-09-09T00:00:00Z'),
     });
@@ -69,13 +119,15 @@ describe('stampDraftPdf', () => {
     expect(reparsed.getPageCount()).toBe(3);
   });
 
+
   it('does not touch the caller s buffer — the original is what the design team gets back', async () => {
     const original = await makePdf(1);
     const before = new Uint8Array(original.slice(0));
-    await stampDraftPdf({
+    await stampReviewPdf({
       pdf: original,
       specCode: 'DS-0001',
-      version: 1,
+      stage: 'initial',
+      revision: 1,
       projectLabel: 'Project',
     });
     expect(new Uint8Array(original)).toEqual(before);
@@ -85,20 +137,22 @@ describe('stampDraftPdf', () => {
     // The regression this guards: an un-encodable character used to throw out of pdf-lib and
     // fail the whole upload.
     const original = await makePdf(1);
-    await expect(stampDraftPdf({
+    await expect(stampReviewPdf({
       pdf: original,
       specCode: 'DS-0002',
-      version: 1,
+      stage: 'initial',
+      revision: 1,
       projectLabel: 'Kühlschrank — “Premium” 冷蔵庫',
     })).resolves.toBeInstanceOf(Uint8Array);
   });
 
   it('can skip the watermark without failing', async () => {
     const original = await makePdf(2);
-    const stamped = await stampDraftPdf({
+    const stamped = await stampReviewPdf({
       pdf: original,
       specCode: 'DS-0003',
-      version: 4,
+      stage: 'initial',
+      revision: 4,
       projectLabel: 'Project',
       watermark: false,
     });
@@ -107,10 +161,11 @@ describe('stampDraftPdf', () => {
 
   it('rejects something that is not a PDF, at pick time', async () => {
     const notAPdf = new TextEncoder().encode('this is not a pdf').buffer as ArrayBuffer;
-    await expect(stampDraftPdf({
+    await expect(stampReviewPdf({
       pdf: notAPdf,
       specCode: 'DS-0004',
-      version: 1,
+      stage: 'initial',
+      revision: 1,
       projectLabel: 'Project',
     })).rejects.toBeTruthy();
   });

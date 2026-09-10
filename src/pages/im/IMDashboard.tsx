@@ -5,10 +5,10 @@ import Layout from '../../components/Layout';
 import {
   getCategories, getIMTemplates, createIMTemplate, duplicateIMTemplate, updateIMTemplate, getAllProjectIMs,
   getStaleProjectIMDetails, republishProjectIM, stalenessKey,
-  getLatestRendersByManual, getReviewRoundsByManual, getProjectsWithoutIM,
+  getLatestRendersByManual, getReviewRoundsByManual, getBacklogProjects,
   getTemplateRegulationCounts
 } from '../../services';
-import type { StaleManual, ReviewRoundSummary, ProjectWithoutIM } from '../../services';
+import type { StaleManual, ReviewRoundSummary, BacklogProject } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
 import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
 import { distinctL1, distinctL2, filterCategories } from '../../utils/category-tree.utils';
@@ -52,7 +52,7 @@ const fmtDate = (iso: string) =>
  * two review steps share one icon — they are the same kind of wait — and differ by label.
  */
 const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
-  to_do: <Circle size={10} />,
+  backlog: <Circle size={10} />,
   in_progress: <Pencil size={10} />,
   draft_review: <Eye size={10} />,
   adjust_im: <Pencil size={10} />,
@@ -72,13 +72,13 @@ const statusIcon = (status: ManualStatus, submitted?: boolean | null): React.Rea
 
 interface AllManualsTabProps {
   ims: ProjectIMSummary[];
-  /** Projects with no manual yet — the workflow's To Do step (see getProjectsWithoutIM). */
-  unstarted: ProjectWithoutIM[];
+  /** Projects with nothing started — the workflow's Backlog step (see getBacklogProjects). */
+  backlog: BacklogProject[];
   categories: CategoryL3[];
   loading: boolean;
 }
 
-const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categories, loading }) => {
+const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories, loading }) => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCat, setFilterCat] = useState<string>('all');
@@ -146,7 +146,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
    *
    * `submitted` is the supplier having pressed Submit, and nothing more — that is what turns
    * a review card green, because it is the moment the ball comes back. Triaging the notes is
-   * the PM's own work and happens at the Adjust IM step, so the open count is reported
+   * the PM's own work and happens at the Re-edit step, so the open count is reported
    * alongside rather than folded into the green.
    */
   const reviewStateOf = (im: ProjectIMSummary) => {
@@ -208,12 +208,12 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
   };
 
   /**
-   * Unstarted projects, run through the SAME filters as the manuals so the To Do column
+   * Backlog projects, run through the SAME filters as the manuals so the Backlog column
    * never disagrees with the rest of the board. They carry no template, no version and no
-   * status of their own — their step is To Do by definition.
+   * status of their own — their step is Backlog by definition.
    */
-  const filteredUnstarted = unstarted.filter(p => {
-    if (filterStatus !== 'all' && filterStatus !== 'to_do') return false;
+  const filteredBacklog = backlog.filter(p => {
+    if (filterStatus !== 'all' && filterStatus !== 'backlog') return false;
     if (filterCat !== 'all' && p.categoryId !== filterCat) return false;
     if (filterProject) {
       const pq = filterProject.toLowerCase();
@@ -231,9 +231,9 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
     return true;
   });
 
-  /** Cards at a step, counting the synthetic To Do ones. Drives the filter dropdown. */
+  /** Cards at a step, counting the synthetic Backlog ones. Drives the filter dropdown. */
   const countAtStep = (status: ManualStatus): number =>
-    status === 'to_do' ? unstarted.length : ims.filter(im => statusOf(im) === status).length;
+    status === 'backlog' ? backlog.length : ims.filter(im => statusOf(im) === status).length;
 
   const filtered = ims.filter(im => {
     // Filter on the DERIVED status so the dropdown, the badges and the groups agree.
@@ -375,7 +375,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
         <p className="text-xs text-gray-400">
           {filtered.length} manual{filtered.length !== 1 ? 's' : ''}
           {filtered.length !== ims.length && ` (${ims.length} total)`}
-          {filteredUnstarted.length > 0 && ` · ${filteredUnstarted.length} project${filteredUnstarted.length !== 1 ? 's' : ''} not started`}
+          {filteredBacklog.length > 0 && ` · ${filteredBacklog.length} project${filteredBacklog.length !== 1 ? 's' : ''} in backlog`}
         </p>
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2">
@@ -398,31 +398,31 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
       </div>
 
       {/* Empty (table view only — the board always renders its columns, empty or not) */}
-      {viewMode === 'table' && filtered.length === 0 && filteredUnstarted.length === 0 && (
+      {viewMode === 'table' && filtered.length === 0 && filteredBacklog.length === 0 && (
         <div className="text-center py-16 border border-dashed border-gray-200 rounded-xl text-gray-400 bg-light">
-          {ims.length === 0 && unstarted.length === 0
+          {ims.length === 0 && backlog.length === 0
             ? 'No manuals created yet. Open a project and generate its IM.'
             : 'Nothing matches the current filters.'}
         </div>
       )}
 
-      {/* To Do, table view — projects with no manual at all. A separate table because these
+      {/* Backlog, table view — projects with nothing started. A separate table because these
           rows have no template, no version and no status of their own; forcing them into the
           manuals table would mean six empty cells apiece. */}
-      {viewMode === 'table' && filteredUnstarted.length > 0 && (
+      {viewMode === 'table' && filteredBacklog.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden mb-4">
           <div className="px-4 py-2 border-b border-gray-100 bg-light/80 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${MANUAL_STATUS_META.to_do.classes}`}>
-              {STATUS_ICON.to_do} {MANUAL_STATUS_META.to_do.label}
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${MANUAL_STATUS_META.backlog.classes}`}>
+              {STATUS_ICON.backlog} {MANUAL_STATUS_META.backlog.label}
             </span>
             <span className="text-xs font-semibold text-gray-700">
-              {filteredUnstarted.length} project{filteredUnstarted.length !== 1 ? 's' : ''}
+              {filteredBacklog.length} project{filteredBacklog.length !== 1 ? 's' : ''}
             </span>
-            <span className="text-[11px] text-gray-500">{MANUAL_STATUS_META.to_do.hint}</span>
+            <span className="text-[11px] text-gray-500">{MANUAL_STATUS_META.backlog.hint}</span>
           </div>
           <table className="w-full text-sm">
             <tbody className="divide-y divide-gray-50">
-              {filteredUnstarted.map(p => (
+              {filteredBacklog.map(p => (
                 <tr key={p.projectId} className="hover:bg-light/60 transition-colors">
                   <td className="px-4 py-3 font-semibold text-gray-800">{p.projectName}</td>
                   <td className="px-4 py-3">
@@ -650,9 +650,12 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
       )}
 
       {/* Board — the workflow, left to right, one column per step:
-          To Do → In Progress → Draft Review → Adjust IM → Final Review → Done → Republish Needed.
-          Every column always renders, empty or not: "nothing is waiting at Final Review" is
-          information a queue has to be able to state.
+          Backlog → In Progress → In Review (draft) → Re-edit → In Review (final) → Final
+          → Republish Needed.
+          Every column always renders, in MANUAL_STATUS_ORDER, empty or not: "nothing is
+          waiting at the final review" is information a queue has to be able to state, and a
+          column that came and went with its contents would stop the board reading as a
+          left-to-right pipeline at all.
 
           Cards are NOT draggable, and that is the point. A step is derived from what is true
           of the manual — you publish it, you send it for review, you mark it Done — so a card
@@ -673,7 +676,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
         );
 
         const columnCount = (status: ManualStatus) =>
-          status === 'to_do' ? filteredUnstarted.length : (byStatus.get(status)?.length ?? 0);
+          status === 'backlog' ? filteredBacklog.length : (byStatus.get(status)?.length ?? 0);
 
         return (
           <div className="flex gap-3 overflow-x-auto pb-3 items-start">
@@ -699,20 +702,20 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, unstarted, categorie
                       </div>
                     )}
 
-                    {/* To Do holds projects, not manuals — there is no manual to link to yet,
-                        so the card offers the one action that exists: start one. */}
-                    {status === 'to_do' && filteredUnstarted.map(p => (
+                    {/* Backlog holds projects, not manuals — there is no manual to link to
+                        yet, so the card offers the one action that exists: start one. */}
+                    {status === 'backlog' && filteredBacklog.map(p => (
                       <div key={p.projectId} className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                            <FileText size={9} /> NO IM
+                            <FileText size={9} /> NOT STARTED
                           </span>
                           <span className="text-[9px] text-gray-300 ml-auto">{fmtDate(p.createdAt)}</span>
                         </div>
                         <Link
                           to={`/project/${p.projectId}/im-generator`}
                           className="block font-semibold text-sm text-gray-800 hover:text-indigo-700 truncate"
-                          title={`${p.projectName} — start its IM`}
+                          title={`${p.projectName} — start its IM or leaflet`}
                         >
                           {p.projectCode ? `${p.projectCode} — ` : ''}{p.projectName}
                         </Link>
@@ -1068,9 +1071,9 @@ const IMDashboard: React.FC = () => {
   const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [templates, setTemplates] = useState<IMTemplate[]>([]);
   const [allIMs, setAllIMs] = useState<ProjectIMSummary[]>([]);
-  // Projects with no manual yet — the board's To Do column. Loaded beside the manuals
+  // Projects with nothing started — the board's Backlog column. Loaded beside the manuals
   // because the two together are the work queue; one without the other is a partial picture.
-  const [unstartedProjects, setUnstartedProjects] = useState<ProjectWithoutIM[]>([]);
+  const [backlogProjects, setBacklogProjects] = useState<BacklogProject[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [loadingIMs, setLoadingIMs] = useState(true);
   const [creatingId, setCreatingId] = useState<string | null>(null);
@@ -1132,14 +1135,14 @@ const IMDashboard: React.FC = () => {
 
   const loadIMData = async () => {
     try {
-      // Settled, not all: an unstarted-projects failure must not blank the manuals the PM
-      // came here for. A missing To Do column degrades to "nothing unstarted", which the
-      // console records — the manuals half stays truthful either way.
-      const [ims, unstarted] = await Promise.allSettled([getAllProjectIMs(), getProjectsWithoutIM()]);
+      // Settled, not all: a backlog failure must not blank the manuals the PM came here
+      // for. An empty Backlog column degrades to "nothing unstarted", which the console
+      // records — the manuals half stays truthful either way.
+      const [ims, backlog] = await Promise.allSettled([getAllProjectIMs(), getBacklogProjects()]);
       if (ims.status === 'fulfilled') setAllIMs(ims.value);
       else console.error('[IMDashboard] loadIMData manuals failed:', ims.reason);
-      if (unstarted.status === 'fulfilled') setUnstartedProjects(unstarted.value);
-      else console.error('[IMDashboard] loadIMData unstarted projects failed:', unstarted.reason);
+      if (backlog.status === 'fulfilled') setBacklogProjects(backlog.value);
+      else console.error('[IMDashboard] loadIMData backlog projects failed:', backlog.reason);
     } catch (e) {
       console.error('[IMDashboard] loadIMData failed:', e);
     } finally {
@@ -1229,7 +1232,7 @@ const IMDashboard: React.FC = () => {
       {activeTab === 'manuals' && (
         <AllManualsTab
           ims={allIMs}
-          unstarted={unstartedProjects}
+          backlog={backlogProjects}
           categories={categories}
           loading={loadingIMs || loadingTemplates}
         />

@@ -38,7 +38,7 @@ const round = (over: Partial<SupplierDesignSpecRound> = {}): SupplierDesignSpecR
   sentAt: '2026-09-01T00:00:00Z',
   expiresAt: null, revokedAt: null, submittedAt: null, submittedBy: null,
   specId: 'spec', specCode: 'DS-0001', specTitle: 'Kettle',
-  versionId: 'v1', version: 1, versionKind: 'draft', versionNote: null, pageCount: 12,
+  versionId: 'v1', version: 1, versionStage: 'initial', versionRevision: 1, versionNote: null, pageCount: 12,
   projectId: 'p1', projectName: 'Kettle 1.7L',
   ...over,
 });

@@ -9,16 +9,17 @@
  *
  * WHY THE BYTES DO NOT PASS THROUGH HERE. A design spec can be 50MB; a Netlify Function
  * body cannot. The browser PUTs straight to Storage with the signed URL, so there is no
- * size ceiling and no egress through Netlify. The same reason the DRAFT stamp is applied in
+ * size ceiling and no egress through Netlify. The same reason the review stamp is applied in
  * the browser (`src/services/design/design-spec-stamp.ts`) rather than server-side: the
  * designer's browser already has the bytes.
  *
  * TWO PATHS PER VERSION, and both are minted here so a caller cannot choose where the bytes
  * land:
  *   <specId>/<uuid>-original.pdf   the design team's file, never mutated, internal-only
- *   <specId>/<uuid>-review.pdf     the DRAFT-stamped copy served to reviewers
+ *   <specId>/<uuid>-review.pdf     the stamped copy served to reviewers
  *
- * A final version asks for the original slot only — a final is served exactly as uploaded.
+ * A Final Release asks for the original slot only — it is served exactly as uploaded. The
+ * other two stages (Internal Review, Initial Release) are stamped, so they get both.
  *
  * Server-only env (set in Netlify, NOT VITE_-prefixed):
  *   SUPABASE_URL
@@ -39,9 +40,13 @@ const CONTENT_TYPE = 'application/pdf';
 /** Mirrors the bucket's file_size_limit (50MB), so an oversize file fails before uploading. */
 export const MAX_PDF_BYTES = 52428800;
 
+/** Mirrors design_spec_versions.stage (migration 171). */
+const STAGES = ['internal', 'initial', 'final'] as const;
+type Stage = typeof STAGES[number];
+
 interface UploadRequest {
   specId?: unknown;
-  kind?: unknown;
+  stage?: unknown;
   /** Declared size, so an oversize file is refused before the bytes move. */
   byteSize?: unknown;
 }
@@ -70,8 +75,10 @@ export const handler = async (event: NetlifyEvent) => {
     return json(400, { error: e instanceof Error ? e.message : 'specId must be a UUID.' });
   }
 
-  const kind = req.kind === 'final' ? 'final' : req.kind === 'draft' ? 'draft' : null;
-  if (!kind) return json(400, { error: 'kind must be "draft" or "final".' });
+  const stage = STAGES.includes(req.stage as Stage) ? req.stage as Stage : null;
+  if (!stage) {
+    return json(400, { error: 'stage must be "internal", "initial" or "final".' });
+  }
 
   if (typeof req.byteSize === 'number' && req.byteSize > MAX_PDF_BYTES) {
     return json(413, { error: 'That PDF is larger than the 50MB limit.' });
@@ -133,7 +140,10 @@ export const handler = async (event: NetlifyEvent) => {
 
   const stem = `${specId}/${randomUUID()}`;
   const originalPath = `${stem}-original.pdf`;
-  const stampedPath = kind === 'draft' ? `${stem}-review.pdf` : null;
+  // Everything but a Final Release is served to reviewers stamped, so it needs the second
+  // slot. Deciding here rather than trusting the client means a caller cannot ask for an
+  // unstamped slot and then upload an Initial Release into it.
+  const stampedPath = stage === 'final' ? null : `${stem}-review.pdf`;
 
   const sign = async (path: string) => {
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path);

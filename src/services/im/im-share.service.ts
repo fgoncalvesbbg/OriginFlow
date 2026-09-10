@@ -67,8 +67,9 @@ export interface IMShare {
   /** project_ims.version when the link was minted — lets a later republish be spotted. */
   manualVersion: number | null;
   /**
-   * Which workflow review step this link was sent as — 'draft' (Draft Review) or 'final'
-   * (Final Review). Null on view-mode links and on rounds minted before migration 149.
+   * Which workflow review step this link was sent as — 'draft' (In Review (draft)) or
+   * 'final' (In Review (final)). Null on view-mode links and on rounds minted before
+   * migration 149.
    *
    * Immutable once minted: a link sent as a draft review stays a draft review in the
    * history even after the manual has moved on to its final round.
@@ -122,7 +123,7 @@ export const getIMShares = async (
  * `mode: 'review'` makes it a supplier review link instead of a read-only one; pass
  * `manualVersion` (the project_ims.version being sent out) alongside it so a later republish
  * is detectable as "reviewed against v3, now on v4", and `reviewStage` to say WHICH of the
- * workflow's two review steps this is (Draft Review or Final Review) — that is what moves
+ * workflow's two review steps this is (draft or final) — that is what moves
  * the manual's card into the right board column. Callers pick the default with
  * `nextReviewStageFor`; the send dialog lets the PM override it.
  *

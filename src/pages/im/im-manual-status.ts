@@ -1,7 +1,8 @@
 /**
  * The IM workflow — one vocabulary for every surface that shows "where is this manual".
  *
- *   To Do → In Progress → Draft Review → Adjust IM → Final Review → Done → Republish Needed
+ *   Backlog → In Progress → In Review (draft) → Re-edit → In Review (final) → Final
+ *   → Republish Needed
  *
  * These seven steps are what the business actually runs, and they are the ONLY step names
  * the UI is allowed to use: the All Manuals board columns, the table's group headings, the
@@ -16,8 +17,8 @@
  *
  * The derivation, strongest claim first:
  *
- *  1. `done`              `isFinalized`. Signed off and locked. Overrides everything: once a
- *                         PM marks a manual final, that is the fact about it that matters
+ *  1. `done`              `isFinalized`. Final — signed off and locked. Overrides everything:
+ *                         once a PM marks a manual final, that is the fact that matters
  *                         most. Publish drift still shows as a secondary flag (see
  *                         `manualFlagsOf`) — it just doesn't move the card.
  *  2. `draft_review` /    a review round is live for the CURRENT published version. Which of
@@ -35,21 +36,32 @@
  *                         "work the supplier's notes" step.
  *  6. `in_progress`       everything else: authored, maybe published, never reviewed.
  *
- * `to_do` is the one step no manual can be in — it means the project has no manual row at
- * all. The dashboard synthesises those cards from the project list; `manualStatusOf` never
- * returns it. It lives in this vocabulary anyway so the column, its label and its position
- * are defined in exactly one place like every other step.
+ * `backlog` is the one step no manual can be in — it means the project has NOTHING started:
+ * no IM and no Warning Leaflet, of any status. The dashboard synthesises those cards from the
+ * project list (`getBacklogProjects`); `manualStatusOf` never returns it. It lives in this
+ * vocabulary anyway so the column, its label and its position are defined in exactly one
+ * place like every other step. Creating either document as a draft is what empties it.
+ *
+ * Three STORED KEYS predate the business names above and were deliberately left alone, so
+ * that renaming a column never has to touch a switch statement:
+ *
+ *   draft_review / final_review  →  In Review (draft) / In Review (final)
+ *   adjust_im                    →  Re-edit
+ *   done                         →  Final
+ *
+ * MANUAL_STATUS_META is the ONLY place a step's words are written. Read a label from there
+ * rather than typing one, and the key it hangs off stops mattering.
  *
  * Note what is NOT a step: publishing. A PM publishes to make a review possible and
  * republishes after adjusting, several times per manual — it is an action inside In Progress
- * and Adjust IM, not a place a manual rests. It shows up as the version on the card and as
+ * and Re-edit, not a place a manual rests. It shows up as the version on the card and as
  * the `Published` readiness check in the generator.
  */
 
 import type { IMReviewStage } from '../../types';
 
 export type ManualStatus =
-  | 'to_do'
+  | 'backlog'
   | 'in_progress'
   | 'draft_review'
   | 'adjust_im'
@@ -96,7 +108,7 @@ export interface ManualStatusInput {
  * (a legacy round without a stamped version) counts as current.
  *
  * This is also what moves a card OUT of a review column: the PM touching the manual is the
- * signal that they have taken the supplier's feedback on, which is the Adjust IM step.
+ * signal that they have taken the supplier's feedback on, which is the Re-edit step.
  */
 export const isInReview = (
   im: Pick<ManualStatusInput, 'status' | 'version' | 'reviewRequestedAt' | 'reviewVersion' | 'hasLiveReviewLink'>,
@@ -106,7 +118,7 @@ export const isInReview = (
   im.hasLiveReviewLink !== false &&
   (im.reviewVersion == null || im.version == null || im.reviewVersion === im.version);
 
-/** Has this manual ever been sent to a supplier? Decides In Progress vs Adjust IM. */
+/** Has this manual ever been sent to a supplier? Decides In Progress vs Re-edit. */
 export const hasBeenReviewed = (im: Pick<ManualStatusInput, 'reviewRequestedAt'>): boolean =>
   im.reviewRequestedAt != null;
 
@@ -134,7 +146,7 @@ export const manualStatusOf = (im: ManualStatusInput, isStale: boolean | null): 
  *
  * This is the rule that makes "create a link and the card moves to the review step" work
  * without asking: the stage is simply the review step that FOLLOWS the manual's current one.
- * From To Do / In Progress the next review is the draft one; from Adjust IM — i.e. the
+ * From Backlog / In Progress the next review is the draft one; from Re-edit — i.e. the
  * supplier has already had a draft pass — it is the final one. Re-sending while a round is
  * open keeps that round's own stage rather than promoting the manual by accident.
  *
@@ -143,7 +155,7 @@ export const manualStatusOf = (im: ManualStatusInput, isStale: boolean | null): 
 export const nextReviewStageFor = (status: ManualStatus, everReviewed: boolean): IMReviewStage => {
   if (status === 'draft_review') return 'draft';
   if (status === 'final_review' || status === 'adjust_im') return 'final';
-  // done / republish_needed / unknown / in_progress / to_do — a manual that has already had a
+  // done / republish_needed / unknown / in_progress / backlog — a manual that has already had a
   // supplier pass is past the draft review wherever it currently sits.
   return everReviewed ? 'final' : 'draft';
 };
@@ -153,7 +165,7 @@ export const nextReviewStageFor = (status: ManualStatus, everReviewed: boolean):
 //
 // The Printed IM is not a workflow item: it is the Digital IM's own content exported for
 // fewer languages, so it has no supplier reviews, no sign-off of its own and no place on
-// the board. Describing a PDF with workflow words ("In Progress", "Adjust IM") would say
+// the board. Describing a PDF with workflow words ("In Progress", "Re-edit") would say
 // something untrue about it. It shares the TONES above — same five meanings — and nothing
 // else.
 // ---------------------------------------------------------------------------
@@ -229,35 +241,35 @@ export interface ManualStatusMeta {
  * ever has to say which of those five it is.
  */
 export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
-  to_do: {
-    label: 'To Do',
+  backlog: {
+    label: 'Backlog',
     classes: 'bg-gray-100 text-gray-600 border-gray-200',
-    hint: 'These projects have no manual yet. Open one to start its IM.',
+    hint: 'Nothing started on these projects — no IM and no leaflet. Create either one as a draft and the project moves to In Progress.',
   },
   in_progress: {
     label: 'In Progress',
     classes: 'bg-amber-100 text-amber-700 border-amber-200',
-    hint: 'Being authored. Publish, then send a draft review to the supplier.',
+    hint: 'Being authored. Publish, then send the draft review to the supplier.',
   },
   draft_review: {
-    label: 'Draft Review',
+    label: 'In Review (draft)',
     classes: 'bg-sky-100 text-sky-700 border-sky-200',
     hint: 'Out with the supplier for the first pass. Turns green once they close their review.',
     waiting: true,
   },
   adjust_im: {
-    label: 'Adjust IM',
+    label: 'Re-edit',
     classes: 'bg-amber-100 text-amber-700 border-amber-200',
     hint: 'The supplier has been through it — work their notes, then send the final review.',
   },
   final_review: {
-    label: 'Final Review',
+    label: 'In Review (final)',
     classes: 'bg-sky-100 text-sky-700 border-sky-200',
     hint: 'Out with the supplier to confirm the adjustments. Turns green once they close it.',
     waiting: true,
   },
   done: {
-    label: 'Done',
+    label: 'Final',
     classes: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     hint: 'Signed off and locked. Unlock a manual in its editor before changing it.',
   },
@@ -282,7 +294,7 @@ export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
  * failed, and it appears only while that is true.
  */
 export const MANUAL_STATUS_ORDER: readonly ManualStatus[] = [
-  'to_do',
+  'backlog',
   'in_progress',
   'draft_review',
   'adjust_im',
@@ -304,7 +316,7 @@ export const MANUAL_STATUS_ORDER: readonly ManualStatus[] = [
  *
  * "Closed" is the supplier pressing Submit, and nothing else. It is deliberately NOT
  * "submitted with zero open notes": triaging the notes is the PM's own work and it happens
- * in Adjust IM, so gating the green on it would hide the one fact the board exists to
+ * in Re-edit, so gating the green on it would hide the one fact the board exists to
  * surface — that the ball has come back.
  *
  * `submitted` is null when the round's outcome hasn't loaded; unknown reads as still out.
@@ -318,7 +330,7 @@ export const reviewStepClasses = (submitted: boolean | null | undefined): string
 export const statusClasses = (status: ManualStatus, submitted?: boolean | null): string =>
   isReviewStep(status) ? reviewStepClasses(submitted) : MANUAL_STATUS_META[status].classes;
 
-/** Badge text for any step. A closed review says so — "Draft Review · closed". */
+/** Badge text for any step. A closed review says so — "In Review (draft) · closed". */
 export const statusLabel = (status: ManualStatus, submitted?: boolean | null): string =>
   isReviewStep(status) && submitted
     ? `${MANUAL_STATUS_META[status].label} · closed`
@@ -427,8 +439,8 @@ const notesFragment = (open: number | null | undefined): string | null =>
 
 export const nextActionOf = (im: NextActionInput, now: number = Date.now()): string | null => {
   switch (im.status) {
-    case 'to_do':
-      return 'no manual yet — open the project to start one';
+    case 'backlog':
+      return 'nothing started — open the project to create its IM or leaflet';
     case 'in_progress':
       return (im.version ?? 0) > 0
         ? `published v${im.version} — send for draft review`
@@ -441,7 +453,7 @@ export const nextActionOf = (im: NextActionInput, now: number = Date.now()): str
         const notes = notesFragment(im.reviewActiveThreads);
         return im.status === 'draft_review'
           ? `review closed${notes ? ` · ${notes}` : ''} — start adjusting`
-          : `review closed${notes ? ` · ${notes}` : ''} — mark it Done`;
+          : `review closed${notes ? ` · ${notes}` : ''} — mark it Final`;
       }
       const parts: string[] = [];
       if (im.reviewRequestedAt) {

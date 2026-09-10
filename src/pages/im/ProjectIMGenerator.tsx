@@ -3762,7 +3762,7 @@ const ProjectIMGenerator: React.FC = () => {
    *
    *  - the VERSION, which is what later lets the panel say "this manual has been republished
    *    since it was sent for review";
-   *  - the STAGE — Draft Review or Final Review — which is what MOVES this manual's card into
+   *  - the STAGE — In Review (draft) or In Review (final) — which is what MOVES this card into
    *    the matching column on the All Manuals board. Creating the link is the whole gesture:
    *    there is no separate "move it to review" step to forget, because a review link
    *    existing and a manual being in review are the same fact.
@@ -4827,8 +4827,8 @@ const ProjectIMGenerator: React.FC = () => {
                        </span>
                        <span className="block text-xs text-gray-500">
                          {option === 'draft'
-                           ? "The supplier's first pass. Their notes come back for you to work through at Adjust IM."
-                           : 'The supplier confirming the adjustments you made. Once they close it, mark the manual Done.'}
+                           ? "The supplier's first pass. Their notes come back for you to work through at Re-edit."
+                           : 'The supplier confirming the adjustments you made. Once they close it, mark the manual Final.'}
                        </span>
                      </span>
                    </label>
@@ -5471,7 +5471,7 @@ const ProjectIMGenerator: React.FC = () => {
                },
              ];
 
-             // The five steps a manual with a row can be at. To Do is excluded because this
+             // The five steps a manual with a row can be at. Backlog is excluded because this
              // page cannot show it (a manual exists), and Republish Needed because it is a
              // publish-health state, not a place in the sequence — the Published check above
              // is where it shows, in warn.
@@ -5510,7 +5510,7 @@ const ProjectIMGenerator: React.FC = () => {
                  state: isCurrent ? 'current' : passed ? 'done' : 'todo',
                  detail,
                  title: reviewClosed
-                   ? `${label} — the supplier has closed it. ${step === 'draft_review' ? 'Start adjusting the manual.' : 'Mark it Done.'}`
+                   ? `${label} — the supplier has closed it. ${step === 'draft_review' ? 'Start adjusting the manual.' : 'Mark it Final.'}`
                    : MANUAL_STATUS_META[step].hint,
                  onClick:
                    isReviewStep(step) && isCurrent ? () => setActivePanel('comments')

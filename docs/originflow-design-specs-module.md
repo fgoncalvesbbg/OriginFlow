@@ -1,6 +1,7 @@
 # Design Specs module — implementation plan
 
-Status: **Phases A-D complete (2026-09-09).** Phase E not started.
+Status: **Phases A-D complete (2026-09-09). Phase F — release stages — written 2026-09-10,
+migration 171 NOT yet applied.** Phase E not started.
 Approved decisions below; the DESIGNER project-visibility open question was resolved in
 favour of the surgical option (one SELECT-only policy on `projects`, `can_see_project`
 left alone).
@@ -17,11 +18,11 @@ distribution — it is **not** an authoring tool. There is no in-app PDF editing
 | Anchoring | One shared portal; anchor is a union — chapter+quote for IM, page + normalised coords for PDF |
 | Statuses | `Backlog` and `Cancelled` stored; `In Progress` / `In Review` / `Final` derived |
 | Cardinality | One spec per project |
-| Versions | Unlimited; each note pins to the version it was written against; one version issued as final, which locks |
+| Versions | Unlimited; each note pins to the version it was written against; one version issued as final, which locks. **Phase F** names them Internal Review / Initial Release / Final Release, each with its own revision |
 | Rounds | Several labelled links per version; round closes only when **every** live link has submitted |
 | Replies | Yes — the design team can answer a note in-thread, and the supplier sees it |
 | PDF access | Private bucket; Netlify function validates the token and returns a short-lived signed URL |
-| Stamping | `DRAFT vN · FOR REVIEW ONLY` on drafts; the issued final is served byte-for-byte |
+| Stamping | Every unreleased copy is stamped; the Final Release is served byte-for-byte. **Phase F** made the wording stage-specific — `INTERNAL REVIEW v.01 · NOT FOR DISTRIBUTION` vs `INITIAL RELEASE v.02 · FOR REVIEW ONLY` |
 | Role | New `DESIGNER`; DESIGNER and ADMIN both have full rights, PM read-only |
 | Notifications | Project Inbox entries on supplier submit and on each new note |
 | Cancelled | Manual action; revokes every live review link; files and history retained |
@@ -444,6 +445,56 @@ The portal half shipped; the notification half did not. What is live:
 
 Still not built from Phase E: the `notifications` rows for `design_specs.owner_id`.
 
+## Phase F — release stages (migration 171)
+
+The workflow the design team actually runs has three named releases, and `kind`
+(`draft`/`final`) could only express two:
+
+| Stage | Who sees it | What it is for |
+|---|---|---|
+| **Internal Review** | us only | The pass before the supplier has ever seen the spec |
+| **Initial Release** | the supplier | The first version they see; their comments land here |
+| **Final Release** | the supplier | Applies those comments. The one that gets issued |
+
+Each stage carries **its own revision counter**, so a correction to the final is
+"Final Release v.02" and not a fourth stage.
+
+### Decisions
+
+| Decision | Choice | Why |
+|---|---|---|
+| Replace `kind` or add alongside it | **Replace** — `kind` is dropped | `draft` cannot say which of Internal Review and Initial Release a file is, and those two differ on the only thing that matters: whether it may reach a supplier. Keeping both vocabularies is how two screens come to describe one file differently |
+| Keep the `version` counter | **Yes, unchanged** | `review_comments.subject_version` and `.checked_subject_version` pin every note and every triage verdict to it, compare orders panes by it, ghost pins match on it. It is the version's IDENTITY; `(stage, revision)` is its NAME. Renumbering would rewrite the meaning of rows already written |
+| Where the revision is assigned | Server-side, in the same trigger as `version` | Two uploads must not both claim Final Release v.02. The client computes one too, but only to print the stamp before the row exists |
+| Can a stage go backwards | **No** | An "Internal Review v.02" after an Initial Release claims the supplier has not seen the spec, which is false. Re-checking internally is a review *link* on the current version, not a stage |
+| Can an Internal Review reach a supplier | **Never via the portal**, and that is a trigger on `review_shares`, not UI | `supplier_id` IS the publish flag, so refusing it there covers the SQL editor and the MCP too. A plain review link is still mintable — that is how a colleague marks one up — and the dialog says whoever holds a token is the reviewer |
+| What the stamp says | Per stage | `INTERNAL REVIEW v.01 · NOT FOR DISTRIBUTION` vs `INITIAL RELEASE v.02 · FOR REVIEW ONLY`. A leaked internal file must not read as an invitation to review, because nobody outside was invited. A Final Release is not stamped — it IS the released document |
+| Final Release v.02 while issued | Requires an explicit **Unlock** | Unchanged from Phase B, and the point: correcting a spec a factory may already be building to is a decision, not a file drop |
+
+### What shipped
+
+- [`171_design_spec_release_stages.sql`](../db_migrations/171_design_spec_release_stages.sql)
+  — `stage` + `revision`, `unique (spec_id, stage, revision)`, the forward-only rule and
+  revision assignment in `design_spec_versions_guard`, issuing gated on a Final Release,
+  `review_shares_internal_stage_guard`, and 170's two round RPCs rewritten to return
+  `version_stage` + `version_revision`. **It refuses to run before 170** — see
+  [STATUS.md](../db_migrations/STATUS.md).
+- [`design-spec-release.ts`](../src/pages/design/design-spec-release.ts) — the one
+  vocabulary: stage order, labels, colours, `formatRevision` (`v.02`), `releaseLabel`,
+  `allowedStagesFor` and `nextRevisionFor`. The last two are the client half of database
+  rules, and are tested as such — a client that offers a control the database then refuses
+  is the worst failure available here.
+- Every surface renamed from the same source: the upload picker (which offers only the
+  stages the spec may still use), the version rows, the viewer's switcher and compare
+  headers, the note rail's "Not re-checked since Internal v.01", the board's version column,
+  the stamp on the page, and the supplier's own portal cards.
+- The upload number survives as a quiet `v7` beside the release name wherever a note is
+  pinned to it, so it stays findable without being the headline.
+
+Verified against the live project on 2026-09-10 in rolled-back transactions: backfill
+(3 `draft` rows → Initial Release v.01–v.03), the forward-only refusal, per-stage revision
+restart, the issue gate, the lock, and all four portal-guard cases.
+
 ## Deliberately not built
 
 - In-app PDF editing or redlining. The design team authors elsewhere.
@@ -460,4 +511,5 @@ Still not built from Phase E: the `notifications` rows for `design_specs.owner_i
 | The rename breaks the live IM round | Compat views + old RPCs kept as wrappers; Phase A gated on an end-to-end IM round passing before anything else starts |
 | `DESIGNER` mis-read as a supplier by the doc module | Finding 2 — CHECK, mapper and both `doc-access.ts` branches fixed together in Phase B, with a test |
 | Stamping corrupts a designer's artwork | Stamp writes to a *separate* object; `storage_path` is never mutated, so the original is always recoverable |
-| A draft leaking to a factory | Drafts are never downloadable from the portal, are stamped, and live behind a 5-minute signed URL |
+| An unreleased version leaking to a factory | Only the ISSUED final is downloadable from the portal; everything else is stamped and lives behind a 5-minute signed URL. An Internal Review cannot be published to a portal at all (trigger, migration 171) |
+| A stage badge read as a progress badge | They sit side by side and answer different questions — `design-spec-release.ts` is "which release is this file", `design-spec-status.ts` is "how far along is this spec". Both headers say so, and the hues carry different meanings on purpose |

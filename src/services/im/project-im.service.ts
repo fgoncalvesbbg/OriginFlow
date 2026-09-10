@@ -272,7 +272,7 @@ export const setProjectIMFinalized = async (
  * ever writes them back to null; that is the design, not an omission.
  *
  * `stage` (migration 149) says WHICH review step this is, and is what moves the manual's card
- * into Draft Review or Final Review. It is written on every request rather than only on the
+ * into In Review (draft) or In Review (final). It is written on every request rather than only on the
  * first, because a manual goes round the loop more than once and the column must describe the
  * round in flight, not the first one ever sent.
  *
@@ -430,26 +430,29 @@ export interface ProjectIMSummary {
    *  getReviewRoundsByManual, because it lives on the share links and the notes. */
   reviewRequestedAt: string | null;
   reviewVersion: number | null;
-  /** Which review step the current round is — decides Draft Review vs Final Review. */
+  /** Which review step the current round is — decides In Review (draft) vs In Review (final). */
   reviewStage: IMReviewStage | null;
   skus: string[];            // SKU numbers on the project (a project can have several)
 }
 
 /**
- * Projects that have no Instruction Manual at all — the workflow's "To Do" step.
+ * Projects with NOTHING started — the workflow's "Backlog" step.
  *
  * The board's other six steps are derived from a `project_ims` row, which means a project
  * nobody has opened yet produces no card and is invisible on the very screen the IM team
  * works from. It only surfaces when someone remembers it exists. These synthetic cards close
- * that hole: a project with a category but no manual is work that has not been started, and
+ * that hole: a project with no document of any kind is work that has not been started, and
  * a work queue has to be able to say so.
  *
- * Scoped to `template_type = 'im'`. A Warning Leaflet is optional per category, so a missing
- * one is not an unstarted job and must not manufacture a To Do card for every project.
+ * "Nothing started" counts BOTH template types: an Instruction Manual or a Warning Leaflet,
+ * at any status, empties the project out of Backlog. Creating either one as a draft is the
+ * moment work began, and a project already being worked as a leaflet must not go on sitting
+ * in Backlog while its own card is showing in In Progress two columns to the right — which
+ * is exactly what scoping this to `template_type = 'im'` used to do.
  *
  * Cancelled and archived projects are excluded — they are not work.
  */
-export interface ProjectWithoutIM {
+export interface BacklogProject {
   projectId: string;
   projectCode: string | null;
   projectName: string;
@@ -459,7 +462,7 @@ export interface ProjectWithoutIM {
   skus: string[];
 }
 
-export const getProjectsWithoutIM = async (): Promise<ProjectWithoutIM[]> => {
+export const getBacklogProjects = async (): Promise<BacklogProject[]> => {
   if (!isLive) return [];
 
   const [projectRows, imRows, skuRows] = await Promise.all([
@@ -468,24 +471,23 @@ export const getProjectsWithoutIM = async (): Promise<ProjectWithoutIM[]> => {
         columns: 'id, name, category_id, project_id_code, status, created_at',
         order: { column: 'created_at', ascending: false },
       }),
-      '[getProjectsWithoutIM] projects',
+      '[getBacklogProjects] projects',
     ),
     orEmpty(
-      db.select<Row>('project_ims', { columns: 'project_id, template_type' }),
-      '[getProjectsWithoutIM] manuals',
+      db.select<Row>('project_ims', { columns: 'project_id' }),
+      '[getBacklogProjects] manuals',
     ),
     orEmpty(
       db.select<Row>('project_skus', {
         columns: 'project_id, sku_number, sort_order',
         order: { column: 'sort_order', ascending: true },
       }),
-      '[getProjectsWithoutIM] skus',
+      '[getBacklogProjects] skus',
     ),
   ]);
 
-  const withIM = new Set(
-    (imRows as any[]).filter(r => (r.template_type ?? 'im') === 'im').map(r => r.project_id),
-  );
+  // Any document of either type counts as started — see the note on BacklogProject.
+  const started = new Set((imRows as any[]).map(r => r.project_id));
 
   const skusByProject = new Map<string, string[]>();
   for (const r of skuRows as any[]) {
@@ -499,7 +501,7 @@ export const getProjectsWithoutIM = async (): Promise<ProjectWithoutIM[]> => {
   const DEAD = new Set(['cancelled', 'archived']);
 
   return (projectRows as any[])
-    .filter(p => !withIM.has(p.id) && !DEAD.has(String(p.status ?? '')))
+    .filter(p => !started.has(p.id) && !DEAD.has(String(p.status ?? '')))
     .map(p => ({
       projectId: p.id,
       projectCode: p.project_id_code ?? null,

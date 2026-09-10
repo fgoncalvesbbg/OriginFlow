@@ -26,10 +26,11 @@ import type { DesignSpec, DesignSpecVersion } from '../../types/design-spec.type
 import type { Project } from '../../types';
 import {
   designSpecStatusOf, designSpecStatusClasses, designSpecStatusLabel, designSpecNextAction,
-  groupByDesignSpecStatus, currentVersionOf, isReviewClosed,
+  groupByDesignSpecStatus, currentReleaseOf, isReviewClosed,
   DESIGN_SPEC_STATUS_META, DESIGN_SPEC_STATUS_ORDER,
   type DesignSpecStatus, type DesignSpecRoundInput,
 } from './design-spec-status';
+import { DESIGN_SPEC_STAGE_META, releaseShort } from './design-spec-release';
 import Layout from '../../components/Layout';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
@@ -141,7 +142,7 @@ const DesignSpecsDashboard: React.FC = () => {
 
     const specRows: Row[] = specs.map(spec => {
       const versions = versionsBySpec.get(spec.id) ?? [];
-      const current = versions.find(v => v.version === currentVersionOf(versions));
+      const current = currentReleaseOf(versions);
       return {
         key: spec.id,
         projectId: spec.projectId,
@@ -334,7 +335,7 @@ const DesignSpecsDashboard: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map(row => {
-                const current = currentVersionOf(row.versions);
+                const current = currentReleaseOf(row.versions);
                 const next = row.spec
                   ? designSpecNextAction(
                     { state: row.spec.state, finalVersionId: row.spec.finalVersionId, versions: row.versions },
@@ -357,7 +358,16 @@ const DesignSpecsDashboard: React.FC = () => {
                     <td className="px-4 py-2.5 text-gray-600">{row.projectName}</td>
                     <td className="px-4 py-2.5"><StatusBadge row={row} /></td>
                     <td className="px-4 py-2.5 text-gray-500">
-                      {current != null ? `v${current}` : <span className="text-gray-300">—</span>}
+                      {current
+                        ? (
+                          <span
+                            className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${DESIGN_SPEC_STAGE_META[current.stage].classes}`}
+                            title={`${DESIGN_SPEC_STAGE_META[current.stage].hint} (upload v${current.version})`}
+                          >
+                            {releaseShort(current)}
+                          </span>
+                        )
+                        : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-2.5 text-[11px] text-gray-500">{next ?? ''}</td>
                     <td className="px-4 py-2.5 text-right"><RowActions row={row} /></td>
@@ -382,7 +392,7 @@ const DesignSpecsDashboard: React.FC = () => {
               </p>
               <div className="border-x border-b border-gray-200 rounded-b-xl bg-gray-50 p-2 space-y-2 min-h-[120px]">
                 {group.items.map(({ row }) => {
-                  const current = currentVersionOf(row.versions);
+                  const current = currentReleaseOf(row.versions);
                   const next = row.spec
                     ? designSpecNextAction(
                       { state: row.spec.state, finalVersionId: row.spec.finalVersionId, versions: row.versions },
@@ -396,8 +406,13 @@ const DesignSpecsDashboard: React.FC = () => {
                         <span className="text-xs font-semibold text-gray-800 leading-tight">
                           {row.projectName}
                         </span>
-                        {current != null && (
-                          <Badge tone="gray">v{current}</Badge>
+                        {current && (
+                          <span
+                            className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${DESIGN_SPEC_STAGE_META[current.stage].classes}`}
+                            title={`${DESIGN_SPEC_STAGE_META[current.stage].hint} (upload v${current.version})`}
+                          >
+                            {releaseShort(current)}
+                          </span>
                         )}
                       </div>
                       {row.spec && (

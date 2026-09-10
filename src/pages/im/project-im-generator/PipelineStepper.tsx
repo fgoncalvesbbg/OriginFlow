@@ -7,9 +7,9 @@
  *   Readiness   Content → Translation → Published. What has to be true before a manual can
  *               go anywhere. These are checks, not places: a manual does not "rest" in
  *               Translation.
- *   Workflow    In Progress → Draft Review → Adjust IM → Final Review → Done. The steps the
- *               All Manuals board is built from, in the same words, so the two screens
- *               cannot disagree about the same manual.
+ *   Workflow    In Progress → In Review (draft) → Re-edit → In Review (final) → Final. The
+ *               steps the All Manuals board is built from, in the same words, so the two
+ *               screens cannot disagree about the same manual.
  *
  * Purely presentational: the host derives every state and supplies the click-through
  * actions. `caption` names which of the two rows this is, so neither has to be guessed

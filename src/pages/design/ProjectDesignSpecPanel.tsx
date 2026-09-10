@@ -35,7 +35,7 @@ import {
   getDesignSpecNotes, getDesignSpecNoteReplies, setReviewCommentStatus, addReviewReply,
 } from '../../services/design';
 import { getProjectSkus, getProjectById, getSupplierById } from '../../services';
-import type { DesignSpec, DesignSpecVersion } from '../../types/design-spec.types';
+import type { DesignSpec, DesignSpecStage, DesignSpecVersion } from '../../types/design-spec.types';
 import type { ProjectSku } from '../../types';
 import type { ReviewComment, ReviewCommentStatus, ReviewReply, ReviewShare } from '../../types/review.types';
 import { anchorLabel, anchorExcerpt, orderByAnchor } from '../../modules/review-portal';
@@ -43,9 +43,13 @@ import { reviewImageUrl } from '../../services/review';
 import { formatReviewStamp, reviewStampTitle } from '../im/project-im-generator/review-comments.utils';
 import {
   designSpecStatusOf, designSpecStatusClasses, designSpecStatusLabel, designSpecNextAction,
-  currentVersionOf, isReviewClosed, DESIGN_SPEC_STATUS_META,
+  currentReleaseOf, isReviewClosed, DESIGN_SPEC_STATUS_META,
   type DesignSpecRoundInput,
 } from './design-spec-status';
+import {
+  DESIGN_SPEC_STAGE_META, allowedStagesFor, nextRevisionFor, releaseLabel,
+  releaseShortByNumber,
+} from './design-spec-release';
 // Imported eagerly: this file is already only reached from a project page, and the viewer
 // keeps pdf.js behind its own React.lazy boundary — so nothing heavy rides along.
 import DesignSpecVersionViewer from './DesignSpecVersionViewer';
@@ -77,7 +81,15 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
 
-  const [uploadKind, setUploadKind] = useState<'draft' | 'final'>('draft');
+  /**
+   * Which release the next upload is.
+   *
+   * Defaults to Internal Review — the first step, and the safe one to default to: an
+   * accidental Internal Review is a file nobody outside sees, while an accidental Initial
+   * Release is one the supplier can be handed. The effect below pulls it forward once the
+   * spec has moved past it, because a stage cannot walk back.
+   */
+  const [uploadStage, setUploadStage] = useState<DesignSpecStage>('internal');
   const [uploadNote, setUploadNote] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -176,10 +188,22 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
     }
   };
 
-  const current = useMemo(
-    () => versions.find(v => v.version === currentVersionOf(versions)) ?? null,
-    [versions],
-  );
+  const current = useMemo(() => currentReleaseOf(versions), [versions]);
+
+  /** The stages the next upload may use — the current one and everything after it. */
+  const stageOptions = useMemo(() => allowedStagesFor(versions), [versions]);
+
+  /**
+   * Keep the picker on a stage that is still legal.
+   *
+   * Uploading an Initial Release strands a picker sitting on Internal Review: the database
+   * would refuse the next upload with a sentence about walking backwards, which is a correct
+   * answer to a question the user never meant to ask. Snapping forward to the earliest still
+   * allowed stage asks it properly instead.
+   */
+  useEffect(() => {
+    if (!stageOptions.includes(uploadStage)) setUploadStage(stageOptions[0]);
+  }, [stageOptions, uploadStage]);
 
   /**
    * The current version's round, in the shape the status derivation wants.
@@ -210,15 +234,19 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
   const onFilePicked = async (files: FileList | null) => {
     const file = files?.[0];
     if (!file || !spec) return;
-    const nextVersion = (currentVersionOf(versions) ?? 0) + 1;
+    // The revision here only names the stamp printed on the page. The database assigns the
+    // real one in the insert below, so a losing upload in a race is stamped one number out
+    // rather than two rows both claiming to be Final Release v.02.
+    const nextRevision = nextRevisionFor(versions, uploadStage);
+    const name = releaseLabel({ stage: uploadStage, revision: nextRevision });
     await run('upload', async () => {
-      const uploaded = await uploadDesignSpecVersion(spec.id, file, uploadKind, {
+      const uploaded = await uploadDesignSpecVersion(spec.id, file, uploadStage, {
         specCode: spec.specCode,
-        version: nextVersion,
+        revision: nextRevision,
         projectLabel: projectName,
       });
       await addDesignSpecVersion(spec.id, {
-        kind: uploadKind,
+        stage: uploadStage,
         storagePath: uploaded.storagePath,
         stampedPath: uploaded.stampedPath,
         pageCount: uploaded.pageCount,
@@ -226,7 +254,7 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
         note: uploadNote,
       });
       setUploadNote('');
-    }, `v${nextVersion} uploaded.`);
+    }, `${name} uploaded.`);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -385,17 +413,20 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
       {canEdit && !spec.finalVersionId && spec.state !== 'cancelled' && (
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">
-            Upload v{(currentVersionOf(versions) ?? 0) + 1}
+            Upload {releaseLabel({ stage: uploadStage, revision: nextRevisionFor(versions, uploadStage) })}
           </h3>
           <div className="flex flex-wrap items-center gap-3">
+            {/* Only the stages this spec may still use. A passed stage is omitted rather
+                than shown disabled — an offer the database would refuse is not an offer. */}
             <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-              {(['draft', 'final'] as const).map(kind => (
+              {stageOptions.map(stage => (
                 <button
-                  key={kind}
-                  onClick={() => setUploadKind(kind)}
-                  className={`px-3 py-1.5 text-xs font-medium capitalize ${uploadKind === kind ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                  key={stage}
+                  onClick={() => setUploadStage(stage)}
+                  title={DESIGN_SPEC_STAGE_META[stage].hint}
+                  className={`px-3 py-1.5 text-xs font-medium ${uploadStage === stage ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
                 >
-                  {kind}
+                  {DESIGN_SPEC_STAGE_META[stage].label}
                 </button>
               ))}
             </div>
@@ -411,9 +442,9 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
             </Button>
           </div>
           <p className="text-[11px] text-gray-400 mt-2">
-            {uploadKind === 'draft'
-              ? 'A draft is stamped “DRAFT · FOR REVIEW ONLY” before a reviewer can see it. Your original is kept untouched.'
-              : 'A final is served exactly as you made it, and issuing it locks the spec.'}
+            {DESIGN_SPEC_STAGE_META[uploadStage].hint}
+            {uploadStage !== 'final' && ` Every reviewer’s copy is stamped “${DESIGN_SPEC_STAGE_META[uploadStage].label.toUpperCase()} · ${uploadStage === 'internal' ? 'NOT FOR DISTRIBUTION' : 'FOR REVIEW ONLY'}”; your original is kept untouched.`}
+            {stageOptions.length === 1 && ' This spec has reached its Final Release, so the next upload is a further revision of it.'}
           </p>
         </div>
       )}
@@ -434,9 +465,19 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
               return (
                 <li key={v.id} className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone={v.kind === 'final' ? 'emerald' : 'gray'}>v{v.version} {v.kind}</Badge>
+                    <span
+                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${DESIGN_SPEC_STAGE_META[v.stage].classes}`}
+                      title={DESIGN_SPEC_STAGE_META[v.stage].hint}
+                    >
+                      {releaseLabel(v)}
+                    </span>
                     {isFinal && <Badge tone="emerald" icon={<Lock size={10} />}>Issued</Badge>}
                     <span className="text-[11px] text-gray-400">
+                      {/* The upload number, quietly. It is what a review note is pinned to,
+                          so it has to stay findable — but it is not what anyone calls the
+                          file, so it does not get to be the headline. */}
+                      <span title="Upload number — what review notes are pinned to">v{v.version}</span>
+                      {' · '}
                       {v.pageCount != null && `${v.pageCount} page${v.pageCount === 1 ? '' : 's'} · `}
                       {formatReviewStamp(v.uploadedAt).short}
                       {v.uploadedBy && ` · ${v.uploadedBy}`}
@@ -472,12 +513,12 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                             Send for review
                           </Button>
                         )}
-                        {v.kind === 'final' && !spec.finalVersionId && (
+                        {v.stage === 'final' && !spec.finalVersionId && (
                           <Button
                             size="sm" loading={busy === `issue:${v.id}`} leftIcon={<Lock size={12} />}
                             onClick={() => {
-                              if (!window.confirm(`Issue v${v.version} as the final? This locks the spec — no further versions until it is unlocked.`)) return;
-                              void run(`issue:${v.id}`, () => issueDesignSpecFinal(spec.id, v.id), `v${v.version} issued as the final.`);
+                              if (!window.confirm(`Issue ${releaseLabel(v)}? This locks the spec — no further versions until it is unlocked.`)) return;
+                              void run(`issue:${v.id}`, () => issueDesignSpecFinal(spec.id, v.id), `${releaseLabel(v)} issued.`);
                             }}
                           >
                             Issue as final
@@ -579,7 +620,7 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 px-4" onClick={() => setSendFor(null)}>
           <div className="bg-white rounded-xl p-5 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-bold text-primary mb-1">
-              Send v{sendFor.version} for review
+              Send {releaseLabel(sendFor)} for review
             </h3>
             <p className="text-xs text-gray-500 mb-3">
               A labelled link, live for 30 days. Add one per reviewer — the round closes only
@@ -608,7 +649,7 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                   <option value="">No — a fresh reviewer</option>
                   {earlierLinks.map(({ link, version }) => (
                     <option key={link.id} value={link.id}>
-                      {link.label || 'Unlabelled link'} · v{version}
+                      {link.label || 'Unlabelled link'} · {releaseShortByNumber(versions, version)}
                     </option>
                   ))}
                 </select>
@@ -620,7 +661,7 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
               </>
             )}
 
-            {supplier && (
+            {supplier && sendFor.stage !== 'internal' && (
               <label className="flex items-start gap-2 mt-3 p-2 rounded bg-indigo-50 border border-indigo-100 cursor-pointer">
                 <input
                   type="checkbox"
@@ -635,6 +676,18 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                   and sees that recipient's earlier notes.
                 </span>
               </label>
+            )}
+
+            {/* An Internal Review is ours only, so the portal is not on offer for it — the
+                database refuses `supplier_id` on one, and a tick that fails on submit would
+                be worse than no tick. The link itself is still mintable: that is how an
+                internal colleague marks the spec up in the same tool. */}
+            {sendFor.stage === 'internal' && (
+              <p className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded p-2 mt-3">
+                <strong>This is an Internal Review — it stays with us.</strong> It cannot be
+                published to a supplier portal. Send this link to a colleague; upload an
+                Initial Release when the spec is ready to leave the building.
+              </p>
             )}
 
             <p className="text-[11px] text-amber-700 bg-amber-50 rounded p-2 mt-3">
@@ -656,7 +709,12 @@ const ProjectDesignSpecPanel: React.FC<ProjectDesignSpecPanelProps> = ({ project
                     const share = await sendDesignSpecForReview(spec, version, {
                       label: sendLabel.trim(),
                       supersedesId: supersedes || null,
-                      supplierId: publish && supplier ? supplier.id : null,
+                      // `stage !== 'internal'` restated here and not only in the markup: the
+                      // tick keeps its own state across dialogs, so hiding it is not the
+                      // same as clearing it.
+                      supplierId: publish && supplier && version.stage !== 'internal'
+                        ? supplier.id
+                        : null,
                     });
                     await copyLink(share.token);
                   });

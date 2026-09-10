@@ -72,11 +72,11 @@ describe('manualStatusOf', () => {
     expect(manualStatusOf(reviewed({ reviewStage: null }), false)).toBe('draft_review');
   });
 
-  it('moves a reviewed manual to Adjust IM once the PM edits it', () => {
+  it('moves a reviewed manual to Re-edit once the PM edits it', () => {
     expect(manualStatusOf(reviewed({ status: 'draft' }), false)).toBe('adjust_im');
   });
 
-  it('moves a reviewed manual to Adjust IM once a newer version is published', () => {
+  it('moves a reviewed manual to Re-edit once a newer version is published', () => {
     expect(manualStatusOf(reviewed({ version: 4, reviewVersion: 3 }), false)).toBe('adjust_im');
   });
 
@@ -106,7 +106,7 @@ describe('manualStatusOf', () => {
 
 describe('nextReviewStageFor', () => {
   it('picks the review step that FOLLOWS where the manual stands', () => {
-    expect(nextReviewStageFor('to_do', false)).toBe('draft');
+    expect(nextReviewStageFor('backlog', false)).toBe('draft');
     expect(nextReviewStageFor('in_progress', false)).toBe('draft');
     expect(nextReviewStageFor('adjust_im', true)).toBe('final');
   });
@@ -126,7 +126,7 @@ describe('nextReviewStageFor', () => {
 
 describe('review step tone — green means the supplier closed it', () => {
   it('goes green on submission ALONE, not on the notes being triaged', () => {
-    // Triaging is the PM's own work at Adjust IM. Gating the green on it would hide the one
+    // Triaging is the PM's own work at Re-edit. Gating the green on it would hide the one
     // fact the board exists to surface: that the ball has come back.
     expect(reviewStepClasses(true)).toContain('emerald');
     expect(reviewStepClasses(false)).toContain('sky');
@@ -138,13 +138,13 @@ describe('review step tone — green means the supplier closed it', () => {
   });
 
   it('says "closed" in words as well as in hue', () => {
-    expect(statusLabel('draft_review', true)).toBe('Draft Review · closed');
-    expect(statusLabel('final_review', true)).toBe('Final Review · closed');
-    expect(statusLabel('draft_review', false)).toBe('Draft Review');
+    expect(statusLabel('draft_review', true)).toBe('In Review (draft) · closed');
+    expect(statusLabel('final_review', true)).toBe('In Review (final) · closed');
+    expect(statusLabel('draft_review', false)).toBe('In Review (draft)');
   });
 
   it('leaves every non-review step alone whatever the review flag says', () => {
-    expect(statusLabel('adjust_im', true)).toBe('Adjust IM');
+    expect(statusLabel('adjust_im', true)).toBe('Re-edit');
     expect(statusClasses('done', true)).toBe(MANUAL_STATUS_META.done.classes);
     expect(statusClasses('in_progress', false)).toBe(MANUAL_STATUS_META.in_progress.classes);
   });
@@ -223,7 +223,8 @@ describe('nextActionOf', () => {
   const NOW = new Date('2026-08-18T12:00:00Z').getTime();
 
   it('tells an unstarted project what it is', () => {
-    expect(nextActionOf({ status: 'to_do' })).toBe('no manual yet — open the project to start one');
+    expect(nextActionOf({ status: 'backlog' }))
+      .toBe('nothing started — open the project to create its IM or leaflet');
   });
 
   it('points a published, never-reviewed manual at its draft review', () => {
@@ -242,10 +243,10 @@ describe('nextActionOf', () => {
     expect(nextActionOf({ status: 'draft_review', reviewSubmitted: true, reviewActiveThreads: 2 }, NOW))
       .toBe('review closed · 2 open notes — start adjusting');
     expect(nextActionOf({ status: 'final_review', reviewSubmitted: true, reviewActiveThreads: 0 }, NOW))
-      .toBe('review closed — mark it Done');
+      .toBe('review closed — mark it Final');
   });
 
-  it('points Adjust IM at the notes, then at the final review', () => {
+  it('points Re-edit at the notes, then at the final review', () => {
     expect(nextActionOf({ status: 'adjust_im', reviewActiveThreads: 4 }))
       .toBe('4 open notes to handle, then send the final review');
     expect(nextActionOf({ status: 'adjust_im', reviewActiveThreads: 0 }))
@@ -274,7 +275,7 @@ describe('isInReview / hasBeenReviewed', () => {
     expect(isInReview(reviewed({ version: 4 }))).toBe(false);
   });
 
-  it('remembers a past round even after it ended — that is what Adjust IM is', () => {
+  it('remembers a past round even after it ended — that is what Re-edit is', () => {
     expect(hasBeenReviewed(reviewed({ status: 'draft' }))).toBe(true);
     expect(hasBeenReviewed(reviewed({ reviewRequestedAt: null }))).toBe(false);
   });
@@ -344,7 +345,7 @@ describe('workflow metadata', () => {
 
   it('lays the seven business steps out in the order the business runs them', () => {
     expect(MANUAL_STATUS_ORDER.filter(s => s !== 'unknown')).toEqual([
-      'to_do', 'in_progress', 'draft_review', 'adjust_im', 'final_review', 'done', 'republish_needed',
+      'backlog', 'in_progress', 'draft_review', 'adjust_im', 'final_review', 'done', 'republish_needed',
     ]);
   });
 

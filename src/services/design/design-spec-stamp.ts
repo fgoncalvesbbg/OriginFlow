@@ -1,11 +1,22 @@
 /**
- * The DRAFT stamp — what a reviewer's copy of a design spec says on every page.
+ * The REVIEW STAMP — what a reviewer's copy of a design spec says on every page.
  *
- * WHY IT EXISTS. A draft that reaches a factory unmarked is a draft a factory can tool up
- * from. So the copy served through a review link carries `DRAFT vN · FOR REVIEW ONLY` at the
- * top of every page and a traceable footer at the bottom, and the ORIGINAL bytes are never
- * touched — the stamp is written to a separate object (`…-review.pdf`), so the design team's
- * file is always recoverable and an internal download is always pristine.
+ * WHY IT EXISTS. A spec that reaches a factory unmarked is a spec a factory can tool up
+ * from. So the copy served through a review link carries its release name at the top of
+ * every page and a traceable footer at the bottom, and the ORIGINAL bytes are never touched
+ * — the stamp is written to a separate object (`…-review.pdf`), so the design team's file is
+ * always recoverable and an internal download is always pristine.
+ *
+ * WHAT IT SAYS DEPENDS ON THE STAGE, and the two unreleased stages are warned about
+ * differently because the consequence of leaking them differs:
+ *
+ *   Internal Review   INTERNAL REVIEW v.01 - NOT FOR DISTRIBUTION   watermark: INTERNAL
+ *   Initial Release   INITIAL RELEASE v.01 - FOR REVIEW ONLY        watermark: DRAFT
+ *   Final Release     not stamped at all — it IS the released document
+ *
+ * The wording lives in `DESIGN_SPEC_STAGE_META` in src/pages/design/design-spec-release.ts,
+ * so the banner on the page and the badge on the screen cannot drift apart. A Final Release
+ * never reaches this module: `uploadDesignSpecVersion` asks for no stamped slot for one.
  *
  * WHY IN THE BROWSER. The designer's browser already holds the bytes it just picked. A
  * design spec can be 50MB and a Netlify Function body cannot, so stamping server-side would
@@ -20,6 +31,10 @@
  */
 
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
+import {
+  DESIGN_SPEC_STAGE_META, formatRevision, releaseLabel,
+} from '../../pages/design/design-spec-release';
+import type { DesignSpecStage } from '../../types/design-spec.types';
 
 /** Ink for the banner and the footer: a muted red that reads as a warning when printed grey. */
 const STAMP_RED = rgb(0.7, 0.13, 0.13);
@@ -36,20 +51,38 @@ export interface StampInput {
   /** The picked file's bytes. Not mutated — pdf-lib works on its own parse. */
   pdf: ArrayBuffer;
   specCode: string;
-  version: number;
+  /** Which release this copy is. Decides the banner, the watermark and the warning. */
+  stage: DesignSpecStage;
+  /** The revision within that stage — 2 prints as `v.02`. */
+  revision: number;
   /** Project name or code, so a printed page traces back to a project without the app. */
   projectLabel: string;
   /** Defaults to today. Injectable so the output is deterministic under test. */
   date?: Date;
   /**
-   * Draw the large diagonal DRAFT watermark across each page.
+   * Draw the large diagonal watermark across each page.
    *
-   * On by default: it is what makes a photographed or photocopied page obviously a draft,
+   * On by default: it is what makes a photographed or photocopied page obviously unreleased,
    * which a header alone does not. Worth turning off only for a spec whose artwork the
-   * watermark would genuinely obscure — the header and footer still say DRAFT.
+   * watermark would genuinely obscure — the header and footer still carry the release name.
    */
   watermark?: boolean;
 }
+
+/**
+ * What the banner warns, per stage.
+ *
+ * An Internal Review is not merely provisional — it is a file that was never meant to leave
+ * the building, so it says so rather than inviting review. An Initial Release IS an
+ * invitation to review, and says that.
+ */
+const WARNING: Record<DesignSpecStage, string> = {
+  internal: 'NOT FOR DISTRIBUTION',
+  initial: 'FOR REVIEW ONLY',
+  // Unreachable — a Final Release is never stamped — but a Record must be total, and a
+  // stamp that somehow reached one must not claim it is released when it has not been issued.
+  final: 'FOR REVIEW ONLY',
+};
 
 /**
  * Replace characters Helvetica cannot draw.
@@ -72,32 +105,51 @@ export const asciiSafe = (s: string): string => s
 const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
 
 /**
- * Produce the reviewer's copy of a draft.
+ * The three strings the stamp draws, built and made ASCII-safe.
+ *
+ * Split out of `stampReviewPdf` so the WORDING can be tested without a PDF: pdf-lib
+ * flate-compresses the content streams it writes, so reading the sentences back out of the
+ * produced file would mean decompressing it — and would be testing pdf-lib rather than this
+ * module's one real decision, which is what each stage says.
+ */
+export const reviewStampText = (
+  input: Pick<StampInput, 'stage' | 'revision' | 'specCode' | 'projectLabel' | 'date'>,
+): { banner: string; footer: string; watermark: string } => {
+  const meta = DESIGN_SPEC_STAGE_META[input.stage];
+  return {
+    banner: asciiSafe(
+      `${meta.stamp?.banner ?? meta.label.toUpperCase()} ${formatRevision(input.revision)} - ${WARNING[input.stage]}`,
+    ),
+    footer: asciiSafe(
+      `${input.specCode} - ${input.projectLabel} - ${releaseLabel({ stage: input.stage, revision: input.revision })} - ${isoDate(input.date ?? new Date())}`,
+    ),
+    watermark: meta.stamp?.watermark ?? 'DRAFT',
+  };
+};
+
+/**
+ * Produce the reviewer's copy of an unreleased version.
  *
  * Returns fresh bytes; the input buffer is left alone. Throws if the file is not a PDF
  * pdf-lib can parse — the caller surfaces that to the designer at pick time, which is the
  * only moment they can do anything about it.
  */
-export const stampDraftPdf = async (input: StampInput): Promise<Uint8Array> => {
+export const stampReviewPdf = async (input: StampInput): Promise<Uint8Array> => {
   const doc = await PDFDocument.load(input.pdf);
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
   const footFont = await doc.embedFont(StandardFonts.Helvetica);
 
-  const banner = asciiSafe(`DRAFT v${input.version} - FOR REVIEW ONLY`);
-  const footer = asciiSafe(
-    `${input.specCode} - ${input.projectLabel} - v${input.version} draft - ${isoDate(input.date ?? new Date())}`,
-  );
+  const { banner, footer, watermark } = reviewStampText(input);
 
   for (const page of doc.getPages()) {
     const { width, height } = page.getSize();
 
     if (input.watermark !== false) {
-      const text = 'DRAFT';
-      const textWidth = font.widthOfTextAtSize(text, WATERMARK_SIZE);
+      const textWidth = font.widthOfTextAtSize(watermark, WATERMARK_SIZE);
       // Drawn FIRST so the page's own artwork sits on top of it — a watermark that obscures
       // a dimension the reviewer is being asked to check is worse than no watermark. The low
       // opacity is what keeps it legible-but-not-in-the-way.
-      page.drawText(text, {
+      page.drawText(watermark, {
         x: width / 2 - textWidth / 2,
         y: height / 2 - WATERMARK_SIZE / 2,
         size: WATERMARK_SIZE,
