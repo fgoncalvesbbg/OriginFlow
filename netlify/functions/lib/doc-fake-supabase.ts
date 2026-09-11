@@ -50,13 +50,71 @@ const matches = (row: Row, filter: Filter): boolean => {
   }
 };
 
+/**
+ * Split a PostgREST select list on TOP-LEVEL commas, so an embedded relation's own column
+ * list (`design_specs(id, project_id)`) stays in one piece instead of being torn apart.
+ */
+const splitSelect = (columns: string): string[] => {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of columns) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { out.push(current); current = ''; continue; }
+    current += ch;
+  }
+  if (current.trim()) out.push(current);
+  return out.map(c => c.trim()).filter(Boolean);
+};
+
+/**
+ * The PostgREST error a select naming a column the table does not have would really produce.
+ *
+ * WHY THIS EXISTS. `select()` used to ignore its argument entirely, which made the fake blind
+ * to the single most common way this codebase breaks a live endpoint: a migration renames a
+ * column and one query keeps the old name. That is not hypothetical — `im-file-url.ts` kept
+ * selecting `template_type` from `review_shares` after migration 162 renamed it
+ * `subject_type`, and every supplier review link 500'd for two days while every test passed.
+ *
+ * Checked against the KEYS PRESENT ON THE FIXTURE ROWS, not against a schema the fake does
+ * not have, so it only ever fires on a name no fixture row carries. Embedded relations,
+ * `*`, and a table with no rows are all skipped — there is nothing to check them against.
+ */
+const unknownColumnError = (table: string, columns: string | undefined, rows: Row[]) => {
+  if (!columns || columns.trim() === '*' || rows.length === 0) return null;
+  const known = new Set<string>();
+  for (const row of rows) for (const key of Object.keys(row)) known.add(key);
+  for (const part of splitSelect(columns)) {
+    // An embedded relation (`table(cols)`) or a star — nothing to verify here.
+    if (part.includes('(') || part === '*') continue;
+    // `alias:column` renames on the way out; the real column is after the colon.
+    const column = (part.includes(':') ? part.slice(part.indexOf(':') + 1) : part).trim();
+    if (!column || column === '*') continue;
+    if (!known.has(column)) {
+      return {
+        code: '42703',
+        message: `column ${table}.${column} does not exist`,
+        details: null,
+        hint: `Perhaps you meant to reference one of: ${[...known].join(', ')}`,
+      };
+    }
+  }
+  return null;
+};
+
 /** A thenable query builder: `await q` resolves to a list, `.maybeSingle()` to one row. */
 class FakeQuery implements PromiseLike<{ data: any; error: any }> {
   private filters: Filter[] = [];
   private sort: { column: string; ascending: boolean } | null = null;
   private max: number | null = null;
 
-  constructor(private readonly rows: Row[]) {}
+  /**
+   * `failure` short-circuits every resolution path with that error and no rows — how
+   * PostgREST answers a bad select. Handlers see it through their own error branch rather
+   * than through a thrown exception, which is what production does.
+   */
+  constructor(private readonly rows: Row[], private readonly failure: any = null) {}
 
   eq(column: string, value: any) { this.filters.push({ op: 'eq', column, value }); return this; }
   is(column: string, value: any) { this.filters.push({ op: 'is', column, value }); return this; }
@@ -86,11 +144,13 @@ class FakeQuery implements PromiseLike<{ data: any; error: any }> {
   }
 
   async maybeSingle() {
+    if (this.failure) return { data: null, error: this.failure };
     const out = this.resolveRows();
     return { data: out[0] ?? null, error: null };
   }
 
   async single() {
+    if (this.failure) return { data: null, error: this.failure };
     const out = this.resolveRows();
     if (out.length !== 1) return { data: null, error: { message: 'expected exactly one row', code: 'PGRST116' } };
     return { data: out[0], error: null };
@@ -100,7 +160,9 @@ class FakeQuery implements PromiseLike<{ data: any; error: any }> {
     onfulfilled?: ((value: { data: any; error: any }) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
-    return Promise.resolve({ data: this.resolveRows(), error: null }).then(onfulfilled, onrejected);
+    return Promise.resolve(
+      this.failure ? { data: null, error: this.failure } : { data: this.resolveRows(), error: null },
+    ).then(onfulfilled, onrejected);
   }
 }
 
@@ -140,7 +202,7 @@ export const createFakeSupabase = (options: FakeSupabaseOptions): FakeSupabase =
     },
 
     from: (name: string) => ({
-      select: () => new FakeQuery(table(name)),
+      select: (columns?: string) => new FakeQuery(table(name), unknownColumnError(name, columns, table(name))),
       insert: (rows: Row | Row[]) => {
         const list = Array.isArray(rows) ? rows : [rows];
         inserts.push({ table: name, rows: list });

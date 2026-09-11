@@ -27,7 +27,10 @@
  *       Looked up DIRECTLY against `review_shares` with the service role — see the note below for
  *       why this is not the `get_im_share_by_token` / `im_review_resolve` RPCs — and the
  *       PROJECT ID COMES FROM THAT ROW, never from the request: a token minted for project A
- *       can never mint a URL under project B's prefix, no matter what the caller sends.
+ *       can never mint a URL under project B's prefix, no matter what the caller sends. The
+ *       row's document type is `subject_type` (renamed from `template_type` by migration
+ *       162); its values are still the IM's own 'im' / 'warning_leaflet', which is what the
+ *       path's second segment is matched against.
  *
  * Why a direct table query instead of the public resolver RPCs: both `get_im_share_by_token`
  * (migration 109) and `im_review_resolve` (migration 130) stamp `last_used_at`/`use_count` —
@@ -146,9 +149,16 @@ export const handler = async (event: NetlifyEvent) => {
       // get_im_share_by_token / im_review_resolve. Any mode ('view' or 'review') may read —
       // both open the same published manual; only commenting is mode-gated, and that's not
       // this endpoint's concern.
+      // `subject_type`, NOT `template_type`: migration 162 renamed `im_shares` to
+      // `review_shares` and that column with it. This query kept the pre-162 name and so
+      // failed with 42703 on every portal read — a 500 that surfaced to reviewers as
+      // "Could not validate the link", making every share and review link look revoked.
+      // The `im_shares` compatibility VIEW still carries the old names, but this endpoint
+      // must not read through it: the views are there for a browser running the pre-162
+      // bundle and are due to be dropped.
       const { data: share, error } = await supabase
         .from('review_shares')
-        .select('project_id, template_type, revoked_at, expires_at')
+        .select('project_id, subject_type, revoked_at, expires_at')
         .eq('token', req.token as string)
         .is('revoked_at', null)
         .maybeSingle();
@@ -164,7 +174,7 @@ export const handler = async (event: NetlifyEvent) => {
       }
       // THE PROJECT COMES FROM THIS ROW. A token minted for a different project/template
       // than the one embedded in the requested path is refused outright.
-      if (share.project_id !== parsed.projectId || share.template_type !== parsed.templateType) {
+      if (share.project_id !== parsed.projectId || share.subject_type !== parsed.templateType) {
         return json(403, { error: 'This link does not grant access to that file.' });
       }
     } else {

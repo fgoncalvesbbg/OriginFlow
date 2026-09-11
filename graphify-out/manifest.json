@@ -1128,9 +1128,9 @@
     "semantic_hash": ""
   },
   "src/pages/ProjectDetail.tsx": {
-    "mtime": 1788965293.2839675,
-    "seen": 1788984983.6405144,
-    "ast_hash": "f112b566d34e485d11172c438c54858e",
+    "mtime": 1789124962.563805,
+    "seen": 1789125441.6363502,
+    "ast_hash": "929ecedf35b6772837dc8595abba60ff",
     "semantic_hash": ""
   },
   "src/pages/SupplierAttributePortal.tsx": {
@@ -1242,9 +1242,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/ProjectIMGenerator.tsx": {
-    "mtime": 1789042451.586372,
-    "seen": 1789043030.7631202,
-    "ast_hash": "2cbf65f302e4259619b360b86ee157f7",
+    "mtime": 1789124816.779388,
+    "seen": 1789125441.6365504,
+    "ast_hash": "1a0a3afa197463cb4bbcf267afda0bf9",
     "semantic_hash": ""
   },
   "src/pages/im/ProjectImImportDialog.tsx": {
@@ -1554,9 +1554,9 @@
     "semantic_hash": ""
   },
   "src/services/im/im-share.service.ts": {
-    "mtime": 1789042451.5873742,
-    "seen": 1789043030.763719,
-    "ast_hash": "93760e07d62f7fcb1020ab548d8c15ac",
+    "mtime": 1789124461.4603324,
+    "seen": 1789125441.6372313,
+    "ast_hash": "59aa11dcaede1541ca545425c3f91960",
     "semantic_hash": ""
   },
   "src/services/im/im-staleness.service.ts": {
@@ -2628,9 +2628,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/ReviewCommentsPanel.tsx": {
-    "mtime": 1787744393.9286077,
-    "seen": 1787843281.2442687,
-    "ast_hash": "25dbea7b4cd0c2c9481d83f57db48dfa",
+    "mtime": 1789125126.6471605,
+    "seen": 1789125441.6366606,
+    "ast_hash": "7b731af85a34e2c16dab712291ba40ad",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/TranslationStatusPanel.tsx": {
@@ -4572,9 +4572,9 @@
     "semantic_hash": ""
   },
   "src/services/review/index.ts": {
-    "mtime": 1788979532.3501678,
-    "seen": 1788984983.6412084,
-    "ast_hash": "d713a2fe3d619a49fb8fb7a3e7e71f8b",
+    "mtime": 1789124523.0546298,
+    "seen": 1789125441.6375537,
+    "ast_hash": "3281add5fd29a418bfa47a7c0f673721",
     "semantic_hash": ""
   },
   "src/services/review/review-comments.service.test.ts": {
@@ -4590,9 +4590,9 @@
     "semantic_hash": ""
   },
   "src/services/review/review-share.service.ts": {
-    "mtime": 1789030959.7640402,
-    "seen": 1789032082.7393165,
-    "ast_hash": "f5fcccc972d51817b14fafabe394f3db",
+    "mtime": 1789124451.8296099,
+    "seen": 1789125441.6375687,
+    "ast_hash": "5eb46dd6a2f907d74d2de44f209edabe",
     "semantic_hash": ""
   },
   "src/types/design-spec.types.ts": {
@@ -5391,6 +5391,24 @@
     "mtime": 1789073831.746706,
     "seen": 1789075670.168536,
     "ast_hash": "7482bde24d4c2773d4b33378dd2fca2a",
+    "semantic_hash": ""
+  },
+  "src/components/review/ReviewLinkList.tsx": {
+    "mtime": 1789124601.6988256,
+    "seen": 1789125441.6360052,
+    "ast_hash": "2ec83f5be9af06dccd814ae7fe3578d3",
+    "semantic_hash": ""
+  },
+  "src/services/review/review-link-status.test.ts": {
+    "mtime": 1789124506.268869,
+    "seen": 1789125441.6375632,
+    "ast_hash": "c05a7a6e50b5b7caa5103a9324873ab8",
+    "semantic_hash": ""
+  },
+  "src/services/review/review-link-status.ts": {
+    "mtime": 1789124489.2690997,
+    "seen": 1789125441.6375656,
+    "ast_hash": "476ae15352ceb40246f1db8475527e65",
     "semantic_hash": ""
   }
 }
