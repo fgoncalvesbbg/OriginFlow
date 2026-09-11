@@ -24,6 +24,11 @@ export {
 } from './review-share.service';
 export type { CreateReviewShareOptions } from './review-share.service';
 
+export { reviewLinkStatusOf, summarizeReviewLinks } from './review-link-status';
+export type {
+  ReviewLinkStatus, ReviewLinkStatusKey, ReviewLinkStatusRef,
+} from './review-link-status';
+
 export {
   anchorFromRow,
   mapCommentRow,

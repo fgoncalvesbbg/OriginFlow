@@ -16,7 +16,7 @@ import {
     getProjectIMStaleReasons, getPrintRenders,
     updateProjectIMPlaceholders, getProjectRequiredLanguages, getProjectPrintedLanguages,
     getProjectIMBackups, ProjectIMConflictError, getAllProjectIMs,
-    getIMShares, createIMShare, getIMReviewUrl,
+    getIMShares, createIMShare, getIMReviewUrl, revokeIMShare,
     getReviewComments, setReviewCommentStatus, setProjectIMReviewRequested,
     getTemplateRegulations, buildTemplateChecklist, getChecklistState, setChecklistItemState,
     getRegulations, collectBlocks, summarizeBlocks,
@@ -27,6 +27,7 @@ import type { ChecklistItem, ChecklistItemState, ChecklistItemStatus } from '../
 import type { IMReviewComment, IMReviewCommentStatus, IMShare } from '../../services';
 import type { ProjectIMBackup } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
+import type { ReviewLinkRef } from '../../components/review/ReviewLinkList';
 import { skuSyntheticAttribute } from '../../config/compliance.constants';
 import { wrapBlockCallout, passesFeatureGate } from '../../services/im/im-resolver';
 import { getAppliesToLabel } from '../../services/im/callout-titles.i18n';
@@ -50,7 +51,7 @@ import {
   MANUAL_STATUS_META, statusClasses, statusLabel, isReviewStep, type ManualStatus,
 } from './im-manual-status';
 import { useAuth } from '../../context/AuthContext';
-import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, CheckCircle2, RefreshCw, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2, Paperclip } from 'lucide-react';
+import { ArrowLeft, Save, FileDown, AlertCircle, Image as ImageIcon, Check, CheckCircle, CheckCircle2, RefreshCw, Crosshair, Settings, GitBranch, CheckSquare, Square, X, Printer, Globe, ChevronDown, Download, FileJson, Loader2, Minus, Trash2, RotateCcw, Upload, Type, ChevronUp, FilePlus2, Lock, Unlock, Boxes, Eye, EyeOff, Plus, Layers, LayoutTemplate, Copy, GripVertical, Undo2, Redo2, ClipboardCopy, ClipboardPaste, Bookmark, Search, Send, Maximize2, Minimize2, Wand2, Paperclip, Info } from 'lucide-react';
 import { InlineBlockEditor, CALLOUT_VARIANTS, type TmRowContext } from './editor/InlineBlockEditor';
 import { useResizablePane, CollapsedPaneRail } from './editor/useResizablePane';
 import { useUndoRedo } from './editor/useUndoRedo';
@@ -239,7 +240,10 @@ const ProjectIMGenerator: React.FC = () => {
   // review link, and the links themselves. Both are loaded once per open; the panel is a
   // second docked rail alongside the pre-publish one.
   const [reviewComments, setReviewComments] = useState<IMReviewComment[]>([]);
+  // EVERY link ever minted for this manual, revoked ones included (see loadReviewRound).
+  // Round state is derived from the live subset below, never from this list directly.
   const [reviewShares, setReviewShares] = useState<IMShare[]>([]);
+  const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentBusyId, setCommentBusyId] = useState<string | null>(null);
   const [sendingForReview, setSendingForReview] = useState(false);
@@ -314,6 +318,16 @@ const ProjectIMGenerator: React.FC = () => {
   // which drives both the localStorage backup and the beforeunload guard. `pendingDraft` is a
   // recovered draft awaiting the user's Restore/Discard decision.
   const savedSnapshotRef = useRef<string | null>(null);
+  /**
+   * "Mint a review link as soon as this publish lands", set by the send-for-review dialog
+   * when the manual has not been published yet.
+   *
+   * A REF, not state: the publish it is waiting on can detour through the pre-publish
+   * checklist panel, which re-renders this component many times, and the intent has to
+   * survive that without re-triggering anything. Cleared the moment it is consumed, and
+   * when the PM backs out of the checklist.
+   */
+  const pendingSendStageRef = useRef<IMReviewStage | null>(null);
   const [pendingDraft, setPendingDraft] = useState<{ savedAt: string; state: DraftState } | null>(null);
   const draftKey = projectId ? `project-im-draft:${projectId}:${templateType}` : null;
 
@@ -847,7 +861,10 @@ const ProjectIMGenerator: React.FC = () => {
       try {
           const [notes, shares] = await Promise.all([
               getReviewComments(projectId, templateType),
-              getIMShares(projectId, templateType, 'review'),
+              // Revoked links included: the panel's job is to say what was SENT and what
+              // became of it, and a link that was pulled back is half that answer. The live
+              // subset (liveReviewShares) is what the round derivation reads.
+              getIMShares(projectId, templateType, 'review', { includeRevoked: true }),
           ]);
           setReviewComments(notes);
           setReviewShares(shares);
@@ -1534,16 +1551,31 @@ const ProjectIMGenerator: React.FC = () => {
           // Baseline = exactly what we persisted, so the local draft clears.
           markSaved({ formData: extForm, sectionAdditions: extOv.sectionAdditions, sectionOverrides: extOv.sectionOverrides, blockOverrides: extOv.blockOverrides, extraSections: extOv.extraSections });
 
-          // No confirmation screen — Publish is one of three quick menu actions now (see the
-          // header's Publish dropdown), not a one-off event needing its own modal. Straight
-          // into the same print-export dialog every other export goes through (scoped to
-          // every required language, unlike Print Version's reduced subset), so exporting a
-          // full-language PDF right after publishing is still one step, not a hunt for a
-          // second button — dismiss it if a PDF isn't needed right now.
-          if (isPrintExportAvailable()) await openPrintDialog();
+          // A publish the PM started in order to SEND THE MANUAL FOR REVIEW ends by minting
+          // the link, and never opens the print dialog. A review link is read in the online
+          // viewer — there is no PDF anywhere on that path, and putting the export dialog in
+          // front of it made rendering a PDF look like a step towards getting the link.
+          const sendStage = pendingSendStageRef.current;
+          pendingSendStageRef.current = null;
+          if (sendStage) {
+              // `savedIM` is the row just written; `instance` in this closure is still the
+              // pre-publish one, so the version is passed explicitly.
+              await sendForReview(sendStage, savedIM.version ?? nextVersion);
+          } else if (isPrintExportAvailable()) {
+              // No confirmation screen — Publish is one of three quick menu actions now (see
+              // the header's Publish dropdown), not a one-off event needing its own modal.
+              // Straight into the same print-export dialog every other export goes through
+              // (scoped to every required language, unlike Print Version's reduced subset),
+              // so exporting a full-language PDF right after publishing is still one step,
+              // not a hunt for a second button — dismiss it if a PDF isn't needed right now.
+              await openPrintDialog();
+          }
 
       } catch (e: any) {
           console.error("Publish failed", e);
+          // A publish that never happened has nothing to send for review. Dropping the intent
+          // here is what stops it firing silently on some unrelated publish later on.
+          pendingSendStageRef.current = null;
           if (e instanceof ProjectIMConflictError) setSaveConflict({ at: e.lastUpdatedAt, by: e.lastUpdatedBy });
           else alert(`Failed to publish ${typeLabel}: ${e.message}`);
       } finally {
@@ -3756,6 +3788,28 @@ const ProjectIMGenerator: React.FC = () => {
   };
 
   /**
+   * Revoke one review link. The supplier loses access immediately, and if it was the last
+   * live link on this manual the round is over as far as every derivation here is concerned.
+   *
+   * Deliberately does NOT clear the manual's mirrored `review_requested_at` columns: those
+   * record that a round was requested, which stays true after the link is pulled, and the
+   * board already prefers the live links when it can see them. Re-reads rather than
+   * splicing, so `revoked_at`/`revoked_by` come back as the server stamped them.
+   */
+  const revokeReviewLink = async (link: ReviewLinkRef) => {
+    setRevokingShareId(link.id);
+    try {
+      await revokeIMShare(link.id);
+      await loadReviewRound();
+    } catch (e) {
+      console.error('[ProjectIMGenerator] Failed to revoke the review link:', e);
+      alert('Could not revoke that link. Please try again.');
+    } finally {
+      setRevokingShareId(null);
+    }
+  };
+
+  /**
    * Mint a supplier review link for the CURRENT published version and copy it to the clipboard.
    *
    * TWO things are stamped on the link, and both are load-bearing:
@@ -3770,28 +3824,42 @@ const ProjectIMGenerator: React.FC = () => {
    * The stage defaults to the review step that follows wherever the manual stands now
    * (`nextReviewStageFor`), and `stage` overrides that when the PM picks explicitly in the
    * send dialog.
+   *
+   * NO PDF IS INVOLVED, at any point. A reviewer opens the published online manual in the
+   * review portal; nothing on this path renders, needs or waits for a print export. Go
+   * through `confirmSendForReview` below for the case where the manual has not been
+   * published yet.
    */
-  const sendForReview = async (stage: IMReviewStage = pendingReviewStage) => {
-    if (!projectId || !instance || sendingForReview) return;
+  const sendForReview = async (
+    stage: IMReviewStage = pendingReviewStage,
+    /**
+     * The version to stamp on the link, when the caller knows it and `instance` does not
+     * yet — the publish-then-send path mints the link inside the same tick that saved the
+     * new version, before the state holding it has re-rendered.
+     */
+    versionOverride?: number | null,
+  ) => {
+    if (!projectId || sendingForReview) return;
+    const manualVersion = versionOverride !== undefined ? versionOverride : (instance?.version ?? null);
     setSendingForReview(true);
     const stageLabel = IM_REVIEW_STAGE_LABELS[stage];
     try {
       const share = await createIMShare(projectId, templateType, {
         mode: 'review',
-        manualVersion: instance.version ?? null,
+        manualVersion,
         reviewStage: stage,
-        label: `${stageLabel} v${instance.version ?? '?'}`,
+        label: `${stageLabel} v${manualVersion ?? '?'}`,
       });
       // Mirror the round onto the manual too, so the board can place every manual from one
       // query instead of loading each one's share links. Non-fatal: the link is already
       // minted and usable, and this page derives its own state from the links directly.
       try {
-        const stamped = await setProjectIMReviewRequested(projectId, templateType, instance.version ?? null, stage);
+        const stamped = await setProjectIMReviewRequested(projectId, templateType, manualVersion, stage);
         setInstance(prev => prev ? {
           ...prev,
           reviewRequestedAt: stamped.reviewRequestedAt,
           reviewRequestedBy: stamped.reviewRequestedBy,
-          reviewVersion: instance.version ?? null,
+          reviewVersion: manualVersion,
           reviewStage: stamped.reviewStage,
         } : prev);
       } catch (e) {
@@ -3815,6 +3883,25 @@ const ProjectIMGenerator: React.FC = () => {
     } finally {
       setSendingForReview(false);
     }
+  };
+
+  /**
+   * The send dialog's confirm button: get this manual to a supplier, whatever state it is in.
+   *
+   * A never-published manual used to dead-end here — the action was disabled with "Publish
+   * the Full IM first", and publishing then opened the print-export dialog, so the shortest
+   * route a PM could see from "I want a review link" to a link ran through a PDF render that
+   * the review portal has never needed. It now publishes and mints the link as one gesture,
+   * and the publish suppresses the print dialog (see handleGenerate).
+   *
+   * Publishing IS still required, and is not the same requirement: the portal serves the
+   * published manifest, so a reviewer has nothing to read until one exists.
+   */
+  const confirmSendForReview = (stage: IMReviewStage) => {
+    if (published) { void sendForReview(stage); return; }
+    pendingSendStageRef.current = stage;
+    setShowSendReview(false);
+    void handlePublishClick();
   };
 
   /**
@@ -4630,7 +4717,27 @@ const ProjectIMGenerator: React.FC = () => {
   // above, so a hook here runs on some renders and not others — React counts that as a
   // changed hook order and throws (#310). It also matches how the rest of this section
   // derives its values (see publishIssues below); the inputs are small arrays.
-  const reviewRound = reviewRoundStateOf(reviewShares, reviewComments, instance?.version ?? null);
+  // Live links only. A revoked link is precisely how a round is ENDED, so feeding the full
+  // history into the derivation would keep a closed round permanently open on the board.
+  const liveReviewShares = reviewShares.filter(sh => !sh.revokedAt);
+  const reviewRound = reviewRoundStateOf(liveReviewShares, reviewComments, instance?.version ?? null);
+
+  /** Project an IM share onto the shape the shared link list renders. */
+  const toReviewLink = (sh: IMShare): ReviewLinkRef => ({
+    id: sh.id,
+    token: sh.token,
+    label: sh.label,
+    createdAt: sh.createdAt,
+    createdBy: sh.createdBy,
+    version: sh.manualVersion,
+    stage: sh.reviewStage,
+    revokedAt: sh.revokedAt,
+    expiresAt: sh.expiresAt,
+    submittedAt: sh.submittedAt,
+    lastUsedAt: sh.lastUsedAt,
+    useCount: sh.useCount,
+  });
+  const reviewLinks = reviewShares.map(toReviewLink);
 
   /**
    * WHERE THIS MANUAL STANDS in the IM workflow — the same derivation the All Manuals
@@ -4793,16 +4900,33 @@ const ProjectIMGenerator: React.FC = () => {
            overridable, because the derivation is a good default and not a verdict: a PM
            re-running a draft pass after a big rewrite is doing a draft review, whatever the
            board thinks. */}
-       {showSendReview && instance && (() => {
+       {showSendReview && (() => {
          const stage = sendReviewStage ?? pendingReviewStage;
          return (
            <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={() => !sendingForReview && setShowSendReview(false)}>
              <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
                <h3 className="text-lg font-bold text-primary mb-1">Send for supplier review</h3>
                <p className="text-sm text-muted mb-4">
-                 Creates an unguessable review link for the published v{instance.version ?? '?'} of this
-                 {' '}{typeLabel.toLowerCase()} and copies it to your clipboard.
+                 {published
+                   ? <>Creates an unguessable review link for the published v{instance?.version ?? '?'} of this {typeLabel.toLowerCase()} and copies it to your clipboard.</>
+                   : <>Publishes this {typeLabel.toLowerCase()} and creates an unguessable review link for it, in one step.</>}
+                 {' '}Reviewers read it online — <strong>no PDF is rendered</strong>.
                </p>
+
+               {/* Publishing is a real prerequisite and a different one from a PDF: the portal
+                   serves the published manifest, so there is nothing to read until one exists.
+                   Said here, once, rather than left as a disabled button the PM has to decode. */}
+               {!published && (
+                 <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 mb-4 text-xs text-sky-900">
+                   <Info size={14} className="mt-0.5 shrink-0 text-sky-600" />
+                   <span>
+                     This {typeLabel.toLowerCase()} has not been published yet. It will be published
+                     first — reviewers read the published online {typeLabel.toLowerCase()}. If anything
+                     is still missing, the pre-publish checklist opens instead and the link is created
+                     as soon as you publish from there.
+                   </span>
+                 </div>
+               )}
 
                <fieldset className="space-y-2 mb-4">
                  <legend className="text-xs font-bold text-muted uppercase mb-2">Which review is this?</legend>
@@ -4847,12 +4971,16 @@ const ProjectIMGenerator: React.FC = () => {
                    className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
                  >Cancel</button>
                  <button
-                   onClick={() => { void sendForReview(stage); }}
-                   disabled={sendingForReview}
+                   onClick={() => confirmSendForReview(stage)}
+                   disabled={sendingForReview || isBusy}
                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
                  >
                    <Send size={14} />
-                   {sendingForReview ? 'Creating link…' : `Create ${IM_REVIEW_STAGE_LABELS[stage]} link`}
+                   {sendingForReview
+                     ? 'Creating link…'
+                     : published
+                       ? `Create ${IM_REVIEW_STAGE_LABELS[stage]} link`
+                       : `Publish & create ${IM_REVIEW_STAGE_LABELS[stage]} link`}
                  </button>
                </div>
              </div>
@@ -5371,13 +5499,16 @@ const ProjectIMGenerator: React.FC = () => {
                          label: reviewRound.isOpen
                            ? `${IM_REVIEW_STAGE_LABELS[reviewRound.stage ?? 'draft']} in progress — open panel`
                            : `Send for ${IM_REVIEW_STAGE_LABELS[pendingReviewStage]}`,
-                         hint: !published
-                           ? 'Publish the Full IM first — reviewers read the published online manual.'
-                           : reviewRound.isOpen
-                             ? 'A review round is already open — see the supplier notes so far.'
-                             : `Creates a supplier review link and moves this manual to ${IM_REVIEW_STAGE_LABELS[pendingReviewStage]} on the IM board.`,
+                         // Never gated on a PDF, and no longer gated on a publish either:
+                         // an unpublished manual publishes on the way to the link instead of
+                         // sending the PM off to do it themselves and land in the export dialog.
+                         hint: reviewRound.isOpen
+                           ? 'A review round is already open — see the supplier notes so far.'
+                           : published
+                             ? `Creates a supplier review link and moves this manual to ${IM_REVIEW_STAGE_LABELS[pendingReviewStage]} on the IM board. No PDF needed.`
+                             : `Publishes this manual and creates a supplier review link in one step, and moves it to ${IM_REVIEW_STAGE_LABELS[pendingReviewStage]} on the IM board. No PDF needed.`,
                          onClick: reviewRound.isOpen ? () => setActivePanel('comments') : openSendReview,
-                         disabled: !published || sendingForReview,
+                         disabled: sendingForReview || isBusy,
                        },
                      ] }]}
                    />
@@ -5515,9 +5646,9 @@ const ProjectIMGenerator: React.FC = () => {
                  onClick:
                    isReviewStep(step) && isCurrent ? () => setActivePanel('comments')
                    : step === 'done' && !locked && instance ? () => setShowFinalizeConfirm(true)
-                   : step === 'draft_review' && !isCurrent && !locked && published && !reviewRound.isOpen && pendingReviewStage === 'draft'
+                   : step === 'draft_review' && !isCurrent && !locked && !reviewRound.isOpen && pendingReviewStage === 'draft'
                      ? openSendReview
-                   : step === 'final_review' && !isCurrent && !locked && published && !reviewRound.isOpen && pendingReviewStage === 'final'
+                   : step === 'final_review' && !isCurrent && !locked && !reviewRound.isOpen && pendingReviewStage === 'final'
                      ? openSendReview
                    : undefined,
                };
@@ -6264,8 +6395,10 @@ const ProjectIMGenerator: React.FC = () => {
                      armed={publishArmed}
                      onPublish={() => { setActivePanel(null); setPublishArmed(false); handleGenerate(); }}
                      // Disarmed rather than closed: "not yet" means "let me fix these first",
-                     // and the list is what they need in order to do that.
-                     onCancelPublish={() => setPublishArmed(false)}
+                     // and the list is what they need in order to do that. Backing out also
+                     // drops any "and then send it for review" the PM started with, so it
+                     // cannot surface on a publish they run for some other reason later.
+                     onCancelPublish={() => { pendingSendStageRef.current = null; setPublishArmed(false); }}
                    />
                )}
 
@@ -6273,7 +6406,12 @@ const ProjectIMGenerator: React.FC = () => {
                    <ReviewCommentsPanel
                      groups={reviewGroups}
                      counts={reviewCounts}
-                     reviewers={reviewShares.map(sh => sh.submittedBy || sh.label || 'a supplier')}
+                     links={reviewLinks}
+                     linkUrl={(l) => getIMReviewUrl(l.token)}
+                     stageLabel={(stage) => IM_REVIEW_STAGE_LABELS[stage]}
+                     onRevokeLink={(l) => { void revokeReviewLink(l); }}
+                     revokingLinkId={revokingShareId}
+                     onSendLink={locked ? undefined : openSendReview}
                      submitted={reviewRound.isSubmitted}
                      stale={reviewRound.isStale}
                      onClose={() => { setActivePanel(null); setQuoteHighlight(null); }}

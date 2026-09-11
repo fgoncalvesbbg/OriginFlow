@@ -26,24 +26,46 @@
  * Attached images open full size in a new tab rather than in a lightbox: the PM's next move is
  * usually to put the screenshot beside the editor, which a tab allows and a modal does not.
  *
- * The panel holds no business rules: groups arrive grouped (review-comments.utils.ts) and every
- * write goes back out through a callback.
+ * THE LINKS COME FIRST, ABOVE THE NOTES. An empty panel used to be ambiguous in the worst
+ * possible way: a supplier who has read the manual and found nothing wrong looked exactly
+ * like a supplier who never received the link — and since OriginFlow sends no email, the
+ * second is the likelier of the two. The link list answers that from the access log before
+ * the PM reads a single note.
+ *
+ * The panel holds no business rules: groups arrive grouped (review-comments.utils.ts), link
+ * status is derived by `reviewLinkStatusOf`, and every write goes back out through a callback.
  */
 
 import React from 'react';
 import {
-  ChevronsRight, ChevronRight, CheckCircle, MessageSquare, Undo2, Ban, Check, AlertTriangle,
+  ChevronsRight, ChevronRight, CheckCircle, MessageSquare, Undo2, Ban, Check, AlertTriangle, Send,
 } from 'lucide-react';
 import { reviewImageUrl } from '../../../services';
 import type { IMReviewComment, IMReviewCommentStatus } from '../../../services';
+import { summarizeReviewLinks } from '../../../services/review';
+import { ReviewLinkList, type ReviewLinkRef } from '../../../components/review/ReviewLinkList';
 import type { ReviewCommentGroup, ReviewCommentCounts } from './review-comments.utils';
 import { formatReviewStamp, reviewStampTitle } from './review-comments.utils';
 
 interface ReviewCommentsPanelProps {
   groups: ReviewCommentGroup[];
   counts: ReviewCommentCounts;
-  /** Names on the outstanding review links, for the header line. */
-  reviewers: string[];
+  /**
+   * Every review link ever minted for this manual, revoked ones included, newest first.
+   * This is the round's delivery record, not its state — `reviewRoundStateOf` still reads
+   * the live links only.
+   */
+  links: readonly ReviewLinkRef[];
+  /** Public review URL for a link. */
+  linkUrl: (link: ReviewLinkRef) => string;
+  /** Human name for a review stage, so the list can say which pass a link was. */
+  stageLabel: (stage: 'draft' | 'final') => string;
+  /** Revoke a link — the supplier loses access immediately. */
+  onRevokeLink: (link: ReviewLinkRef) => void;
+  /** The link currently being revoked, if any. */
+  revokingLinkId: string | null;
+  /** Mint another link for this round — a second supplier, or a replacement for a dead one. */
+  onSendLink?: () => void;
   /** True once every outstanding reviewer has pressed "Submit review". */
   submitted: boolean;
   /** True when the manual has been republished since the notes were written. */
@@ -60,8 +82,8 @@ interface ReviewCommentsPanelProps {
 }
 
 export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
-  groups, counts, reviewers, submitted, stale, onClose,
-  onJump, onSetStatus, activeCommentId, busyCommentId,
+  groups, counts, links, linkUrl, stageLabel, onRevokeLink, revokingLinkId, onSendLink,
+  submitted, stale, onClose, onJump, onSetStatus, activeCommentId, busyCommentId,
 }) => {
   // No collapsed rendering of its own: EditorSideRail is the collapsed state for every
   // editor panel, and it keeps this panel's open count on screen while it is shut.
@@ -87,12 +109,36 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        {reviewers.length > 0 && (
-          <p className="text-[11px] text-muted">
-            Sent to {reviewers.join(', ')}.{' '}
-            {submitted ? 'Review submitted.' : 'Still open — more notes may arrive.'}
+        {/* Links sent, and what became of each — read before the notes, because "no notes"
+            and "never opened" are the same empty panel otherwise. */}
+        <section>
+          <div className="flex items-center gap-2 mb-1.5">
+            <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide flex-1">
+              Links sent{links.length > 0 ? ` (${links.length})` : ''}
+            </h4>
+            {onSendLink && (
+              <button
+                type="button"
+                onClick={onSendLink}
+                title="Create a supplier review link for this manual — no PDF is rendered"
+                className="flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+              ><Send size={11} /> {links.length === 0 ? 'Send for review' : 'Send another'}</button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted mb-1.5">
+            {summarizeReviewLinks(links)}{' '}
+            {links.length > 0 && (submitted ? 'Review submitted.' : 'Still open — more notes may arrive.')}
           </p>
-        )}
+          <ReviewLinkList
+            links={links}
+            urlOf={linkUrl}
+            stageLabel={stageLabel}
+            onRevoke={onRevokeLink}
+            revokingId={revokingLinkId}
+            dense
+            emptyLabel="No review link has been sent for this manual yet."
+          />
+        </section>
 
         {/* Republished since the notes went out: the quoted wording may no longer exist. */}
         {stale && (
@@ -114,7 +160,9 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
 
         {counts.total === 0 && (
           <p className="text-xs text-gray-400 text-center py-6">
-            Send a review link from the Review step to collect supplier feedback here.
+            {links.length === 0
+              ? 'Send a review link from the Review step to collect supplier feedback here.'
+              : 'No notes yet — they appear here as the reviewers leave them.'}
           </p>
         )}
 

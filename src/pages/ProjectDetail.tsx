@@ -39,6 +39,8 @@ import {
   getProjectIMStaleReasons,
   getPrintRenders,
   getPublishHistory,
+  getIMShares,
+  getIMReviewUrl,
   getProductionUpdates,
   saveProductionUpdate,
   createAttributeRequest,
@@ -56,6 +58,9 @@ import {
   lookupJiraIssue
 } from '../services';
 import { getAttributesForCategory, generateUUID } from '../utils';
+import { ReviewLinkList, type ReviewLinkRef } from '../components/review/ReviewLinkList';
+import { summarizeReviewLinks } from '../services/review';
+import { IM_REVIEW_STAGE_LABELS } from '../types';
 import {
   Project, ProjectStep, ProjectDocument, Supplier, StepStatus, DocStatus, ResponsibleParty,
   ComplianceRequest, CategoryL3, User, ProjectOverallStatus, ProjectIM, IMTemplate, ProductionUpdate, ProductionDelayReason,
@@ -84,6 +89,22 @@ import ProjectDesignSpecPanel from './design/ProjectDesignSpecPanel';
 // language subset.
 const PRINTED_IM_LABEL = 'Printed IM';
 const WARNING_LEAFLET_LABEL = 'Warning Leaflet';
+
+/** Project an IM share row onto the shape the shared review-link list renders. */
+const toReviewLink = (sh: import('../services').IMShare): ReviewLinkRef => ({
+  id: sh.id,
+  token: sh.token,
+  label: sh.label,
+  createdAt: sh.createdAt,
+  createdBy: sh.createdBy,
+  version: sh.manualVersion,
+  stage: sh.reviewStage,
+  revokedAt: sh.revokedAt,
+  expiresAt: sh.expiresAt,
+  submittedAt: sh.submittedAt,
+  lastUsedAt: sh.lastUsedAt,
+  useCount: sh.useCount,
+});
 
 // --- Internal Components ---
 
@@ -148,6 +169,14 @@ const ProjectDetail: React.FC = () => {
   // Publish events (digital JSON artifact), newest first — who published which languages, when.
   const [imPublishHistory, setImPublishHistory] = useState<import('../services').PublishHistoryEvent[]>([]);
   const [leafletPublishHistory, setLeafletPublishHistory] = useState<import('../services').PublishHistoryEvent[]>([]);
+  // Supplier review links per document type, revoked ones included, newest first.
+  //
+  // Read-only here BY DESIGN. The project page is where someone who is not the PM asks
+  // whether a round is moving, and the answer — sent / opened / submitted / revoked — is
+  // the whole point; minting and revoking stay in the generator, where the person doing it
+  // can see what the supplier would be reading.
+  const [imReviewLinks, setImReviewLinks] = useState<ReviewLinkRef[]>([]);
+  const [leafletReviewLinks, setLeafletReviewLinks] = useState<ReviewLinkRef[]>([]);
 
   // Manufacturing State
   const [productionUpdates, setProductionUpdates] = useState<ProductionUpdate[]>([]);
@@ -356,6 +385,21 @@ const ProjectDetail: React.FC = () => {
     return () => { active = false; };
   }, [id, projectLeaflet?.status, projectLeaflet?.updatedAt]);
 
+  // Review links for both manuals. Keyed on the same inputs as the publish histories above,
+  // so a republish (which is what stales a round) refreshes them too. Degrades to an empty
+  // list: a failed read must not take the IM tab down with it.
+  useEffect(() => {
+    let active = true;
+    if (!id) { setImReviewLinks([]); setLeafletReviewLinks([]); return; }
+    const load = (type: 'im' | 'warning_leaflet', set: (l: ReviewLinkRef[]) => void) =>
+      getIMShares(id, type, 'review', { includeRevoked: true })
+        .then(shares => { if (active) set(shares.map(toReviewLink)); })
+        .catch(e => { console.error(`[ProjectDetail] loading ${type} review links failed:`, e); if (active) set([]); });
+    void load('im', setImReviewLinks);
+    void load('warning_leaflet', setLeafletReviewLinks);
+    return () => { active = false; };
+  }, [id, projectIM?.updatedAt, projectLeaflet?.updatedAt]);
+
   const staleSummary = (reasons: import('../services').StaleReason[]) => {
     const blocks = reasons.filter(r => r.type === 'block').map(r => r.label);
     const others = reasons.filter(r => r.type !== 'block').map(r => r.label);
@@ -492,6 +536,44 @@ const ProjectDetail: React.FC = () => {
       </div>
     );
   };
+
+  /**
+   * Supplier review links for one manual, and what became of each.
+   *
+   * Rendered even when the list is empty — "nobody has been sent this yet" is an answer
+   * somebody comes to this tab for, and a card that appears only once a link exists cannot
+   * give it. The card is read-only; the generator is where links are minted and revoked.
+   */
+  const renderReviewLinks = (
+    links: ReviewLinkRef[],
+    docLabel: string,
+    generatorPath: string,
+  ) => (
+    <div className="mt-6 bg-white p-6 rounded-xl border border-gray-200 shadow">
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h4 className="text-xs font-bold text-muted uppercase flex items-center gap-2">
+          <LinkIcon size={14} /> Supplier review links{links.length > 0 ? ` (${links.length})` : ''}
+        </h4>
+        <Link
+          to={generatorPath}
+          className="shrink-0 text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+        >
+          {links.length === 0 ? 'Send for review' : 'Manage'} <ArrowRight size={12} />
+        </Link>
+      </div>
+      <p className="text-xs text-muted mb-3">
+        {summarizeReviewLinks(links)} Reviewers read the {docLabel.toLowerCase()} online — these
+        links carry no PDF. OriginFlow sends no email, so a link that was never opened may simply
+        never have been passed on.
+      </p>
+      <ReviewLinkList
+        links={links}
+        urlOf={(l) => getIMReviewUrl(l.token)}
+        stageLabel={(stage) => IM_REVIEW_STAGE_LABELS[stage]}
+        emptyLabel={`No supplier review link has been sent for this ${docLabel.toLowerCase()} yet.`}
+      />
+    </div>
+  );
 
   // The Printed IM — not a separate document: it's the Digital IM's own manual (projectIM),
   // exported for a project-chosen SUBSET of its languages, to physically ship with the
@@ -2589,6 +2671,8 @@ const ProjectDetail: React.FC = () => {
                </div>
             )}
 
+            {renderReviewLinks(imReviewLinks, 'Instruction Manual', `/project/${project.id}/im-generator`)}
+
             {renderPublishHistory(imPublishHistory, 'indigo')}
 
             {renderPrintTimeline(imRenders, 'indigo')}
@@ -2642,6 +2726,8 @@ const ProjectDetail: React.FC = () => {
                   </div>
                </div>
             )}
+
+            {renderReviewLinks(leafletReviewLinks, 'Warning Leaflet', `/project/${project.id}/im-generator/warning_leaflet`)}
 
             {renderPublishHistory(leafletPublishHistory, 'amber')}
 

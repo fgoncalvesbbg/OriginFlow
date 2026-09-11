@@ -103,17 +103,23 @@ export const isShareExpired = (share: IMShare): boolean =>
   !!share.expiresAt && new Date(share.expiresAt).getTime() <= Date.now();
 
 /**
- * Active (non-revoked) share links for a manual, most recent first.
+ * Share links for a manual, most recent first. Active (non-revoked) only by default.
  *
  * `mode` is an optional filter: omit it to list both kinds (the Viewer tab shows one table),
  * pass one to list just read-only links or just review links.
+ *
+ * `includeRevoked` returns the full history instead. Only the surfaces that ANSWER "what
+ * was sent to suppliers and what happened to it" pass it — `reviewRoundStateOf` and every
+ * other round derivation must keep the default, because a revoked link is precisely how a
+ * round is ended.
  */
 export const getIMShares = async (
   projectId: string,
   templateType: IMTemplateType = 'im',
   mode?: IMShareMode,
+  opts?: { includeRevoked?: boolean },
 ): Promise<IMShare[]> => {
-  const shares = await getReviewShares(imSubject(projectId, templateType), mode);
+  const shares = await getReviewShares(imSubject(projectId, templateType), mode, opts);
   return shares.map(toIMShare);
 };
 

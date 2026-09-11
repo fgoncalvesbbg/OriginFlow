@@ -48,16 +48,22 @@ export const mapShareRow = (row: any): ReviewShare => ({
 });
 
 /**
- * Active (non-revoked) links for one subject, most recent first.
+ * Links for one subject, most recent first. Active (non-revoked) only by default.
  *
  * `mode` is an optional filter: omit it to list both kinds in one table, pass one to list
  * just read-only links or just review links. `subject.id` narrows to a single version's
  * round — omit it and every round on the subject comes back, which is what the IM wants
  * (it has no per-version rounds) and what a design spec's history view wants.
+ *
+ * `includeRevoked` widens the list to the FULL history of what was sent out. Every
+ * round-state derivation wants the default (a revoked link is not an open round), so this
+ * is opt-in and belongs only to surfaces answering "what did we send this supplier, and
+ * what happened to it" — where a link that was pulled back is part of the answer, not noise.
  */
 export const getReviewShares = async (
   subject: ReviewSubject,
   mode?: ReviewShareMode,
+  opts?: { includeRevoked?: boolean },
 ): Promise<ReviewShare[]> => {
   if (!isLive) return [];
   const rows = await orEmpty(
@@ -66,7 +72,7 @@ export const getReviewShares = async (
         project_id: subject.projectId,
         subject_type: subject.type,
         ...(subject.id ? { subject_id: subject.id } : {}),
-        revoked_at: { op: 'isNull' },
+        ...(opts?.includeRevoked ? {} : { revoked_at: { op: 'isNull' } }),
         mode,
       },
       order: { column: 'created_at', ascending: false },
