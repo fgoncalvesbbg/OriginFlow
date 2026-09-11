@@ -171,3 +171,27 @@
   from = "/api/doc/*"
   to = "/.netlify/functions/doc-registry/:splat"
   status = 200
+
+# ---------------------------------------------------------------------------
+# Supplier IM draft intake (migration 179). One function, five routes:
+#
+#   /requests    supplier credential  open draft slots for their projects
+#   /upload-url  supplier credential  signed PUT at a path the function chooses
+#   /commit      supplier credential  validate the bytes, record, mint Quality's review link
+#   /queue       QM access code       drafts awaiting review, with their tokens
+#   /file        review token | staff session | supplier credential   short-TTL signed GET
+#
+# im_draft_requests/im_draft_uploads are RLS-scoped to can_see_project and the `im-drafts`
+# bucket has ZERO storage policies, so this function is the ONLY way in — there is no
+# client-side Supabase query against either table anywhere in src/. It reads SUPABASE_URL
+# and SUPABASE_SERVICE_ROLE_KEY from the server environment (already provisioned above); no
+# new secret is needed.
+#
+# The QM access code is checked by public.im_draft_check_code, which is granted to
+# service_role ONLY — PostgREST with the anon key cannot reach it, so /queue is the single
+# door and it rate-limits per IP before it asks.
+# ---------------------------------------------------------------------------
+[[redirects]]
+  from = "/api/im-draft/*"
+  to = "/.netlify/functions/im-draft-portal/:splat"
+  status = 200

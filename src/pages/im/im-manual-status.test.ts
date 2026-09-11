@@ -3,8 +3,10 @@ import {
   MANUAL_STATUS_META,
   MANUAL_STATUS_ORDER,
   PRINTED_STATUS_META,
+  draftStepOf,
   groupByStatus,
   hasBeenReviewed,
+  isDraftStep,
   isInReview,
   isReviewStep,
   manualFlagsOf,
@@ -15,6 +17,7 @@ import {
   reviewStepClasses,
   statusClasses,
   statusLabel,
+  type DraftStatusInput,
   type ManualStatus,
   type PrintedStatus,
 } from './im-manual-status';
@@ -343,14 +346,92 @@ describe('workflow metadata', () => {
     expect([...MANUAL_STATUS_ORDER].sort()).toEqual(keys.sort());
   });
 
-  it('lays the seven business steps out in the order the business runs them', () => {
+  it('lays the ten business steps out in the order the business runs them', () => {
     expect(MANUAL_STATUS_ORDER.filter(s => s !== 'unknown')).toEqual([
+      'draft_requested', 'draft_qm_review', 'draft_ready',
       'backlog', 'in_progress', 'draft_review', 'adjust_im', 'final_review', 'done', 'republish_needed',
     ]);
   });
 
-  it('marks exactly the two review steps as waiting on someone else', () => {
+  it('marks every step where the ball is in someone else\'s court as waiting', () => {
     const waiting = MANUAL_STATUS_ORDER.filter(s => MANUAL_STATUS_META[s].waiting);
-    expect(waiting).toEqual(['draft_review', 'final_review']);
+    // The two supplier rounds on the manual, plus the two draft-intake steps: one waits on
+    // the supplier to upload, one waits on Quality to mark up. `draft_ready` is NOT here —
+    // the draft is done and the ball is ours.
+    expect(waiting).toEqual([
+      'draft_requested', 'draft_qm_review', 'draft_review', 'final_review',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The draft intake steps (migration 179).
+// ---------------------------------------------------------------------------
+
+describe('draftStepOf', () => {
+  const d = (over: Partial<DraftStatusInput> = {}): DraftStatusInput => ({
+    hasOpenRequest: false, hasUpload: false, draftSubmitted: false, ...over,
+  });
+
+  it('is plain Backlog when no draft was ever requested', () => {
+    expect(draftStepOf(d())).toBe('backlog');
+  });
+
+  it('is Backlog — not a parked draft step — when the request was cancelled', () => {
+    // The whole point of the hasOpenRequest gate: a cancelled request must not leave the
+    // project sitting in a column waiting on an upload nobody intends to make.
+    expect(draftStepOf(d({ hasOpenRequest: false, hasUpload: true }))).toBe('backlog');
+  });
+
+  it('waits on the supplier once a draft is requested', () => {
+    expect(draftStepOf(d({ hasOpenRequest: true }))).toBe('draft_requested');
+  });
+
+  it('moves to Quality once the supplier has uploaded', () => {
+    expect(draftStepOf(d({ hasOpenRequest: true, hasUpload: true }))).toBe('draft_qm_review');
+  });
+
+  it('is Draft Ready once Quality submits', () => {
+    expect(draftStepOf(d({ hasOpenRequest: true, hasUpload: true, draftSubmitted: true })))
+      .toBe('draft_ready');
+  });
+
+  it('keeps a submitted draft available even if the request is later cancelled', () => {
+    // Cancelling says "no further draft is coming". It cannot un-write notes Quality has
+    // already made, and the writer's brief must not vanish from under them.
+    expect(draftStepOf(d({ hasOpenRequest: false, hasUpload: true, draftSubmitted: true })))
+      .toBe('draft_ready');
+  });
+});
+
+describe('the draft steps are not manual steps', () => {
+  it('manualStatusOf never returns a draft step, for any input', () => {
+    // The load-bearing invariant. A manual that exists is always further along than the
+    // draft that preceded it, so the draft steps belong to projects with no manual at all.
+    // If this ever fails, a started manual can be dragged back behind Backlog.
+    const inputs = [
+      im('draft'), im('generated'), im('draft', true), im('generated', true),
+      reviewed(), reviewed({ reviewStage: 'final' }), reviewed({ status: 'draft' }),
+      reviewed({ isFinalized: true }), { ...reviewed(), hasLiveReviewLink: false },
+    ];
+    for (const input of inputs) {
+      for (const stale of [true, false, null] as const) {
+        expect(isDraftStep(manualStatusOf(input, stale))).toBe(false);
+      }
+    }
+  });
+
+  it('classifies exactly the three intake steps as draft steps', () => {
+    expect(MANUAL_STATUS_ORDER.filter(isDraftStep)).toEqual([
+      'draft_requested', 'draft_qm_review', 'draft_ready',
+    ]);
+  });
+
+  it('does not count the QM markup round as a supplier review step', () => {
+    // `draft_qm_review` and `draft_review` are different things wearing similar names: one
+    // is Quality marking up the supplier's PDF, the other is the supplier reading our
+    // finished manual. isReviewStep drives the green-when-closed tone and must not blur them.
+    expect(isReviewStep('draft_qm_review' as ManualStatus)).toBe(false);
+    expect(MANUAL_STATUS_ORDER.filter(isReviewStep)).toEqual(['draft_review', 'final_review']);
   });
 });

@@ -15,12 +15,14 @@ import { distinctL1, distinctL2, filterCategories } from '../../utils/category-t
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
   FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X,
-  List, Kanban, Scale, ShieldCheck, Circle, Pencil, Send
+  List, Kanban, Scale, ShieldCheck, Circle, Pencil, Send, Upload, ClipboardCheck, FileCheck2
 } from 'lucide-react';
 import {
   MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf,
-  isReviewStep, manualFlagsOf, statusClasses, statusLabel, type ManualStatus,
+  isReviewStep, isDraftStep, manualFlagsOf, statusClasses, statusLabel,
+  type ManualStatus, type DraftStep,
 } from './im-manual-status';
+import { getDraftStepsByProject } from '../../services/im/im-draft.service';
 import { IMViewerTab } from './IMViewerTab';
 import { LeafletCoverageTab } from './LeafletCoverageTab';
 import { ImImportDialog } from './ImImportDialog';
@@ -52,6 +54,9 @@ const fmtDate = (iso: string) =>
  * two review steps share one icon — they are the same kind of wait — and differ by label.
  */
 const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
+  draft_requested: <Upload size={10} />,
+  draft_qm_review: <ClipboardCheck size={10} />,
+  draft_ready: <FileCheck2 size={10} />,
   backlog: <Circle size={10} />,
   in_progress: <Pencil size={10} />,
   draft_review: <Eye size={10} />,
@@ -74,11 +79,17 @@ interface AllManualsTabProps {
   ims: ProjectIMSummary[];
   /** Projects with nothing started — the workflow's Backlog step (see getBacklogProjects). */
   backlog: BacklogProject[];
+  /**
+   * The supplier-draft step per project id (migration 179), for the projects that have a
+   * draft slot. A project missing from this map has no draft and stays in plain Backlog —
+   * which is what stops every in-house product parking in Supplier Draft Upload.
+   */
+  draftSteps: Map<string, { step: DraftStep; requestedAt: string | null; noteCount: number }>;
   categories: CategoryL3[];
   loading: boolean;
 }
 
-const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories, loading }) => {
+const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps, categories, loading }) => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCat, setFilterCat] = useState<string>('all');
@@ -212,8 +223,16 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
    * never disagrees with the rest of the board. They carry no template, no version and no
    * status of their own — their step is Backlog by definition.
    */
+  /**
+   * Which of the four pre-manual steps a backlog project is in. Defaults to `backlog` for a
+   * project with no draft slot — the map only carries projects that have one.
+   */
+  const stepOfBacklog = (p: BacklogProject): DraftStep =>
+    draftSteps.get(p.projectId)?.step ?? 'backlog';
+
   const filteredBacklog = backlog.filter(p => {
-    if (filterStatus !== 'all' && filterStatus !== 'backlog') return false;
+    // The status filter now has four values that can match a backlog project, not one.
+    if (filterStatus !== 'all' && filterStatus !== stepOfBacklog(p)) return false;
     if (filterCat !== 'all' && p.categoryId !== filterCat) return false;
     if (filterProject) {
       const pq = filterProject.toLowerCase();
@@ -375,7 +394,9 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
         <p className="text-xs text-gray-400">
           {filtered.length} manual{filtered.length !== 1 ? 's' : ''}
           {filtered.length !== ims.length && ` (${ims.length} total)`}
-          {filteredBacklog.length > 0 && ` · ${filteredBacklog.length} project${filteredBacklog.length !== 1 ? 's' : ''} in backlog`}
+          {/* "not started" rather than "in backlog": this count now spans the four
+              pre-manual steps, and three of them are not Backlog. */}
+          {filteredBacklog.length > 0 && ` · ${filteredBacklog.length} project${filteredBacklog.length !== 1 ? 's' : ''} not started`}
         </p>
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2">
@@ -409,20 +430,30 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
       {/* Backlog, table view — projects with nothing started. A separate table because these
           rows have no template, no version and no status of their own; forcing them into the
           manuals table would mean six empty cells apiece. */}
-      {viewMode === 'table' && filteredBacklog.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden mb-4">
+      {viewMode === 'table' && filteredBacklog.length > 0 && (['draft_requested', 'draft_qm_review', 'draft_ready', 'backlog'] as const)
+        .map(step => ({ step, rows: filteredBacklog.filter(p => stepOfBacklog(p) === step) }))
+        .filter(g => g.rows.length > 0)
+        .map(({ step, rows }) => (
+        // One table per pre-manual step, in workflow order. Grouping here rather than
+        // labelling every row "Backlog" is what keeps the table and the board telling the
+        // same story — two screens describing the same project with different words is the
+        // confusion im-manual-status.ts exists to prevent.
+        <div key={step} className="bg-white rounded-xl border border-gray-200 shadow overflow-hidden mb-4">
           <div className="px-4 py-2 border-b border-gray-100 bg-light/80 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${MANUAL_STATUS_META.backlog.classes}`}>
-              {STATUS_ICON.backlog} {MANUAL_STATUS_META.backlog.label}
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${MANUAL_STATUS_META[step].classes}`}>
+              {STATUS_ICON[step]} {MANUAL_STATUS_META[step].label}
             </span>
             <span className="text-xs font-semibold text-gray-700">
-              {filteredBacklog.length} project{filteredBacklog.length !== 1 ? 's' : ''}
+              {rows.length} project{rows.length !== 1 ? 's' : ''}
             </span>
-            <span className="text-[11px] text-gray-500">{MANUAL_STATUS_META.backlog.hint}</span>
+            {MANUAL_STATUS_META[step].waiting && (
+              <span className="text-[9px] uppercase tracking-wide text-gray-400 font-semibold">waiting</span>
+            )}
+            <span className="text-[11px] text-gray-500">{MANUAL_STATUS_META[step].hint}</span>
           </div>
           <table className="w-full text-sm">
             <tbody className="divide-y divide-gray-50">
-              {filteredBacklog.map(p => (
+              {rows.map(p => (
                 <tr key={p.projectId} className="hover:bg-light/60 transition-colors">
                   <td className="px-4 py-3 font-semibold text-gray-800">{p.projectName}</td>
                   <td className="px-4 py-3">
@@ -457,7 +488,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
             </tbody>
           </table>
         </div>
-      )}
+      ))}
 
       {/* Table */}
       {viewMode === 'table' && filtered.length > 0 && (
@@ -675,8 +706,19 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
           status => status !== 'unknown' || (byStatus.get(status)?.length ?? 0) > 0,
         );
 
+        // A backlog project lands in ONE of the four pre-manual columns. Bucket once, so a
+        // column's count and its cards cannot disagree.
+        const backlogByStep = new Map<DraftStep, BacklogProject[]>();
+        for (const p of filteredBacklog) {
+          const s = stepOfBacklog(p);
+          if (!backlogByStep.has(s)) backlogByStep.set(s, []);
+          backlogByStep.get(s)!.push(p);
+        }
+
         const columnCount = (status: ManualStatus) =>
-          status === 'backlog' ? filteredBacklog.length : (byStatus.get(status)?.length ?? 0);
+          isDraftStep(status) || status === 'backlog'
+            ? (backlogByStep.get(status as DraftStep)?.length ?? 0)
+            : (byStatus.get(status)?.length ?? 0);
 
         return (
           <div className="flex gap-3 overflow-x-auto pb-3 items-start">
@@ -702,13 +744,20 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
                       </div>
                     )}
 
-                    {/* Backlog holds projects, not manuals — there is no manual to link to
-                        yet, so the card offers the one action that exists: start one. */}
-                    {status === 'backlog' && filteredBacklog.map(p => (
+                    {/* The four pre-manual columns hold PROJECTS, not manuals — there is no
+                        manual to link to yet, so the card offers the one action that always
+                        exists: start one. That link is present in all four on purpose. The
+                        draft is a brief, never a gate: a writer can start from Supplier
+                        Draft Upload just as well as from Backlog, and the board must not
+                        imply otherwise by hiding the action. */}
+                    {(isDraftStep(status) || status === 'backlog')
+                      && (backlogByStep.get(status as DraftStep) ?? []).map(p => {
+                      const draft = draftSteps.get(p.projectId);
+                      return (
                       <div key={p.projectId} className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow">
                         <div className="flex items-center gap-1.5 mb-1">
-                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                            <FileText size={9} /> NOT STARTED
+                          <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${MANUAL_STATUS_META[status].classes}`}>
+                            {STATUS_ICON[status]} {MANUAL_STATUS_META[status].label.toUpperCase()}
                           </span>
                           <span className="text-[9px] text-gray-300 ml-auto">{fmtDate(p.createdAt)}</span>
                         </div>
@@ -723,12 +772,24 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, categories,
                           {p.categoryId ? (catMap[p.categoryId] ?? '') : 'No category'}
                           {p.skus.length ? ` · ${p.skus.slice(0, 2).join(', ')}${p.skus.length > 2 ? ` +${p.skus.length - 2}` : ''}` : ''}
                         </div>
+                        {/* Whose turn it is, in words — the column hue says it too, but only
+                            to people who can see colour. */}
+                        {status !== 'backlog' && (
+                          <div className="text-[10px] text-gray-500 mt-1">
+                            {nextActionOf({
+                              status,
+                              draftRequestedAt: draft?.requestedAt ?? null,
+                              draftNoteCount: draft?.noteCount ?? null,
+                            })}
+                          </div>
+                        )}
                         <Link
                           to={`/project/${p.projectId}/im-generator`}
                           className="inline-flex items-center gap-1 text-[10px] underline font-semibold text-indigo-600 hover:text-indigo-800 mt-1"
                         ><Plus size={10} /> Start IM</Link>
                       </div>
-                    ))}
+                      );
+                    })}
 
                     {items.map(im => {
                       const hint = nextAction(im);
@@ -1074,6 +1135,11 @@ const IMDashboard: React.FC = () => {
   // Projects with nothing started — the board's Backlog column. Loaded beside the manuals
   // because the two together are the work queue; one without the other is a partial picture.
   const [backlogProjects, setBacklogProjects] = useState<BacklogProject[]>([]);
+  /** Supplier-draft step per project id (migration 179). Empty until loaded, and empty is
+   *  safe: a project missing from it reads as plain Backlog. */
+  const [draftSteps, setDraftSteps] = useState<
+    Map<string, { step: DraftStep; requestedAt: string | null; noteCount: number }>
+  >(new Map());
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [loadingIMs, setLoadingIMs] = useState(true);
   const [creatingId, setCreatingId] = useState<string | null>(null);
@@ -1138,11 +1204,18 @@ const IMDashboard: React.FC = () => {
       // Settled, not all: a backlog failure must not blank the manuals the PM came here
       // for. An empty Backlog column degrades to "nothing unstarted", which the console
       // records — the manuals half stays truthful either way.
-      const [ims, backlog] = await Promise.allSettled([getAllProjectIMs(), getBacklogProjects()]);
+      const [ims, backlog, drafts] = await Promise.allSettled([
+        getAllProjectIMs(), getBacklogProjects(), getDraftStepsByProject('im'),
+      ]);
       if (ims.status === 'fulfilled') setAllIMs(ims.value);
       else console.error('[IMDashboard] loadIMData manuals failed:', ims.reason);
       if (backlog.status === 'fulfilled') setBacklogProjects(backlog.value);
       else console.error('[IMDashboard] loadIMData backlog projects failed:', backlog.reason);
+      // Settled for the same reason as the others, and the degradation is the honest one:
+      // with no draft data every unstarted project reads as plain Backlog, which is what it
+      // was before this feature. It never invents a draft that is not there.
+      if (drafts.status === 'fulfilled') setDraftSteps(drafts.value);
+      else console.error('[IMDashboard] loadIMData draft steps failed:', drafts.reason);
     } catch (e) {
       console.error('[IMDashboard] loadIMData failed:', e);
     } finally {
@@ -1233,6 +1306,7 @@ const IMDashboard: React.FC = () => {
         <AllManualsTab
           ims={allIMs}
           backlog={backlogProjects}
+          draftSteps={draftSteps}
           categories={categories}
           loading={loadingIMs || loadingTemplates}
         />

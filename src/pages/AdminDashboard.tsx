@@ -26,12 +26,13 @@ import { generateUUID, getAttributesForCategory, parseAttributeCsv } from '../ut
 import type { ParsedAttributeRow } from '../utils';
 import { distinctL1, distinctL2, filterCategories, UNCATEGORISED_LABEL } from '../utils/category-tree.utils';
 import { User, UserRole, Supplier, CategoryL3, CategoryTree, CategoryAttribute, AttributeDataType, AIPrompt, PromptLibraryEntry, TranslationVerbatim } from '../types';
-import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks, ShieldAlert, Lock, Unlock } from 'lucide-react';
+import { Users, Truck, ShieldCheck, Plus, CheckCircle, ChevronUp, ChevronDown, Link as LinkIcon, Edit2, ArrowLeft, Layers, Trash2, SlidersHorizontal, X, RefreshCw, Package, Search, Sparkles, Copy, ExternalLink, BookOpen, Upload, AlertTriangle, Globe, Loader2, Type, Languages, MessageSquarePlus, ListChecks, ShieldAlert, Lock, Unlock, KeyRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { IM_LANGUAGES } from '../config/im-languages';
 import { useRefetchOnFocus } from '../hooks';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
 import PrintSettingsAdminSection from '../components/admin/PrintSettingsAdminSection';
+import DraftIntakeAdminSection from '../components/im/DraftIntakeAdminSection';
 import TranslationMemoryAdmin from '../components/admin/translation-memory/TranslationMemoryAdmin';
 import FeedbackAdminSection from '../components/admin/FeedbackAdminSection';
 import ProjectTemplateAdminSection from '../components/admin/ProjectTemplateAdminSection';
@@ -225,7 +226,7 @@ const AdminDashboard: React.FC = () => {
   // Only a super admin may move the Super Admin flag (migration 154 reverts it for
   // anyone else), so only a super admin is shown the control.
   const viewerIsSuperAdmin = currentUser?.isSuperAdmin === true;
-  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'projectTemplates' | 'prompts' | 'markets' | 'imPrint' | 'translationMemory' | 'feedback'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'suppliers' | 'categories' | 'projects' | 'projectTemplates' | 'prompts' | 'markets' | 'imPrint' | 'draftIntake' | 'translationMemory' | 'feedback'>('users');
   const [refreshing, setRefreshing] = useState(false);
 
   // Core Data
@@ -1879,6 +1880,9 @@ const AdminDashboard: React.FC = () => {
         <button onClick={() => setActiveTab('imPrint')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'imPrint' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Type size={18} /> IM Print
         </button>
+        <button onClick={() => setActiveTab('draftIntake')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'draftIntake' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
+          <KeyRound size={18} /> Draft Intake
+        </button>
         <button onClick={() => setActiveTab('translationMemory')} className={`px-6 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'translationMemory' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Languages size={18} /> Translation Memory
         </button>
@@ -1897,6 +1901,11 @@ const AdminDashboard: React.FC = () => {
 
         {/* IM PRINT TAB — global print typography for the PDF export. */}
         {activeTab === 'imPrint' && <PrintSettingsAdminSection />}
+
+        {/* DRAFT INTAKE TAB — the access code for the quality draft queue (migration 179).
+            Without a code set here that queue is closed, and a quality manager has no way to
+            reach a review link at all: OriginFlow sends no email. */}
+        {activeTab === 'draftIntake' && <DraftIntakeAdminSection />}
 
         {/* TRANSLATION MEMORY TAB — browse, correct and approve the reuse corpus. */}
         {activeTab === 'translationMemory' && <TranslationMemoryAdmin />}

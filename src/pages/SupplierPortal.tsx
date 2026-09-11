@@ -6,6 +6,8 @@ import { getProjectByToken, getProjectSteps, getProjectDocs, uploadFile, uploadA
 import { Project, ProjectStep, ProjectDocument, DocStatus, ResponsibleParty, ProjectAttributeRequest } from '../types';
 import type { SupplierDesignSpecFinal, SupplierDesignSpecRound } from '../types/design-spec.types';
 import { DesignSpecRoundsCard, DesignSpecFinalCard } from '../components/design/SupplierDesignSpecCards';
+import { SupplierIMDraftCard } from '../components/im/SupplierIMDraftCard';
+import { getSupplierDraftRequests, type SupplierDraftRequest } from '../services/im/im-draft.service';
 import { DESIGN_REVIEW_PHASE, DESIGN_FINAL_PHASE, phaseStep } from './supplier-portal-phases';
 import { StatusBadge } from '../components/StatusBadge';
 import SupplierDocumentsPanel from '../components/documents/SupplierDocumentsPanel';
@@ -20,6 +22,8 @@ const SupplierPortal: React.FC = () => {
   const [attrRequests, setAttrRequests] = useState<ProjectAttributeRequest[]>([]);
   const [specRounds, setSpecRounds] = useState<SupplierDesignSpecRound[]>([]);
   const [specFinals, setSpecFinals] = useState<SupplierDesignSpecFinal[]>([]);
+  /** Open draft-manual requests for this project (migration 179). */
+  const [draftRequests, setDraftRequests] = useState<SupplierDraftRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
@@ -58,12 +62,18 @@ const SupplierPortal: React.FC = () => {
 
         // Both design spec reads are token-scoped routines of their own (migration 170), so
         // they join the same single round-trip as everything else this page needs.
-        const [stepsData, docsData, attrReqsData, roundsData, finalsData] = await Promise.all([
+        const [stepsData, docsData, attrReqsData, roundsData, finalsData, draftsData] = await Promise.all([
           getProjectSteps(p.id),
           getProjectDocs(p.id),
           getAttributeRequestsByProjectPublic(token),
           getSupplierDesignSpecRounds({ projectToken: token }),
-          getSupplierDesignSpecFinals({ projectToken: token })
+          getSupplierDesignSpecFinals({ projectToken: token }),
+          // Fails soft: a draft-request outage must not take down the portal the supplier
+          // came here to upload their phase documents into.
+          getSupplierDraftRequests({ projectToken: token }).catch(e => {
+            console.error('[SupplierPortal] draft requests failed:', e);
+            return [] as SupplierDraftRequest[];
+          }),
         ]);
 
         if (!mounted || controller.signal.aborted) return;
@@ -77,6 +87,7 @@ const SupplierPortal: React.FC = () => {
         setAttrRequests(attrReqsData);
         setSpecRounds(roundsData);
         setSpecFinals(finalsData);
+        setDraftRequests(draftsData);
         setLoading(false);
       } catch (err: any) {
         if (!mounted || controller.signal.aborted) return;
@@ -97,6 +108,21 @@ const SupplierPortal: React.FC = () => {
       controller.abort();
     };
   }, [token]);
+
+  /**
+   * Re-read the draft requests after an upload, so the card shows the version that just
+   * landed rather than the state it was rendered with. Only this one list is refetched —
+   * reloading the whole portal would lose any half-filled document forms on the page.
+   */
+  const reloadDraftRequests = async () => {
+    if (!token) return;
+    try {
+      setDraftRequests(await getSupplierDraftRequests({ projectToken: token }));
+    } catch (e) {
+      // The upload itself already succeeded; a stale card is not worth an error banner.
+      console.error('[SupplierPortal] could not refresh draft requests:', e);
+    }
+  };
 
   // Open a document via a short-lived signed URL (the documents bucket is private).
   // Falls back to the stored URL while the bucket is still public.
@@ -201,6 +227,20 @@ const SupplierPortal: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {/* The draft manual (migration 179). Deliberately ABOVE the phase list and not
+            inside it: unlike the design spec blocks, a draft request is not tied to a
+            project phase — it is asked for once, whenever the manual work starts, and the
+            supplier should not have to expand the right phase to find it. */}
+        {draftRequests.length > 0 && (
+          <div className="mb-8">
+            <SupplierIMDraftCard
+              requests={draftRequests}
+              credential={{ projectToken: token! }}
+              onUploaded={reloadDraftRequests}
+            />
+          </div>
+        )}
 
         <div className="space-y-8">
           {steps.map(step => {

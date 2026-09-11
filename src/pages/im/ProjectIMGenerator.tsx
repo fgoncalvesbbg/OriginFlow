@@ -81,6 +81,7 @@ import { OptionalContentPanel, IncludeModeControl, modeOf, type OptionalContentI
 import { BindableField } from './project-im-generator/BindableField';
 import PrintExportDialog from './project-im-generator/PrintExportDialog';
 import PipelineStepper, { type PipelineStep } from './project-im-generator/PipelineStepper';
+import { ProjectIMDraftPanel } from '../../components/im/ProjectIMDraftPanel';
 import type { Regulation, TemplateRegulation } from '../../types';
 import { normalizeIMTemplateMetadata } from '../../utils/im-template-metadata.utils';
 import { usePrintColumn } from './editor/usePrintColumn';
@@ -5661,6 +5662,17 @@ const ProjectIMGenerator: React.FC = () => {
                </>
              );
            })()}
+
+           {/* The supplier's draft and quality's notes on it (migration 179) — the writer's
+               brief. Sits ABOVE the editor because it is what you read before you write, and
+               OUTSIDE the pipeline steppers because it describes a different document: the
+               steppers are about this manual, and the draft is the thing that preceded it.
+               Never gates anything; see the panel's own header note. */}
+           {projectId && <div className="mb-4"><ProjectIMDraftPanel
+             projectId={projectId}
+             templateType={templateType}
+             requestedBy={user?.email ?? null}
+           /></div>}
 
            {locked && (
              <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900">

@@ -20,12 +20,16 @@
 
 /**
  * What is under review. 'im' and 'warning_leaflet' are the two IM template types (they are
- * published separately and reviewed separately); 'design_spec' is a PDF.
+ * published separately and reviewed separately); 'design_spec' and 'im_draft' are PDFs.
+ *
+ * 'im_draft' (migration 179) is the supplier's draft manual, marked up by Quality BEFORE a
+ * writer starts. Note that it is not the same thing as the 'im' subject: that one is our
+ * finished manual going out to the supplier, and the two run in opposite directions.
  *
  * Not a CHECK constraint in the database — house style there is TEXT with a constraint only
  * where a wrong value would corrupt meaning, and this column is written by this file alone.
  */
-export type ReviewSubjectType = 'im' | 'warning_leaflet' | 'design_spec';
+export type ReviewSubjectType = 'im' | 'warning_leaflet' | 'design_spec' | 'im_draft';
 
 /**
  * 'view' = a read-only share link. 'review' = the portal that also collects notes.

@@ -46,6 +46,8 @@ import IMPreview from '../pages/im/IMPreview';
 import IMSharedManual from '../pages/im/IMSharedManual';
 import IMReviewPortal from '../pages/im/IMReviewPortal';
 import DesignSpecReviewPortal from '../pages/design/DesignSpecReviewPortal';
+import IMDraftReviewPortal from '../pages/im/IMDraftReviewPortal';
+import IMDraftQueuePortal from '../pages/im/IMDraftQueuePortal';
 import DesignSpecsDashboard from '../pages/design/DesignSpecsDashboard';
 import RoadmapDashboard from '../pages/roadmap/RoadmapDashboard';
 import IMBlockLibrary from '../pages/im/IMBlockLibrary';
@@ -104,6 +106,13 @@ const AppContent: React.FC = () => {
               getIMReviewUrl and designSpecReviewUrl. */}
           <Route path="/review/im/:token" element={<IMReviewPortal />} />
           <Route path="/review/design-spec/:token" element={<DesignSpecReviewPortal />} />
+          {/* The supplier draft intake (migration 179). The markup round is the same shared
+              shell as the two above, so it gets its own route for the same reason they do.
+              The queue is the odd one out — a FIXED url with no token, because a quality
+              manager has to be able to bookmark it. It is gated by a shared access code
+              checked server-side; see the note in IMDraftQueuePortal. */}
+          <Route path="/review/im-draft/:token" element={<IMDraftReviewPortal />} />
+          <Route path="/im-draft/queue" element={<IMDraftQueuePortal />} />
           <Route path="/attribute-request/:token" element={<SupplierAttributePortal />} />
           <Route path="/attribute-request-batch/:batchToken" element={<SupplierAttributeBatchPortal />} />
 

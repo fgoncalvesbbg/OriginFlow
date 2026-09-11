@@ -175,6 +175,14 @@ export interface FakeSupabaseOptions {
   rpc?: Record<string, (args: Record<string, any>) => { data?: any; error?: any }>;
   /** Signed URL to hand back from storage.createSignedUrl. */
   signedUrl?: string;
+  /**
+   * Stored objects by path, for handlers that READ BYTES BACK after an upload to validate
+   * them (im-draft-portal's /commit checks size and `%PDF-` magic, then deletes and refuses
+   * on failure). Without this, `download` reports "not implemented" and a test cannot tell a
+   * rejected upload from a broken fake. Paths absent here download as missing, which is what
+   * an upload that never arrived looks like.
+   */
+  files?: Record<string, Uint8Array>;
 }
 
 export interface FakeSupabase {
@@ -183,12 +191,18 @@ export interface FakeSupabase {
   signedUrlCalls: { bucket: string; path: string; ttl: number; options?: any }[];
   /** Every insert, so a test can assert the access log was written. */
   inserts: { table: string; rows: Row[] }[];
+  /** Every storage object removed, so "a rejected upload is deleted" is provable. */
+  removed: { bucket: string; paths: string[] }[];
 }
 
 export const createFakeSupabase = (options: FakeSupabaseOptions): FakeSupabase => {
-  const { db, sessions = {}, rpc = {}, signedUrl = 'https://storage.test/signed?token=abc' } = options;
+  const {
+    db, sessions = {}, rpc = {}, files = {},
+    signedUrl = 'https://storage.test/signed?token=abc',
+  } = options;
   const signedUrlCalls: FakeSupabase['signedUrlCalls'] = [];
   const inserts: FakeSupabase['inserts'] = [];
+  const removed: FakeSupabase['removed'] = [];
 
   const table = (name: string): Row[] => (db[name] ||= []);
 
@@ -264,12 +278,21 @@ export const createFakeSupabase = (options: FakeSupabaseOptions): FakeSupabase =
           data: { signedUrl: `${signedUrl}&path=${path}`, token: 'upload-token' },
           error: null,
         }),
-        remove: async () => ({ data: null, error: null }),
+        remove: async (paths: string[]) => {
+          removed.push({ bucket, paths });
+          for (const p of paths) delete files[p];
+          return { data: null, error: null };
+        },
         list: async () => ({ data: [], error: null }),
-        download: async () => ({ data: null, error: { message: 'not implemented' } }),
+        download: async (path: string) => {
+          const bytes = files[path];
+          if (!bytes) return { data: null, error: { message: 'Object not found' } };
+          // Only arrayBuffer() is used by the handlers, so that is all this stands up.
+          return { data: { arrayBuffer: async () => bytes.buffer } as any, error: null };
+        },
       }),
     },
   };
 
-  return { client, signedUrlCalls, inserts };
+  return { client, signedUrlCalls, inserts, removed };
 };

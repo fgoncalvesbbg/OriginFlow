@@ -1,10 +1,15 @@
 /**
  * The IM workflow — one vocabulary for every surface that shows "where is this manual".
  *
+ *   Supplier Draft Upload → Draft Review → Draft Ready →
  *   Backlog → In Progress → In Review (draft) → Re-edit → In Review (final) → Final
  *   → Republish Needed
  *
- * These seven steps are what the business actually runs, and they are the ONLY step names
+ * The first three are the supplier draft intake (migration 179) and are derived by
+ * `draftStepOf`, NOT by `manualStatusOf` — see the note below. The rest are the manual's own
+ * life and are unchanged.
+ *
+ * These ten steps are what the business actually runs, and they are the ONLY step names
  * the UI is allowed to use: the All Manuals board columns, the table's group headings, the
  * generator's header chip and the generator's pipeline stepper all read from here. Two
  * screens describing the same manual with different words is the confusion this module
@@ -42,6 +47,18 @@
  * vocabulary anyway so the column, its label and its position are defined in exactly one
  * place like every other step. Creating either document as a draft is what empties it.
  *
+ * THE SAME IS TRUE OF THE THREE DRAFT STEPS, and more so. `draft_requested`,
+ * `draft_qm_review` and `draft_ready` describe a supplier's draft PDF, not a manual — a
+ * project in any of them has no project_ims row for `manualStatusOf` to read. They are
+ * refinements of that same synthesised Backlog, derived by `draftStepOf` from the draft
+ * tables (migration 179), and `manualStatusOf` returns none of them — there is a test
+ * asserting exactly that.
+ *
+ * This is what makes the draft a pre-step rather than a gate. The draft NEVER blocks
+ * authoring: the moment a manual exists it is the stronger fact and the card moves to
+ * In Progress, whatever the draft is doing. A project cannot be stuck waiting on a supplier
+ * who never uploads, because a writer was never stopped from starting.
+ *
  * Three STORED KEYS predate the business names above and were deliberately left alone, so
  * that renaming a column never has to touch a switch statement:
  *
@@ -61,6 +78,9 @@
 import type { IMReviewStage } from '../../types';
 
 export type ManualStatus =
+  | 'draft_requested'
+  | 'draft_qm_review'
+  | 'draft_ready'
   | 'backlog'
   | 'in_progress'
   | 'draft_review'
@@ -125,6 +145,57 @@ export const hasBeenReviewed = (im: Pick<ManualStatusInput, 'reviewRequestedAt'>
 /** The two steps a supplier holds the ball in. */
 export const isReviewStep = (status: ManualStatus): boolean =>
   status === 'draft_review' || status === 'final_review';
+
+// ---------------------------------------------------------------------------
+// The draft intake steps — migration 179.
+// ---------------------------------------------------------------------------
+
+/**
+ * The four steps a project can be in BEFORE a manual exists. Three are new (the supplier
+ * draft intake); `backlog` is the one that was always here.
+ *
+ * These are refinements of the synthesised Backlog, NOT states of a manual, and that is the
+ * whole reason `manualStatusOf` does not know about them. The draft never blocks authoring:
+ * the moment a project_ims row exists the card is a manual and `manualStatusOf` decides,
+ * exactly as before. A project can therefore be in Draft Review and have a writer already
+ * working — the writer's card simply wins, because a started manual is the stronger fact.
+ */
+export type DraftStep = Extract<
+  ManualStatus,
+  'draft_requested' | 'draft_qm_review' | 'draft_ready' | 'backlog'
+>;
+
+/** The facts `draftStepOf` needs. Structural, so tests need not build a whole project. */
+export interface DraftStatusInput {
+  /** A live im_draft_requests row — one that exists and is not cancelled. */
+  hasOpenRequest: boolean;
+  /** At least one im_draft_uploads row against that request. */
+  hasUpload: boolean;
+  /** Quality pressed Submit on the review round for the LATEST upload. */
+  draftSubmitted: boolean;
+}
+
+/**
+ * Which pre-manual step a project sits in, strongest claim first.
+ *
+ * `draft_ready` is tested before the request is even looked at: once Quality has submitted,
+ * the brief exists and stays available to the writer whether or not someone later cancels
+ * the request. Cancelling is how you say "no draft is coming"; it cannot un-write notes that
+ * have already been made.
+ *
+ * The `hasOpenRequest` gate is what stops projects parking. Without it every in-house
+ * product and every draft that arrives by email would sit in Supplier Draft Upload forever,
+ * waiting on an upload nobody intends to make.
+ */
+export const draftStepOf = (d: DraftStatusInput): DraftStep => {
+  if (d.draftSubmitted) return 'draft_ready';
+  if (!d.hasOpenRequest) return 'backlog';
+  return d.hasUpload ? 'draft_qm_review' : 'draft_requested';
+};
+
+/** True for the steps that describe a draft rather than a manual. */
+export const isDraftStep = (status: ManualStatus): boolean =>
+  status === 'draft_requested' || status === 'draft_qm_review' || status === 'draft_ready';
 
 /**
  * `isStale`: true = out of date, false = up to date, null = THE CHECK FAILED. The null
@@ -241,10 +312,27 @@ export interface ManualStatusMeta {
  * ever has to say which of those five it is.
  */
 export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
+  draft_requested: {
+    label: 'Supplier Draft Upload',
+    classes: 'bg-sky-100 text-sky-700 border-sky-200',
+    hint: 'A draft manual has been requested from the supplier and they have not uploaded it yet. Nothing here blocks a writer — the project can be started at any time.',
+    waiting: true,
+  },
+  draft_qm_review: {
+    label: 'Draft Review',
+    classes: 'bg-sky-100 text-sky-700 border-sky-200',
+    hint: 'The supplier has uploaded a draft and Quality is marking it up. Turns green once Quality submits.',
+    waiting: true,
+  },
+  draft_ready: {
+    label: 'Draft Ready',
+    classes: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    hint: 'Quality has been through the supplier draft and submitted their notes. A writer can pick this up with a brief already waiting.',
+  },
   backlog: {
     label: 'Backlog',
     classes: 'bg-gray-100 text-gray-600 border-gray-200',
-    hint: 'Nothing started on these projects — no IM and no leaflet. Create either one as a draft and the project moves to In Progress.',
+    hint: 'Nothing started on these projects — no IM and no leaflet, and no supplier draft requested. Create either one as a draft and the project moves to In Progress.',
   },
   in_progress: {
     label: 'In Progress',
@@ -294,6 +382,9 @@ export const MANUAL_STATUS_META: Record<ManualStatus, ManualStatusMeta> = {
  * failed, and it appears only while that is true.
  */
 export const MANUAL_STATUS_ORDER: readonly ManualStatus[] = [
+  'draft_requested',
+  'draft_qm_review',
+  'draft_ready',
   'backlog',
   'in_progress',
   'draft_review',
@@ -420,6 +511,13 @@ export interface NextActionInput {
    * loaded (say nothing); null = never printed.
    */
   printedVersion?: number | null;
+  /**
+   * When the supplier draft was requested (im_draft_requests.requested_at). Drives the
+   * "waiting N days" line on Supplier Draft Upload; absent = say it without the age.
+   */
+  draftRequestedAt?: string | null;
+  /** Quality's notes on the ready draft. Null/undefined = count not loaded. */
+  draftNoteCount?: number | null;
 }
 
 /** Days between an ISO instant and now, floored at 0. */
@@ -439,6 +537,23 @@ const notesFragment = (open: number | null | undefined): string | null =>
 
 export const nextActionOf = (im: NextActionInput, now: number = Date.now()): string | null => {
   switch (im.status) {
+    case 'draft_requested':
+      return im.draftRequestedAt
+        ? (() => {
+            const d = daysSince(im.draftRequestedAt!, now);
+            return d === 0
+              ? 'requested today — waiting on the supplier'
+              : `waiting on the supplier — ${d} day${d === 1 ? '' : 's'}`;
+          })()
+        : 'waiting on the supplier to upload the draft';
+    case 'draft_qm_review':
+      return 'with Quality for markup — nothing to do until they submit';
+    case 'draft_ready': {
+      const notes = notesFragment(im.draftNoteCount);
+      return notes
+        ? `quality draft ready · ${notes} — start the IM with it as the brief`
+        : 'quality draft ready — start the IM with it as the brief';
+    }
     case 'backlog':
       return 'nothing started — open the project to create its IM or leaflet';
     case 'in_progress':
