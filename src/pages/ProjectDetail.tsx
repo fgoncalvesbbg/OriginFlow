@@ -5,6 +5,8 @@
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ProjectDraftChecklistRow } from '../components/im/ProjectDraftChecklistRow';
+import { getProjectDraftState, type ProjectDraftState } from '../services/im/im-draft.service';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
@@ -13,6 +15,7 @@ import {
   getProjectById,
   getProjectSteps,
   getProjectDocs,
+  setPhaseDeadline,
   openSignedDocument,
   getSupplierById,
   getSuppliers,
@@ -72,7 +75,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import {
   CheckCircle2, Circle, FileText, Copy, Check, Eye, Upload, Plus, Pencil,
-  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes, FileDown, Loader2
+  Trash2, Calendar, X, ShieldCheck, ChevronRight, ListTodo, History, ChevronDown, ChevronUp, ExternalLink, Lock, Unlock, AlertTriangle, File, GanttChartSquare, Paperclip, BookOpen, Factory, ArrowRight, Clock, AlertCircle, User as UserIcon, RefreshCw, ClipboardList, Send, Link as LinkIcon, Download, Layers, Boxes, FileDown, Loader2, CalendarClock
 } from 'lucide-react';
 // Signed-URL minting bypasses the barrel, matching PrintExportDialog.tsx/ProjectIMGenerator.tsx's
 // own imports of the same helper — im-print is one of the two buckets closed off from
@@ -130,6 +133,8 @@ const NotificationToast: React.FC<{ message: string, type: 'success' | 'error' |
 const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  /** The supplier's draft manual for this project (migrations 179–181), for the checklist row. */
+  const [draftState, setDraftState] = useState<ProjectDraftState | null>(null);
   const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [steps, setSteps] = useState<ProjectStep[]>([]);
@@ -236,6 +241,21 @@ const ProjectDetail: React.FC = () => {
     const requested = searchParams.get('tab') as ProjectTab | null;
     return requested && PROJECT_TABS.includes(requested) ? requested : 'checklist';
   });
+
+  /**
+   * A Re-Edit (migration 182) is a skeletal, IM-only project: it has no phases, no
+   * documents, no supplier and no supplier portal. The tabs that describe those would all
+   * render empty — Checklist silently so, since it maps over `project_steps` with no empty
+   * state — and the Supplier Link button would copy a URL with no token behind it. So they
+   * are hidden rather than shown broken.
+   */
+  const isReEdit = project?.kind === 'reedit';
+
+  // Land a re-edit on its manual, once the project is known. Checklist is the default for a
+  // launch and would be a blank page here.
+  useEffect(() => {
+    if (isReEdit && !searchParams.get('tab')) setActiveTab('im');
+  }, [isReEdit]);
 
   // Attributes tab: track which historical snapshots are expanded
   const [expandedAttrHistoryId, setExpandedAttrHistoryId] = useState<string | null>(null);
@@ -714,7 +734,7 @@ const ProjectDetail: React.FC = () => {
         // Not awaited: the Jira chip fills in on its own, and Atlassian being slow or
         // down must never hold up (or fail) the project page.
         void refreshJira(p.projectId);
-        const [sData, stepsData, docsData, compReqs, cats, imData, leafletData, prodUpdates] = await Promise.all([
+        const [sData, stepsData, docsData, compReqs, cats, imData, leafletData, prodUpdates, draftData] = await Promise.all([
           getSupplierById(p.supplierId).catch(err => {
             console.error('Error loading supplier:', err);
             return null;
@@ -733,7 +753,13 @@ const ProjectDetail: React.FC = () => {
           // "no draft"); here a failure only hides the status card, so degrade to null.
           getProjectIM(p.id).catch(err => { console.error('Error loading project IM:', err); return null; }),
           getProjectIM(p.id, 'warning_leaflet').catch(err => { console.error('Error loading leaflet IM:', err); return null; }),
-          getProductionUpdates(p.id)
+          getProductionUpdates(p.id),
+          // Best-effort: the draft row is information for chasing a supplier, and losing it
+          // must not take the project page down with it.
+          getProjectDraftState(p.id, 'im').catch(err => {
+            console.error('Error loading the supplier draft state:', err);
+            return null;
+          })
         ]);
         setSupplier(sData || null);
         setSteps(stepsData);
@@ -744,6 +770,7 @@ const ProjectDetail: React.FC = () => {
         setProjectIM(imData || null);
         setProjectLeaflet(leafletData || null);
         setProductionUpdates(prodUpdates);
+        setDraftState(draftData);
 
         // The Digital IM's template — best-effort, only needed to derive the Printed IM's
         // language subset for the status card below.
@@ -797,6 +824,28 @@ const ProjectDetail: React.FC = () => {
   const handleStepStatusChange = async (stepId: string, newStatus: StepStatus) => {
     await updateStepStatus(stepId, newStatus);
     setSteps(steps.map(s => s.id === stepId ? { ...s, status: newStatus } : s));
+  };
+
+  /**
+   * Save a phase's due date, then reload the documents.
+   *
+   * The reload is not optional. A database trigger rewrites the deadline of every document
+   * in the phase that has not overridden it, so the rows on screen are stale the moment this
+   * returns — patching only `steps` in local state would leave the phase showing the new
+   * date above a list of documents still showing the old one.
+   */
+  const handlePhaseDeadlineChange = async (stepNumber: number, value: string) => {
+    const deadline = value || null;
+    const previous = steps;
+    setSteps(steps.map(s => s.stepNumber === stepNumber ? { ...s, deadline } : s));
+    try {
+      await setPhaseDeadline(id!, stepNumber, deadline);
+      setDocs(await getProjectDocs(id!));
+    } catch (e) {
+      console.error('[ProjectDetail] could not set the phase due date:', e);
+      setSteps(previous);
+      alert('Could not save the phase due date.');
+    }
   };
 
   const handleDocReview = async (status: DocStatus) => {
@@ -1618,6 +1667,13 @@ const ProjectDetail: React.FC = () => {
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm text-muted font-mono">{project.projectId}</span>
             <StatusBadge status={project.status} type="project" />
+            {/* Says what this project IS, since a re-edit has none of the phases, documents
+                or supplier that otherwise identify a project page at a glance. */}
+            {isReEdit && (
+              <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                Re-Edit
+              </span>
+            )}
             {jiraConfigured && (
               <JiraStatusBadge lookup={jiraLookup} loading={jiraLoading} />
             )}
@@ -1643,23 +1699,30 @@ const ProjectDetail: React.FC = () => {
            >
              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} /> Refresh
            </button>
-           <button onClick={handleCopyLink} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-light">
-              {copied ? <Check size={16} /> : <Copy size={16} />} Supplier Link
-           </button>
+           {/* No supplier, no portal, no token — the button would copy a dead link. */}
+           {!isReEdit && (
+             <button onClick={handleCopyLink} className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-light">
+                {copied ? <Check size={16} /> : <Copy size={16} />} Supplier Link
+             </button>
+           )}
         </div>
       </div>
 
       {/* Tabs Navigation */}
       <div className="flex border-b border-gray-200 mb-6 overflow-x-auto">
+        {!isReEdit && (
         <button onClick={() => setActiveTab('checklist')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'checklist' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <ListTodo size={16} /> Checklist
         </button>
+        )}
         <button onClick={() => setActiveTab('attributes')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'attributes' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <Layers size={16} /> Attributes
         </button>
+        {!isReEdit && (
         <button onClick={() => setActiveTab('documents')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'documents' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <BookOpen size={16} /> Documents
         </button>
+        )}
         <button onClick={() => setActiveTab('compliance')} className={`px-6 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === 'compliance' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-muted hover:text-gray-700'}`}>
           <ShieldCheck size={16} /> Compliance
         </button>
@@ -1698,7 +1761,33 @@ const ProjectDetail: React.FC = () => {
                     </div>
                     <h3 className="font-bold text-gray-800">{step.name}</h3>
                   </div>
-                  <select 
+                  <div className="flex items-center gap-3">
+                    {/* Phase due date (migration 181). Saving it cascades onto every document
+                        in this phase that has not set its own — including the supplier's
+                        draft manual. The cascade runs in the database, so the dashboard's
+                        overdue count and this page can never disagree about it. */}
+                    <label className="flex items-center gap-1.5 text-xs text-muted">
+                      <CalendarClock size={14} className="text-gray-400" />
+                      <span className="whitespace-nowrap">Phase due</span>
+                      <input
+                        type="date"
+                        value={step.deadline ?? ''}
+                        onChange={e => handlePhaseDeadlineChange(step.stepNumber, e.target.value)}
+                        className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white focus:border-indigo-500 focus:ring-indigo-500"
+                        title="Applies to every document in this phase that has not set its own date."
+                      />
+                      {(() => {
+                        const inheriting = allStepDocs.filter(d => !d.deadlineIsCustom).length;
+                        const overridden = allStepDocs.length - inheriting;
+                        return (
+                          <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                            {inheriting} follow{inheriting === 1 ? 's' : ''} it
+                            {overridden > 0 && ` · ${overridden} own date${overridden === 1 ? '' : 's'}`}
+                          </span>
+                        );
+                      })()}
+                    </label>
+                    <select
                     value={step.status}
                     onChange={(e) => handleStepStatusChange(step.id, e.target.value as StepStatus)}
                     className="text-sm border-gray-300 rounded-md shadow focus:border-indigo-500 focus:ring-indigo-500 bg-white px-2 py-1"
@@ -1706,7 +1795,8 @@ const ProjectDetail: React.FC = () => {
                     {Object.values(StepStatus).map(s => (
                       <option key={s} value={s}>{s.replace('_', ' ').toUpperCase()}</option>
                     ))}
-                  </select>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="divide-y divide-slate-100">
@@ -2007,6 +2097,16 @@ const ProjectDetail: React.FC = () => {
                     );
                   })()}
 
+                  {/* The supplier's draft manual, in the phase that asks for it (181). It is
+                      something the supplier owes on a date, so it belongs in the list the PM
+                      chases from — not only on the IM screen. */}
+                  {draftState && draftState.stepNumber === step.stepNumber && (
+                    <ProjectDraftChecklistRow
+                      state={draftState}
+                      onOpen={() => navigate(`/project/${id}/im-generator`)}
+                    />
+                  )}
+
                   {allStepDocs.map(doc => {
                     const isRejected = doc.status === DocStatus.REJECTED;
                     const hasFile = !!doc.fileUrl;
@@ -2027,7 +2127,19 @@ const ProjectDetail: React.FC = () => {
                               </div>
                               <div className="text-xs text-muted mt-0.5 flex items-center gap-2">
                                 <span>{doc.responsibleParty === 'supplier' ? 'Supplier' : 'Internal'}</span>
-                                {doc.deadline && <span className="text-amber-600 flex items-center gap-1">Due: {doc.deadline}</span>}
+                                {doc.deadline && (
+                                  <span className={`flex items-center gap-1 ${
+                                    new Date(doc.deadline) < new Date() && doc.status !== DocStatus.APPROVED
+                                      ? 'text-rose-600 font-semibold' : 'text-amber-600'
+                                  }`}>
+                                    Due: {doc.deadline}
+                                    {/* Which date this is matters when the phase date moves:
+                                        an own date will not follow it. */}
+                                    {!doc.deadlineIsCustom && (
+                                      <span className="text-[10px] text-gray-400 font-normal">(phase)</span>
+                                    )}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>

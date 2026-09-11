@@ -42,6 +42,46 @@ export const getProjectSkus = async (projectId: string): Promise<ProjectSku[]> =
   return rows.map(map);
 };
 
+/** A SKU that exists somewhere in OriginFlow, for pickers that reach across projects. */
+export interface KnownSku {
+  skuNumber: string;
+  skuTitle: string;
+  /** How many projects (launches and re-edits) already carry this SKU number. */
+  occurrences: number;
+}
+
+/**
+ * Every distinct SKU number known to OriginFlow, newest first.
+ *
+ * There is no global SKU catalogue table — `project_skus` IS the SKU universe, one row per
+ * SKU per project. The Re-Edit form needs to pick a SKU that is already live, i.e. one that
+ * exists on some earlier project, so it de-duplicates by number here and copies the number
+ * and title onto rows of its own.
+ */
+export const getKnownSkus = async (): Promise<KnownSku[]> => {
+  if (!isLive) return [];
+  const rows = await orEmpty(
+    db.select<Row>('project_skus', {
+      columns: 'sku_number, sku_title, created_at',
+      order: { column: 'created_at', ascending: false },
+      limit: 5000,
+    }),
+    'getKnownSkus',
+  );
+
+  const byNumber = new Map<string, KnownSku>();
+  for (const r of rows) {
+    const skuNumber = String((r as any).sku_number ?? '').trim();
+    if (!skuNumber) continue;
+    const seen = byNumber.get(skuNumber);
+    if (seen) { seen.occurrences += 1; continue; }
+    // First row wins the title because the read is newest-first — the most recent spelling
+    // of a SKU's name is the one worth showing.
+    byNumber.set(skuNumber, { skuNumber, skuTitle: String((r as any).sku_title ?? ''), occurrences: 1 });
+  }
+  return [...byNumber.values()];
+};
+
 export const createProjectSku = async (
   projectId: string,
   skuNumber: string,

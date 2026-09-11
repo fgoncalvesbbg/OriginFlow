@@ -147,7 +147,7 @@ describe('review step tone — green means the supplier closed it', () => {
   });
 
   it('leaves every non-review step alone whatever the review flag says', () => {
-    expect(statusLabel('adjust_im', true)).toBe('Re-edit');
+    expect(statusLabel('adjust_im', true)).toBe('Rework');
     expect(statusClasses('done', true)).toBe(MANUAL_STATUS_META.done.classes);
     expect(statusClasses('in_progress', false)).toBe(MANUAL_STATUS_META.in_progress.classes);
   });
@@ -228,6 +228,20 @@ describe('nextActionOf', () => {
   it('tells an unstarted project what it is', () => {
     expect(nextActionOf({ status: 'backlog' }))
       .toBe('nothing started — open the project to create its IM or leaflet');
+  });
+
+  it('says a backlog project comes with a brief when one was checked', () => {
+    // The one thing the retired Draft Ready column carried that Backlog did not. It is a
+    // line on the card now, not a column: same queue, more information.
+    expect(nextActionOf({ status: 'backlog', draftReady: true, draftNoteCount: 4 }))
+      .toBe('quality draft ready · 4 open notes — start the IM with it as the brief');
+    expect(nextActionOf({ status: 'backlog', draftReady: true, draftNoteCount: 0 }))
+      .toBe('quality draft ready — start the IM with it as the brief');
+  });
+
+  it('points the draft review step at the one action it has', () => {
+    expect(nextActionOf({ status: 'draft_qm_review' }))
+      .toBe('supplier draft in — open the markup, then mark it reviewed');
   });
 
   it('points a published, never-reviewed manual at its draft review', () => {
@@ -346,18 +360,25 @@ describe('workflow metadata', () => {
     expect([...MANUAL_STATUS_ORDER].sort()).toEqual(keys.sort());
   });
 
-  it('lays the ten business steps out in the order the business runs them', () => {
+  it('lays the nine business steps out in the order the business runs them', () => {
     expect(MANUAL_STATUS_ORDER.filter(s => s !== 'unknown')).toEqual([
-      'draft_requested', 'draft_qm_review', 'draft_ready',
+      'draft_requested', 'draft_qm_review',
       'backlog', 'in_progress', 'draft_review', 'adjust_im', 'final_review', 'done', 'republish_needed',
     ]);
+  });
+
+  it('has no step between Draft Review and Backlog', () => {
+    // `draft_ready` was retired: a checked draft is a backlog project with a brief, not a
+    // step of its own. Two columns saying "nothing started, pick this up" was two queues.
+    expect(MANUAL_STATUS_ORDER).not.toContain('draft_ready' as ManualStatus);
+    expect(MANUAL_STATUS_ORDER[MANUAL_STATUS_ORDER.indexOf('draft_qm_review') + 1]).toBe('backlog');
   });
 
   it('marks every step where the ball is in someone else\'s court as waiting', () => {
     const waiting = MANUAL_STATUS_ORDER.filter(s => MANUAL_STATUS_META[s].waiting);
     // The two supplier rounds on the manual, plus the two draft-intake steps: one waits on
-    // the supplier to upload, one waits on Quality to mark up. `draft_ready` is NOT here —
-    // the draft is done and the ball is ours.
+    // the supplier to upload, one waits on Quality to mark up. Once Quality is done the ball
+    // is ours, and the project is in Backlog — which is not a waiting step.
     expect(waiting).toEqual([
       'draft_requested', 'draft_qm_review', 'draft_review', 'final_review',
     ]);
@@ -369,8 +390,10 @@ describe('workflow metadata', () => {
 // ---------------------------------------------------------------------------
 
 describe('draftStepOf', () => {
+  // reachedStep defaults to true here so the pre-180 cases read unchanged; the phase gate
+  // has its own describe block below.
   const d = (over: Partial<DraftStatusInput> = {}): DraftStatusInput => ({
-    hasOpenRequest: false, hasUpload: false, draftSubmitted: false, ...over,
+    hasOpenRequest: false, hasUpload: false, draftSubmitted: false, reachedStep: true, ...over,
   });
 
   it('is plain Backlog when no draft was ever requested', () => {
@@ -391,16 +414,82 @@ describe('draftStepOf', () => {
     expect(draftStepOf(d({ hasOpenRequest: true, hasUpload: true }))).toBe('draft_qm_review');
   });
 
-  it('is Draft Ready once Quality submits', () => {
+  it('returns to Backlog once Quality marks the draft reviewed', () => {
+    // The retired `draft_ready` step said exactly what Backlog says. A checked draft means
+    // nobody is waiting on anybody: the project is ready to be written.
     expect(draftStepOf(d({ hasOpenRequest: true, hasUpload: true, draftSubmitted: true })))
-      .toBe('draft_ready');
+      .toBe('backlog');
   });
 
-  it('keeps a submitted draft available even if the request is later cancelled', () => {
+  it('keeps a checked draft in Backlog even if the request is later cancelled', () => {
     // Cancelling says "no further draft is coming". It cannot un-write notes Quality has
-    // already made, and the writer's brief must not vanish from under them.
+    // already made, and it must not pull the project back into a review column either.
     expect(draftStepOf(d({ hasOpenRequest: false, hasUpload: true, draftSubmitted: true })))
-      .toBe('draft_ready');
+      .toBe('backlog');
+  });
+});
+
+describe('draftStepOf — the phase gate (migration 180)', () => {
+  const d = (over: Partial<DraftStatusInput> = {}): DraftStatusInput => ({
+    hasOpenRequest: true, hasUpload: false, draftSubmitted: false, ...over,
+  });
+
+  it('is Backlog while the project has not reached the step that asks', () => {
+    // THE GUARD THAT REPLACED "only if someone asked". Since 180 every launch is seeded with
+    // a request, so without this a project created this morning and still in RFQ would sit
+    // in Supplier Draft Upload — and Backlog would empty out entirely.
+    expect(draftStepOf(d({ reachedStep: false }))).toBe('backlog');
+  });
+
+  it('waits on the supplier once the project reaches that step', () => {
+    expect(draftStepOf(d({ reachedStep: true }))).toBe('draft_requested');
+  });
+
+  it('shows an upload already in flight regardless of the phase', () => {
+    // If the supplier has sent something, that work is real. Hiding it behind a step number
+    // would mean a draft sitting unreviewed with nothing on the board saying so.
+    expect(draftStepOf(d({ reachedStep: false, hasUpload: true }))).toBe('draft_qm_review');
+    expect(draftStepOf(d({ reachedStep: false, hasUpload: true, draftSubmitted: true })))
+      .toBe('backlog');
+  });
+
+  it('treats an absent reachedStep as reached, so pre-180 callers are unchanged', () => {
+    expect(draftStepOf({ hasOpenRequest: true, hasUpload: false, draftSubmitted: false }))
+      .toBe('draft_requested');
+  });
+
+  it('still lets a cancelled request win over the phase gate', () => {
+    expect(draftStepOf(d({ hasOpenRequest: false, reachedStep: true }))).toBe('backlog');
+  });
+});
+
+describe('draftStepOf — a re-edit has no intake (migration 182)', () => {
+  const d = (over: Partial<DraftStatusInput> = {}): DraftStatusInput => ({
+    hasOpenRequest: true, hasUpload: false, draftSubmitted: false, kind: 'reedit', ...over,
+  });
+
+  it('is Backlog the moment it exists, with a slot open and the phase not reached', () => {
+    // A re-edit's requirement is mandatory at creation — the database rejects a blank one —
+    // so there is never a moment where the work is waiting on a brief. The equivalent of a
+    // launch's submitted draft, and it lands in the same place.
+    expect(draftStepOf(d())).toBe('backlog');
+    expect(draftStepOf(d({ reachedStep: false }))).toBe('backlog');
+  });
+
+  it('never waits on a supplier, because a re-edit has none', () => {
+    // The facts below can only be false for a re-edit. Asserted anyway: if a requirement slot
+    // is ever mistaken for a supplier ask, a re-edit would park in a column whose label
+    // promises an upload that is not coming.
+    expect(draftStepOf(d({ hasUpload: true }))).toBe('backlog');
+    expect(draftStepOf(d({ hasOpenRequest: false }))).toBe('backlog');
+    expect(draftStepOf(d({ hasUpload: true, draftSubmitted: true }))).toBe('backlog');
+  });
+
+  it('leaves launches alone — the guard keys off the kind, not the absence of one', () => {
+    expect(draftStepOf({ ...d(), kind: 'launch' })).toBe('draft_requested');
+    // An absent kind is a launch: callers that predate 182 must behave exactly as before.
+    expect(draftStepOf({ hasOpenRequest: true, hasUpload: false, draftSubmitted: false }))
+      .toBe('draft_requested');
   });
 });
 
@@ -421,9 +510,11 @@ describe('the draft steps are not manual steps', () => {
     }
   });
 
-  it('classifies exactly the three intake steps as draft steps', () => {
+  it('classifies exactly the two intake steps as draft steps', () => {
+    // Backlog is NOT one of them, even when it holds a checked draft: it is the step a
+    // project rests in, and the board's Start IM action belongs to it.
     expect(MANUAL_STATUS_ORDER.filter(isDraftStep)).toEqual([
-      'draft_requested', 'draft_qm_review', 'draft_ready',
+      'draft_requested', 'draft_qm_review',
     ]);
   });
 

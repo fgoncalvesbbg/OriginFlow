@@ -10,19 +10,36 @@ import {
 } from '../../services';
 import type { StaleManual, ReviewRoundSummary, BacklogProject } from '../../services';
 import type { ProjectIMSummary } from '../../services/im/project-im.service';
-import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS } from '../../types';
+import { CategoryL3, IMTemplate, IMTemplateType, IM_TEMPLATE_TYPE_LABELS, ProjectKind } from '../../types';
 import { distinctL1, distinctL2, filterCategories } from '../../utils/category-tree.utils';
 import {
   BookOpen, Plus, FileText, ArrowRight, CheckCircle2, Lock, Unlock,
   FileEdit, Search, Clock, Layers, AlertTriangle, Eye, RefreshCw, FileJson, Copy, Loader2, X,
-  List, Kanban, Scale, ShieldCheck, Circle, Pencil, Send, Upload, ClipboardCheck, FileCheck2
+  List, Kanban, Scale, ShieldCheck, Circle, Pencil, Send, Upload, ClipboardCheck
 } from 'lucide-react';
 import {
   MANUAL_STATUS_META, MANUAL_STATUS_ORDER, groupByStatus, manualStatusOf, nextActionOf,
   isReviewStep, isDraftStep, manualFlagsOf, statusClasses, statusLabel,
   type ManualStatus, type DraftStep,
 } from './im-manual-status';
-import { getDraftStepsByProject } from '../../services/im/im-draft.service';
+import { getDraftStepsByProject, type DraftBoardState } from '../../services/im/im-draft.service';
+
+/**
+ * Which body of work the board is showing (migration 182).
+ *
+ * `'launch'` and `'reedit'` are the two project kinds; `'all'` is the escape hatch for
+ * someone searching across both. Note this splits the board WITHOUT touching the workflow:
+ * a re-edit runs through Backlog → In Progress → review → Final exactly as a launch does,
+ * because the steps describe the manual, not the reason it exists.
+ */
+type ProjectScope = ProjectKind | 'all';
+
+const SCOPES: ReadonlyArray<{ id: ProjectScope; label: string; hint: string }> = [
+  { id: 'launch', label: 'Launches', hint: 'Manuals for projects going through a product launch' },
+  { id: 'reedit', label: 'Re-Edits', hint: 'New manuals for SKUs that are already live' },
+  { id: 'all', label: 'All', hint: 'Both kinds together' },
+];
+import { DraftQualityCheckDialog } from '../../components/im/DraftQualityCheckDialog';
 import { IMViewerTab } from './IMViewerTab';
 import { LeafletCoverageTab } from './LeafletCoverageTab';
 import { ImImportDialog } from './ImImportDialog';
@@ -56,7 +73,6 @@ const fmtDate = (iso: string) =>
 const STATUS_ICON: Record<ManualStatus, React.ReactNode> = {
   draft_requested: <Upload size={10} />,
   draft_qm_review: <ClipboardCheck size={10} />,
-  draft_ready: <FileCheck2 size={10} />,
   backlog: <Circle size={10} />,
   in_progress: <Pencil size={10} />,
   draft_review: <Eye size={10} />,
@@ -84,16 +100,40 @@ interface AllManualsTabProps {
    * draft slot. A project missing from this map has no draft and stays in plain Backlog —
    * which is what stops every in-house product parking in Supplier Draft Upload.
    */
-  draftSteps: Map<string, { step: DraftStep; requestedAt: string | null; noteCount: number }>;
+  draftSteps: Map<string, DraftBoardState>;
+  /** Re-read the board after a draft round is closed — the project changes step. */
+  onDraftReviewed: () => void;
   categories: CategoryL3[];
   loading: boolean;
 }
 
-const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps, categories, loading }) => {
+const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps, onDraftReviewed, categories, loading }) => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCat, setFilterCat] = useState<string>('all');
   const [filterProject, setFilterProject] = useState('');
+  /**
+   * Launches vs Re-Edits (migration 182).
+   *
+   * A Re-Edit is a new manual for a SKU that is already live — no phases, no documents, no
+   * supplier — and it can happen several times over one SKU's life. They are a different
+   * body of work from launches and mixing them makes both boards harder to read, so this
+   * splits the whole surface rather than adding a column: the steps, their order and their
+   * meanings are identical either way, which is the point.
+   *
+   * Persisted like the view mode, so someone who lives in one scope stays there.
+   */
+  const [scope, setScope] = useState<ProjectScope>(() => {
+    try {
+      const v = localStorage.getItem('im-manuals-scope');
+      return v === 'reedit' || v === 'all' ? v : 'launch';
+    } catch { return 'launch'; }
+  });
+  const switchScope = (next: ProjectScope) => {
+    setScope(next);
+    try { localStorage.setItem('im-manuals-scope', next); } catch { /* ignore */ }
+  };
+  const inScope = (kind: ProjectKind) => scope === 'all' || kind === scope;
   // Published manuals whose source changed since publish, keyed by
   // `projectId::templateType` → drill-down reasons. Computed after mount.
   const [staleInfo, setStaleInfo] = useState<Map<string, StaleManual>>(new Map());
@@ -103,6 +143,8 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
   // Bulk re-publish selection (by ProjectIMSummary id) + in-flight flag.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [republishing, setRepublishing] = useState(false);
+  // The project whose supplier draft is open for its quality check (Draft Review step).
+  const [qmTarget, setQmTarget] = useState<BacklogProject | null>(null);
   // "What changed?" drill-down target (opens PublishDiffModal on a stale row).
   const [diffTarget, setDiffTarget] = useState<{ projectId: string; templateType: ProjectIMSummary['templateType']; title: string } | null>(null);
   // Table vs. kanban board. The board is a VISUALIZATION of the derived statuses —
@@ -231,6 +273,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
     draftSteps.get(p.projectId)?.step ?? 'backlog';
 
   const filteredBacklog = backlog.filter(p => {
+    if (!inScope(p.kind)) return false;
     // The status filter now has four values that can match a backlog project, not one.
     if (filterStatus !== 'all' && filterStatus !== stepOfBacklog(p)) return false;
     if (filterCat !== 'all' && p.categoryId !== filterCat) return false;
@@ -250,11 +293,19 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
     return true;
   });
 
+  /** Everything in a scope, manuals and not-yet-started projects alike. */
+  const countInScope = (s: ProjectScope): number =>
+    ims.filter(im => s === 'all' || im.kind === s).length +
+    backlog.filter(p => s === 'all' || p.kind === s).length;
+
   /** Cards at a step, counting the synthetic Backlog ones. Drives the filter dropdown. */
   const countAtStep = (status: ManualStatus): number =>
-    status === 'backlog' ? backlog.length : ims.filter(im => statusOf(im) === status).length;
+    status === 'backlog'
+      ? backlog.filter(p => inScope(p.kind)).length
+      : ims.filter(im => inScope(im.kind) && statusOf(im) === status).length;
 
   const filtered = ims.filter(im => {
+    if (!inScope(im.kind)) return false;
     // Filter on the DERIVED status so the dropdown, the badges and the groups agree.
     if (filterStatus !== 'all' && statusOf(im) !== filterStatus) return false;
     if (filterCat !== 'all' && im.categoryId !== filterCat) return false;
@@ -314,6 +365,36 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
 
   return (
     <div>
+      {/*
+        Scope. Deliberately the FIRST control and visually separated from the filters: it
+        chooses which body of work you are looking at, where everything to its right narrows
+        whatever it selected. Counts are live so an empty scope is obvious before you switch.
+      */}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center rounded-lg border border-gray-200 bg-white overflow-hidden shrink-0">
+          {SCOPES.map((s, i) => (
+            <React.Fragment key={s.id}>
+              {i > 0 && <div className="w-px h-5 bg-gray-200" />}
+              <button
+                onClick={() => switchScope(s.id)}
+                title={s.hint}
+                className={`px-3 py-2 text-sm font-medium transition-colors ${scope === s.id ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                {s.label}
+                <span className={`ml-1.5 text-xs ${scope === s.id ? 'text-white/70' : 'text-gray-400'}`}>
+                  {countInScope(s.id)}
+                </span>
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+        <Link
+          to="/im/re-edit/new"
+          className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shrink-0"
+          title="A new manual for a SKU that is already live"
+        ><Plus size={14} /> New re-edit</Link>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
         <div className="relative flex-1 min-w-52">
@@ -430,7 +511,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
       {/* Backlog, table view — projects with nothing started. A separate table because these
           rows have no template, no version and no status of their own; forcing them into the
           manuals table would mean six empty cells apiece. */}
-      {viewMode === 'table' && filteredBacklog.length > 0 && (['draft_requested', 'draft_qm_review', 'draft_ready', 'backlog'] as const)
+      {viewMode === 'table' && filteredBacklog.length > 0 && (['draft_requested', 'draft_qm_review', 'backlog'] as const)
         .map(step => ({ step, rows: filteredBacklog.filter(p => stepOfBacklog(p) === step) }))
         .filter(g => g.rows.length > 0)
         .map(({ step, rows }) => (
@@ -455,7 +536,18 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
             <tbody className="divide-y divide-gray-50">
               {rows.map(p => (
                 <tr key={p.projectId} className="hover:bg-light/60 transition-colors">
-                  <td className="px-4 py-3 font-semibold text-gray-800">{p.projectName}</td>
+                  <td className="px-4 py-3 font-semibold text-gray-800">
+                    {p.projectName}
+                    {/* Backlog holds both "nothing at all" and "a checked draft is waiting",
+                        and the writer picking up the queue needs to tell them apart. */}
+                    {step === 'backlog' && draftSteps.get(p.projectId)?.submitted && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5 py-0.5 align-middle">
+                        <ClipboardCheck size={10} /> draft ready
+                        {(draftSteps.get(p.projectId)?.noteCount ?? 0) > 0
+                          && ` · ${draftSteps.get(p.projectId)!.noteCount} note${draftSteps.get(p.projectId)!.noteCount === 1 ? '' : 's'}`}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     {p.projectCode
                       ? <span className="text-[11px] font-mono text-gray-500">{p.projectCode}</span>
@@ -476,12 +568,25 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link
-                      to={`/project/${p.projectId}/im-generator`}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors"
-                    >
-                      <Plus size={12} /> Start IM
-                    </Link>
+                    {/* Draft Review asks one question — has Quality been through the PDF —
+                        so the row offers that and nothing else. Every other pre-manual step
+                        offers the action that always exists: start the manual. */}
+                    {step === 'draft_qm_review' ? (
+                      <button
+                        type="button"
+                        onClick={() => setQmTarget(p)}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 px-3 py-1.5 rounded-lg border border-sky-200 transition-colors"
+                      >
+                        <ClipboardCheck size={12} /> Review draft
+                      </button>
+                    ) : (
+                      <Link
+                        to={`/project/${p.projectId}/im-generator`}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors"
+                      >
+                        <Plus size={12} /> Start IM
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -681,7 +786,7 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
       )}
 
       {/* Board — the workflow, left to right, one column per step:
-          Backlog → In Progress → In Review (draft) → Re-edit → In Review (final) → Final
+          Backlog → In Progress → In Review (draft) → Rework → In Review (final) → Final
           → Republish Needed.
           Every column always renders, in MANUAL_STATUS_ORDER, empty or not: "nothing is
           waiting at the final review" is information a queue has to be able to state, and a
@@ -744,15 +849,21 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
                       </div>
                     )}
 
-                    {/* The four pre-manual columns hold PROJECTS, not manuals — there is no
-                        manual to link to yet, so the card offers the one action that always
-                        exists: start one. That link is present in all four on purpose. The
-                        draft is a brief, never a gate: a writer can start from Supplier
-                        Draft Upload just as well as from Backlog, and the board must not
-                        imply otherwise by hiding the action. */}
+                    {/* The three pre-manual columns hold PROJECTS, not manuals — there is
+                        no manual to link to yet, so the card offers the one action that
+                        makes sense at that step.
+
+                        For Supplier Draft Upload and Backlog that is "start one": the draft
+                        is a brief, never a gate, and a writer can start from either. DRAFT
+                        REVIEW IS THE EXCEPTION. A draft sitting there is waiting on one
+                        decision — has Quality been through it — and the card offers exactly
+                        that: the markup link and the tick. Starting the manual from a draft
+                        nobody has checked wastes the check, and the project page still
+                        offers it for the case where someone must. */}
                     {(isDraftStep(status) || status === 'backlog')
                       && (backlogByStep.get(status as DraftStep) ?? []).map(p => {
                       const draft = draftSteps.get(p.projectId);
+                      const qmStep = status === 'draft_qm_review';
                       return (
                       <div key={p.projectId} className="bg-white border border-gray-200 rounded-lg p-2.5 shadow-sm hover:shadow transition-shadow">
                         <div className="flex items-center gap-1.5 mb-1">
@@ -761,32 +872,53 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
                           </span>
                           <span className="text-[9px] text-gray-300 ml-auto">{fmtDate(p.createdAt)}</span>
                         </div>
-                        <Link
-                          to={`/project/${p.projectId}/im-generator`}
-                          className="block font-semibold text-sm text-gray-800 hover:text-indigo-700 truncate"
-                          title={`${p.projectName} — start its IM or leaflet`}
-                        >
-                          {p.projectCode ? `${p.projectCode} — ` : ''}{p.projectName}
-                        </Link>
+                        {qmStep ? (
+                          <button
+                            type="button"
+                            onClick={() => setQmTarget(p)}
+                            className="block w-full text-left font-semibold text-sm text-gray-800 hover:text-sky-700 truncate"
+                            title={`${p.projectName} — open the supplier draft review`}
+                          >
+                            {p.projectCode ? `${p.projectCode} — ` : ''}{p.projectName}
+                          </button>
+                        ) : (
+                          <Link
+                            to={`/project/${p.projectId}/im-generator`}
+                            className="block font-semibold text-sm text-gray-800 hover:text-indigo-700 truncate"
+                            title={`${p.projectName} — start its IM or leaflet`}
+                          >
+                            {p.projectCode ? `${p.projectCode} — ` : ''}{p.projectName}
+                          </Link>
+                        )}
                         <div className="text-[10px] text-gray-400 truncate">
                           {p.categoryId ? (catMap[p.categoryId] ?? '') : 'No category'}
                           {p.skus.length ? ` · ${p.skus.slice(0, 2).join(', ')}${p.skus.length > 2 ? ` +${p.skus.length - 2}` : ''}` : ''}
                         </div>
                         {/* Whose turn it is, in words — the column hue says it too, but only
-                            to people who can see colour. */}
-                        {status !== 'backlog' && (
+                            to people who can see colour. Backlog says it only when there IS
+                            something to say: a checked draft waiting as a brief. */}
+                        {(status !== 'backlog' || draft?.submitted) && (
                           <div className="text-[10px] text-gray-500 mt-1">
                             {nextActionOf({
                               status,
                               draftRequestedAt: draft?.requestedAt ?? null,
                               draftNoteCount: draft?.noteCount ?? null,
+                              draftReady: draft?.submitted,
                             })}
                           </div>
                         )}
-                        <Link
-                          to={`/project/${p.projectId}/im-generator`}
-                          className="inline-flex items-center gap-1 text-[10px] underline font-semibold text-indigo-600 hover:text-indigo-800 mt-1"
-                        ><Plus size={10} /> Start IM</Link>
+                        {qmStep ? (
+                          <button
+                            type="button"
+                            onClick={() => setQmTarget(p)}
+                            className="inline-flex items-center gap-1 text-[10px] underline font-semibold text-sky-700 hover:text-sky-900 mt-1"
+                          ><ClipboardCheck size={10} /> Review draft</button>
+                        ) : (
+                          <Link
+                            to={`/project/${p.projectId}/im-generator`}
+                            className="inline-flex items-center gap-1 text-[10px] underline font-semibold text-indigo-600 hover:text-indigo-800 mt-1"
+                          ><Plus size={10} /> Start IM</Link>
+                        )}
                       </div>
                       );
                     })}
@@ -875,6 +1007,15 @@ const AllManualsTab: React.FC<AllManualsTabProps> = ({ ims, backlog, draftSteps,
           templateType={diffTarget.templateType}
           title={diffTarget.title}
           onClose={() => setDiffTarget(null)}
+        />
+      )}
+
+      {qmTarget && (
+        <DraftQualityCheckDialog
+          projectId={qmTarget.projectId}
+          projectName={qmTarget.projectCode ? `${qmTarget.projectCode} — ${qmTarget.projectName}` : qmTarget.projectName}
+          onClose={() => setQmTarget(null)}
+          onReviewed={onDraftReviewed}
         />
       )}
     </div>
@@ -1137,9 +1278,7 @@ const IMDashboard: React.FC = () => {
   const [backlogProjects, setBacklogProjects] = useState<BacklogProject[]>([]);
   /** Supplier-draft step per project id (migration 179). Empty until loaded, and empty is
    *  safe: a project missing from it reads as plain Backlog. */
-  const [draftSteps, setDraftSteps] = useState<
-    Map<string, { step: DraftStep; requestedAt: string | null; noteCount: number }>
-  >(new Map());
+  const [draftSteps, setDraftSteps] = useState<Map<string, DraftBoardState>>(new Map());
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [loadingIMs, setLoadingIMs] = useState(true);
   const [creatingId, setCreatingId] = useState<string | null>(null);
@@ -1307,6 +1446,7 @@ const IMDashboard: React.FC = () => {
           ims={allIMs}
           backlog={backlogProjects}
           draftSteps={draftSteps}
+          onDraftReviewed={loadIMData}
           categories={categories}
           loading={loadingIMs || loadingTemplates}
         />

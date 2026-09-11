@@ -18,8 +18,9 @@
  * would unlock this PDF. Revoking the link therefore genuinely revokes the file, which a
  * public bucket could not do.
  *
- * NOTHING HERE BLOCKS A WRITER. Submitting moves the project to Draft Ready, which is a
- * better starting point, not a gate — the writer could always have started without it.
+ * NOTHING HERE BLOCKS A WRITER. Submitting ends the intake and puts the project in Backlog
+ * with this draft and these notes attached as the brief — a better starting point, not a
+ * gate. The writer could always have started without it.
  */
 import React, { useCallback, useState, Suspense } from 'react';
 import { useParams } from 'react-router-dom';

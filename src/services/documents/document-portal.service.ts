@@ -77,7 +77,11 @@ export const getSupplierProjectDocuments = async (
     `/project-documents${query}`,
     credentials,
   );
-  return documents;
+  // `request` casts the parsed body to T without checking it, so a response that is not the
+  // shape this expects yields `undefined` here — and the declared return type hides it.
+  // SupplierDocumentsPanel then reads `.length` off undefined and the error boundary takes
+  // the WHOLE supplier portal down, over a documents list that is allowed to be empty.
+  return documents ?? [];
 };
 
 /** The same list for a signed-in internal user, who additionally sees internal documents. */
@@ -88,7 +92,7 @@ export const getInternalProjectDocuments = async (
     `/project-documents?projectId=${encodeURIComponent(projectId)}`,
     undefined,
   );
-  return documents;
+  return documents ?? [];
 };
 
 /**

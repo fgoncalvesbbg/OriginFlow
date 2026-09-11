@@ -5,7 +5,7 @@
 
 import { auth, db, orEmpty, withDeadline, type Row } from '../../data';
 import { isLive } from '../../config/environment.config';
-import { ProjectIM, SKUContentValue, IMTemplateType, IMReviewStage, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef, ProjectAttachmentEntry } from '../../types';
+import { ProjectIM, SKUContentValue, IMTemplateType, IMReviewStage, ProjectBlockAddition, ProjectExtraSection, InlineBlockRef, ProjectAttachmentEntry, ProjectKind } from '../../types';
 import { saveWithRetry } from '../core/save-retry';
 
 const mapProjectIMRow = (data: any): ProjectIM => ({
@@ -410,6 +410,8 @@ export interface ProjectIMSummary {
   projectId: string;        // projects.id (UUID) — used in URL
   projectCode: string | null; // projects.project_id_code — human-readable project ID shown to users
   projectName: string;
+  /** launch vs reedit (migration 182) — the dashboard's scope toggle reads this. */
+  kind: ProjectKind;
   categoryId: string | null;
   templateId: string;
   templateType: IMTemplateType;
@@ -456,6 +458,8 @@ export interface BacklogProject {
   projectId: string;
   projectCode: string | null;
   projectName: string;
+  /** launch vs reedit (migration 182) — the dashboard's scope toggle reads this. */
+  kind: ProjectKind;
   categoryId: string | null;
   /** When the project was created — the only "last touched" signal it has. */
   createdAt: string;
@@ -468,7 +472,7 @@ export const getBacklogProjects = async (): Promise<BacklogProject[]> => {
   const [projectRows, imRows, skuRows] = await Promise.all([
     orEmpty(
       db.select<Row>('projects', {
-        columns: 'id, name, category_id, project_id_code, status, created_at',
+        columns: 'id, name, category_id, project_id_code, status, created_at, kind',
         order: { column: 'created_at', ascending: false },
       }),
       '[getBacklogProjects] projects',
@@ -506,6 +510,7 @@ export const getBacklogProjects = async (): Promise<BacklogProject[]> => {
       projectId: p.id,
       projectCode: p.project_id_code ?? null,
       projectName: p.name ?? 'Unknown Project',
+      kind: p.kind === 'reedit' ? 'reedit' : 'launch',
       categoryId: p.category_id ?? null,
       createdAt: p.created_at,
       skus: skusByProject.get(p.id) ?? [],
@@ -539,7 +544,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       review_status,
       review_active_threads,
       bound_sku_ids,
-      project:projects ( id, name, category_id, project_id_code ),
+      project:projects ( id, name, category_id, project_id_code, kind ),
       template:im_templates ( name )
     `,
       order: { column: 'updated_at', ascending: false },
@@ -577,6 +582,7 @@ export const getAllProjectIMs = async (): Promise<ProjectIMSummary[]> => {
       projectId,
       projectCode: row.project?.project_id_code ?? null,
       projectName: row.project?.name ?? 'Unknown Project',
+      kind: row.project?.kind === 'reedit' ? 'reedit' : 'launch',
       categoryId: row.project?.category_id ?? null,
       templateId: row.template_id,
       templateType: (row.template_type ?? 'im') as IMTemplateType,

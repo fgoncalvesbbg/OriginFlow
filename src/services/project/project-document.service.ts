@@ -129,9 +129,48 @@ export const updateDocumentMetadata = async (id: string, updates: Partial<Projec
     if (updates.responsibleParty) payload.responsible_party = updates.responsibleParty;
     if (updates.isVisibleToSupplier !== undefined) payload.is_visible_to_supplier = updates.isVisibleToSupplier;
     if (updates.isRequired !== undefined) payload.is_required = updates.isRequired;
-    if (updates.deadline) payload.deadline = updates.deadline;
+
+    // Setting a date HERE is what makes it an override (migration 181): a phase-date change
+    // must not flatten a date someone agreed for this one document. `deadlineIsCustom` is
+    // honoured when the caller states it — that is how "use the phase date again" clears the
+    // override — but a bare date edit marks it custom, because that is what it means.
+    if (updates.deadline !== undefined) {
+        payload.deadline = updates.deadline || null;
+        payload.deadline_is_custom = updates.deadlineIsCustom ?? !!updates.deadline;
+    } else if (updates.deadlineIsCustom !== undefined) {
+        payload.deadline_is_custom = updates.deadlineIsCustom;
+    }
 
     const updated = await db.update<Row>('project_documents', payload, { where: { id } });
+    return mapProjectDocument(updated);
+};
+
+/**
+ * Put a document back on its phase's date, undoing an individual override.
+ *
+ * The phase date is re-read and stamped here rather than left null, because
+ * `project_documents.deadline` IS the effective date every other screen reads — see the
+ * migration. Clearing it to null would make the document the one row in the phase with no
+ * deadline at all.
+ */
+export const clearDocumentDeadlineOverride = async (id: string): Promise<ProjectDocument> => {
+    const doc = await db.selectMaybeOne<Row>('project_documents', {
+        columns: 'id, project_id, step_number',
+        where: { id },
+    });
+    let phaseDeadline: string | null = null;
+    if (doc?.project_id != null && doc?.step_number != null) {
+        const step = await db.selectMaybeOne<Row>('project_steps', {
+            columns: 'deadline',
+            where: { project_id: doc.project_id, step_number: doc.step_number },
+        });
+        phaseDeadline = (step?.deadline as string | null) ?? null;
+    }
+    const updated = await db.update<Row>(
+        'project_documents',
+        { deadline: phaseDeadline, deadline_is_custom: false },
+        { where: { id } },
+    );
     return mapProjectDocument(updated);
 };
 

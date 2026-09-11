@@ -228,20 +228,6 @@ const SupplierPortal: React.FC = () => {
           </div>
         </div>
 
-        {/* The draft manual (migration 179). Deliberately ABOVE the phase list and not
-            inside it: unlike the design spec blocks, a draft request is not tied to a
-            project phase — it is asked for once, whenever the manual work starts, and the
-            supplier should not have to expand the right phase to find it. */}
-        {draftRequests.length > 0 && (
-          <div className="mb-8">
-            <SupplierIMDraftCard
-              requests={draftRequests}
-              credential={{ projectToken: token! }}
-              onUploaded={reloadDraftRequests}
-            />
-          </div>
-        )}
-
         <div className="space-y-8">
           {steps.map(step => {
             const rawStepDocs = docs.filter(d => d.stepNumber === step.stepNumber);
@@ -250,7 +236,13 @@ const SupplierPortal: React.FC = () => {
             // returning null here would have hidden them.
             const showRounds = specRounds.length > 0 && step.stepNumber === reviewPhase;
             const showFinals = specFinals.length > 0 && step.stepNumber === finalPhase;
-            if (rawStepDocs.length === 0 && !showRounds && !showFinals) return null;
+            // The draft manual request belongs to ONE phase — its own step_number, 2 by
+            // default (migrations 179/180) — so it sits with the rest of that phase's asks
+            // rather than floating above the checklist. Like the design spec blocks, it makes
+            // a phase worth rendering on its own: a development phase with no document rows
+            // still has a draft outstanding, and returning null would hide it.
+            const stepDrafts = draftRequests.filter(r => (r.stepNumber ?? 2) === step.stepNumber);
+            if (rawStepDocs.length === 0 && !showRounds && !showFinals && stepDrafts.length === 0) return null;
 
             const othersPlaceholder = rawStepDocs.find(d => d.title === 'Others' && d.description !== 'ad-hoc');
             const adHocDocs = rawStepDocs.filter(d => d.description === 'ad-hoc');
@@ -369,6 +361,16 @@ const SupplierPortal: React.FC = () => {
                       </div>
                     );
                   })}
+
+                  {/* The draft instruction manual — one more row in this phase's list, with
+                      the same layout and states as the document rows above it. */}
+                  {stepDrafts.length > 0 && (
+                    <SupplierIMDraftCard
+                      requests={stepDrafts}
+                      credential={{ projectToken: token! }}
+                      onUploaded={reloadDraftRequests}
+                    />
+                  )}
 
                   {/* Attribute Data Requests for this step */}
                   {attrRequests.filter(r => r.step === step.stepNumber).map(req => {

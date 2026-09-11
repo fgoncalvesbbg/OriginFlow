@@ -32,7 +32,8 @@ export type {
   SkuAttributeFlag,
   SkuChangeLogEntry,
   JiraIssueRef,
-  JiraLookup
+  JiraLookup,
+  ProjectKind
 } from './project.types';
 
 // SOP & Documents types

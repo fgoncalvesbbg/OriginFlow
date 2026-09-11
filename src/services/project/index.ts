@@ -9,6 +9,7 @@ export {
   getProjectByToken,
   getProjectsBySupplierToken,
   createProject,
+  createReEditProject,
   updateProject,
   deleteProject,
   saveProjectMilestones
@@ -18,6 +19,7 @@ export {
   getProjectSteps,
   getStepsForProjects,
   updateStepStatus,
+  setPhaseDeadline,
   setStepStatuses
 } from './project-step.service';
 
@@ -40,6 +42,7 @@ export {
   getProjectDocs,
   addDocument,
   updateDocumentMetadata,
+  clearDocumentDeadlineOverride,
   updateDocStatus,
   removeDocument,
   uploadFile,
@@ -72,6 +75,7 @@ export type { SiblingAttributeRequest } from './project-attribute-request.servic
 export {
   MAX_SKUS_PER_PROJECT,
   getProjectSkus,
+  getKnownSkus,
   createProjectSku,
   updateProjectSku,
   deleteProjectSku,

@@ -3,7 +3,7 @@
  *
  * The supplier uploads the draft manual from the portal they already have; that mints a
  * review link for Quality on the shared review layer; Quality marks the PDF up and submits.
- * The project then reads Draft Ready and the writer opens the PDF plus those notes.
+ * The project then reads Backlog with a brief, and the writer opens the PDF plus those notes.
  *
  * WHY ONE FUNCTION WITH FIVE ROUTES. `im_draft_requests` and `im_draft_uploads` are
  * RLS-scoped to can_see_project and the `im-drafts` bucket has ZERO storage policies, so
@@ -149,6 +149,43 @@ const projectsForSupplier = async (
 };
 
 /**
+ * Which project an INTERNAL (staff) caller may act on, for this request body.
+ *
+ * A re-edit (migration 182) has no supplier, so its requirement PDF is attached by the
+ * person writing the manual rather than uploaded through the portal. Rather than a second
+ * upload pipeline, the same two routes serve both: only the credential differs.
+ *
+ * Asking Postgres AS THE CALLER is the authorization, exactly as the /file route's internal
+ * branch does — PM-scoped RLS already restricts `projects` to the caller's own (or every
+ * project, for an admin), so there is no role check to forget here. Returns the single
+ * project the request belongs to, or an empty array, so callers fail closed on the same
+ * `projectIds.includes(...)` test the supplier paths use.
+ */
+const projectsForStaff = async (
+  supabase: Supabase,
+  event: NetlifyEvent,
+  body: { requestId?: unknown },
+): Promise<string[]> => {
+  let requestId: string;
+  try {
+    requestId = assertUuid(body.requestId, 'requestId');
+  } catch {
+    return [];
+  }
+
+  const { data } = await supabase
+    .from('im_draft_requests').select('project_id').eq('id', requestId).maybeSingle();
+  const projectId = (data as { project_id: string } | null)?.project_id ?? null;
+  if (!projectId) return [];
+
+  await authenticate(event);
+  const { data: proj, error } = await userClient(event)
+    .from('projects').select('id').eq('id', projectId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return proj ? [projectId] : [];
+};
+
+/**
  * The QM access code, checked against the pgcrypto hash. Rate-limited per IP BEFORE the
  * comparison, reusing doc_rate_limit_hit from migration 159 (a generic keyed counter despite
  * the name). Returns false for a wrong code, a missing config row and a throttled caller
@@ -188,7 +225,7 @@ const listRequests = async (supabase: Supabase, projectIds: string[]) => {
 
   const { data, error } = await supabase
     .from('im_draft_requests')
-    .select('id, project_id, template_type, requested_at, due_date, note, projects(name, project_id_code)')
+    .select('id, project_id, template_type, step_number, requested_at, due_date, note, projects(name, project_id_code)')
     .in('project_id', projectIds)
     .is('cancelled_at', null)
     .order('requested_at', { ascending: false });
@@ -216,14 +253,16 @@ const listRequests = async (supabase: Supabase, projectIds: string[]) => {
   return json(200, {
     requests: (data ?? []).map(r => {
       const row = r as {
-        id: string; project_id: string; template_type: string; requested_at: string;
-        due_date: string | null; note: string | null;
+        id: string; project_id: string; template_type: string; step_number: number | null;
+        requested_at: string; due_date: string | null; note: string | null;
         projects: { name: string; project_id_code: string | null } | null;
       };
       const last = latest.get(row.id);
       return {
         id: row.id,
         templateType: row.template_type,
+        // Which phase the supplier sees this ask in (migration 180).
+        stepNumber: row.step_number ?? 2,
         requestedAt: row.requested_at,
         dueDate: row.due_date,
         note: row.note,
@@ -294,6 +333,13 @@ const commitUpload = async (
   supabase: Supabase,
   projectIds: string[],
   body: { requestId?: unknown; uploadId?: unknown; uploadedByName?: unknown; originalFilename?: unknown },
+  /**
+   * `false` for an internal attachment (a re-edit's requirement, migration 182): it is
+   * recorded with `source: 'internal'` and opens NO quality review round. A re-edit has no
+   * supplier draft to check — the requirement is the brief itself, written by the person who
+   * raised the re-edit — so a QM round would be a queue entry nobody is waiting on.
+   */
+  isSupplier = true,
 ) => {
   let requestId: string;
   let uploadId: string;
@@ -303,9 +349,6 @@ const commitUpload = async (
   } catch (e) {
     return json(400, { error: e instanceof Error ? e.message : 'Invalid identifiers.' });
   }
-
-  const uploadedByName = (str(body.uploadedByName) ?? '').trim().slice(0, 120);
-  if (!uploadedByName) return json(400, { error: 'Please give your name with the upload.' });
 
   const { data: request } = await supabase
     .from('im_draft_requests')
@@ -340,12 +383,33 @@ const commitUpload = async (
   }
   if (!isPdf(bytes)) return reject('That file is not a PDF.');
 
+  /**
+   * WHO UPLOADED IT IS DERIVED, NOT TYPED. Uploading a draft is the same gesture as
+   * uploading any other project document, and no other upload in the portal asks who you
+   * are — a name box on this one alone is friction the supplier has no reason to expect.
+   *
+   * The credential already identifies the company, so the server reads the supplier's name
+   * off the project. That is also more trustworthy than a free-text field: nobody can type
+   * someone else's company into it. `uploadedByName` is still accepted for the internal and
+   * quality-uploaded paths (im_draft_uploads.source), where there is no supplier to derive.
+   */
+  const { data: projectRow } = await supabase
+    .from('projects')
+    .select('suppliers(name)')
+    .eq('id', r.project_id)
+    .maybeSingle();
+
+  const supplierName =
+    (projectRow as { suppliers?: { name?: string } | null } | null)?.suppliers?.name ?? null;
+  const uploadedByName =
+    (str(body.uploadedByName) ?? '').trim().slice(0, 120) || supplierName || 'Supplier';
+
   const { data: inserted, error: insErr } = await supabase
     .from('im_draft_uploads')
     .insert({
       id: uploadId,
       request_id: requestId,
-      source: 'supplier',
+      source: isSupplier ? 'supplier' : 'internal',
       storage_path: path,
       original_filename: (str(body.originalFilename) ?? '').slice(0, 260) || null,
       page_count: countPages(bytes),
@@ -361,6 +425,10 @@ const commitUpload = async (
   }
 
   const version = (inserted as { version: number }).version;
+
+  // An internal attachment is done here: recorded, readable from the manual's draft panel,
+  // and in no queue.
+  if (!isSupplier) return json(200, { uploadId, version, reviewToken: null });
 
   // Quality's round, on the shared review layer. subject_id is the upload, so a token is
   // bound to exactly one PDF and /file can prove it (see the token branch below).
@@ -591,19 +659,29 @@ export const handler = async (event: NetlifyEvent) => {
       return await qmQueue(supabase);
     }
 
-    // The three supplier routes share one credential check, so none of them can forget it.
+    // `requests` lists a supplier's open slots and is supplier-only; `upload-url` and
+    // `commit` also serve staff attaching a re-edit's requirement. Whichever credential is
+    // presented, both end up at the SAME `projectIds.includes(...)` test inside the route,
+    // so neither path can skip authorization.
     const credential = supplierCredential(event);
-    if (!hasSupplierCredential(credential)) {
-      return json(401, { error: 'Portal credentials are required.' });
-    }
-    const projectIds = await projectsForSupplier(supabase, credential);
+    const isSupplier = hasSupplierCredential(credential);
 
-    if (route === 'requests') return await listRequests(supabase, projectIds);
+    if (route === 'requests') {
+      if (!isSupplier) return json(401, { error: 'Portal credentials are required.' });
+      return await listRequests(supabase, await projectsForSupplier(supabase, credential));
+    }
+
+    const projectIds = isSupplier
+      ? await projectsForSupplier(supabase, credential)
+      : await projectsForStaff(supabase, event, body);
+
     if (projectIds.length === 0) return json(403, { error: NO_PORTAL_ACCESS });
     if (route === 'upload-url') return await mintUploadUrl(supabase, projectIds, body);
-    return await commitUpload(supabase, projectIds, body);
+    return await commitUpload(supabase, projectIds, body, isSupplier);
   } catch (e) {
     if (e instanceof ValidationError) return json(400, { error: e.message });
+    if (e instanceof AuthError) return json(401, { error: e.message });
+    if (e instanceof ForbiddenError) return json(403, { error: e.message });
     if (e instanceof ConfigError) return json(500, { error: e.message });
     console.error(`[im-draft-portal] ${route} failed:`, e);
     return json(500, { error: 'Something went wrong.' });

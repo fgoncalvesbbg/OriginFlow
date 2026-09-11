@@ -4952,7 +4952,7 @@ const ProjectIMGenerator: React.FC = () => {
                        </span>
                        <span className="block text-xs text-gray-500">
                          {option === 'draft'
-                           ? "The supplier's first pass. Their notes come back for you to work through at Re-edit."
+                           ? "The supplier's first pass. Their notes come back for you to work through at Rework."
                            : 'The supplier confirming the adjustments you made. Once they close it, mark the manual Final.'}
                        </span>
                      </span>
@@ -5672,6 +5672,8 @@ const ProjectIMGenerator: React.FC = () => {
              projectId={projectId}
              templateType={templateType}
              requestedBy={user?.email ?? null}
+             kind={project?.kind ?? 'launch'}
+             requirement={project?.reeditRequirement ?? null}
            /></div>}
 
            {locked && (

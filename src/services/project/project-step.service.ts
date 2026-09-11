@@ -78,3 +78,28 @@ export const setStepStatuses = async (writes: readonly { id: string; status: Ste
         await db.updateWhere('project_steps', { status }, { where: { id: { op: 'in', value: ids } } });
     }
 };
+
+/**
+ * Set (or clear) the due date for a whole phase.
+ *
+ * THE CASCADE IS NOT DONE HERE. A database trigger stamps this date onto every document in
+ * the phase that has not overridden it, and onto the supplier's draft-manual request
+ * (migration 181). Doing it in the database rather than in this function is what makes the
+ * PM dashboard's overdue count, the supplier portal, the timeline and the inbox all agree:
+ * they read `project_documents.deadline`, and that column is already correct by the time
+ * this resolves. A loop here would only cover the callers that remembered to use it.
+ *
+ * Pass null to clear the phase date. Documents that were inheriting it are cleared with it;
+ * overrides are left alone, which is exactly what an override is for.
+ */
+export const setPhaseDeadline = async (
+    projectId: string,
+    stepNumber: number,
+    deadline: string | null,
+): Promise<void> => {
+    await db.updateWhere(
+        'project_steps',
+        { deadline: deadline || null },
+        { where: { project_id: projectId, step_number: stepNumber } },
+    );
+};

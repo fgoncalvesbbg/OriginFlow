@@ -1,25 +1,26 @@
 /**
- * The draft-manual upload block a SUPPLIER sees, shared by their project portal and their
- * dashboard so both surfaces say the same thing about the same request (migration 179).
+ * The draft-manual ask, as one more row in the supplier's phase checklist
+ * (migrations 179/180).
  *
- * WHAT THE SUPPLIER IS BEING ASKED FOR. Their own draft of the instruction manual — the
- * document they would otherwise email. Uploading it here starts the quality check that used
- * to happen in somebody's inbox, and gives the technical writer a brief instead of a blank
- * page.
+ * IT IS DELIBERATELY NOT SPECIAL. A supplier opening their portal sees a column of document
+ * rows — status pill, title, description, a dashed box to drop a file into, and a green
+ * panel once it has landed. The draft manual is one of those rows and nothing more: same
+ * layout, same words, same states. An earlier version of this card had its own heading and
+ * its own "Your name" field, and it read as a different kind of task in the middle of a list
+ * of identical ones, which is the opposite of what it is.
  *
- * THE UPLOAD IS THREE CALLS, NOT ONE, and the middle one does not come through OriginFlow:
- * the server mints a signed URL for a path IT chooses, the browser PUTs the file straight to
- * Storage, and the server then reads the bytes back to check them. A draft manual can be
- * 50MB and a Netlify Function body cannot. See uploadSupplierDraft.
+ * NOBODY IS ASKED WHO THEY ARE. No other upload in this portal does, and the credential
+ * already identifies the company — the server reads the supplier's name off the project
+ * (see `commitUpload`). That is also harder to get wrong than a free-text box.
  *
- * RE-UPLOADING IS NORMAL AND NEVER DESTRUCTIVE. Each upload is a new version; the previous
- * one and the notes written against it are kept, because a note pinned to v1 page 4 still
- * means something after v2 lands. So the card offers "Upload a new version" rather than
- * "Replace", which would be a lie about what happens.
+ * RE-UPLOADING IS NORMAL AND NEVER DESTRUCTIVE, which is why the button says "Replace File"
+ * to match the other rows but the text underneath says which version landed: each upload is
+ * a new version and the notes written against the previous one survive, because a note
+ * pinned to v1 page 4 still means something after v2 arrives.
  */
 
 import React, { useRef, useState } from 'react';
-import { AlertCircle, CheckCircle, Clock, FileText, Loader2, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, FileText, UploadCloud } from 'lucide-react';
 import {
   uploadSupplierDraft, MAX_DRAFT_PDF_BYTES,
   type PortalCredential, type SupplierDraftRequest,
@@ -28,29 +29,17 @@ import {
 const shortDate = (iso: string | null): string =>
   iso ? new Date(iso).toLocaleDateString() : '—';
 
-const STAGE_LABEL: Record<string, string> = {
-  preparing: 'Preparing…',
-  uploading: 'Uploading…',
-  recording: 'Checking the file…',
-};
-
 interface Props {
   requests: readonly SupplierDraftRequest[];
   credential: PortalCredential;
-  /** Shown on the dashboard, where requests from several projects sit in one list. */
-  showProject?: boolean;
   /** Let the parent refresh its own copy of the rows after a successful upload. */
   onUploaded?: () => void;
 }
 
-export const SupplierIMDraftCard: React.FC<Props> = ({
-  requests, credential, showProject = false, onUploaded,
-}) => {
+export const SupplierIMDraftCard: React.FC<Props> = ({ requests, credential, onUploaded }) => {
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [stage, setStage] = useState<string>('');
   const [error, setError] = useState<Record<string, string>>({});
-  const [done, setDone] = useState<Record<string, number>>({});
-  const [name, setName] = useState('');
+  const [justUploaded, setJustUploaded] = useState<Record<string, number>>({});
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   if (requests.length === 0) return null;
@@ -59,19 +48,15 @@ export const SupplierIMDraftCard: React.FC<Props> = ({
     if (!file) return;
     setError(e => ({ ...e, [request.id]: '' }));
 
-    if (!name.trim()) {
-      setError(e => ({ ...e, [request.id]: 'Please give your name first, so we know who sent it.' }));
-      return;
-    }
     if (file.size > MAX_DRAFT_PDF_BYTES) {
-      setError(e => ({ ...e, [request.id]: 'That PDF is larger than the 50MB limit.' }));
+      setError(e => ({ ...e, [request.id]: 'That PDF is larger than the 50 MB limit.' }));
       return;
     }
 
     setBusyId(request.id);
     try {
-      const res = await uploadSupplierDraft(credential, request.id, file, name.trim(), s => setStage(s));
-      setDone(d => ({ ...d, [request.id]: res.version }));
+      const res = await uploadSupplierDraft(credential, request.id, file);
+      setJustUploaded(d => ({ ...d, [request.id]: res.version }));
       onUploaded?.();
     } catch (e: any) {
       // The function writes its messages for this screen — an expired request, a file that
@@ -79,7 +64,6 @@ export const SupplierIMDraftCard: React.FC<Props> = ({
       setError(er => ({ ...er, [request.id]: e?.message ?? 'The upload failed. Please try again.' }));
     } finally {
       setBusyId(null);
-      setStage('');
       // Clear the picker so choosing the same file again still fires onChange.
       const input = inputs.current[request.id];
       if (input) input.value = '';
@@ -87,67 +71,50 @@ export const SupplierIMDraftCard: React.FC<Props> = ({
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100 bg-light/60">
-        <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-          <FileText size={15} className="text-gray-400" /> Draft instruction manual
-        </h3>
-        <p className="text-[11px] text-gray-500 mt-0.5">
-          Upload your draft manual as a PDF. Our quality team reviews it before we write the
-          final version.
-        </p>
-      </div>
+    <>
+      {requests.map(r => {
+        const busy = busyId === r.id;
+        const version = justUploaded[r.id] ?? r.latestVersion;
+        const uploaded = version != null;
+        const uploadedAt = justUploaded[r.id] != null ? new Date().toISOString() : r.latestUploadedAt;
+        const overdue = !!r.dueDate && new Date(r.dueDate) < new Date() && !uploaded;
 
-      <div className="px-4 py-3 border-b border-gray-100">
-        <label className="block text-[11px] font-semibold text-gray-600 mb-1">Your name</label>
-        <input
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="Who is sending this?"
-          className="w-full sm:max-w-xs border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-      </div>
-
-      <ul className="divide-y divide-gray-50">
-        {requests.map(r => {
-          const busy = busyId === r.id;
-          const uploadedVersion = done[r.id] ?? r.latestVersion;
-          const overdue = r.dueDate && new Date(r.dueDate) < new Date() && !uploadedVersion;
-          return (
-            <li key={r.id} className="px-4 py-3">
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-1">
-                {showProject && (
-                  <span className="text-sm font-semibold text-gray-900">
-                    {r.projectCode ? `${r.projectCode} — ` : ''}{r.projectName ?? 'Project'}
-                  </span>
-                )}
-                <span className="text-[11px] text-gray-500">
-                  {r.templateType === 'warning_leaflet' ? 'Warning leaflet' : 'Instruction manual'}
+        return (
+          <div key={r.id} className={`p-6 flex flex-col md:flex-row gap-6 ${uploaded ? 'bg-emerald-50/30' : ''}`}>
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-2">
+                {/* Same two-state pill the document rows use: nothing yet, or done. */}
+                <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${
+                  uploaded
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-gray-100 text-gray-600 border-gray-200'
+                }`}>
+                  {uploaded ? 'Uploaded' : 'Not Started'}
                 </span>
                 {r.dueDate && (
-                  <span className={`text-[11px] inline-flex items-center gap-1 ${overdue ? 'text-rose-600 font-semibold' : 'text-gray-500'}`}>
-                    <Clock size={10} /> due {shortDate(r.dueDate)}
+                  <span className={`text-xs font-medium flex items-center gap-1 ${overdue ? 'text-rose-600' : uploaded ? 'text-gray-400' : 'text-amber-600'}`}>
+                    <Clock size={14} /> Due: {shortDate(r.dueDate)}
                   </span>
                 )}
               </div>
-
-              {r.note && <p className="text-[11px] text-gray-600 mb-1.5">{r.note}</p>}
-
-              {uploadedVersion != null && (
-                <p className="text-[11px] text-emerald-700 inline-flex items-center gap-1 mb-1.5">
-                  <CheckCircle size={11} />
-                  {done[r.id] != null
-                    ? `Thank you — version ${uploadedVersion} received. Our quality team will review it.`
-                    : `Version ${uploadedVersion} received${r.latestUploadedAt ? ` on ${shortDate(r.latestUploadedAt)}` : ''}.`}
-                </p>
-              )}
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className={`font-semibold text-lg ${uploaded ? 'text-emerald-900' : 'text-primary'}`}>
+                  {r.templateType === 'warning_leaflet' ? 'Draft Warning Leaflet' : 'Draft Instruction Manual'}
+                </h3>
+              </div>
+              <p className="text-sm text-muted mb-3">
+                Your draft of the manual as a PDF. Our quality team reviews it before we write
+                the final version.
+              </p>
 
               {error[r.id] && (
-                <p className="text-[11px] text-rose-700 inline-flex items-start gap-1 mb-1.5">
-                  <AlertCircle size={11} className="shrink-0 mt-0.5" /> {error[r.id]}
-                </p>
+                <div className="bg-rose-50 border border-rose-100 p-3 rounded text-sm text-rose-800 mt-3 flex items-start gap-2">
+                  <AlertCircle size={15} className="shrink-0 mt-0.5" /> <span>{error[r.id]}</span>
+                </div>
               )}
+            </div>
 
+            <div className="w-full md:w-72 shrink-0 flex flex-col justify-center bg-light rounded-xl border border-gray-100 p-4">
               <input
                 ref={el => { inputs.current[r.id] = el; }}
                 type="file"
@@ -155,22 +122,50 @@ export const SupplierIMDraftCard: React.FC<Props> = ({
                 className="hidden"
                 onChange={e => upload(r, e.target.files?.[0])}
               />
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => inputs.current[r.id]?.click()}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors disabled:opacity-60"
-              >
-                {busy
-                  ? <><Loader2 size={12} className="animate-spin" /> {STAGE_LABEL[stage] ?? 'Working…'}</>
-                  : <><Upload size={12} /> {uploadedVersion != null ? 'Upload a new version' : 'Upload draft PDF'}</>}
-              </button>
-              <span className="text-[10px] text-gray-400 ml-2">PDF, up to 50 MB</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+
+              {uploaded ? (
+                <div className="text-center">
+                  <CheckCircle className="mx-auto text-emerald-500 mb-2" size={32} />
+                  <p className="text-sm font-medium text-primary">File Uploaded</p>
+                  <p className="text-xs text-muted mt-1 mb-3">
+                    Version {version} on {shortDate(uploadedAt)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => inputs.current[r.id]?.click()}
+                    disabled={busy}
+                    className="block w-full text-center py-2 px-4 border border-gray-300 rounded bg-white hover:bg-light text-sm transition-colors disabled:opacity-50"
+                  >
+                    {busy ? 'Uploading…' : 'Replace File'}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => inputs.current[r.id]?.click()}
+                    disabled={busy}
+                    className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-colors border-gray-300 bg-white hover:bg-indigo-50 hover:border-indigo-300 disabled:opacity-60"
+                  >
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      {busy ? (
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+                      ) : (
+                        <>
+                          <UploadCloud className="w-8 h-8 mb-2 text-gray-400" />
+                          <p className="text-sm text-muted font-medium">Click to upload</p>
+                          <p className="text-xs text-gray-400">PDF only, up to 50 MB</p>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 };
 

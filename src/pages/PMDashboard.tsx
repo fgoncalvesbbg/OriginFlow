@@ -2,12 +2,13 @@
 /** Project-manager dashboard: overview of the PM's projects and pending actions. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, getStepsForProjects, setStepStatuses, lookupJiraIssues, jiraFilterValue, JIRA_NOT_FOUND_LABEL } from '../services';
-import { Project, ProjectStep, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus, JiraLookup } from '../types';
+import { getProjects, getSuppliers, getDashboardStats, updateProject, deleteProject, getProfiles, getStepsForProjects, setStepStatuses, lookupJiraIssues, jiraFilterValue, JIRA_NOT_FOUND_LABEL, getCategories } from '../services';
+import { Project, ProjectStep, Supplier, User, UserRole, DashboardStats, ProjectOverallStatus, JiraLookup, CategoryL3 } from '../types';
 import Layout from '../components/Layout';
 import { StatusBadge } from '../components/StatusBadge';
 import { JiraStatusBadge } from '../components/JiraStatusBadge';
 import { Card } from '../components/common/Card';
+import { CategoryTreeFilter, CategoryFilterValue } from '../components/common/CategoryTreeFilter';
 import { ChevronRight, Search, Filter, Layout as LayoutIcon, Clock, FileText, Trash2, Archive, MoreHorizontal, AlertTriangle, RefreshCw, ShoppingBag, AlertCircle, ArrowUp, ArrowDown, ChevronsUpDown, LayoutGrid, Table2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRefetchOnFocus } from '../hooks';
@@ -56,10 +57,16 @@ const PMDashboard: React.FC = () => {
   const [chapters, setChapters] = useState<Record<string, ProjectStep[]>>({});
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [profiles, setProfiles] = useState<User[]>([]);
+  // The category tree, for the L1/L2/L3 filter below — fails soft to [] if the role can't
+  // read it, in which case the filter button just has nothing to offer.
+  const [categories, setCategories] = useState<CategoryL3[]>([]);
   const [stats, setStats] = useState<(DashboardStats & { newProposals: number }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  // The tree node (L1, L2 or L3) picked in the top-bar Category filter — matches every leaf
+  // under it, so picking an L1 doesn't require enumerating its L2/L3 descendants.
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterValue | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   // Kanban grouped by status is the default landing view; Table is the detailed,
   // filterable/sortable alternative.
@@ -89,16 +96,18 @@ const PMDashboard: React.FC = () => {
     setLoading(true);
     setErrorMsg('');
     try {
-      const [pData, sData, statsData, profileData] = await Promise.all([
+      const [pData, sData, statsData, profileData, categoryData] = await Promise.all([
         getProjects(),
         getSuppliers(),
         getDashboardStats(),
-        getProfiles().catch(() => [] as User[])
+        getProfiles().catch(() => [] as User[]),
+        getCategories().catch(() => [] as CategoryL3[])
       ]);
       setProjects(pData);
       setSuppliers(sData);
       setProfiles(profileData);
       setStats(statsData);
+      setCategories(categoryData);
       // Awaited, unlike Jira: without the chapters the board cannot place a card, and a
       // half-placed board is worse than a moment more of the spinner. One indexed query for
       // every project, and it returns {} rather than throwing if the role cannot read them.
@@ -186,6 +195,18 @@ const PMDashboard: React.FC = () => {
   const setFilter = (key: ProjectColKey, value: string) =>
     setColFilters(prev => ({ ...prev, [key]: value }));
 
+  const categoryById = new Map(categories.map(c => [c.id, c]));
+
+  /** A project matches a picked L1/L2 node when its own L3 category rolls up under it. */
+  const matchesCategoryFilter = (p: Project): boolean => {
+    if (!categoryFilter) return true;
+    if (!p.categoryId) return false;
+    if (categoryFilter.level === 'l3') return p.categoryId === categoryFilter.id;
+    const own = categoryById.get(p.categoryId);
+    if (categoryFilter.level === 'l2') return own?.l2Id === categoryFilter.id;
+    return own?.l1Id === categoryFilter.id;
+  };
+
   const onSort = (key: ProjectColKey) => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
@@ -201,6 +222,12 @@ const PMDashboard: React.FC = () => {
       const q = searchTerm.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !p.projectId.toLowerCase().includes(q)) return false;
     }
+
+    // PM and Category are top-bar filters, so they apply to the board as well as the table —
+    // the table's own PM column filter below reads/writes this same colFilters.pm state.
+    if (colFilters.pm && colFilters.pm !== 'all' && getPmName(p.pmId).toLowerCase() !== colFilters.pm.toLowerCase()) return false;
+    if (!matchesCategoryFilter(p)) return false;
+
     return true;
   });
 
@@ -453,18 +480,38 @@ const PMDashboard: React.FC = () => {
       )}
 
       {/* Filters */}
-      <Card className="p-4 mb-6 flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div className="relative w-full sm:w-96">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Search projects or IDs..." 
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      <Card className="p-4 mb-6 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+        <div className="flex flex-wrap gap-2 items-center w-full lg:w-auto lg:flex-1">
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search projects or IDs..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <select
+            value={colFilters.pm}
+            onChange={(e) => setFilter('pm', e.target.value)}
+            className="text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">All PMs</option>
+            {pmOptions.map(pm => <option key={pm} value={pm}>{pm}</option>)}
+          </select>
+          <CategoryTreeFilter categories={categories} value={categoryFilter} onChange={setCategoryFilter} />
+          {(colFilters.pm || categoryFilter) && (
+            <button
+              type="button"
+              onClick={() => { setFilter('pm', ''); setCategoryFilter(null); }}
+              className="text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
-        <div className="flex gap-2 w-full sm:w-auto items-center">
+        <div className="flex gap-2 w-full lg:w-auto items-center">
           <div className="flex items-center bg-light border border-gray-200 rounded-lg p-0.5 mr-2">
             <button
               type="button"
@@ -534,7 +581,7 @@ const PMDashboard: React.FC = () => {
           <>
             {kanbanProjects.length === 0 && (
               <p className="mb-3 text-sm text-muted flex items-center gap-2">
-                <Search size={14} /> No projects match this search — the pipeline is shown empty.
+                <Search size={14} /> No projects match these filters — the pipeline is shown empty.
               </p>
             )}
             <div className="flex gap-4 overflow-x-auto pb-2">

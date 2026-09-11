@@ -24,7 +24,10 @@ export const getDashboardStats = async (): Promise<DashboardStats & { newProposa
 
     const results = await withDeadline(
         (signal) => Promise.all([
-            db.select<Row>('projects', { columns: 'status', limit: 1000, signal }),
+            // Launches only: the headline project counters describe the launch pipeline, and
+            // a re-edit (migration 182) is an IM job, not a launch. They are counted on the
+            // IM dashboard instead.
+            db.select<Row>('projects', { columns: 'status', where: { kind: 'launch' }, limit: 1000, signal }),
             db.select<Row>('project_documents', {
                 columns: '*, projects!inner(name)',
                 where: { status: 'uploaded' },

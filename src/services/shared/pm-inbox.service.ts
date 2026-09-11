@@ -82,7 +82,10 @@ export const getInboxSnapshot = async (userId: string | null): Promise<InboxSnap
   const results = await withDeadline(
     (signal) =>
       Promise.all([
-        source('projects', db.select<Row>('projects', { columns: 'id, name, supplier_id', limit: 1000, signal })),
+        // Launches only. Re-edits (migration 182) have no phases, no documents and no
+        // supplier, so they can never produce an inbox item — carrying them here would
+        // only pad the 1000-row budget.
+        source('projects', db.select<Row>('projects', { columns: 'id, name, supplier_id', where: { kind: 'launch' }, limit: 1000, signal })),
         source('suppliers', db.select<Row>('suppliers', { columns: 'id, name', limit: 1000, signal })),
         // Reuses the canonical read rather than re-querying the table, so the ownership
         // filter lives in exactly one place. The cost is that this one read cannot join

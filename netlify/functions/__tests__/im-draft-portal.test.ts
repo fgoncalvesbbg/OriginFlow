@@ -51,6 +51,7 @@ const SUPPLIER_TOKEN = 'supplier-portal-token';
 const ACCESS_CODE = 'CODE-1234';
 
 const QM_CODE = 'the-right-code';
+const SUPPLIER_NAME = 'Acme Manufacturing Ltd';
 
 const PATH = `${REQUEST}/${UPLOAD}-draft.pdf`;
 const DEAD_LINK = 'This review link is invalid, expired or has been revoked.';
@@ -99,14 +100,14 @@ const share = (token: string, subjectId: string | null, over: Record<string, any
 
 const freshDb = (): FakeDbState => ({
   projects: [
-    { id: PROJECT, supplier_link_token: PROJECT_TOKEN, supplier_id: SUPPLIER, name: 'Cook Pro', project_id_code: 'P-1042' },
-    { id: OTHER_PROJECT, supplier_link_token: OTHER_PROJECT_TOKEN, supplier_id: null, name: 'Hood X', project_id_code: 'P-1057' },
+    { id: PROJECT, supplier_link_token: PROJECT_TOKEN, supplier_id: SUPPLIER, name: 'Cook Pro', project_id_code: 'P-1042', suppliers: { name: SUPPLIER_NAME } },
+    { id: OTHER_PROJECT, supplier_link_token: OTHER_PROJECT_TOKEN, supplier_id: null, name: 'Hood X', project_id_code: 'P-1057', suppliers: null },
   ],
-  suppliers: [{ id: SUPPLIER, portal_token: SUPPLIER_TOKEN, access_code: ACCESS_CODE }],
+  suppliers: [{ id: SUPPLIER, name: SUPPLIER_NAME, portal_token: SUPPLIER_TOKEN, access_code: ACCESS_CODE }],
   im_draft_requests: [
-    { id: REQUEST, project_id: PROJECT, template_type: 'im', requested_at: '2026-09-01T00:00:00Z', due_date: null, note: null, cancelled_at: null, projects: { name: 'Cook Pro', project_id_code: 'P-1042' } },
-    { id: OTHER_REQUEST, project_id: OTHER_PROJECT, template_type: 'im', requested_at: '2026-09-01T00:00:00Z', due_date: null, note: null, cancelled_at: null, projects: { name: 'Hood X', project_id_code: 'P-1057' } },
-    { id: CANCELLED_REQUEST, project_id: PROJECT, template_type: 'warning_leaflet', requested_at: '2026-09-01T00:00:00Z', due_date: null, note: null, cancelled_at: '2026-09-05T00:00:00Z', projects: { name: 'Cook Pro', project_id_code: 'P-1042' } },
+    { id: REQUEST, project_id: PROJECT, template_type: 'im', step_number: 2, requested_at: '2026-09-01T00:00:00Z', due_date: null, note: null, cancelled_at: null, projects: { name: 'Cook Pro', project_id_code: 'P-1042' } },
+    { id: OTHER_REQUEST, project_id: OTHER_PROJECT, template_type: 'im', step_number: 2, requested_at: '2026-09-01T00:00:00Z', due_date: null, note: null, cancelled_at: null, projects: { name: 'Hood X', project_id_code: 'P-1057' } },
+    { id: CANCELLED_REQUEST, project_id: PROJECT, template_type: 'warning_leaflet', step_number: 2, requested_at: '2026-09-01T00:00:00Z', due_date: null, note: null, cancelled_at: '2026-09-05T00:00:00Z', projects: { name: 'Cook Pro', project_id_code: 'P-1042' } },
   ],
   im_draft_uploads: [
     upload(UPLOAD, REQUEST, PROJECT),
@@ -298,8 +299,7 @@ describe('/requests and /upload-url — the supplier boundary', () => {
 describe('/commit — byte validation', () => {
   const commit = (over: Record<string, unknown> = {}) =>
     call('commit', {
-      requestId: REQUEST, uploadId: NEW_UPLOAD, uploadedByName: 'Supplier Sam',
-      originalFilename: 'draft.pdf', ...over,
+      requestId: REQUEST, uploadId: NEW_UPLOAD, originalFilename: 'draft.pdf', ...over,
     }, { 'x-portal-token': PROJECT_TOKEN });
 
   const newPath = `${REQUEST}/${NEW_UPLOAD}-draft.pdf`;
@@ -312,7 +312,7 @@ describe('/commit — byte validation', () => {
     const uploadInsert = fake.inserts.find(i => i.table === 'im_draft_uploads');
     expect(uploadInsert?.rows[0]).toMatchObject({
       id: NEW_UPLOAD, request_id: REQUEST, source: 'supplier',
-      storage_path: newPath, uploaded_by_name: 'Supplier Sam',
+      storage_path: newPath, uploaded_by_name: SUPPLIER_NAME,
     });
     // Read off the real bytes, not trusted from the client.
     expect(uploadInsert?.rows[0].byte_size).toBe(PDF_BYTES.byteLength);
@@ -353,16 +353,35 @@ describe('/commit — byte validation', () => {
     expect(fake.inserts.some(i => i.table === 'im_draft_uploads')).toBe(false);
   });
 
-  it('requires a name, so an upload is always attributable', async () => {
+  it('derives the uploader from the credential instead of asking for a name', async () => {
+    // No other upload in the supplier portal asks who you are, so this one must not either.
+    // The credential already identifies the company — and a derived name cannot be spoofed
+    // the way a free-text box can.
     files[newPath] = PDF_BYTES;
-    const res = await commit({ uploadedByName: '   ' });
-    expect(res.statusCode).toBe(400);
+    const res = await call('commit', {
+      requestId: REQUEST, uploadId: NEW_UPLOAD, originalFilename: 'draft.pdf',
+    }, { 'x-portal-token': PROJECT_TOKEN });
+
+    expect(res.statusCode).toBe(200);
+    const uploadInsert = fake.inserts.find(i => i.table === 'im_draft_uploads');
+    expect(uploadInsert?.rows[0].uploaded_by_name).toBe(SUPPLIER_NAME);
+  });
+
+  it('falls back to a generic name rather than failing when no supplier is set', async () => {
+    // uploaded_by_name is NOT NULL, so an unattributable upload must still record something
+    // rather than 500 on a project whose supplier row is missing.
+    db.projects[0].suppliers = null;
+    files[newPath] = PDF_BYTES;
+    const res = await commit();
+    expect(res.statusCode).toBe(200);
+    const uploadInsert = fake.inserts.find(i => i.table === 'im_draft_uploads');
+    expect(uploadInsert?.rows[0].uploaded_by_name).toBe('Supplier');
   });
 
   it("refuses a commit against another project's request", async () => {
     files[`${OTHER_REQUEST}/${NEW_UPLOAD}-draft.pdf`] = PDF_BYTES;
     const res = await call('commit', {
-      requestId: OTHER_REQUEST, uploadId: NEW_UPLOAD, uploadedByName: 'Sam',
+      requestId: OTHER_REQUEST, uploadId: NEW_UPLOAD,
     }, { 'x-portal-token': PROJECT_TOKEN });
     expect(res.statusCode).toBe(403);
   });

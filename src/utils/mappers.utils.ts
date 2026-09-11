@@ -34,13 +34,19 @@ export const mapProject = (p: any): Project => {
     id: p.id,
     projectId: p.project_id_code || p.projectId,
     name: p.name,
-    supplierId: p.supplier_id,
-    pmId: p.pm_id,
+    supplierId: p.supplier_id ?? null,
+    pmId: p.pm_id ?? null,
+    createdBy: p.created_by ?? undefined,
     currentStep: p.current_step,
     status: p.status,
+    // Rows read before migration 182 (and any partial select that omits the column) have no
+    // `kind`; they are launches by definition, which is also the column's DB default.
+    kind: p.kind === 'reedit' ? 'reedit' : 'launch',
     categoryId: p.category_id ?? null,
     milestones: p.milestones,
-    supplierLinkToken: p.supplier_link_token,
+    supplierLinkToken: p.supplier_link_token ?? null,
+    sourceProjectId: p.source_project_id ?? null,
+    reeditRequirement: p.reedit_requirement ?? null,
     createdAt: p.created_at
   };
 };
@@ -55,7 +61,8 @@ export const mapProjectStep = (s: any): ProjectStep => {
     projectId: s.project_id,
     stepNumber: s.step_number,
     name: s.name,
-    status: s.status
+    status: s.status,
+    deadline: s.deadline ?? null
   };
 };
 
@@ -86,6 +93,7 @@ export const mapProjectDocument = (d: any): ProjectDocument => {
     isRequired: d.is_required,
     status: d.status,
     deadline: d.deadline,
+    deadlineIsCustom: d.deadline_is_custom ?? false,
     fileUrl: d.file_url,
     uploadedAt: d.uploaded_at,
     versions: d.versions || [],

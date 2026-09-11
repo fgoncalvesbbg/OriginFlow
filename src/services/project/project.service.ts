@@ -13,17 +13,30 @@ import { getDefaultTemplateStructure } from './project-template.service';
 // /api/doc and pulling it in through services/index.ts would drag the whole barrel into
 // this one's import graph.
 import { bindTemplateDocumentsToProject } from '../documents/document.service';
+import { requestSupplierDraft, openReEditRequirementSlot } from '../im/im-draft.service';
+import { createProjectSku } from './project-sku.service';
 
 /** Bound for dashboard reads so a stalled connection fails fast instead of hanging the spinner. */
 const READ_TIMEOUT_MS = 20000;
 
 /**
- * Get all projects
+ * Get all projects.
+ *
+ * Re-edits (migration 182) are EXCLUDED by default. They are skeletal, IM-only projects
+ * with no phases, no documents and no supplier, so every launch-facing surface that lists
+ * or offers projects — the PM board, the timeline, supplier counts, and the compliance /
+ * design-spec / documents pickers — would show something unusable. Filtering here rather
+ * than in each of those callers is what keeps the exclusion from being forgotten in the
+ * next picker somebody adds.
+ *
+ * Pass `{ includeReEdits: true }` to get everything; the IM module is the only place that
+ * legitimately wants both.
  */
-export const getProjects = async (): Promise<Project[]> => {
+export const getProjects = async (opts?: { includeReEdits?: boolean }): Promise<Project[]> => {
     if (!isLive) return [];
+    const where = opts?.includeReEdits ? undefined : { kind: 'launch' };
     const rows = await orEmpty(
-        withDeadline((signal) => db.select<Row>('projects', { signal }), READ_TIMEOUT_MS, 'getProjects'),
+        withDeadline((signal) => db.select<Row>('projects', { where, signal }), READ_TIMEOUT_MS, 'getProjects'),
         'getProjects',
     );
     return rows.map(mapProject);
@@ -57,8 +70,11 @@ export const getProjectByToken = async (token: string): Promise<Project | undefi
  */
 export const getProjectsBySupplierId = async (supplierId: string): Promise<Project[]> => {
     if (!isLive) return [];
+    // `kind` is redundant with `supplier_id` today (a re-edit has no supplier, so it can
+    // never match) but is stated anyway: the day someone sets a supplier on a re-edit for
+    // reference, it must still not appear in a supplier's list.
     const rows = await orEmpty(
-        db.select<Row>('projects', { where: { supplier_id: supplierId } }),
+        db.select<Row>('projects', { where: { supplier_id: supplierId, kind: 'launch' } }),
         'getProjectsBySupplierId',
     );
     return rows.map(mapProject);
@@ -163,6 +179,117 @@ export const createProject = async (name: string, supplierId: string, projectId:
         } catch (e) {
             console.error("Failed to attach the template's standard documents. Add them from the project's Documents tab.", e);
         }
+    }
+
+    /**
+     * The supplier's draft instruction manual (migrations 179/180). Asked for on EVERY
+     * launch, not on request: the draft is part of the process, and a request a PM has to
+     * remember to open is one the supplier mostly never hears about.
+     *
+     * It is shown to the supplier inside phase `step_number` (2 — Business Case &
+     * Development) and, until the project reaches that phase, the board reads the project as
+     * plain Backlog rather than as waiting on the supplier. Nothing about it blocks the
+     * technical writer at any point.
+     *
+     * Non-fatal, exactly like seedChecklist and the standard documents above: a project that
+     * exists without a draft request is recoverable from its IM screen, whereas throwing
+     * here would leave a PM believing a creation failed after the row was already committed.
+     */
+    try {
+        await requestSupplierDraft(project.id, 'im', {
+            requestedBy: user?.email ?? null,
+            note: 'Standard for every launch: your draft of the instruction manual.',
+        });
+    } catch (e) {
+        console.error("Failed to open the supplier draft request. Request it from the project's IM screen.", e);
+    }
+
+    return project;
+};
+
+/** What the Re-Edit form collects. */
+export interface ReEditProjectInput {
+    name: string;
+    /** What must change and why. Mandatory — the database rejects a blank one too. */
+    requirement: string;
+    /** The live SKUs this re-edit covers. Copied into `project_skus` rows of their own. */
+    skus: Array<{ skuNumber: string; skuTitle: string }>;
+    categoryId?: string | null;
+    /** The launch project whose IM this revises, when it is known. */
+    sourceProjectId?: string | null;
+}
+
+/**
+ * Create a Re-Edit project — a skeletal, IM-only project for a SKU that is already live.
+ *
+ * A deliberate sibling of `createProject` rather than a flag on it, because it has to skip
+ * all three of that function's side effects: no phase checklist, no standard documents, and
+ * above all no supplier draft request (a re-edit has no supplier to ask, and the request
+ * would sit pending forever).
+ *
+ * Two details that are easy to get wrong:
+ *
+ *  - `supplier_link_token` must be an explicit NULL. The column DEFAULTs to a random hex,
+ *    and `SupplierPortal` is driven entirely by that token and never reads `supplier_id` —
+ *    so omitting it would leave a working supplier portal on a project that has no supplier.
+ *  - `pm_id` is set to the creator even though the form never asks for a PM.
+ *    `can_see_project()` is `ADMIN OR pm_id = auth.uid()`, so pm_id IS the access-control
+ *    rule for the project and every child row; a NULL there would hide the re-edit from the
+ *    very person who just made it and 403 its IM print and file URLs.
+ *
+ * The code is claimed on save, not when the form opens, so an abandoned form burns no
+ * number in the sequence.
+ */
+export const createReEditProject = async (input: ReEditProjectInput): Promise<Project> => {
+    const user = await auth.getUser();
+
+    const requirement = input.requirement.trim();
+    if (!requirement) throw new Error('Say what must change and why — a re-edit without a requirement cannot be actioned.');
+
+    const code = await db.rpc<string>('next_reedit_code');
+    if (!code) throw new Error('Could not assign a re-edit code. Try again.');
+
+    const created = await db.insert<Row>('projects', {
+        name: input.name,
+        project_id_code: code,
+        kind: 'reedit',
+        reedit_requirement: requirement,
+        source_project_id: input.sourceProjectId || null,
+        supplier_id: null,
+        pm_id: user?.id ?? null,
+        category_id: input.categoryId || null,
+        created_by: user?.id,
+        status: ProjectOverallStatus.IN_PROGRESS,
+        current_step: 1,
+        created_at: new Date().toISOString(),
+        supplier_link_token: null,
+    });
+
+    const project = mapProject(created);
+
+    /**
+     * Non-fatal, for the same reason the launch path's seeding is: the project row is
+     * already committed, and throwing here would report a failure for something that half
+     * happened. Missing SKUs are recoverable from the project's own SKU list.
+     */
+    try {
+        for (const [i, sku] of input.skus.entries()) {
+            await createProjectSku(project.id, sku.skuNumber, sku.skuTitle, [], i, input.categoryId ?? null);
+        }
+    } catch (e) {
+        console.error('Failed to attach every SKU to the re-edit. Add the missing ones from the project.', e);
+    }
+
+    /**
+     * The requirement slot. The text already lives on the project row — this mirrors it into
+     * the draft tables so the writer's brief panel and the PDF attachment pipeline, both of
+     * which hang off `im_draft_requests`, work on a re-edit exactly as they do on a launch.
+     * `draftStepOf` short-circuits on the kind, so this row never reads as a supplier ask.
+     */
+    try {
+        await openReEditRequirementSlot(project.id, requirement, user?.email ?? null);
+    } catch (e) {
+        console.error('Failed to record the re-edit requirement slot. The requirement is still on the project.', e);
     }
 
     return project;

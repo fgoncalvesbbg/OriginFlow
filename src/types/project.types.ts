@@ -17,18 +17,40 @@ export interface ProjectMilestones {
     eta?: string;
 }
 
+/**
+ * What a project IS, structurally.
+ *
+ * `launch` is the normal thing: phases, documents, a supplier, a supplier portal.
+ * `reedit` is a skeletal, IM-only project for a SKU that is already live — no phases, no
+ * documents, no supplier. It exists because an IM cannot exist without a project
+ * (`project_ims.project_id` is NOT NULL and unique per template type), and a live SKU can
+ * need a new manual several times over its life. See migration 182.
+ */
+export type ProjectKind = 'launch' | 'reedit';
+
 export interface Project {
   id: string;
   projectId: string;
   name: string;
-  supplierId: string;
-  pmId: string;
+  /** Null on a re-edit, and nullable in the database on a launch too. */
+  supplierId: string | null;
+  /**
+   * Null is possible in the database, but note `can_see_project()` is
+   * `ADMIN OR pm_id = auth.uid()` — pm_id IS the ACL, so a null one hides the project and
+   * every child row from all non-admins. Re-edits set it to their creator for this reason.
+   */
+  pmId: string | null;
   createdBy?: string;
   currentStep: number;
   status: ProjectOverallStatus;
+  kind: ProjectKind;
   categoryId?: string | null;
   milestones?: ProjectMilestones;
-  supplierLinkToken?: string;
+  supplierLinkToken?: string | null;
+  /** Re-edits only: the launch project whose IM this revises, if it is known. */
+  sourceProjectId?: string | null;
+  /** Re-edits only: what must change and why. Mandatory for `kind === 'reedit'`. */
+  reeditRequirement?: string | null;
   createdAt: string;
 }
 
@@ -45,6 +67,16 @@ export interface ProjectStep {
   stepNumber: number;
   name: string;
   status: StepStatus;
+  /**
+   * Due date for the whole phase (migration 181). Documents in the phase inherit it; one
+   * that sets its own date keeps it (`ProjectDocument.deadlineIsCustom`).
+   *
+   * The inheritance is resolved in the DATABASE, by a trigger that cascades this into
+   * `project_documents.deadline` — so every screen that already reads a document's deadline
+   * is correct without knowing this column exists. See the migration for why read-time
+   * resolution was rejected.
+   */
+  deadline?: string | null;
 }
 
 export enum DocStatus {
@@ -80,6 +112,11 @@ export interface ProjectDocument {
   isRequired: boolean;
   status: DocStatus;
   deadline?: string;
+  /**
+   * True when this document's date was set on its own and must survive a phase-date change
+   * (migration 181). False means the date is the phase's and moves with it.
+   */
+  deadlineIsCustom?: boolean;
   fileUrl?: string;
   uploadedAt?: string;
   versions?: DocVersion[];

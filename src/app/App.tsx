@@ -41,6 +41,7 @@ import RegulationDetail from '../pages/regulations/RegulationDetail';
 
 // IM Pages
 import IMDashboard from '../pages/im/IMDashboard';
+import CreateReEdit from '../pages/im/CreateReEdit';
 import IMTemplateEditor from '../pages/im/IMTemplateEditor';
 import IMPreview from '../pages/im/IMPreview';
 import IMSharedManual from '../pages/im/IMSharedManual';
@@ -264,6 +265,11 @@ const AppContent: React.FC = () => {
           <Route path="/im" element={
             <ProtectedRoute>
               <IMDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/im/re-edit/new" element={
+            <ProtectedRoute>
+              <CreateReEdit />
             </ProtectedRoute>
           } />
           <Route path="/im/template/:categoryId/:templateType?" element={

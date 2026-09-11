@@ -7,7 +7,7 @@
  *   Readiness   Content → Translation → Published. What has to be true before a manual can
  *               go anywhere. These are checks, not places: a manual does not "rest" in
  *               Translation.
- *   Workflow    In Progress → In Review (draft) → Re-edit → In Review (final) → Final. The
+ *   Workflow    In Progress → In Review (draft) → Rework → In Review (final) → Final. The
  *               steps the All Manuals board is built from, in the same words, so the two
  *               screens cannot disagree about the same manual.
  *

@@ -810,9 +810,9 @@
     "semantic_hash": ""
   },
   "src/app/App.tsx": {
-    "mtime": 1789033001.995426,
-    "seen": 1789034299.7837172,
-    "ast_hash": "74b2c4187a4455bfaab7676a265ea536",
+    "mtime": 1789131922.4616745,
+    "seen": 1789132950.0281098,
+    "ast_hash": "38710329e1b8817268fab2977422cec4",
     "semantic_hash": ""
   },
   "src/app/main.tsx": {
@@ -1098,9 +1098,9 @@
     "semantic_hash": ""
   },
   "src/pages/AdminDashboard.tsx": {
-    "mtime": 1789051775.92875,
-    "seen": 1789075670.167547,
-    "ast_hash": "9ebc15cd0d6e7b4224aba6e801eda562",
+    "mtime": 1789132545.5286925,
+    "seen": 1789132950.0284076,
+    "ast_hash": "6b0ea3dc16a6321d030a1232069d0b2e",
     "semantic_hash": ""
   },
   "src/pages/AdminTestEmail.tsx": {
@@ -1146,9 +1146,9 @@
     "semantic_hash": ""
   },
   "src/pages/SupplierPortal.tsx": {
-    "mtime": 1789033004.9302783,
-    "seen": 1789034299.7839656,
-    "ast_hash": "724d829fc77e9cd05b58e3ab99f9a802",
+    "mtime": 1789132272.3003955,
+    "seen": 1789132950.028428,
+    "ast_hash": "478a96328138324f4b08fb2fa4c70e73",
     "semantic_hash": ""
   },
   "src/pages/SuppliersList.tsx": {
@@ -1206,9 +1206,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/IMDashboard.tsx": {
-    "mtime": 1789042558.288239,
-    "seen": 1789043030.7630835,
-    "ast_hash": "babda61034bfb683002bdd2ed931c872",
+    "mtime": 1789132152.3852067,
+    "seen": 1789132950.028506,
+    "ast_hash": "2b2c02e107b1bd1927c10bc9b0c49066",
     "semantic_hash": ""
   },
   "src/pages/im/IMPreview.tsx": {
@@ -1242,9 +1242,9 @@
     "semantic_hash": ""
   },
   "src/pages/im/ProjectIMGenerator.tsx": {
-    "mtime": 1789124816.779388,
-    "seen": 1789125441.6365504,
-    "ast_hash": "1a0a3afa197463cb4bbcf267afda0bf9",
+    "mtime": 1789132413.1023893,
+    "seen": 1789132950.0285418,
+    "ast_hash": "038720c780cd3a743ebeed056d8f13e0",
     "semantic_hash": ""
   },
   "src/pages/im/ProjectImImportDialog.tsx": {
@@ -2574,15 +2574,15 @@
     "semantic_hash": ""
   },
   "src/pages/im/im-manual-status.test.ts": {
-    "mtime": 1789042484.7856598,
-    "seen": 1789043030.7631714,
-    "ast_hash": "8a2d252dc137de8c6ffe44fac25da43a",
+    "mtime": 1789131112.207483,
+    "seen": 1789132950.0285814,
+    "ast_hash": "4a578f865ed12ff0481297954c1b0cb0",
     "semantic_hash": ""
   },
   "src/pages/im/im-manual-status.ts": {
-    "mtime": 1789042712.742041,
-    "seen": 1789043030.7631738,
-    "ast_hash": "374c6bb5f6f4d2029cf14d2ba54053a5",
+    "mtime": 1789130985.068724,
+    "seen": 1789132950.0285835,
+    "ast_hash": "5701ee851af96b00b09a472692356739",
     "semantic_hash": ""
   },
   "src/pages/im/project-im-generator/EditorSideRail.tsx": {
@@ -4356,9 +4356,9 @@
     "semantic_hash": ""
   },
   "netlify/functions/lib/doc-fake-supabase.ts": {
-    "mtime": 1789126541.430508,
-    "seen": 1789127292.4344091,
-    "ast_hash": "ac09eff236e41a3512e7616a71179899",
+    "mtime": 1789131492.4974427,
+    "seen": 1789132950.02802,
+    "ast_hash": "1e72be0af43188838141b1783f105f22",
     "semantic_hash": ""
   },
   "scripts/reconcile-migrations.mjs": {
@@ -4608,9 +4608,9 @@
     "semantic_hash": ""
   },
   "src/types/review.types.ts": {
-    "mtime": 1789030947.7921617,
-    "seen": 1789032082.7393997,
-    "ast_hash": "9fcb49b02e9b862cd0c3aa4c9d4d3a1e",
+    "mtime": 1789131131.580735,
+    "seen": 1789132950.0293968,
+    "ast_hash": "53b5a2a0d679e118435c765853ecdc21",
     "semantic_hash": ""
   },
   "src/utils/sku-attribute-value.utils.test.ts": {
@@ -5415,6 +5415,60 @@
     "mtime": 1789126618.9883485,
     "seen": 1789127292.4343743,
     "ast_hash": "999612a4cf38f3d50613c8ea9276b224",
+    "semantic_hash": ""
+  },
+  "db_migrations/179_im_draft_intake.sql": {
+    "mtime": 1789131373.917166,
+    "seen": 1789132950.0277932,
+    "ast_hash": "3248f224b4afbce007a562aa0afaff32",
+    "semantic_hash": ""
+  },
+  "netlify/functions/__tests__/im-draft-portal.test.ts": {
+    "mtime": 1789131594.1855724,
+    "seen": 1789132950.027983,
+    "ast_hash": "8e45797ea2907ca1c586aff4a261952d",
+    "semantic_hash": ""
+  },
+  "netlify/functions/im-draft-portal.ts": {
+    "mtime": 1789131468.2142968,
+    "seen": 1789132950.0280056,
+    "ast_hash": "4d37a68525c32fb21343097b0d40b4da",
+    "semantic_hash": ""
+  },
+  "src/components/im/DraftIntakeAdminSection.tsx": {
+    "mtime": 1789132524.288882,
+    "seen": 1789132950.0281887,
+    "ast_hash": "3468a7aaa107eba9ca656facbfe77f74",
+    "semantic_hash": ""
+  },
+  "src/components/im/ProjectIMDraftPanel.tsx": {
+    "mtime": 1789132360.553865,
+    "seen": 1789132950.028191,
+    "ast_hash": "4f859ea01e528d6f55bf9c762a28c5ca",
+    "semantic_hash": ""
+  },
+  "src/components/im/SupplierIMDraftCard.tsx": {
+    "mtime": 1789132187.7065403,
+    "seen": 1789132950.028193,
+    "ast_hash": "12e1669ab5b1ece1fe69ef5e2314c597",
+    "semantic_hash": ""
+  },
+  "src/pages/im/IMDraftQueuePortal.tsx": {
+    "mtime": 1789131910.9340098,
+    "seen": 1789132950.028508,
+    "ast_hash": "c127a5c422b2d984d537f502724bc6b9",
+    "semantic_hash": ""
+  },
+  "src/pages/im/IMDraftReviewPortal.tsx": {
+    "mtime": 1789131877.607319,
+    "seen": 1789132950.0285099,
+    "ast_hash": "30e157f2f51e15d3fe1e26ebe6b80e21",
+    "semantic_hash": ""
+  },
+  "src/services/im/im-draft.service.ts": {
+    "mtime": 1789131819.1178043,
+    "seen": 1789132950.0289762,
+    "ast_hash": "da658bd5c557b6634d3847ef2fa59d3e",
     "semantic_hash": ""
   }
 }
